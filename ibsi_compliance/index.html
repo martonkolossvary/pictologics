@@ -1,0 +1,8512 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="IBSI-compliant radiomic feature extraction library.">
+      
+      
+        <meta name="author" content="Márton Kolossváry">
+      
+      
+      
+        <link rel="prev" href="../benchmarks/">
+      
+      
+        <link rel="next" href="../quality/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+    
+    
+      
+        <title>IBSI Compliance - Pictologics</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.618322db.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Share+Tech+Mono:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Share Tech Mono";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+
+
+<link rel="icon" type="image/png" sizes="16x16" href="../assets/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32x32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo.png">
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#comprehensive-ibsi-benchmark-results" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Pictologics" class="md-header__button md-logo" aria-label="Pictologics" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pictologics
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              IBSI Compliance
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/martonkolossvary/pictologics" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    martonkolossvary/pictologics
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../user_guide/installation/" class="md-tabs__link">
+          
+  
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/loader/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../benchmarks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Benchmarks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  IBSI Compliance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quality/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Report
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Pictologics" class="md-nav__button md-logo" aria-label="Pictologics" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    Pictologics
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/martonkolossvary/pictologics" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    martonkolossvary/pictologics
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_guide/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_guide/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_guide/pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_guide/case_examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Case Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/loader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loader
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/preprocessing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Preprocessing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results Support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_5" id="__nav_3_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/features/intensity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Intensity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/features/morphology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Morphology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/features/texture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Texture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI Compliance
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI Compliance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-run-the-benchmarks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to Run the Benchmarks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How to Run the Benchmarks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-download-the-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Download the Data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-run-configurations-programmatically-using-radiomicspipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run Configurations Programmatically using RadiomicsPipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-deviations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Deviations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#digital-phantom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Digital Phantom
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Digital Phantom">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#morphology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Morphology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-histogram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-volume-histogram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity-Volume Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glcm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLCM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glrlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLRLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glszm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLSZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gldzm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLDZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngtdm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGTDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngldm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGLDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config C
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Config C">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#morphology_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Morphology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-histogram_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-volume-histogram_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity-Volume Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glcm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLCM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glrlm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLRLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glszm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLSZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gldzm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLDZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngtdm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGTDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngldm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGLDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-d" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config D
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Config D">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#morphology_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Morphology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-histogram_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-volume-histogram_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity-Volume Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glcm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLCM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glrlm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLRLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glszm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLSZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gldzm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLDZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngtdm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGTDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngldm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGLDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-e" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config E
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Config E">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#morphology_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Morphology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-histogram_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-volume-histogram_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity-Volume Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glcm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLCM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glrlm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLRLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glszm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLSZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gldzm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLDZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngtdm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGTDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngldm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGLDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-run-the-benchmarks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to Run the Benchmarks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How to Run the Benchmarks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-download-the-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Download the Data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-run-configurations-programmatically-using-radiomicspipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run Configurations Programmatically using RadiomicsPipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-deviations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Deviations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#digital-phantom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Digital Phantom
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Digital Phantom">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#morphology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Morphology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-histogram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-volume-histogram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity-Volume Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glcm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLCM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glrlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLRLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glszm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLSZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gldzm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLDZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngtdm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGTDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngldm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGLDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config C
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Config C">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#morphology_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Morphology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-histogram_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-volume-histogram_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity-Volume Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glcm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLCM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glrlm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLRLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glszm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLSZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gldzm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLDZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngtdm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGTDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngldm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGLDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-d" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config D
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Config D">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#morphology_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Morphology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-histogram_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-volume-histogram_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity-Volume Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glcm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLCM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glrlm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLRLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glszm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLSZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gldzm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLDZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngtdm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGTDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngldm_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGLDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-e" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config E
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Config E">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#morphology_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Morphology
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-histogram_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intensity-volume-histogram_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intensity-Volume Histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glcm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLCM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glrlm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLRLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#glszm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLSZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gldzm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GLDZM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngtdm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGTDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ngldm_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NGLDM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="comprehensive-ibsi-benchmark-results">Comprehensive IBSI Benchmark Results</h1>
+<h2 id="how-to-run-the-benchmarks">How to Run the Benchmarks</h2>
+<p>To reproduce these results or run the IBSI compliance benchmarks on your own system:</p>
+<h3 id="1-download-the-data">1. Download the Data</h3>
+<p>The IBSI reference datasets (Digital Phantom and Lung Cancer CT) are available on the <a href="https://github.com/theibsi/data_sets">IBSI GitHub repository</a>.</p>
+<ul>
+<li><strong>Digital Phantom</strong>: Download <code>phantom.nii.gz</code> and <code>mask.nii.gz</code> from the <code>digital_phantom</code> folder.</li>
+<li><strong>Lung Cancer CT</strong>: Download the <code>PAT1</code> NIfTI files. Note that IBSI recommends converting these to at least 32-bit floating point and rounding to the nearest integer before processing.</li>
+</ul>
+<p>Place these files in <code>dev/data/</code> or provide their paths to the script.</p>
+<h3 id="2-run-configurations-programmatically-using-radiomicspipeline">2. Run Configurations Programmatically using <code>RadiomicsPipeline</code></h3>
+<p>You can run any of the IBSI configurations programmatically using the <code>RadiomicsPipeline</code> class.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.loader</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_image</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># 1. Initialize Pipeline</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># --- DEFINE CONFIGURATIONS ---</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># A. Digital Phantom Config (FBS 1.0, no resampling)</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">config_digital_phantom</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBS&quot;</span><span class="p">,</span> <span class="s2">&quot;bin_width&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">}},</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="s2">&quot;ivh&quot;</span><span class="p">],</span> <span class="s2">&quot;include_spatial_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;include_local_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}}</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="p">]</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="c1"># B. Config C (2mm isotropic, resegment [-1000, 400], FBS 25 HU)</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">config_c</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">),</span> <span class="s2">&quot;interpolation&quot;</span><span class="p">:</span> <span class="s2">&quot;linear&quot;</span><span class="p">,</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}},</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;keep_largest_component&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;apply_to&quot;</span><span class="p">:</span> <span class="s2">&quot;morph&quot;</span><span class="p">}},</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">}},</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBS&quot;</span><span class="p">,</span> <span class="s2">&quot;bin_width&quot;</span><span class="p">:</span> <span class="mf">25.0</span><span class="p">,</span> <span class="s2">&quot;min_val&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">}},</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="s2">&quot;ivh&quot;</span><span class="p">],</span> <span class="s2">&quot;include_spatial_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;include_local_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;ivh_discretisation&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBS&quot;</span><span class="p">,</span> <span class="s2">&quot;bin_width&quot;</span><span class="p">:</span> <span class="mf">2.5</span><span class="p">,</span> <span class="s2">&quot;min_val&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">},</span> <span class="s2">&quot;ivh_params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;target_range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">}}}</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="p">]</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="c1"># C. Config D (2mm isotropic, 3-sigma outlier, FBN 32, Continuous IVH)</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="n">config_d</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">),</span> <span class="s2">&quot;interpolation&quot;</span><span class="p">:</span> <span class="s2">&quot;linear&quot;</span><span class="p">,</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}},</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;keep_largest_component&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;apply_to&quot;</span><span class="p">:</span> <span class="s2">&quot;morph&quot;</span><span class="p">}},</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter_outliers&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;sigma&quot;</span><span class="p">:</span> <span class="mf">3.0</span><span class="p">}},</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="s2">&quot;ivh&quot;</span><span class="p">],</span> <span class="s2">&quot;include_spatial_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;include_local_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;ivh_use_continuous&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}}</span>
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="p">]</span>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="c1"># D. Config E (Cubic resamp, 3-sigma, round last, FBN 32 for tex, FBN 1000 for IVH)</span>
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="n">config_e</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">),</span> <span class="s2">&quot;interpolation&quot;</span><span class="p">:</span> <span class="s2">&quot;cubic&quot;</span><span class="p">,</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}},</span>
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;keep_largest_component&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;apply_to&quot;</span><span class="p">:</span> <span class="s2">&quot;morph&quot;</span><span class="p">}},</span>
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">}},</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter_outliers&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;sigma&quot;</span><span class="p">:</span> <span class="mf">3.0</span><span class="p">}},</span>
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{}},</span>
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="s2">&quot;ivh&quot;</span><span class="p">],</span> <span class="s2">&quot;include_spatial_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;include_local_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;ivh_discretisation&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">},</span> <span class="s2">&quot;ivh_params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;bin_width&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span> <span class="s2">&quot;min_val&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s2">&quot;max_val&quot;</span><span class="p">:</span> <span class="mf">1000.5</span><span class="p">}}}</span>
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a><span class="p">]</span>
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a><span class="c1"># --- RUN PIPELINE ---</span>
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a><span class="c1"># Choose which config to run:</span>
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;ibsi_config_c&quot;</span><span class="p">,</span> <span class="n">config_c</span><span class="p">)</span>
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a><span class="c1"># 3. Load image and mask</span>
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a><span class="c1"># For Config C/D/E (Lung Cancer CT)</span>
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/CT_image.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/CT_mask.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a><span class="c1"># 4. Run extraction</span>
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="s2">&quot;ibsi_config_c&quot;</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>
+<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a><span class="c1"># 5. Access results</span>
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a><span class="nb">print</span><span class="p">(</span><span class="n">results</span><span class="p">[</span><span class="s2">&quot;ibsi_config_c&quot;</span><span class="p">])</span>
+</code></pre></div>
+<h2 id="known-deviations">Known Deviations</h2>
+<p>For configuration D, Zone size non-uniformity and Zone size entropy are known to fail with minimal differences, but pass for all other conffigurations. The following morphological features consistently fail across all configurations due to differences in surface mesh generation algorithms:</p>
+<ul>
+<li><strong>Compactness 2 (BQWJ)</strong>: Sensitive to surface area calculation differences.</li>
+<li><strong>Asphericity (25C7)</strong>: Derived from Compactness 2, inheriting the same deviation.</li>
+</ul>
+<h2 id="digital-phantom">Digital Phantom</h2>
+<h3 id="morphology">Morphology</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Volume</td>
+<td>RNU0</td>
+<td>556.3</td>
+<td>556</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume voxel counting</td>
+<td>YEKZ</td>
+<td>592</td>
+<td>592</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Surface area</td>
+<td>C0JK</td>
+<td>388.1</td>
+<td>388</td>
+<td>3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Surface to volume ratio</td>
+<td>2PR5</td>
+<td>0.6976</td>
+<td>0.698</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Compactness 1</td>
+<td>SKGS</td>
+<td>0.04106</td>
+<td>0.0411</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Compactness 2</td>
+<td>BQWJ</td>
+<td>0.5989</td>
+<td>0.599</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Spherical disproportion</td>
+<td>KRCK</td>
+<td>1.186</td>
+<td>1.19</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sphericity</td>
+<td>QCFX</td>
+<td>0.8429</td>
+<td>0.843</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Asphericity</td>
+<td>25C7</td>
+<td>0.1863</td>
+<td>0.186</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Center of mass shift</td>
+<td>KLMA</td>
+<td>0.6715</td>
+<td>0.672</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum 3D diameter</td>
+<td>L0JK</td>
+<td>13.11</td>
+<td>13.1</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Major axis length</td>
+<td>TDIC</td>
+<td>11.4</td>
+<td>11.4</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minor axis length</td>
+<td>P9VJ</td>
+<td>9.308</td>
+<td>9.31</td>
+<td>0.06</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Least axis length</td>
+<td>7J51</td>
+<td>8.536</td>
+<td>8.54</td>
+<td>0.05</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Elongation</td>
+<td>Q3CK</td>
+<td>0.8163</td>
+<td>0.816</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Flatness</td>
+<td>N17B</td>
+<td>0.7486</td>
+<td>0.749</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (AABB)</td>
+<td>PBX1</td>
+<td>0.8693</td>
+<td>0.869</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (AABB)</td>
+<td>R59B</td>
+<td>0.8662</td>
+<td>0.866</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (OMBB)</td>
+<td>ZH1A</td>
+<td>0.458</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Area density (OMBB)</td>
+<td>IQYR</td>
+<td>0.5673</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Volume density (AEE)</td>
+<td>6BDE</td>
+<td>1.173</td>
+<td>1.17</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (AEE)</td>
+<td>RDD2</td>
+<td>1.355</td>
+<td>1.36</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (MVEE)</td>
+<td>SWZ1</td>
+<td>0.513</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Area density (MVEE)</td>
+<td>BRI8</td>
+<td>0.7909</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Volume density (convex hull)</td>
+<td>R3ER</td>
+<td>0.9609</td>
+<td>0.961</td>
+<td>0.006</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (convex hull)</td>
+<td>7T7F</td>
+<td>1.033</td>
+<td>1.03</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity">Intensity</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Integrated intensity</td>
+<td>99N0</td>
+<td>1195</td>
+<td>1.2e3</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Moran's I index</td>
+<td>N365</td>
+<td>0.0397</td>
+<td>0.0397</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Geary's C measure</td>
+<td>NPT7</td>
+<td>0.974</td>
+<td>0.974</td>
+<td>0.006</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Local intensity peak</td>
+<td>VJGA</td>
+<td>2.6</td>
+<td>2.6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Global intensity peak</td>
+<td>0F91</td>
+<td>3.103</td>
+<td>3.1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Mean intensity</td>
+<td>Q4LE</td>
+<td>2.149</td>
+<td>2.15</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity variance</td>
+<td>ECT3</td>
+<td>3.045</td>
+<td>3.05</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity skewness</td>
+<td>KE2A</td>
+<td>1.084</td>
+<td>1.08</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity kurtosis</td>
+<td>IPH6</td>
+<td>-0.3546</td>
+<td>-0.355</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Median intensity</td>
+<td>Y12H</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum intensity</td>
+<td>1GSF</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>10th intensity percentile</td>
+<td>QG58</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>90th intensity percentile</td>
+<td>8DWT</td>
+<td>4</td>
+<td>4</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum intensity</td>
+<td>84IY</td>
+<td>6</td>
+<td>6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity interquartile range</td>
+<td>SALO</td>
+<td>3</td>
+<td>3</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity range</td>
+<td>2OJQ</td>
+<td>5</td>
+<td>5</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Mean absolute deviation</td>
+<td>4FUA</td>
+<td>1.552</td>
+<td>1.55</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Robust mean absolute deviation</td>
+<td>1128</td>
+<td>1.114</td>
+<td>1.11</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Median absolute deviation</td>
+<td>N72L</td>
+<td>1.149</td>
+<td>1.15</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Coefficient of variation</td>
+<td>7TET</td>
+<td>0.8122</td>
+<td>0.812</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Quartile coefficient of dispersion</td>
+<td>9S40</td>
+<td>0.6</td>
+<td>0.6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity energy</td>
+<td>N8CA</td>
+<td>567</td>
+<td>567</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Root mean square intensity</td>
+<td>5ZWQ</td>
+<td>2.768</td>
+<td>2.77</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity-histogram">Intensity Histogram</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mean discretised intensity</td>
+<td>X6K6</td>
+<td>2.149</td>
+<td>2.15</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity variance</td>
+<td>CH89</td>
+<td>3.045</td>
+<td>3.05</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity skewness</td>
+<td>88K1</td>
+<td>1.084</td>
+<td>1.08</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity kurtosis</td>
+<td>C3I7</td>
+<td>-0.3546</td>
+<td>-0.355</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Median discretised intensity</td>
+<td>WIFQ</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum discretised intensity</td>
+<td>1PR8</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>10th discretised intensity percentile</td>
+<td>1PR</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>90th discretised intensity percentile</td>
+<td>GPMT</td>
+<td>4</td>
+<td>4</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum discretised intensity</td>
+<td>3NCY</td>
+<td>6</td>
+<td>6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram mode</td>
+<td>AMMC</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity interquartile range</td>
+<td>WR0O</td>
+<td>3</td>
+<td>3</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity range</td>
+<td>5Z3W</td>
+<td>5</td>
+<td>5</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram mean absolute deviation</td>
+<td>D2ZX</td>
+<td>1.552</td>
+<td>1.55</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram robust mean absolute deviation</td>
+<td>WRZB</td>
+<td>1.114</td>
+<td>1.11</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram median absolute deviation</td>
+<td>4RNL</td>
+<td>1.149</td>
+<td>1.15</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram coefficient of variation</td>
+<td>CWYJ</td>
+<td>0.8122</td>
+<td>0.812</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram quartile coefficient of dispersion</td>
+<td>SLWD</td>
+<td>0.6</td>
+<td>0.6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity entropy</td>
+<td>TLU2</td>
+<td>1.266</td>
+<td>1.27</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity uniformity</td>
+<td>BJ5W</td>
+<td>0.5124</td>
+<td>0.512</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum histogram gradient</td>
+<td>12CE</td>
+<td>8</td>
+<td>8</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum histogram gradient intensity</td>
+<td>8E6O</td>
+<td>3</td>
+<td>3</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum histogram gradient</td>
+<td>VQB3</td>
+<td>-50</td>
+<td>-50</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum histogram gradient intensity</td>
+<td>RHQZ</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity-volume-histogram">Intensity-Volume Histogram</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Volume at intensity fraction 0.10</td>
+<td>BC2M_10</td>
+<td>0.3243</td>
+<td>0.324</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume at intensity fraction 0.90</td>
+<td>BC2M_90</td>
+<td>0.09459</td>
+<td>0.0946</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity at volume fraction 0.10</td>
+<td>GBPN_10</td>
+<td>5</td>
+<td>5</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity at volume fraction 0.90</td>
+<td>GBPN_90</td>
+<td>2</td>
+<td>2</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume fraction difference between intensity 0.10 and 0.90 fractions</td>
+<td>DDTU</td>
+<td>0.2297</td>
+<td>0.23</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity fraction difference between volume 0.10 and 0.90 fractions</td>
+<td>CNV2</td>
+<td>3</td>
+<td>3</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area under the IVH curve</td>
+<td>9CMM</td>
+<td>2.047</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glcm">GLCM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Joint maximum</td>
+<td>GYBY</td>
+<td>0.5085</td>
+<td>0.509</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint average</td>
+<td>60VM</td>
+<td>2.149</td>
+<td>2.15</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint variance</td>
+<td>UR99</td>
+<td>3.132</td>
+<td>3.13</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint entropy</td>
+<td>TU9B</td>
+<td>2.574</td>
+<td>2.57</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference average</td>
+<td>TF7R</td>
+<td>1.38</td>
+<td>1.38</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference variance</td>
+<td>D3YU</td>
+<td>3.215</td>
+<td>3.21</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference entropy</td>
+<td>NTRS</td>
+<td>1.641</td>
+<td>1.64</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum average</td>
+<td>ZGXS</td>
+<td>4.298</td>
+<td>4.3</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum variance</td>
+<td>OEEB</td>
+<td>7.412</td>
+<td>7.41</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum entropy</td>
+<td>P6QZ</td>
+<td>2.11</td>
+<td>2.11</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Angular second moment</td>
+<td>8ZQL</td>
+<td>0.291</td>
+<td>0.291</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Contrast</td>
+<td>ACUI</td>
+<td>5.118</td>
+<td>5.12</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dissimilarity</td>
+<td>8S9J</td>
+<td>1.38</td>
+<td>1.38</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse difference</td>
+<td>IB1Z</td>
+<td>0.6877</td>
+<td>0.688</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised inverse difference</td>
+<td>NDRX</td>
+<td>0.8559</td>
+<td>0.856</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse difference moment</td>
+<td>WF0Z</td>
+<td>0.6306</td>
+<td>0.631</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised inverse difference moment</td>
+<td>1QCO</td>
+<td>0.9022</td>
+<td>0.902</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse variance</td>
+<td>E8JP</td>
+<td>0.05744</td>
+<td>0.0574</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Correlation</td>
+<td>NI2N</td>
+<td>0.1831</td>
+<td>0.183</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Autocorrelation</td>
+<td>QWB0</td>
+<td>5.192</td>
+<td>5.19</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster tendency</td>
+<td>DG8W</td>
+<td>7.412</td>
+<td>7.41</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster shade</td>
+<td>7NFM</td>
+<td>17.42</td>
+<td>17.4</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster prominence</td>
+<td>AE86</td>
+<td>147.5</td>
+<td>147</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Information correlation 1</td>
+<td>R8DG</td>
+<td>-0.0288</td>
+<td>-0.0288</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Information correlation 2</td>
+<td>JN9H</td>
+<td>0.2692</td>
+<td>0.269</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glrlm">GLRLM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Short runs emphasis</td>
+<td>22OV</td>
+<td>0.7291</td>
+<td>0.729</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long runs emphasis</td>
+<td>W4KF</td>
+<td>2.761</td>
+<td>2.76</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level run emphasis</td>
+<td>V3SW</td>
+<td>0.6067</td>
+<td>0.607</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level run emphasis</td>
+<td>G3QZ</td>
+<td>9.638</td>
+<td>9.64</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Short run low grey level emphasis</td>
+<td>HTZT</td>
+<td>0.3716</td>
+<td>0.372</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Short run high grey level emphasis</td>
+<td>GD3A</td>
+<td>8.672</td>
+<td>8.67</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long run low grey level emphasis</td>
+<td>IVPO</td>
+<td>2.163</td>
+<td>2.16</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long run high grey level emphasis</td>
+<td>3KUM</td>
+<td>15.63</td>
+<td>15.6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>R5YN</td>
+<td>281.3</td>
+<td>281</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>OVBL</td>
+<td>0.4301</td>
+<td>0.43</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run length non-uniformity</td>
+<td>W92Y</td>
+<td>327.7</td>
+<td>328</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised run length non-uniformity</td>
+<td>IC23</td>
+<td>0.5011</td>
+<td>0.501</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run percentage</td>
+<td>9ZK5</td>
+<td>0.6798</td>
+<td>0.68</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>8CE5</td>
+<td>3.479</td>
+<td>3.48</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run length variance</td>
+<td>SXLW</td>
+<td>0.5978</td>
+<td>0.598</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run entropy</td>
+<td>HJ9O</td>
+<td>2.624</td>
+<td>2.62</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glszm">GLSZM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small zone emphasis</td>
+<td>P001</td>
+<td>0.2552</td>
+<td>0.255</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone emphasis</td>
+<td>48P8</td>
+<td>550</td>
+<td>550</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level zone emphasis</td>
+<td>XMSY</td>
+<td>0.2528</td>
+<td>0.253</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level zone emphasis</td>
+<td>5GN9</td>
+<td>15.6</td>
+<td>15.6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small zone low grey level emphasis</td>
+<td>5RAI</td>
+<td>0.0256</td>
+<td>0.0256</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small zone high grey level emphasis</td>
+<td>HW1V</td>
+<td>2.763</td>
+<td>2.76</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone low grey level emphasis</td>
+<td>YH51</td>
+<td>502.8</td>
+<td>503</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone high grey level emphasis</td>
+<td>J17V</td>
+<td>1495</td>
+<td>1.49e3</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>JNSA</td>
+<td>1.4</td>
+<td>1.4</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>Y1RO</td>
+<td>0.28</td>
+<td>0.28</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size non-uniformity</td>
+<td>4JP3</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised zone size non-uniformity</td>
+<td>VB3A</td>
+<td>0.2</td>
+<td>0.2</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone percentage</td>
+<td>P30P</td>
+<td>0.06757</td>
+<td>0.0676</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>BYLV</td>
+<td>2.64</td>
+<td>2.64</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size variance</td>
+<td>3NSA</td>
+<td>331</td>
+<td>331</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size entropy</td>
+<td>GU8N</td>
+<td>2.322</td>
+<td>2.32</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gldzm">GLDZM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small distance emphasis</td>
+<td>0GBI</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance emphasis</td>
+<td>MB4I</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level zone emphasis</td>
+<td>S1RA</td>
+<td>0.2528</td>
+<td>0.253</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level zone emphasis</td>
+<td>K26C</td>
+<td>15.6</td>
+<td>15.6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small distance low grey level emphasis</td>
+<td>RUVG</td>
+<td>0.2528</td>
+<td>0.253</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small distance high grey level emphasis</td>
+<td>DKNJ</td>
+<td>15.6</td>
+<td>15.6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance low grey level emphasis</td>
+<td>A7WM</td>
+<td>0.2528</td>
+<td>0.253</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance high grey level emphasis</td>
+<td>KLTH</td>
+<td>15.6</td>
+<td>15.6</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>VFT7</td>
+<td>1.4</td>
+<td>1.4</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>7HP3</td>
+<td>0.28</td>
+<td>0.28</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance non-uniformity</td>
+<td>V294</td>
+<td>5</td>
+<td>5</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised zone distance non-uniformity</td>
+<td>IATH</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone percentage</td>
+<td>VIWW</td>
+<td>0.06757</td>
+<td>0.0676</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>QK93</td>
+<td>2.64</td>
+<td>2.64</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance variance</td>
+<td>7WT1</td>
+<td>0</td>
+<td>0</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance entropy</td>
+<td>GBDU</td>
+<td>1.922</td>
+<td>1.92</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ngtdm">NGTDM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Coarseness</td>
+<td>QCDE</td>
+<td>0.0296</td>
+<td>0.0296</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Contrast</td>
+<td>65HE</td>
+<td>0.5837</td>
+<td>0.584</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Busyness</td>
+<td>NQ30</td>
+<td>6.544</td>
+<td>6.54</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Complexity</td>
+<td>HDEZ</td>
+<td>13.54</td>
+<td>13.5</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Strength</td>
+<td>1X9X</td>
+<td>0.7635</td>
+<td>0.763</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ngldm">NGLDM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Low dependence emphasis</td>
+<td>SODN</td>
+<td>0.045</td>
+<td>0.045</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence emphasis</td>
+<td>IMOQ</td>
+<td>109</td>
+<td>109</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level count emphasis</td>
+<td>TL9H</td>
+<td>0.6933</td>
+<td>0.693</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level count emphasis</td>
+<td>OAE7</td>
+<td>7.662</td>
+<td>7.66</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low dependence low grey level emphasis</td>
+<td>EQ3F</td>
+<td>0.009631</td>
+<td>0.00963</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low dependence high grey level emphasis</td>
+<td>JA6D</td>
+<td>0.7362</td>
+<td>0.736</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence low grey level emphasis</td>
+<td>NBZI</td>
+<td>102.5</td>
+<td>102</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence high grey level emphasis</td>
+<td>9QMG</td>
+<td>235</td>
+<td>235</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>FP8K</td>
+<td>37.92</td>
+<td>37.9</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>5SPA</td>
+<td>0.5124</td>
+<td>0.512</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count non-uniformity</td>
+<td>Z87G</td>
+<td>4.865</td>
+<td>4.86</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised dependence count non-uniformity</td>
+<td>OKJI</td>
+<td>0.06574</td>
+<td>0.0657</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count percentage</td>
+<td>6XV8</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>1PFV</td>
+<td>3.045</td>
+<td>3.05</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count variance</td>
+<td>DNX2</td>
+<td>22.06</td>
+<td>22.1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count entropy</td>
+<td>FCBV</td>
+<td>4.404</td>
+<td>4.4</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count energy</td>
+<td>CAS9</td>
+<td>0.05332</td>
+<td>0.0533</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h2 id="config-c">Config C</h2>
+<h3 id="morphology_1">Morphology</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Volume</td>
+<td>RNU0</td>
+<td>3.672e+05</td>
+<td>3.67e5</td>
+<td>6e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume voxel counting</td>
+<td>YEKZ</td>
+<td>3.675e+05</td>
+<td>3.68e5</td>
+<td>6e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Surface area</td>
+<td>C0JK</td>
+<td>3.446e+04</td>
+<td>3.43e4</td>
+<td>400</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Surface to volume ratio</td>
+<td>2PR5</td>
+<td>0.09384</td>
+<td>0.0934</td>
+<td>0.0007</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Compactness 1</td>
+<td>SKGS</td>
+<td>0.03239</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Compactness 2</td>
+<td>BQWJ</td>
+<td>0.3727</td>
+<td>0.378</td>
+<td>0.004</td>
+<td>❌ FAIL</td>
+</tr>
+<tr>
+<td>Spherical disproportion</td>
+<td>KRCK</td>
+<td>1.39</td>
+<td>1.38</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sphericity</td>
+<td>QCFX</td>
+<td>0.7196</td>
+<td>0.723</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Asphericity</td>
+<td>25C7</td>
+<td>0.3896</td>
+<td>0.383</td>
+<td>0.004</td>
+<td>❌ FAIL</td>
+</tr>
+<tr>
+<td>Center of mass shift</td>
+<td>KLMA</td>
+<td>45.64</td>
+<td>45.6</td>
+<td>2.8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum 3D diameter</td>
+<td>L0JK</td>
+<td>125.1</td>
+<td>125</td>
+<td>1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Major axis length</td>
+<td>TDIC</td>
+<td>93.26</td>
+<td>93.3</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minor axis length</td>
+<td>P9VJ</td>
+<td>81.98</td>
+<td>82</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Least axis length</td>
+<td>7J51</td>
+<td>70.88</td>
+<td>70.9</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Elongation</td>
+<td>Q3CK</td>
+<td>0.879</td>
+<td>0.879</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Flatness</td>
+<td>N17B</td>
+<td>0.76</td>
+<td>0.76</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (AABB)</td>
+<td>PBX1</td>
+<td>0.4779</td>
+<td>0.478</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (AABB)</td>
+<td>R59B</td>
+<td>0.6814</td>
+<td>0.678</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (OMBB)</td>
+<td>ZH1A</td>
+<td>0.3405</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Area density (OMBB)</td>
+<td>IQYR</td>
+<td>0.5412</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Volume density (AEE)</td>
+<td>6BDE</td>
+<td>1.294</td>
+<td>1.29</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (AEE)</td>
+<td>RDD2</td>
+<td>1.625</td>
+<td>1.62</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (MVEE)</td>
+<td>SWZ1</td>
+<td>0.4956</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Area density (MVEE)</td>
+<td>BRI8</td>
+<td>0.8844</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Volume density (convex hull)</td>
+<td>R3ER</td>
+<td>0.8331</td>
+<td>0.834</td>
+<td>0.002</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (convex hull)</td>
+<td>7T7F</td>
+<td>1.135</td>
+<td>1.13</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity_1">Intensity</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Integrated intensity</td>
+<td>99N0</td>
+<td>-1.794e+07</td>
+<td>-1.8e7</td>
+<td>1.4e6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Moran's I index</td>
+<td>N365</td>
+<td>0.08246</td>
+<td>0.0824</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Geary's C measure</td>
+<td>NPT7</td>
+<td>0.8461</td>
+<td>0.846</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Local intensity peak</td>
+<td>VJGA</td>
+<td>168.6</td>
+<td>169</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Global intensity peak</td>
+<td>0F91</td>
+<td>179.7</td>
+<td>180</td>
+<td>5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Mean intensity</td>
+<td>Q4LE</td>
+<td>-48.85</td>
+<td>-49</td>
+<td>2.9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity variance</td>
+<td>ECT3</td>
+<td>5.056e+04</td>
+<td>5.06e4</td>
+<td>1.4e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity skewness</td>
+<td>KE2A</td>
+<td>-2.142</td>
+<td>-2.14</td>
+<td>0.05</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity kurtosis</td>
+<td>IPH6</td>
+<td>3.534</td>
+<td>3.53</td>
+<td>0.23</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Median intensity</td>
+<td>Y12H</td>
+<td>40</td>
+<td>40</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum intensity</td>
+<td>1GSF</td>
+<td>-939</td>
+<td>-939</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>10th intensity percentile</td>
+<td>QG58</td>
+<td>-424</td>
+<td>-424</td>
+<td>14</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>90th intensity percentile</td>
+<td>8DWT</td>
+<td>86</td>
+<td>86</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum intensity</td>
+<td>84IY</td>
+<td>393</td>
+<td>393</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity interquartile range</td>
+<td>SALO</td>
+<td>67</td>
+<td>67</td>
+<td>4.9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity range</td>
+<td>2OJQ</td>
+<td>1332</td>
+<td>1.33e3</td>
+<td>20</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Mean absolute deviation</td>
+<td>4FUA</td>
+<td>157.8</td>
+<td>158</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Robust mean absolute deviation</td>
+<td>1128</td>
+<td>66.74</td>
+<td>66.8</td>
+<td>3.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Median absolute deviation</td>
+<td>N72L</td>
+<td>119</td>
+<td>119</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Coefficient of variation</td>
+<td>7TET</td>
+<td>-4.603</td>
+<td>-4.59</td>
+<td>0.29</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Quartile coefficient of dispersion</td>
+<td>9S40</td>
+<td>1.031</td>
+<td>1.03</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity energy</td>
+<td>N8CA</td>
+<td>2.432e+09</td>
+<td>2.44e9</td>
+<td>1.2e8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Root mean square intensity</td>
+<td>5ZWQ</td>
+<td>230.1</td>
+<td>230</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity-histogram_1">Intensity Histogram</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mean discretised intensity</td>
+<td>X6K6</td>
+<td>38.56</td>
+<td>38.6</td>
+<td>0.2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity variance</td>
+<td>CH89</td>
+<td>80.99</td>
+<td>81.1</td>
+<td>2.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity skewness</td>
+<td>88K1</td>
+<td>-2.139</td>
+<td>-2.14</td>
+<td>0.05</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity kurtosis</td>
+<td>C3I7</td>
+<td>3.528</td>
+<td>3.52</td>
+<td>0.23</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Median discretised intensity</td>
+<td>WIFQ</td>
+<td>42</td>
+<td>42</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum discretised intensity</td>
+<td>1PR8</td>
+<td>3</td>
+<td>3</td>
+<td>0.16</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>10th discretised intensity percentile</td>
+<td>1PR</td>
+<td>24</td>
+<td>24</td>
+<td>0.7</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>90th discretised intensity percentile</td>
+<td>GPMT</td>
+<td>44</td>
+<td>44</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum discretised intensity</td>
+<td>3NCY</td>
+<td>56</td>
+<td>56</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram mode</td>
+<td>AMMC</td>
+<td>43</td>
+<td>43</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity interquartile range</td>
+<td>WR0O</td>
+<td>3</td>
+<td>3</td>
+<td>0.21</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity range</td>
+<td>5Z3W</td>
+<td>53</td>
+<td>53</td>
+<td>0.6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram mean absolute deviation</td>
+<td>D2ZX</td>
+<td>6.314</td>
+<td>6.32</td>
+<td>0.15</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram robust mean absolute deviation</td>
+<td>WRZB</td>
+<td>2.587</td>
+<td>2.59</td>
+<td>0.14</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram median absolute deviation</td>
+<td>4RNL</td>
+<td>4.745</td>
+<td>4.75</td>
+<td>0.12</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram coefficient of variation</td>
+<td>CWYJ</td>
+<td>0.2334</td>
+<td>0.234</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram quartile coefficient of dispersion</td>
+<td>SLWD</td>
+<td>0.03614</td>
+<td>0.0361</td>
+<td>0.0027</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity entropy</td>
+<td>TLU2</td>
+<td>3.734</td>
+<td>3.73</td>
+<td>0.04</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity uniformity</td>
+<td>BJ5W</td>
+<td>0.1396</td>
+<td>0.14</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum histogram gradient</td>
+<td>12CE</td>
+<td>4740</td>
+<td>4.75e3</td>
+<td>30</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum histogram gradient intensity</td>
+<td>8E6O</td>
+<td>41</td>
+<td>41</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum histogram gradient</td>
+<td>VQB3</td>
+<td>-4672</td>
+<td>-4.68e3</td>
+<td>50</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum histogram gradient intensity</td>
+<td>RHQZ</td>
+<td>44</td>
+<td>44</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity-volume-histogram_1">Intensity-Volume Histogram</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Volume at intensity fraction 0.10</td>
+<td>BC2M_10</td>
+<td>0.9976</td>
+<td>0.998</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume at intensity fraction 0.90</td>
+<td>BC2M_90</td>
+<td>0.0001524</td>
+<td>0.000152</td>
+<td>2e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity at volume fraction 0.10</td>
+<td>GBPN_10</td>
+<td>88.75</td>
+<td>88.8</td>
+<td>0.2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity at volume fraction 0.90</td>
+<td>GBPN_90</td>
+<td>-421.2</td>
+<td>-421</td>
+<td>14</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume fraction difference between intensity 0.10 and 0.90 fractions</td>
+<td>DDTU</td>
+<td>0.9974</td>
+<td>0.997</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity fraction difference between volume 0.10 and 0.90 fractions</td>
+<td>CNV2</td>
+<td>510</td>
+<td>510</td>
+<td>14</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area under the IVH curve</td>
+<td>9CMM</td>
+<td>891.4</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glcm_1">GLCM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Joint maximum</td>
+<td>GYBY</td>
+<td>0.1109</td>
+<td>0.111</td>
+<td>0.002</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint average</td>
+<td>60VM</td>
+<td>38.98</td>
+<td>39</td>
+<td>0.2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint variance</td>
+<td>UR99</td>
+<td>73.68</td>
+<td>73.8</td>
+<td>2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint entropy</td>
+<td>TU9B</td>
+<td>6.419</td>
+<td>6.42</td>
+<td>0.06</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference average</td>
+<td>TF7R</td>
+<td>2.162</td>
+<td>2.16</td>
+<td>0.05</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference variance</td>
+<td>D3YU</td>
+<td>14.42</td>
+<td>14.4</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference entropy</td>
+<td>NTRS</td>
+<td>2.642</td>
+<td>2.64</td>
+<td>0.03</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum average</td>
+<td>ZGXS</td>
+<td>77.96</td>
+<td>78</td>
+<td>0.3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum variance</td>
+<td>OEEB</td>
+<td>275.6</td>
+<td>276</td>
+<td>8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum entropy</td>
+<td>P6QZ</td>
+<td>4.559</td>
+<td>4.56</td>
+<td>0.04</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Angular second moment</td>
+<td>8ZQL</td>
+<td>0.04471</td>
+<td>0.0447</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Contrast</td>
+<td>ACUI</td>
+<td>19.09</td>
+<td>19.1</td>
+<td>0.7</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dissimilarity</td>
+<td>8S9J</td>
+<td>2.162</td>
+<td>2.16</td>
+<td>0.05</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse difference</td>
+<td>IB1Z</td>
+<td>0.5828</td>
+<td>0.583</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised inverse difference</td>
+<td>NDRX</td>
+<td>0.9652</td>
+<td>0.966</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse difference moment</td>
+<td>WF0Z</td>
+<td>0.5479</td>
+<td>0.548</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised inverse difference moment</td>
+<td>1QCO</td>
+<td>0.994</td>
+<td>0.994</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse variance</td>
+<td>E8JP</td>
+<td>0.3906</td>
+<td>0.39</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Correlation</td>
+<td>NI2N</td>
+<td>0.8704</td>
+<td>0.871</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Autocorrelation</td>
+<td>QWB0</td>
+<td>1584</td>
+<td>1.58e3</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster tendency</td>
+<td>DG8W</td>
+<td>275.6</td>
+<td>276</td>
+<td>8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster shade</td>
+<td>7NFM</td>
+<td>-1.062e+04</td>
+<td>-1.06e4</td>
+<td>300</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster prominence</td>
+<td>AE86</td>
+<td>5.69e+05</td>
+<td>5.7e5</td>
+<td>1.1e4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Information correlation 1</td>
+<td>R8DG</td>
+<td>-0.2283</td>
+<td>-0.228</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Information correlation 2</td>
+<td>JN9H</td>
+<td>0.8993</td>
+<td>0.899</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glrlm_1">GLRLM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Short runs emphasis</td>
+<td>22OV</td>
+<td>0.7872</td>
+<td>0.787</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long runs emphasis</td>
+<td>W4KF</td>
+<td>3.275</td>
+<td>3.28</td>
+<td>0.04</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level run emphasis</td>
+<td>V3SW</td>
+<td>0.001544</td>
+<td>0.00155</td>
+<td>5e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level run emphasis</td>
+<td>G3QZ</td>
+<td>1473</td>
+<td>1.47e3</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Short run low grey level emphasis</td>
+<td>HTZT</td>
+<td>0.001358</td>
+<td>0.00136</td>
+<td>5e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Short run high grey level emphasis</td>
+<td>GD3A</td>
+<td>1100</td>
+<td>1.1e3</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long run low grey level emphasis</td>
+<td>IVPO</td>
+<td>0.003141</td>
+<td>0.00314</td>
+<td>4e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long run high grey level emphasis</td>
+<td>3KUM</td>
+<td>5523</td>
+<td>5.53e3</td>
+<td>80</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>R5YN</td>
+<td>4.129e+04</td>
+<td>4.13e4</td>
+<td>100</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>OVBL</td>
+<td>0.1018</td>
+<td>0.102</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run length non-uniformity</td>
+<td>W92Y</td>
+<td>2.334e+05</td>
+<td>2.34e5</td>
+<td>6e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised run length non-uniformity</td>
+<td>IC23</td>
+<td>0.5755</td>
+<td>0.575</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run percentage</td>
+<td>9ZK5</td>
+<td>0.6792</td>
+<td>0.679</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>8CE5</td>
+<td>101.2</td>
+<td>101</td>
+<td>3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run length variance</td>
+<td>SXLW</td>
+<td>1.107</td>
+<td>1.11</td>
+<td>0.02</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run entropy</td>
+<td>HJ9O</td>
+<td>5.349</td>
+<td>5.35</td>
+<td>0.03</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glszm_1">GLSZM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small zone emphasis</td>
+<td>P001</td>
+<td>0.6951</td>
+<td>0.695</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone emphasis</td>
+<td>48P8</td>
+<td>3.892e+04</td>
+<td>3.89e4</td>
+<td>900</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level zone emphasis</td>
+<td>XMSY</td>
+<td>0.002342</td>
+<td>0.00235</td>
+<td>6e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level zone emphasis</td>
+<td>5GN9</td>
+<td>971.7</td>
+<td>971</td>
+<td>7</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small zone low grey level emphasis</td>
+<td>5RAI</td>
+<td>0.001588</td>
+<td>0.0016</td>
+<td>4e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small zone high grey level emphasis</td>
+<td>HW1V</td>
+<td>657.8</td>
+<td>657</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone low grey level emphasis</td>
+<td>YH51</td>
+<td>21.55</td>
+<td>21.6</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone high grey level emphasis</td>
+<td>J17V</td>
+<td>7.071e+07</td>
+<td>7.07e7</td>
+<td>1.5e6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>JNSA</td>
+<td>195</td>
+<td>195</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>Y1RO</td>
+<td>0.02868</td>
+<td>0.0286</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size non-uniformity</td>
+<td>4JP3</td>
+<td>3039</td>
+<td>3.04e3</td>
+<td>100</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised zone size non-uniformity</td>
+<td>VB3A</td>
+<td>0.447</td>
+<td>0.447</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone percentage</td>
+<td>P30P</td>
+<td>0.148</td>
+<td>0.148</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>BYLV</td>
+<td>105.7</td>
+<td>106</td>
+<td>1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size variance</td>
+<td>3NSA</td>
+<td>3.888e+04</td>
+<td>3.89e4</td>
+<td>900</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size entropy</td>
+<td>GU8N</td>
+<td>6.997</td>
+<td>7</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gldzm_1">GLDZM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small distance emphasis</td>
+<td>0GBI</td>
+<td>0.5312</td>
+<td>0.531</td>
+<td>0.006</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance emphasis</td>
+<td>MB4I</td>
+<td>11.01</td>
+<td>11</td>
+<td>0.3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level zone emphasis</td>
+<td>S1RA</td>
+<td>0.002342</td>
+<td>0.00235</td>
+<td>6e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level zone emphasis</td>
+<td>K26C</td>
+<td>971.7</td>
+<td>971</td>
+<td>7</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small distance low grey level emphasis</td>
+<td>RUVG</td>
+<td>0.001487</td>
+<td>0.00149</td>
+<td>4e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small distance high grey level emphasis</td>
+<td>DKNJ</td>
+<td>476.7</td>
+<td>476</td>
+<td>11</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance low grey level emphasis</td>
+<td>A7WM</td>
+<td>0.0154</td>
+<td>0.0154</td>
+<td>0.0005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance high grey level emphasis</td>
+<td>KLTH</td>
+<td>1.334e+04</td>
+<td>1.34e4</td>
+<td>200</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>VFT7</td>
+<td>195</td>
+<td>195</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>7HP3</td>
+<td>0.02868</td>
+<td>0.0286</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance non-uniformity</td>
+<td>V294</td>
+<td>1864</td>
+<td>1.87e3</td>
+<td>40</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised zone distance non-uniformity</td>
+<td>IATH</td>
+<td>0.2742</td>
+<td>0.274</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone percentage</td>
+<td>VIWW</td>
+<td>0.148</td>
+<td>0.148</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>QK93</td>
+<td>105.7</td>
+<td>106</td>
+<td>1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance variance</td>
+<td>7WT1</td>
+<td>4.594</td>
+<td>4.6</td>
+<td>0.06</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance entropy</td>
+<td>GBDU</td>
+<td>7.562</td>
+<td>7.56</td>
+<td>0.03</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ngtdm_1">NGTDM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Coarseness</td>
+<td>QCDE</td>
+<td>0.0002163</td>
+<td>0.000216</td>
+<td>4e-6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Contrast</td>
+<td>65HE</td>
+<td>0.0872</td>
+<td>0.0873</td>
+<td>0.0019</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Busyness</td>
+<td>NQ30</td>
+<td>1.388</td>
+<td>1.39</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Complexity</td>
+<td>HDEZ</td>
+<td>1808</td>
+<td>1.81e3</td>
+<td>60</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Strength</td>
+<td>1X9X</td>
+<td>0.6517</td>
+<td>0.651</td>
+<td>0.015</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ngldm_1">NGLDM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Low dependence emphasis</td>
+<td>SODN</td>
+<td>0.1368</td>
+<td>0.137</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence emphasis</td>
+<td>IMOQ</td>
+<td>126.4</td>
+<td>126</td>
+<td>2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level count emphasis</td>
+<td>TL9H</td>
+<td>0.001296</td>
+<td>0.0013</td>
+<td>4e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level count emphasis</td>
+<td>OAE7</td>
+<td>1568</td>
+<td>1.57e3</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low dependence low grey level emphasis</td>
+<td>EQ3F</td>
+<td>0.0003046</td>
+<td>0.000306</td>
+<td>1.2e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low dependence high grey level emphasis</td>
+<td>JA6D</td>
+<td>140.7</td>
+<td>141</td>
+<td>2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence low grey level emphasis</td>
+<td>NBZI</td>
+<td>0.08278</td>
+<td>0.0828</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence high grey level emphasis</td>
+<td>9QMG</td>
+<td>2.266e+05</td>
+<td>2.27e5</td>
+<td>3e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>FP8K</td>
+<td>6412</td>
+<td>6.42e3</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>5SPA</td>
+<td>0.1396</td>
+<td>0.14</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count non-uniformity</td>
+<td>Z87G</td>
+<td>2445</td>
+<td>2.45e3</td>
+<td>60</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised dependence count non-uniformity</td>
+<td>OKJI</td>
+<td>0.05322</td>
+<td>0.0532</td>
+<td>0.0005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count percentage</td>
+<td>6XV8</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>1PFV</td>
+<td>80.99</td>
+<td>81.1</td>
+<td>2.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count variance</td>
+<td>DNX2</td>
+<td>39.18</td>
+<td>39.2</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count entropy</td>
+<td>FCBV</td>
+<td>7.536</td>
+<td>7.54</td>
+<td>0.03</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count energy</td>
+<td>CAS9</td>
+<td>0.007893</td>
+<td>0.00789</td>
+<td>0.00011</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h2 id="config-d">Config D</h2>
+<h3 id="morphology_2">Morphology</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Volume</td>
+<td>RNU0</td>
+<td>3.672e+05</td>
+<td>3.67e5</td>
+<td>6e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume voxel counting</td>
+<td>YEKZ</td>
+<td>3.675e+05</td>
+<td>3.68e5</td>
+<td>6e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Surface area</td>
+<td>C0JK</td>
+<td>3.446e+04</td>
+<td>3.43e4</td>
+<td>400</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Surface to volume ratio</td>
+<td>2PR5</td>
+<td>0.09384</td>
+<td>0.0934</td>
+<td>0.0007</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Compactness 1</td>
+<td>SKGS</td>
+<td>0.03239</td>
+<td>0.0326</td>
+<td>0.0002</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Compactness 2</td>
+<td>BQWJ</td>
+<td>0.3727</td>
+<td>0.378</td>
+<td>0.004</td>
+<td>❌ FAIL</td>
+</tr>
+<tr>
+<td>Spherical disproportion</td>
+<td>KRCK</td>
+<td>1.39</td>
+<td>1.38</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sphericity</td>
+<td>QCFX</td>
+<td>0.7196</td>
+<td>0.723</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Asphericity</td>
+<td>25C7</td>
+<td>0.3896</td>
+<td>0.383</td>
+<td>0.004</td>
+<td>❌ FAIL</td>
+</tr>
+<tr>
+<td>Center of mass shift</td>
+<td>KLMA</td>
+<td>65.29</td>
+<td>64.9</td>
+<td>2.8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum 3D diameter</td>
+<td>L0JK</td>
+<td>125.1</td>
+<td>125</td>
+<td>1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Major axis length</td>
+<td>TDIC</td>
+<td>93.26</td>
+<td>93.3</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minor axis length</td>
+<td>P9VJ</td>
+<td>81.98</td>
+<td>82</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Least axis length</td>
+<td>7J51</td>
+<td>70.88</td>
+<td>70.9</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Elongation</td>
+<td>Q3CK</td>
+<td>0.879</td>
+<td>0.879</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Flatness</td>
+<td>N17B</td>
+<td>0.76</td>
+<td>0.76</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (AABB)</td>
+<td>PBX1</td>
+<td>0.4779</td>
+<td>0.478</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (AABB)</td>
+<td>R59B</td>
+<td>0.6814</td>
+<td>0.678</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (OMBB)</td>
+<td>ZH1A</td>
+<td>0.3405</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Area density (OMBB)</td>
+<td>IQYR</td>
+<td>0.5412</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Volume density (AEE)</td>
+<td>6BDE</td>
+<td>1.294</td>
+<td>1.29</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (AEE)</td>
+<td>RDD2</td>
+<td>1.625</td>
+<td>1.62</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (MVEE)</td>
+<td>SWZ1</td>
+<td>0.4956</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Area density (MVEE)</td>
+<td>BRI8</td>
+<td>0.8844</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Volume density (convex hull)</td>
+<td>R3ER</td>
+<td>0.8331</td>
+<td>0.834</td>
+<td>0.002</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (convex hull)</td>
+<td>7T7F</td>
+<td>1.135</td>
+<td>1.13</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity_2">Intensity</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Integrated intensity</td>
+<td>99N0</td>
+<td>-8.551e+06</td>
+<td>-8.64e6</td>
+<td>1.56e6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Moran's I index</td>
+<td>N365</td>
+<td>0.06202</td>
+<td>0.0622</td>
+<td>0.0013</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Geary's C measure</td>
+<td>NPT7</td>
+<td>0.8512</td>
+<td>0.851</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Local intensity peak</td>
+<td>VJGA</td>
+<td>200.8</td>
+<td>201</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Global intensity peak</td>
+<td>0F91</td>
+<td>200.8</td>
+<td>201</td>
+<td>5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Mean intensity</td>
+<td>Q4LE</td>
+<td>-23.29</td>
+<td>-23.5</td>
+<td>3.9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity variance</td>
+<td>ECT3</td>
+<td>3.264e+04</td>
+<td>3.28e4</td>
+<td>2.1e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity skewness</td>
+<td>KE2A</td>
+<td>-2.282</td>
+<td>-2.28</td>
+<td>0.06</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity kurtosis</td>
+<td>IPH6</td>
+<td>4.361</td>
+<td>4.35</td>
+<td>0.32</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Median intensity</td>
+<td>Y12H</td>
+<td>42</td>
+<td>42</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum intensity</td>
+<td>1GSF</td>
+<td>-723</td>
+<td>-724</td>
+<td>12</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>10th intensity percentile</td>
+<td>QG58</td>
+<td>-304</td>
+<td>-304</td>
+<td>20</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>90th intensity percentile</td>
+<td>8DWT</td>
+<td>86</td>
+<td>86</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum intensity</td>
+<td>84IY</td>
+<td>521</td>
+<td>521</td>
+<td>22</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity interquartile range</td>
+<td>SALO</td>
+<td>57</td>
+<td>57</td>
+<td>4.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity range</td>
+<td>2OJQ</td>
+<td>1244</td>
+<td>1.24e3</td>
+<td>40</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Mean absolute deviation</td>
+<td>4FUA</td>
+<td>122.2</td>
+<td>123</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Robust mean absolute deviation</td>
+<td>1128</td>
+<td>46.82</td>
+<td>46.8</td>
+<td>3.6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Median absolute deviation</td>
+<td>N72L</td>
+<td>94.51</td>
+<td>94.7</td>
+<td>3.8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Coefficient of variation</td>
+<td>7TET</td>
+<td>-7.758</td>
+<td>-7.7</td>
+<td>1.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Quartile coefficient of dispersion</td>
+<td>9S40</td>
+<td>0.7403</td>
+<td>0.74</td>
+<td>0.011</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity energy</td>
+<td>N8CA</td>
+<td>1.474e+09</td>
+<td>1.48e9</td>
+<td>1.4e8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Root mean square intensity</td>
+<td>5ZWQ</td>
+<td>182.2</td>
+<td>183</td>
+<td>7</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity-histogram_2">Intensity Histogram</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mean discretised intensity</td>
+<td>X6K6</td>
+<td>18.51</td>
+<td>18.5</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity variance</td>
+<td>CH89</td>
+<td>21.65</td>
+<td>21.7</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity skewness</td>
+<td>88K1</td>
+<td>-2.27</td>
+<td>-2.27</td>
+<td>0.06</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity kurtosis</td>
+<td>C3I7</td>
+<td>4.316</td>
+<td>4.31</td>
+<td>0.32</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Median discretised intensity</td>
+<td>WIFQ</td>
+<td>20</td>
+<td>20</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum discretised intensity</td>
+<td>1PR8</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>10th discretised intensity percentile</td>
+<td>1PR</td>
+<td>11</td>
+<td>11</td>
+<td>0.7</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>90th discretised intensity percentile</td>
+<td>GPMT</td>
+<td>21</td>
+<td>21</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum discretised intensity</td>
+<td>3NCY</td>
+<td>32</td>
+<td>32</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram mode</td>
+<td>AMMC</td>
+<td>20</td>
+<td>20</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity interquartile range</td>
+<td>WR0O</td>
+<td>2</td>
+<td>2</td>
+<td>0.06</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity range</td>
+<td>5Z3W</td>
+<td>31</td>
+<td>31</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram mean absolute deviation</td>
+<td>D2ZX</td>
+<td>3.148</td>
+<td>3.15</td>
+<td>0.05</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram robust mean absolute deviation</td>
+<td>WRZB</td>
+<td>1.33</td>
+<td>1.33</td>
+<td>0.06</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram median absolute deviation</td>
+<td>4RNL</td>
+<td>2.404</td>
+<td>2.41</td>
+<td>0.04</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram coefficient of variation</td>
+<td>CWYJ</td>
+<td>0.2515</td>
+<td>0.252</td>
+<td>0.006</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram quartile coefficient of dispersion</td>
+<td>SLWD</td>
+<td>0.05</td>
+<td>0.05</td>
+<td>0.0021</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity entropy</td>
+<td>TLU2</td>
+<td>2.937</td>
+<td>2.94</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity uniformity</td>
+<td>BJ5W</td>
+<td>0.2289</td>
+<td>0.229</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum histogram gradient</td>
+<td>12CE</td>
+<td>7256</td>
+<td>7.26e3</td>
+<td>200</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum histogram gradient intensity</td>
+<td>8E6O</td>
+<td>19</td>
+<td>19</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum histogram gradient</td>
+<td>VQB3</td>
+<td>-6676</td>
+<td>-6.67e3</td>
+<td>230</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum histogram gradient intensity</td>
+<td>RHQZ</td>
+<td>22</td>
+<td>22</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity-volume-histogram_2">Intensity-Volume Histogram</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Volume at intensity fraction 0.10</td>
+<td>BC2M_10</td>
+<td>0.9716</td>
+<td>0.972</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume at intensity fraction 0.90</td>
+<td>BC2M_90</td>
+<td>9.005e-05</td>
+<td>9e-5</td>
+<td>0.000415</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity at volume fraction 0.10</td>
+<td>GBPN_10</td>
+<td>87</td>
+<td>87</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity at volume fraction 0.90</td>
+<td>GBPN_90</td>
+<td>-303</td>
+<td>-303</td>
+<td>20</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume fraction difference between intensity 0.10 and 0.90 fractions</td>
+<td>DDTU</td>
+<td>0.9715</td>
+<td>0.971</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity fraction difference between volume 0.10 and 0.90 fractions</td>
+<td>CNV2</td>
+<td>390</td>
+<td>390</td>
+<td>20</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area under the IVH curve</td>
+<td>9CMM</td>
+<td>700.2</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glcm_2">GLCM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Joint maximum</td>
+<td>GYBY</td>
+<td>0.2322</td>
+<td>0.232</td>
+<td>0.007</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint average</td>
+<td>60VM</td>
+<td>18.85</td>
+<td>18.9</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint variance</td>
+<td>UR99</td>
+<td>17.59</td>
+<td>17.6</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint entropy</td>
+<td>TU9B</td>
+<td>4.96</td>
+<td>4.96</td>
+<td>0.03</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference average</td>
+<td>TF7R</td>
+<td>1.29</td>
+<td>1.29</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference variance</td>
+<td>D3YU</td>
+<td>5.391</td>
+<td>5.38</td>
+<td>0.11</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference entropy</td>
+<td>NTRS</td>
+<td>2.139</td>
+<td>2.14</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum average</td>
+<td>ZGXS</td>
+<td>37.71</td>
+<td>37.7</td>
+<td>0.8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum variance</td>
+<td>OEEB</td>
+<td>63.31</td>
+<td>63.5</td>
+<td>1.3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum entropy</td>
+<td>P6QZ</td>
+<td>3.677</td>
+<td>3.68</td>
+<td>0.02</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Angular second moment</td>
+<td>8ZQL</td>
+<td>0.1094</td>
+<td>0.109</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Contrast</td>
+<td>ACUI</td>
+<td>7.056</td>
+<td>7.05</td>
+<td>0.13</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dissimilarity</td>
+<td>8S9J</td>
+<td>1.29</td>
+<td>1.29</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse difference</td>
+<td>IB1Z</td>
+<td>0.6822</td>
+<td>0.682</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised inverse difference</td>
+<td>NDRX</td>
+<td>0.9651</td>
+<td>0.965</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse difference moment</td>
+<td>WF0Z</td>
+<td>0.657</td>
+<td>0.657</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised inverse difference moment</td>
+<td>1QCO</td>
+<td>0.9937</td>
+<td>0.994</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse variance</td>
+<td>E8JP</td>
+<td>0.3404</td>
+<td>0.34</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Correlation</td>
+<td>NI2N</td>
+<td>0.7995</td>
+<td>0.8</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Autocorrelation</td>
+<td>QWB0</td>
+<td>369.6</td>
+<td>370</td>
+<td>16</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster tendency</td>
+<td>DG8W</td>
+<td>63.31</td>
+<td>63.5</td>
+<td>1.3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster shade</td>
+<td>7NFM</td>
+<td>-1271</td>
+<td>-1.28e3</td>
+<td>40</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster prominence</td>
+<td>AE86</td>
+<td>3.558e+04</td>
+<td>3.57e4</td>
+<td>1.5e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Information correlation 1</td>
+<td>R8DG</td>
+<td>-0.2249</td>
+<td>-0.225</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Information correlation 2</td>
+<td>JN9H</td>
+<td>0.8459</td>
+<td>0.846</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glrlm_2">GLRLM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Short runs emphasis</td>
+<td>22OV</td>
+<td>0.7355</td>
+<td>0.736</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long runs emphasis</td>
+<td>W4KF</td>
+<td>6.558</td>
+<td>6.56</td>
+<td>0.18</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level run emphasis</td>
+<td>V3SW</td>
+<td>0.02563</td>
+<td>0.0257</td>
+<td>0.0012</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level run emphasis</td>
+<td>G3QZ</td>
+<td>326</td>
+<td>326</td>
+<td>17</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Short run low grey level emphasis</td>
+<td>HTZT</td>
+<td>0.02319</td>
+<td>0.0232</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Short run high grey level emphasis</td>
+<td>GD3A</td>
+<td>219.3</td>
+<td>219</td>
+<td>13</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long run low grey level emphasis</td>
+<td>IVPO</td>
+<td>0.04771</td>
+<td>0.0478</td>
+<td>0.0031</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long run high grey level emphasis</td>
+<td>3KUM</td>
+<td>2627</td>
+<td>2.63e3</td>
+<td>30</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>R5YN</td>
+<td>4.279e+04</td>
+<td>4.28e4</td>
+<td>200</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>OVBL</td>
+<td>0.1339</td>
+<td>0.134</td>
+<td>0.002</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run length non-uniformity</td>
+<td>W92Y</td>
+<td>1.601e+05</td>
+<td>1.6e5</td>
+<td>3e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised run length non-uniformity</td>
+<td>IC23</td>
+<td>0.5009</td>
+<td>0.501</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run percentage</td>
+<td>9ZK5</td>
+<td>0.5536</td>
+<td>0.554</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>8CE5</td>
+<td>31.4</td>
+<td>31.4</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run length variance</td>
+<td>SXLW</td>
+<td>3.295</td>
+<td>3.29</td>
+<td>0.13</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run entropy</td>
+<td>HJ9O</td>
+<td>5.08</td>
+<td>5.08</td>
+<td>0.02</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glszm_2">GLSZM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small zone emphasis</td>
+<td>P001</td>
+<td>0.6395</td>
+<td>0.637</td>
+<td>0.005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone emphasis</td>
+<td>48P8</td>
+<td>9.863e+04</td>
+<td>9.91e4</td>
+<td>2.8e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level zone emphasis</td>
+<td>XMSY</td>
+<td>0.04051</td>
+<td>0.0409</td>
+<td>0.0005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level zone emphasis</td>
+<td>5GN9</td>
+<td>187.2</td>
+<td>188</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small zone low grey level emphasis</td>
+<td>5RAI</td>
+<td>0.02478</td>
+<td>0.0248</td>
+<td>0.0004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small zone high grey level emphasis</td>
+<td>HW1V</td>
+<td>116.4</td>
+<td>117</td>
+<td>7</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone low grey level emphasis</td>
+<td>YH51</td>
+<td>239.8</td>
+<td>241</td>
+<td>14</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone high grey level emphasis</td>
+<td>J17V</td>
+<td>4.122e+07</td>
+<td>4.14e7</td>
+<td>3e5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>JNSA</td>
+<td>212.9</td>
+<td>212</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>Y1RO</td>
+<td>0.04908</td>
+<td>0.0491</td>
+<td>0.0008</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size non-uniformity</td>
+<td>4JP3</td>
+<td>1648</td>
+<td>1.63e3</td>
+<td>10</td>
+<td>❌ FAIL</td>
+</tr>
+<tr>
+<td>Normalised zone size non-uniformity</td>
+<td>VB3A</td>
+<td>0.3801</td>
+<td>0.377</td>
+<td>0.006</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone percentage</td>
+<td>P30P</td>
+<td>0.09764</td>
+<td>0.0972</td>
+<td>0.0007</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>BYLV</td>
+<td>32.64</td>
+<td>32.7</td>
+<td>1.6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size variance</td>
+<td>3NSA</td>
+<td>9.853e+04</td>
+<td>9.9e4</td>
+<td>2.8e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size entropy</td>
+<td>GU8N</td>
+<td>6.498</td>
+<td>6.52</td>
+<td>0.01</td>
+<td>❌ FAIL</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gldzm_2">GLDZM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small distance emphasis</td>
+<td>0GBI</td>
+<td>0.5791</td>
+<td>0.579</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance emphasis</td>
+<td>MB4I</td>
+<td>10.21</td>
+<td>10.3</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level zone emphasis</td>
+<td>S1RA</td>
+<td>0.04051</td>
+<td>0.0409</td>
+<td>0.0005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level zone emphasis</td>
+<td>K26C</td>
+<td>187.2</td>
+<td>188</td>
+<td>10</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small distance low grey level emphasis</td>
+<td>RUVG</td>
+<td>0.02965</td>
+<td>0.0302</td>
+<td>0.0006</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small distance high grey level emphasis</td>
+<td>DKNJ</td>
+<td>99.26</td>
+<td>99.3</td>
+<td>5.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance low grey level emphasis</td>
+<td>A7WM</td>
+<td>0.1844</td>
+<td>0.183</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance high grey level emphasis</td>
+<td>KLTH</td>
+<td>2587</td>
+<td>2.62e3</td>
+<td>110</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>VFT7</td>
+<td>212.9</td>
+<td>212</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>7HP3</td>
+<td>0.04908</td>
+<td>0.0491</td>
+<td>0.0008</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance non-uniformity</td>
+<td>V294</td>
+<td>1373</td>
+<td>1.37e3</td>
+<td>20</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised zone distance non-uniformity</td>
+<td>IATH</td>
+<td>0.3165</td>
+<td>0.317</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone percentage</td>
+<td>VIWW</td>
+<td>0.09764</td>
+<td>0.0972</td>
+<td>0.0007</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>QK93</td>
+<td>32.64</td>
+<td>32.7</td>
+<td>1.6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance variance</td>
+<td>7WT1</td>
+<td>4.586</td>
+<td>4.61</td>
+<td>0.04</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance entropy</td>
+<td>GBDU</td>
+<td>6.613</td>
+<td>6.61</td>
+<td>0.03</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ngtdm_2">NGTDM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Coarseness</td>
+<td>QCDE</td>
+<td>0.0002084</td>
+<td>0.000208</td>
+<td>4e-6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Contrast</td>
+<td>65HE</td>
+<td>0.04598</td>
+<td>0.046</td>
+<td>0.0005</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Busyness</td>
+<td>NQ30</td>
+<td>5.143</td>
+<td>5.14</td>
+<td>0.14</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Complexity</td>
+<td>HDEZ</td>
+<td>400.5</td>
+<td>400</td>
+<td>5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Strength</td>
+<td>1X9X</td>
+<td>0.1617</td>
+<td>0.162</td>
+<td>0.008</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ngldm_2">NGLDM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Low dependence emphasis</td>
+<td>SODN</td>
+<td>0.09168</td>
+<td>0.0912</td>
+<td>0.0007</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence emphasis</td>
+<td>IMOQ</td>
+<td>222.9</td>
+<td>223</td>
+<td>5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level count emphasis</td>
+<td>TL9H</td>
+<td>0.01673</td>
+<td>0.0168</td>
+<td>0.0009</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level count emphasis</td>
+<td>OAE7</td>
+<td>364.1</td>
+<td>364</td>
+<td>16</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low dependence low grey level emphasis</td>
+<td>EQ3F</td>
+<td>0.003592</td>
+<td>0.00357</td>
+<td>4e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low dependence high grey level emphasis</td>
+<td>JA6D</td>
+<td>18.95</td>
+<td>18.9</td>
+<td>1.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence low grey level emphasis</td>
+<td>NBZI</td>
+<td>0.7971</td>
+<td>0.798</td>
+<td>0.072</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence high grey level emphasis</td>
+<td>9QMG</td>
+<td>9.282e+04</td>
+<td>9.28e4</td>
+<td>1.3e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>FP8K</td>
+<td>1.017e+04</td>
+<td>1.02e4</td>
+<td>300</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>5SPA</td>
+<td>0.2289</td>
+<td>0.229</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count non-uniformity</td>
+<td>Z87G</td>
+<td>1834</td>
+<td>1.84e3</td>
+<td>30</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised dependence count non-uniformity</td>
+<td>OKJI</td>
+<td>0.0413</td>
+<td>0.0413</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count percentage</td>
+<td>6XV8</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>1PFV</td>
+<td>21.65</td>
+<td>21.7</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count variance</td>
+<td>DNX2</td>
+<td>63.94</td>
+<td>63.9</td>
+<td>1.3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count entropy</td>
+<td>FCBV</td>
+<td>6.979</td>
+<td>6.98</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count energy</td>
+<td>CAS9</td>
+<td>0.0113</td>
+<td>0.0113</td>
+<td>0.0002</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h2 id="config-e">Config E</h2>
+<h3 id="morphology_3">Morphology</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Volume</td>
+<td>RNU0</td>
+<td>3.672e+05</td>
+<td>3.67e5</td>
+<td>6e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume voxel counting</td>
+<td>YEKZ</td>
+<td>3.675e+05</td>
+<td>3.68e5</td>
+<td>6e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Surface area</td>
+<td>C0JK</td>
+<td>3.446e+04</td>
+<td>3.43e4</td>
+<td>400</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Surface to volume ratio</td>
+<td>2PR5</td>
+<td>0.09384</td>
+<td>0.0934</td>
+<td>0.0007</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Compactness 1</td>
+<td>SKGS</td>
+<td>0.03239</td>
+<td>0.0326</td>
+<td>0.0002</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Compactness 2</td>
+<td>BQWJ</td>
+<td>0.3727</td>
+<td>0.378</td>
+<td>0.004</td>
+<td>❌ FAIL</td>
+</tr>
+<tr>
+<td>Spherical disproportion</td>
+<td>KRCK</td>
+<td>1.39</td>
+<td>1.38</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sphericity</td>
+<td>QCFX</td>
+<td>0.7196</td>
+<td>0.723</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Asphericity</td>
+<td>25C7</td>
+<td>0.3896</td>
+<td>0.383</td>
+<td>0.004</td>
+<td>❌ FAIL</td>
+</tr>
+<tr>
+<td>Center of mass shift</td>
+<td>KLMA</td>
+<td>68.89</td>
+<td>68.5</td>
+<td>2.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum 3D diameter</td>
+<td>L0JK</td>
+<td>125.1</td>
+<td>125</td>
+<td>1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Major axis length</td>
+<td>TDIC</td>
+<td>93.26</td>
+<td>93.3</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minor axis length</td>
+<td>P9VJ</td>
+<td>81.98</td>
+<td>82</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Least axis length</td>
+<td>7J51</td>
+<td>70.88</td>
+<td>70.9</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Elongation</td>
+<td>Q3CK</td>
+<td>0.879</td>
+<td>0.879</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Flatness</td>
+<td>N17B</td>
+<td>0.76</td>
+<td>0.76</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (AABB)</td>
+<td>PBX1</td>
+<td>0.4779</td>
+<td>0.478</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (AABB)</td>
+<td>R59B</td>
+<td>0.6814</td>
+<td>0.678</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (OMBB)</td>
+<td>ZH1A</td>
+<td>0.3405</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Area density (OMBB)</td>
+<td>IQYR</td>
+<td>0.5412</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Volume density (AEE)</td>
+<td>6BDE</td>
+<td>1.294</td>
+<td>1.29</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (AEE)</td>
+<td>RDD2</td>
+<td>1.625</td>
+<td>1.62</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume density (MVEE)</td>
+<td>SWZ1</td>
+<td>0.4956</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Area density (MVEE)</td>
+<td>BRI8</td>
+<td>0.8844</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+<tr>
+<td>Volume density (convex hull)</td>
+<td>R3ER</td>
+<td>0.8331</td>
+<td>0.834</td>
+<td>0.002</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area density (convex hull)</td>
+<td>7T7F</td>
+<td>1.135</td>
+<td>1.13</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity_3">Intensity</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Integrated intensity</td>
+<td>99N0</td>
+<td>-8.244e+06</td>
+<td>-8.31e6</td>
+<td>1.6e6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Moran's I index</td>
+<td>N365</td>
+<td>0.05951</td>
+<td>0.0596</td>
+<td>0.0014</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Geary's C measure</td>
+<td>NPT7</td>
+<td>0.8531</td>
+<td>0.853</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Local intensity peak</td>
+<td>VJGA</td>
+<td>180.8</td>
+<td>181</td>
+<td>13</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Global intensity peak</td>
+<td>0F91</td>
+<td>180.8</td>
+<td>181</td>
+<td>5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Mean intensity</td>
+<td>Q4LE</td>
+<td>-22.45</td>
+<td>-22.6</td>
+<td>4.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity variance</td>
+<td>ECT3</td>
+<td>3.499e+04</td>
+<td>3.51e4</td>
+<td>2.2e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity skewness</td>
+<td>KE2A</td>
+<td>-2.302</td>
+<td>-2.3</td>
+<td>0.07</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity kurtosis</td>
+<td>IPH6</td>
+<td>4.449</td>
+<td>4.44</td>
+<td>0.33</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Median intensity</td>
+<td>Y12H</td>
+<td>43</td>
+<td>43</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum intensity</td>
+<td>1GSF</td>
+<td>-743</td>
+<td>-743</td>
+<td>13</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>10th intensity percentile</td>
+<td>QG58</td>
+<td>-310</td>
+<td>-310</td>
+<td>21</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>90th intensity percentile</td>
+<td>8DWT</td>
+<td>93</td>
+<td>93</td>
+<td>0.2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum intensity</td>
+<td>84IY</td>
+<td>345</td>
+<td>345</td>
+<td>9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity interquartile range</td>
+<td>SALO</td>
+<td>62</td>
+<td>62</td>
+<td>3.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity range</td>
+<td>2OJQ</td>
+<td>1088</td>
+<td>1.09e3</td>
+<td>30</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Mean absolute deviation</td>
+<td>4FUA</td>
+<td>125.1</td>
+<td>125</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Robust mean absolute deviation</td>
+<td>1128</td>
+<td>46.44</td>
+<td>46.5</td>
+<td>3.7</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Median absolute deviation</td>
+<td>N72L</td>
+<td>97.71</td>
+<td>97.9</td>
+<td>3.9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Coefficient of variation</td>
+<td>7TET</td>
+<td>-8.331</td>
+<td>-8.28</td>
+<td>0.95</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity Quartile coefficient of dispersion</td>
+<td>9S40</td>
+<td>0.7949</td>
+<td>0.795</td>
+<td>0.337</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity energy</td>
+<td>N8CA</td>
+<td>1.577e+09</td>
+<td>1.58e9</td>
+<td>1.4e8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Root mean square intensity</td>
+<td>5ZWQ</td>
+<td>188.4</td>
+<td>189</td>
+<td>7</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity-histogram_3">Intensity Histogram</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mean discretised intensity</td>
+<td>X6K6</td>
+<td>21.71</td>
+<td>21.7</td>
+<td>0.3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity variance</td>
+<td>CH89</td>
+<td>30.33</td>
+<td>30.4</td>
+<td>0.8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity skewness</td>
+<td>88K1</td>
+<td>-2.291</td>
+<td>-2.29</td>
+<td>0.07</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity kurtosis</td>
+<td>C3I7</td>
+<td>4.415</td>
+<td>4.4</td>
+<td>0.33</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Median discretised intensity</td>
+<td>WIFQ</td>
+<td>24</td>
+<td>24</td>
+<td>0.2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum discretised intensity</td>
+<td>1PR8</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>10th discretised intensity percentile</td>
+<td>1PR</td>
+<td>13</td>
+<td>13</td>
+<td>0.7</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>90th discretised intensity percentile</td>
+<td>GPMT</td>
+<td>25</td>
+<td>25</td>
+<td>0.2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum discretised intensity</td>
+<td>3NCY</td>
+<td>32</td>
+<td>32</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram mode</td>
+<td>AMMC</td>
+<td>24</td>
+<td>24</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity interquartile range</td>
+<td>WR0O</td>
+<td>1</td>
+<td>1</td>
+<td>0.06</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity range</td>
+<td>5Z3W</td>
+<td>31</td>
+<td>31</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram mean absolute deviation</td>
+<td>D2ZX</td>
+<td>3.681</td>
+<td>3.69</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram robust mean absolute deviation</td>
+<td>WRZB</td>
+<td>1.455</td>
+<td>1.46</td>
+<td>0.09</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram median absolute deviation</td>
+<td>4RNL</td>
+<td>2.889</td>
+<td>2.89</td>
+<td>0.07</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram coefficient of variation</td>
+<td>CWYJ</td>
+<td>0.2537</td>
+<td>0.254</td>
+<td>0.006</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity histogram quartile coefficient of dispersion</td>
+<td>SLWD</td>
+<td>0.02128</td>
+<td>0.0213</td>
+<td>0.0015</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity entropy</td>
+<td>TLU2</td>
+<td>3.221</td>
+<td>3.22</td>
+<td>0.02</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Discretised intensity uniformity</td>
+<td>BJ5W</td>
+<td>0.1837</td>
+<td>0.184</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum histogram gradient</td>
+<td>12CE</td>
+<td>6002</td>
+<td>6.01e3</td>
+<td>130</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Maximum histogram gradient intensity</td>
+<td>8E6O</td>
+<td>23</td>
+<td>23</td>
+<td>0.2</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum histogram gradient</td>
+<td>VQB3</td>
+<td>-6102</td>
+<td>-6.11e3</td>
+<td>180</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Minimum histogram gradient intensity</td>
+<td>RHQZ</td>
+<td>25</td>
+<td>25</td>
+<td>0.2</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="intensity-volume-histogram_3">Intensity-Volume Histogram</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Volume at intensity fraction 0.10</td>
+<td>BC2M_10</td>
+<td>0.9748</td>
+<td>0.975</td>
+<td>0.002</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume at intensity fraction 0.90</td>
+<td>BC2M_90</td>
+<td>0.0001575</td>
+<td>0.000157</td>
+<td>0.000248</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity at volume fraction 0.10</td>
+<td>GBPN_10</td>
+<td>770</td>
+<td>770</td>
+<td>5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity at volume fraction 0.90</td>
+<td>GBPN_90</td>
+<td>399</td>
+<td>399</td>
+<td>17</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Volume fraction difference between intensity 0.10 and 0.90 fractions</td>
+<td>DDTU</td>
+<td>0.9746</td>
+<td>0.974</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Intensity fraction difference between volume 0.10 and 0.90 fractions</td>
+<td>CNV2</td>
+<td>371</td>
+<td>371</td>
+<td>13</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Area under the IVH curve</td>
+<td>9CMM</td>
+<td>662.3</td>
+<td>—</td>
+<td>—</td>
+<td>❗ REF.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glcm_3">GLCM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Joint maximum</td>
+<td>GYBY</td>
+<td>0.153</td>
+<td>0.153</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint average</td>
+<td>60VM</td>
+<td>22.14</td>
+<td>22.1</td>
+<td>0.3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint variance</td>
+<td>UR99</td>
+<td>24.35</td>
+<td>24.4</td>
+<td>0.9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Joint entropy</td>
+<td>TU9B</td>
+<td>5.613</td>
+<td>5.61</td>
+<td>0.03</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference average</td>
+<td>TF7R</td>
+<td>1.695</td>
+<td>1.7</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference variance</td>
+<td>D3YU</td>
+<td>8.228</td>
+<td>8.23</td>
+<td>0.06</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Difference entropy</td>
+<td>NTRS</td>
+<td>2.397</td>
+<td>2.4</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum average</td>
+<td>ZGXS</td>
+<td>44.27</td>
+<td>44.3</td>
+<td>0.4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum variance</td>
+<td>OEEB</td>
+<td>86.3</td>
+<td>86.7</td>
+<td>3.3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Sum entropy</td>
+<td>P6QZ</td>
+<td>3.966</td>
+<td>3.97</td>
+<td>0.02</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Angular second moment</td>
+<td>8ZQL</td>
+<td>0.06354</td>
+<td>0.0635</td>
+<td>0.0009</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Contrast</td>
+<td>ACUI</td>
+<td>11.1</td>
+<td>11.1</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dissimilarity</td>
+<td>8S9J</td>
+<td>1.695</td>
+<td>1.7</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse difference</td>
+<td>IB1Z</td>
+<td>0.6084</td>
+<td>0.608</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised inverse difference</td>
+<td>NDRX</td>
+<td>0.9552</td>
+<td>0.955</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse difference moment</td>
+<td>WF0Z</td>
+<td>0.5769</td>
+<td>0.577</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised inverse difference moment</td>
+<td>1QCO</td>
+<td>0.9905</td>
+<td>0.99</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Inverse variance</td>
+<td>E8JP</td>
+<td>0.4101</td>
+<td>0.41</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Correlation</td>
+<td>NI2N</td>
+<td>0.7721</td>
+<td>0.773</td>
+<td>0.006</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Autocorrelation</td>
+<td>QWB0</td>
+<td>508.8</td>
+<td>509</td>
+<td>8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster tendency</td>
+<td>DG8W</td>
+<td>86.3</td>
+<td>86.7</td>
+<td>3.3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster shade</td>
+<td>7NFM</td>
+<td>-2065</td>
+<td>-2.08e3</td>
+<td>70</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Cluster prominence</td>
+<td>AE86</td>
+<td>6.86e+04</td>
+<td>6.9e4</td>
+<td>2.1e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Information correlation 1</td>
+<td>R8DG</td>
+<td>-0.1752</td>
+<td>-0.175</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Information correlation 2</td>
+<td>JN9H</td>
+<td>0.8122</td>
+<td>0.813</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glrlm_3">GLRLM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Short runs emphasis</td>
+<td>22OV</td>
+<td>0.7771</td>
+<td>0.777</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long runs emphasis</td>
+<td>W4KF</td>
+<td>3.521</td>
+<td>3.52</td>
+<td>0.07</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level run emphasis</td>
+<td>V3SW</td>
+<td>0.0201</td>
+<td>0.0204</td>
+<td>0.0008</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level run emphasis</td>
+<td>G3QZ</td>
+<td>471.5</td>
+<td>471</td>
+<td>9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Short run low grey level emphasis</td>
+<td>HTZT</td>
+<td>0.01843</td>
+<td>0.0186</td>
+<td>0.0007</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Short run high grey level emphasis</td>
+<td>GD3A</td>
+<td>347.3</td>
+<td>347</td>
+<td>7</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long run low grey level emphasis</td>
+<td>IVPO</td>
+<td>0.0307</td>
+<td>0.0311</td>
+<td>0.0016</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Long run high grey level emphasis</td>
+<td>3KUM</td>
+<td>1888</td>
+<td>1.89e3</td>
+<td>20</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>R5YN</td>
+<td>5.194e+04</td>
+<td>5.19e4</td>
+<td>200</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>OVBL</td>
+<td>0.1354</td>
+<td>0.135</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run length non-uniformity</td>
+<td>W92Y</td>
+<td>2.149e+05</td>
+<td>2.15e5</td>
+<td>4e3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised run length non-uniformity</td>
+<td>IC23</td>
+<td>0.5602</td>
+<td>0.56</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run percentage</td>
+<td>9ZK5</td>
+<td>0.6639</td>
+<td>0.664</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>8CE5</td>
+<td>39.62</td>
+<td>39.7</td>
+<td>0.9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run length variance</td>
+<td>SXLW</td>
+<td>1.252</td>
+<td>1.25</td>
+<td>0.05</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Run entropy</td>
+<td>HJ9O</td>
+<td>4.869</td>
+<td>4.87</td>
+<td>0.03</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glszm_3">GLSZM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small zone emphasis</td>
+<td>P001</td>
+<td>0.6763</td>
+<td>0.676</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone emphasis</td>
+<td>48P8</td>
+<td>5.849e+04</td>
+<td>5.86e4</td>
+<td>800</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level zone emphasis</td>
+<td>XMSY</td>
+<td>0.03423</td>
+<td>0.034</td>
+<td>0.0004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level zone emphasis</td>
+<td>5GN9</td>
+<td>285.6</td>
+<td>286</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small zone low grey level emphasis</td>
+<td>5RAI</td>
+<td>0.02236</td>
+<td>0.0224</td>
+<td>0.0004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small zone high grey level emphasis</td>
+<td>HW1V</td>
+<td>185.8</td>
+<td>186</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone low grey level emphasis</td>
+<td>YH51</td>
+<td>104.8</td>
+<td>105</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large zone high grey level emphasis</td>
+<td>J17V</td>
+<td>3.352e+07</td>
+<td>3.36e7</td>
+<td>3e5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>JNSA</td>
+<td>231.1</td>
+<td>231</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>Y1RO</td>
+<td>0.04137</td>
+<td>0.0414</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size non-uniformity</td>
+<td>4JP3</td>
+<td>2367</td>
+<td>2.37e3</td>
+<td>40</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised zone size non-uniformity</td>
+<td>VB3A</td>
+<td>0.4236</td>
+<td>0.424</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone percentage</td>
+<td>P30P</td>
+<td>0.1257</td>
+<td>0.126</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>BYLV</td>
+<td>50.84</td>
+<td>50.8</td>
+<td>0.9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size variance</td>
+<td>3NSA</td>
+<td>5.842e+04</td>
+<td>5.85e4</td>
+<td>800</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone size entropy</td>
+<td>GU8N</td>
+<td>6.563</td>
+<td>6.57</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gldzm_3">GLDZM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small distance emphasis</td>
+<td>0GBI</td>
+<td>0.5276</td>
+<td>0.527</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance emphasis</td>
+<td>MB4I</td>
+<td>12.54</td>
+<td>12.6</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level zone emphasis</td>
+<td>S1RA</td>
+<td>0.03423</td>
+<td>0.034</td>
+<td>0.0004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level zone emphasis</td>
+<td>K26C</td>
+<td>285.6</td>
+<td>286</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small distance low grey level emphasis</td>
+<td>RUVG</td>
+<td>0.02311</td>
+<td>0.0228</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Small distance high grey level emphasis</td>
+<td>DKNJ</td>
+<td>136.2</td>
+<td>136</td>
+<td>4</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance low grey level emphasis</td>
+<td>A7WM</td>
+<td>0.179</td>
+<td>0.179</td>
+<td>0.004</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Large distance high grey level emphasis</td>
+<td>KLTH</td>
+<td>4844</td>
+<td>4.85e3</td>
+<td>60</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>VFT7</td>
+<td>231.1</td>
+<td>231</td>
+<td>6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>7HP3</td>
+<td>0.04137</td>
+<td>0.0414</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance non-uniformity</td>
+<td>V294</td>
+<td>1506</td>
+<td>1.5e3</td>
+<td>30</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised zone distance non-uniformity</td>
+<td>IATH</td>
+<td>0.2695</td>
+<td>0.269</td>
+<td>0.003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone percentage</td>
+<td>VIWW</td>
+<td>0.1257</td>
+<td>0.126</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>QK93</td>
+<td>50.84</td>
+<td>50.8</td>
+<td>0.9</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance variance</td>
+<td>7WT1</td>
+<td>5.55</td>
+<td>5.56</td>
+<td>0.05</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Zone distance entropy</td>
+<td>GBDU</td>
+<td>7.061</td>
+<td>7.06</td>
+<td>0.01</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ngtdm_3">NGTDM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Coarseness</td>
+<td>QCDE</td>
+<td>0.0001886</td>
+<td>0.000188</td>
+<td>4e-6</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Contrast</td>
+<td>65HE</td>
+<td>0.07502</td>
+<td>0.0752</td>
+<td>0.0019</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Busyness</td>
+<td>NQ30</td>
+<td>4.645</td>
+<td>4.65</td>
+<td>0.1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Complexity</td>
+<td>HDEZ</td>
+<td>574.2</td>
+<td>574</td>
+<td>1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Strength</td>
+<td>1X9X</td>
+<td>0.1676</td>
+<td>0.167</td>
+<td>0.006</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ngldm_3">NGLDM</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Code</th>
+<th>Calc</th>
+<th>Ref</th>
+<th>Tol</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Low dependence emphasis</td>
+<td>SODN</td>
+<td>0.1183</td>
+<td>0.118</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence emphasis</td>
+<td>IMOQ</td>
+<td>134.3</td>
+<td>134</td>
+<td>3</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low grey level count emphasis</td>
+<td>TL9H</td>
+<td>0.01519</td>
+<td>0.0154</td>
+<td>0.0007</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High grey level count emphasis</td>
+<td>OAE7</td>
+<td>501.6</td>
+<td>502</td>
+<td>8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low dependence low grey level emphasis</td>
+<td>EQ3F</td>
+<td>0.00386</td>
+<td>0.00388</td>
+<td>4e-5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Low dependence high grey level emphasis</td>
+<td>JA6D</td>
+<td>36.65</td>
+<td>36.7</td>
+<td>0.5</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence low grey level emphasis</td>
+<td>NBZI</td>
+<td>0.4499</td>
+<td>0.457</td>
+<td>0.031</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>High dependence high grey level emphasis</td>
+<td>9QMG</td>
+<td>7.599e+04</td>
+<td>7.6e4</td>
+<td>600</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level non-uniformity</td>
+<td>FP8K</td>
+<td>8162</td>
+<td>8.17e3</td>
+<td>130</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised grey level non-uniformity</td>
+<td>5SPA</td>
+<td>0.1837</td>
+<td>0.184</td>
+<td>0.001</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count non-uniformity</td>
+<td>Z87G</td>
+<td>2245</td>
+<td>2.25e3</td>
+<td>30</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Normalised dependence count non-uniformity</td>
+<td>OKJI</td>
+<td>0.05051</td>
+<td>0.0505</td>
+<td>0.0003</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count percentage</td>
+<td>6XV8</td>
+<td>1</td>
+<td>1</td>
+<td>—</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Grey level variance</td>
+<td>1PFV</td>
+<td>30.33</td>
+<td>30.4</td>
+<td>0.8</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count variance</td>
+<td>DNX2</td>
+<td>39.44</td>
+<td>39.4</td>
+<td>1</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count entropy</td>
+<td>FCBV</td>
+<td>7.064</td>
+<td>7.06</td>
+<td>0.02</td>
+<td>✅ PASS</td>
+</tr>
+<tr>
+<td>Dependence count energy</td>
+<td>CAS9</td>
+<td>0.01062</td>
+<td>0.0106</td>
+<td>0.0001</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025 Márton Kolossváry. Licensed under Apache 2.0.
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      
+    
+  </body>
+</html>
