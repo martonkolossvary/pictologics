@@ -1,0 +1,342 @@
+/* Alien / Blade Runner / Cyberpunk Theme */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap');
+
+:root {
+  /* Common variables */
+  --cyber-green: #00ff41;
+  --cyber-amber: #ffb000;
+  --cyber-dim-green: #003b00;
+  --cyber-grid: rgba(255, 255, 255, 0.05);
+  /* More visible Grey transparent grid */
+  /* Slightly more visible green grid for dark mode */
+  --cyber-grid-light: rgba(0, 0, 0, 0.05);
+  /* More visible grey grid */
+  /* Grey grid for light mode */
+}
+
+/* Dark Mode (Slate) - Cyberpunk Theme */
+[data-md-color-scheme="slate"] {
+  --cyber-bg: #050505;
+
+  /* Material Overrides */
+  --md-primary-fg-color: var(--cyber-green);
+  --md-primary-bg-color: var(--cyber-bg);
+  --md-default-bg-color: var(--cyber-bg);
+  --md-default-fg-color: #e0e0e0;
+  --md-accent-fg-color: var(--cyber-amber);
+
+  --md-typeset-a-color: var(--cyber-green);
+  --md-code-bg-color: #001100;
+}
+
+/* Light Mode (Default) - Clean Medical Theme with Cyberpunk Header */
+[data-md-color-scheme="default"] {
+  /* Use matching Green (#00ff41) but slightly darker for contrast on white if needed, 
+     but user requested "same green". We'll use a slightly darker readable variant for text 
+     but keeping the vivid green for accents. */
+  --md-primary-fg-color: #00c832;
+  /* Slightly darker cyber-green for readability */
+  --md-primary-bg-color: #000000;
+  /* Black Header for Light Mode */
+
+  --md-default-bg-color: #ffffff;
+  --md-default-fg-color: #212121;
+  --md-accent-fg-color: #ffb300;
+
+  /* Readable text colors */
+  --md-typeset-a-color: #008822;
+  --md-headings-color: #000000;
+}
+
+/* CRT / Grid Background Effect */
+/* Dark Mode Grid */
+body[data-md-color-scheme="slate"] {
+  background-color: var(--cyber-bg);
+  background-image:
+    linear-gradient(var(--cyber-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--cyber-grid) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Light Mode Grid */
+body[data-md-color-scheme="default"] {
+  background-color: var(--md-default-bg-color);
+  background-image:
+    linear-gradient(var(--cyber-grid-light) 1px, transparent 1px),
+    linear-gradient(90deg, var(--cyber-grid-light) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+body {
+  font-family: "Share Tech Mono", "Roboto Mono", monospace;
+}
+
+/* Typography - Glowing Text */
+/* Typography - Glowing Text (Dark Mode Only) */
+[data-md-color-scheme="slate"] h1,
+[data-md-color-scheme="slate"] h2,
+[data-md-color-scheme="slate"] h3,
+[data-md-color-scheme="slate"] h4,
+[data-md-color-scheme="slate"] h5,
+[data-md-color-scheme="slate"] h6 {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--cyber-green);
+  text-shadow: 0 0 5px var(--cyber-dim-green);
+  font-family: "Orbitron", sans-serif;
+}
+
+/* Typography - Light Mode */
+[data-md-color-scheme="default"] h1,
+[data-md-color-scheme="default"] h2,
+[data-md-color-scheme="default"] h3,
+[data-md-color-scheme="default"] h4,
+[data-md-color-scheme="default"] h5,
+[data-md-color-scheme="default"] h6 {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #004d40;
+  font-family: "Orbitron", sans-serif;
+  font-weight: 700;
+}
+
+/* Sharp Corners Everywhere */
+.md-header,
+.md-tabs,
+.md-sidebar,
+.md-content,
+.md-footer,
+.md-typeset pre>code,
+.md-button,
+input,
+.md-search__input,
+.md-nav__link,
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 0 !important;
+}
+
+/* Header Styling */
+/* Header Styling - Dark Mode */
+[data-md-color-scheme="slate"] .md-header {
+  border-bottom: 1px solid var(--cyber-green);
+  background: rgba(5, 5, 5, 0.95);
+  box-shadow: 0 0 10px var(--cyber-dim-green);
+}
+
+/* Header Styling - Light Mode (Cyberpunk Hybrid) */
+[data-md-color-scheme="default"] .md-header {
+  background: #050505;
+  /* Black header */
+  border-bottom: 2px solid var(--cyber-green);
+  /* Matching Green border */
+  box-shadow: 0 2px 10px rgba(0, 255, 65, 0.2);
+}
+
+[data-md-color-scheme="default"] .md-header__title,
+[data-md-color-scheme="default"] .md-header__button {
+  color: var(--cyber-green) !important;
+}
+
+/* Ensure Logo/Title is visible */
+.md-header__title {
+  font-family: "Orbitron", sans-serif;
+  font-weight: bold;
+}
+
+/* Hide the default logo icon to prevent duplication */
+.md-header__button.md-logo {
+  display: none;
+}
+
+/* Replace Text with ASCII Image */
+.md-header__topic:first-of-type {
+  display: block;
+  color: transparent !important;
+  /* Hide text color */
+  background: url('../assets/logo.png') no-repeat left center;
+  background-size: contain;
+  /* Scale height to fill, let width expand */
+  width: 250px;
+  /* Increased width to accommodate larger logo */
+  height: 48px;
+  /* Fill full header height */
+  margin-top: 0;
+  margin-left: -10px;
+}
+
+/* Fix Toggle Visibility explicitly */
+.md-header__option {
+  color: inherit !important;
+  opacity: 1 !important;
+}
+
+/* Force visible toggle icons in both modes */
+[data-md-color-scheme="slate"] .md-header__button.md-icon {
+  color: var(--cyber-green);
+}
+
+[data-md-color-scheme="default"] .md-header__button.md-icon {
+  color: var(--cyber-green);
+}
+
+/* Navigation Tabs */
+/* Navigation Tabs */
+[data-md-color-scheme="slate"] .md-tabs {
+  background: var(--cyber-bg);
+  border-bottom: 1px solid var(--cyber-dim-green);
+}
+
+[data-md-color-scheme="default"] .md-tabs {
+  background: #0a0a0a;
+  /* Dark bar to match header */
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* Tabs Links */
+.md-tabs__link {
+  opacity: 0.7;
+}
+
+[data-md-color-scheme="slate"] .md-tabs__link {
+  color: var(--cyber-green);
+}
+
+[data-md-color-scheme="default"] .md-tabs__link {
+  color: var(--cyber-green);
+  /* Green links on dark background */
+}
+
+.md-tabs__link--active {
+  font-weight: bold;
+  opacity: 1;
+}
+
+[data-md-color-scheme="slate"] .md-tabs__link--active {
+  color: var(--cyber-amber);
+  text-shadow: 0 0 8px var(--cyber-amber);
+  border-bottom: 2px solid var(--cyber-amber);
+}
+
+[data-md-color-scheme="default"] .md-tabs__link--active {
+  color: #ffffff;
+  border-bottom: 3px solid #ffb300;
+  text-shadow: 0 0 5px rgba(255, 179, 0, 0.5);
+}
+
+/* Sidebar */
+/* Sidebar */
+[data-md-color-scheme="slate"] .md-sidebar {
+  border-right: 1px solid var(--cyber-dim-green);
+}
+
+.md-nav__link--active {
+  color: var(--cyber-amber) !important;
+  border-left: 2px solid var(--cyber-amber);
+  padding-left: 8px;
+  background: linear-gradient(90deg, rgba(255, 176, 0, 0.1), transparent);
+}
+
+/* Code Blocks */
+/* Code Blocks */
+[data-md-color-scheme="slate"] .md-typeset pre>code {
+  border: 1px solid var(--cyber-green);
+  box-shadow: 0 0 5px var(--cyber-dim-green);
+  color: #ccffcc;
+}
+
+/* Admonitions */
+.md-typeset .admonition {
+  border: 1px solid var(--cyber-green);
+  background-color: rgba(0, 20, 0, 0.3);
+  box-shadow: inset 0 0 10px var(--cyber-dim-green);
+}
+
+.md-typeset .admonition.warning {
+  border-color: var(--cyber-amber);
+  background-color: rgba(20, 10, 0, 0.3);
+}
+
+.md-typeset .admonition__title {
+  background-color: transparent;
+  border-bottom: 1px solid var(--cyber-green);
+  color: var(--cyber-green);
+  font-family: "Orbitron", sans-serif;
+}
+
+.md-typeset .admonition.warning .admonition__title {
+  border-color: var(--cyber-amber);
+  color: var(--cyber-amber);
+}
+
+/* Buttons */
+/* Buttons */
+.md-button {
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  font-family: "Orbitron", sans-serif;
+  border-radius: 0;
+}
+
+/* Dark Mode Buttons */
+[data-md-color-scheme="slate"] .md-button {
+  border: 1px solid var(--cyber-green);
+  background: transparent;
+  color: var(--cyber-green);
+}
+
+[data-md-color-scheme="slate"] .md-button:hover {
+  background: var(--cyber-green);
+  color: black;
+  box-shadow: 0 0 15px var(--cyber-green);
+}
+
+[data-md-color-scheme="slate"] .md-button--primary {
+  border-color: var(--cyber-amber);
+  color: var(--cyber-amber);
+}
+
+[data-md-color-scheme="slate"] .md-button--primary:hover {
+  background: var(--cyber-amber);
+  color: black;
+  box-shadow: 0 0 15px var(--cyber-amber);
+}
+
+/* Light Mode Buttons */
+[data-md-color-scheme="default"] .md-button {
+  border: 1px solid #00796b;
+  color: #00796b;
+}
+
+[data-md-color-scheme="default"] .md-button:hover {
+  background: #00796b;
+  color: white;
+}
+
+[data-md-color-scheme="default"] .md-button--primary {
+  background: #00796b;
+  color: white;
+  border: none;
+}
+
+[data-md-color-scheme="default"] .md-button--primary:hover {
+  background: #004d40;
+}
+
+/* Search */
+/* Search */
+[data-md-color-scheme="slate"] .md-search__input {
+  background-color: #000 !important;
+  border: 1px solid var(--cyber-green) !important;
+  color: var(--cyber-green) !important;
+}
+
+/* Footer */
+/* Footer */
+[data-md-color-scheme="slate"] .md-footer {
+  border-top: 1px solid var(--cyber-green);
+}
+
+[data-md-color-scheme="default"] .md-footer {
+  border-top: 1px solid #e0e0e0;
+}

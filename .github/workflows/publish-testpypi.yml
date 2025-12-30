@@ -1,0 +1,67 @@
+name: Publish to TestPyPI
+
+on:
+  workflow_dispatch:  # Manual trigger
+  release:
+    types: [prereleased]  # Triggered on pre-release
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write  # Required for Trusted Publisher (OIDC)
+      contents: write  # Required for GitHub Pages deployment
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction
+
+      - name: Clear build artifacts
+        run: |
+          rm -rf dist/ build/ *.egg-info
+
+      - name: Run tests
+        run: |
+          poetry run pytest -q --cov=pictologics --cov-report=xml
+
+      - name: Build package
+        run: |
+          # Sync version with release tag
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "Setting package version to $VERSION"
+          poetry version $VERSION
+          
+          poetry build
+
+      - name: Publish to TestPyPI (Trusted Publisher)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # No password needed - uses Trusted Publisher (OIDC)
+
+      - name: Build documentation
+        run: |
+          poetry run mkdocs build
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site

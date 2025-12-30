@@ -1,0 +1,86 @@
+site_name: Pictologics
+site_description: IBSI-compliant radiomic feature extraction library.
+site_author: Márton Kolossváry
+repo_url: https://github.com/martonkolossvary/pictologics
+repo_name: martonkolossvary/pictologics
+copyright: Copyright &copy; 2025 Márton Kolossváry. Licensed under Apache 2.0.
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  palette:
+    - scheme: slate
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  font:
+    text: Share Tech Mono
+    code: Roboto Mono
+  logo: assets/logo.png
+  favicon: favicon.ico
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+
+
+nav:
+  - Home: index.md
+  - User Guide:
+    - Installation: user_guide/installation.md
+    - Quick Start: user_guide/quickstart.md
+    - Pipeline Usage: user_guide/pipeline.md
+    - Case Examples: user_guide/case_examples.md
+  - API Reference:
+    - Loader: api/loader.md
+    - Preprocessing: api/preprocessing.md
+    - Pipeline: api/pipeline.md
+    - Results Support: api/results.md
+    - Features:
+      - Intensity: api/features/intensity.md
+      - Morphology: api/features/morphology.md
+      - Texture: api/features/texture.md
+  - Benchmarks: benchmarks.md
+  - IBSI Compliance: ibsi_compliance.md
+  - Quality Report: quality.md
