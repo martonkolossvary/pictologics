@@ -1,14 +1,14 @@
 # Pictologics
 
 <p align="center">
-    <img src="docs/assets/logo.png" width="220" alt="Pictologics logo" />
+    <img src="https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/logo.png" width="220" alt="Pictologics logo" />
 </p>
 
 [![CI](https://github.com/martonkolossvary/pictologics/actions/workflows/ci.yml/badge.svg)](https://github.com/martonkolossvary/pictologics/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://martonkolossvary.github.io/pictologics/)
 [![PyPI](https://img.shields.io/pypi/v/pictologics)](https://pypi.org/project/pictologics/)
 [![Python](https://img.shields.io/pypi/pyversions/pictologics)](https://pypi.org/project/pictologics/)
-[![License](https://img.shields.io/github/license/martonkolossvary/pictologics)](LICENSE)
+[![License](https://img.shields.io/github/license/martonkolossvary/pictologics)](https://github.com/martonkolossvary/pictologics/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/martonkolossvary/pictologics/graph/badge.svg)](https://codecov.io/gh/martonkolossvary/pictologics)
 [![Ruff](https://img.shields.io/badge/ruff-0%20issues-261230.svg)](https://github.com/astral-sh/ruff)
 [![Mypy](https://img.shields.io/badge/mypy-0%20errors-blue.svg)](https://mypy-lang.org/)
@@ -20,8 +20,8 @@ Documentation (User Guide, API, Benchmarks): https://martonkolossvary.github.io/
 
 ## Why Pictologics?
 
-*   **🚀 High Performance**: Uses `numba` for JIT compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](benchmarks.md) page for details).
-*   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantom ([IBSI compliance](ibsi_compliance.md) page for details).
+*   **🚀 High Performance**: Uses `numba` for JIT compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page for details).
+*   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantom ([IBSI compliance](https://martonkolossvary.github.io/pictologics/ibsi_compliance/) page for details).
 *   **🔧 Flexible**: Configurable pipeline for reproducible research.
 *   **✨ Easy to Use**: Simple installation and a straightforward pipeline make it easy to get started quickly.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
@@ -100,7 +100,7 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 | Execution Time (Log-Log) | Speedup |
 |:---:|:---:|
-| [![Intensity time](docs/assets/benchmarks/intensity_execution_time_log.png)](docs/assets/benchmarks/intensity_execution_time_log.png) | [![Intensity speedup](docs/assets/benchmarks/intensity_speedup_factor.png)](docs/assets/benchmarks/intensity_speedup_factor.png) |
+| [![Intensity time](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/intensity_execution_time_log.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/intensity_execution_time_log.png) | [![Intensity speedup](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/intensity_speedup_factor.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/intensity_speedup_factor.png) |
 
 
 
@@ -108,7 +108,7 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 | Execution Time (Log-Log) | Speedup |
 |:---:|:---:|
-| [![Morphology time](docs/assets/benchmarks/morphology_execution_time_log.png)](docs/assets/benchmarks/morphology_execution_time_log.png) | [![Morphology speedup](docs/assets/benchmarks/morphology_speedup_factor.png)](docs/assets/benchmarks/morphology_speedup_factor.png) |
+| [![Morphology time](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/morphology_execution_time_log.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/morphology_execution_time_log.png) | [![Morphology speedup](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/morphology_speedup_factor.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/morphology_speedup_factor.png) |
 
 
 
@@ -116,7 +116,7 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 | Execution Time (Log-Log) | Speedup |
 |:---:|:---:|
-| [![Texture time](docs/assets/benchmarks/texture_execution_time_log.png)](docs/assets/benchmarks/texture_execution_time_log.png) | [![Texture speedup](docs/assets/benchmarks/texture_speedup_factor.png)](docs/assets/benchmarks/texture_speedup_factor.png) |
+| [![Texture time](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/texture_execution_time_log.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/texture_execution_time_log.png) | [![Texture speedup](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/texture_speedup_factor.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/texture_speedup_factor.png) |
 
 
 
