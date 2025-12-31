@@ -10,14 +10,14 @@ import os
 os.environ["NUMBA_DISABLE_JIT"] = "1"
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
-import pytest
-import numpy as np
-from unittest.mock import patch, ANY, MagicMock
 from typing import Any
+from unittest.mock import ANY, MagicMock, patch
 
-from pictologics.pipeline import RadiomicsPipeline, EmptyROIMaskError
+import numpy as np
+import pytest
+
 from pictologics.loader import Image
-
+from pictologics.pipeline import EmptyROIMaskError, RadiomicsPipeline
 
 # --- Fixtures ---
 
@@ -165,7 +165,7 @@ def test_run_defaults_all_configs(
 
     with patch.object(
         pipeline, "_execute_preprocessing_step"
-    ) as mock_exec, patch.object(pipeline, "_extract_features") as mock_ext:
+    ) as _mock_exec, patch.object(pipeline, "_extract_features") as mock_ext:
 
         mock_ext.return_value = {}
         # Call without config_names

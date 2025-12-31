@@ -16,7 +16,7 @@ Key Features:
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple, Union
+from typing import Optional
 
 import numpy as np
 from scipy.ndimage import affine_transform, label
@@ -26,7 +26,7 @@ from .loader import Image
 
 def resample_image(
     image: Image,
-    new_spacing: Tuple[float, float, float],
+    new_spacing: tuple[float, float, float],
     interpolation: str = "linear",
     boundary_mode: str = "nearest",
     round_intensities: bool = False,
@@ -135,15 +135,15 @@ def resample_image(
 
 
 def discretise_image(
-    image: Union[Image, np.ndarray],
+    image: Image | np.ndarray,
     method: str,
-    roi_mask: Optional[Union[Image, np.ndarray]] = None,
+    roi_mask: Image | np.ndarray | None = None,
     n_bins: Optional[int] = None,
     bin_width: Optional[float] = None,
     min_val: Optional[float] = None,
     max_val: Optional[float] = None,
-    cutoffs: Optional[List[float]] = None,
-) -> Union[Image, np.ndarray]:
+    cutoffs: Optional[list[float]] = None,
+) -> Image | np.ndarray:
     """
     Discretise image intensities.
 
@@ -281,9 +281,9 @@ def discretise_image(
 
 
 def apply_mask(
-    image: Union[Image, np.ndarray],
-    mask: Union[Image, np.ndarray],
-    mask_values: Optional[Union[int, List[int]]] = 1,
+    image: Image | np.ndarray,
+    mask: Image | np.ndarray,
+    mask_values: int | list[int] | None = 1,
 ) -> np.ndarray:
     """
     Apply mask to image and return flattened array of voxel values.
@@ -326,7 +326,7 @@ def apply_mask(
 def extract_roi(
     image: Image,
     mask: Image,
-    mask_values: Optional[Union[int, List[int]]] = 1,
+    mask_values: int | list[int] | None = 1,
 ) -> Image:
     """
     Extract ROI from image. Voxels outside the mask are set to NaN.

@@ -8,11 +8,11 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://martonkolossvary.github.io/pictologics/)
 [![PyPI](https://img.shields.io/pypi/v/pictologics)](https://pypi.org/project/pictologics/)
 [![Python](https://img.shields.io/pypi/pyversions/pictologics)](https://pypi.org/project/pictologics/)
+[![Downloads](https://img.shields.io/pypi/dm/pictologics)](https://pypi.org/project/pictologics/)
 [![License](https://img.shields.io/github/license/martonkolossvary/pictologics)](https://github.com/martonkolossvary/pictologics/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/martonkolossvary/pictologics/graph/badge.svg)](https://codecov.io/gh/martonkolossvary/pictologics)
 [![Ruff](https://img.shields.io/badge/ruff-0%20issues-261230.svg)](https://github.com/astral-sh/ruff)
 [![Mypy](https://img.shields.io/badge/mypy-0%20errors-blue.svg)](https://mypy-lang.org/)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-green.svg)](https://martonkolossvary.github.io/pictologics/quality/)
 
 **Pictologics** is a high-performance, IBSI-compliant Python library for radiomic feature extraction from medical images (NIfTI, DICOM).
 
@@ -22,7 +22,7 @@ Documentation (User Guide, API, Benchmarks): https://martonkolossvary.github.io/
 
 *   **🚀 High Performance**: Uses `numba` for JIT compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page for details).
 *   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantom ([IBSI compliance](https://martonkolossvary.github.io/pictologics/ibsi_compliance/) page for details).
-*   **🔧 Flexible**: Configurable pipeline for reproducible research.
+*   **🔧 Flexible**: Configurable pipeline for reproducible research. Provides utilities for DICOM parsing and organization and common image processing tasks.
 *   **✨ Easy to Use**: Simple installation and a straightforward pipeline make it easy to get started quickly.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
 
@@ -90,7 +90,7 @@ Comparisons between **Pictologics** and **PyRadiomics** (single-thread parity).
 - **Hardware**: Apple M4 Pro, 14 cores, 48 GB
 - **OS**: macOS 26.2 (arm64)
 - **Python**: 3.12.10
-- **Core deps**: pictologics 0.1.0, numpy 2.3.5, scipy 1.16.3, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
+- **Core deps**: pictologics 0.2.0, numpy 2.3.5, scipy 1.16.3, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
 - **PyRadiomics stack (parity runs)**: pyradiomics 3.1.1.dev111+g8ed579383, SimpleITK 2.5.3
 - **BLAS/LAPACK**: Apple Accelerate (from `numpy.show_config()`)
 
@@ -137,7 +137,7 @@ See [Quality Report](https://martonkolossvary.github.io/pictologics/quality/) fo
 
 ## Citation
 
-Citation information will be added/updated for releases.
+Citation information will be added/updated.
 
 ## License
 

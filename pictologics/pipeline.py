@@ -22,7 +22,7 @@ import datetime
 import json
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -86,8 +86,8 @@ class RadiomicsPipeline:
     """
 
     def __init__(self) -> None:
-        self._configs: Dict[str, List[Dict[str, Any]]] = {}
-        self._log: List[Dict[str, Any]] = []
+        self._configs: dict[str, list[dict[str, Any]]] = {}
+        self._log: list[dict[str, Any]] = []
         self._load_predefined_configs()
 
     def _load_predefined_configs(self) -> None:
@@ -176,7 +176,7 @@ class RadiomicsPipeline:
             ],
         )
 
-    def get_all_standard_config_names(self) -> List[str]:
+    def get_all_standard_config_names(self) -> list[str]:
         """
         Returns the list of all standard configuration names.
         """
@@ -189,7 +189,7 @@ class RadiomicsPipeline:
             "standard_fbs_32",
         ]
 
-    def add_config(self, name: str, steps: List[Dict[str, Any]]) -> "RadiomicsPipeline":
+    def add_config(self, name: str, steps: list[dict[str, Any]]) -> "RadiomicsPipeline":
         """
         Add a processing configuration.
 
@@ -221,11 +221,11 @@ class RadiomicsPipeline:
 
     def run(
         self,
-        image: Union[str, Image],
-        mask: Optional[Union[str, Image]] = None,
+        image: str | Image,
+        mask: str | Image | None = None,
         subject_id: Optional[str] = None,
-        config_names: Optional[List[str]] = None,
-    ) -> Dict[str, pd.Series]:
+        config_names: Optional[list[str]] = None,
+    ) -> dict[str, pd.Series]:
         """
         Run configurations on the provided image and mask.
 
@@ -300,7 +300,7 @@ class RadiomicsPipeline:
 
             self._ensure_nonempty_roi(state, context="initialization")
 
-            config_log: Dict[str, Any] = {
+            config_log: dict[str, Any] = {
                 "timestamp": datetime.datetime.now().isoformat(),
                 "subject_id": subject_id,
                 "config_name": config_name,
@@ -368,7 +368,7 @@ class RadiomicsPipeline:
             )
 
     def _execute_preprocessing_step(
-        self, state: PipelineState, step_name: str, params: Dict[str, Any]
+        self, state: PipelineState, step_name: str, params: dict[str, Any]
     ) -> None:
         """
         Execute a single preprocessing step and update the state in-place.
@@ -494,8 +494,8 @@ class RadiomicsPipeline:
             raise ValueError(f"Unknown preprocessing step: {step_name}")
 
     def _extract_features(
-        self, state: PipelineState, params: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, state: PipelineState, params: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Extract features based on current state.
         """
@@ -629,7 +629,7 @@ class RadiomicsPipeline:
 
             # IVH accepts several optional arguments; support both explicit top-level
             # keys and an "ivh_params" dict for full control.
-            ivh_kwargs: Dict[str, Any] = {}
+            ivh_kwargs: dict[str, Any] = {}
 
             # If ivh_discretisation was used, pass its bin_width and min_val
             if ivh_disc_bin_width is not None:
@@ -678,7 +678,7 @@ class RadiomicsPipeline:
             # Calculate Matrices
             # Use morphological mask for distance map (GLDZM)
             # Advanced: allow overriding matrix computation parameters via texture_matrix_params.
-            matrix_kwargs: Dict[str, Any] = {}
+            matrix_kwargs: dict[str, Any] = {}
             if "ngldm_alpha" in texture_matrix_params:
                 matrix_kwargs["ngldm_alpha"] = texture_matrix_params.get("ngldm_alpha")
             if "ngldm_alpha" not in matrix_kwargs and "ngldm_alpha" in params:

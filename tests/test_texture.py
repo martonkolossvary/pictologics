@@ -1,6 +1,6 @@
 import os
-import warnings
 import unittest
+import warnings
 
 # Disable Numba JIT global optimization for coverage analysis
 os.environ["NUMBA_DISABLE_JIT"] = "1"
@@ -9,8 +9,9 @@ os.environ["NUMBA_DISABLE_JIT"] = "1"
 # Must be done BEFORE importing numpy
 warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
+from unittest.mock import PropertyMock, patch
+
 import numpy as np
-from unittest.mock import patch, PropertyMock
 
 # Import the module under test
 import pictologics.features.texture as texture_module

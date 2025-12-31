@@ -71,7 +71,7 @@ Example:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple, cast
+from typing import Any, Optional, cast
 
 import numba
 import numpy as np
@@ -80,7 +80,7 @@ from numba.np.ufunc.parallel import get_thread_id
 from scipy.ndimage import distance_transform_cdt
 
 
-def _compute_nonzero_bbox(mask: np.ndarray) -> Optional[Tuple[slice, slice, slice]]:
+def _compute_nonzero_bbox(mask: np.ndarray) -> Optional[tuple[slice, slice, slice]]:
     """Compute the tight bounding box of non-zero voxels in a 3D mask.
 
     Args:
@@ -113,7 +113,7 @@ def _maybe_crop_to_bbox(
     data: np.ndarray,
     mask: np.ndarray,
     distance_mask: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """Crop data/masks to a tight bounding box around the ROI.
 
     Cropping is a major performance win for sparse ROIs because the texture kernels are
@@ -169,7 +169,7 @@ class _ZoneBufferPool:
 
     def get_buffers(
         self, max_zones: int
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Get pre-allocated buffers, resizing if necessary.
 
@@ -245,7 +245,7 @@ def _calculate_local_features_numba(
     directions_13: np.ndarray,
     ngldm_alpha: int,
     n_threads: int,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Calculate GLCM, GLRLM, NGTDM, and NGLDM in a single pass.
     Optimized with parallel execution, thread-local storage, and interior loop optimization.
@@ -628,7 +628,7 @@ def calculate_all_texture_matrices(
     n_bins: int,
     distance_mask: Optional[np.ndarray] = None,
     ngldm_alpha: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Calculate all texture matrices (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM) in an optimized single pass.
 
@@ -651,7 +651,7 @@ def calculate_all_texture_matrices(
             which is the IBSI standard. Use α=1 for tolerance of ±1 grey level difference.
 
     Returns:
-        Dict[str, Any]: A dictionary containing the calculated texture matrices:
+        dict[str, Any]: A dictionary containing the calculated texture matrices:
             - 'glcm' (np.ndarray): Grey Level Co-occurrence Matrix. Shape: (n_dirs, n_bins, n_bins).
             - 'glrlm' (np.ndarray): Grey Level Run Length Matrix. Shape: (n_dirs, n_bins, max_run_length).
             - 'ngtdm_s' (np.ndarray): NGTDM Sum of absolute differences. Shape: (n_bins,).
@@ -754,7 +754,7 @@ def calculate_glcm_features(
     mask: np.ndarray,
     n_bins: int,
     glcm_matrix: Optional[np.ndarray] = None,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     r"""
     Calculate Grey Level Co-occurrence Matrix (GLCM) features.
 
@@ -805,7 +805,7 @@ def calculate_glcm_features(
             If None, the matrix is calculated from scratch.
 
     Returns:
-        Dict[str, float]: A dictionary of calculated GLCM features, keyed by their name and IBSI code.
+        dict[str, float]: A dictionary of calculated GLCM features, keyed by their name and IBSI code.
             Example keys: 'joint_maximum_GYBY', 'contrast_ACUI', 'correlation_NI2N'.
 
     Example:
@@ -1006,7 +1006,7 @@ def calculate_glrlm_features(
     mask: np.ndarray,
     n_bins: int,
     glrlm_matrix: Optional[np.ndarray] = None,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate Grey Level Run Length Matrix (GLRLM) features.
 
@@ -1021,7 +1021,7 @@ def calculate_glrlm_features(
         glrlm_matrix (Optional[np.ndarray]): Pre-calculated GLRLM matrix.
 
     Returns:
-        Dict[str, float]: A dictionary of calculated GLRLM features.
+        dict[str, float]: A dictionary of calculated GLRLM features.
             Example keys: 'short_runs_emphasis_22OV', 'grey_level_non_uniformity_R5YN'.
     """
     if glrlm_matrix is None:
@@ -1145,7 +1145,7 @@ def _calculate_zone_features_numba(
     stack: np.ndarray,
     calc_glszm: bool = True,
     calc_gldzm: bool = True,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Calculate GLSZM and GLDZM in a single pass using an optimized 1D flattened approach.
 
@@ -1314,7 +1314,7 @@ def calculate_zone_features(
     n_bins: int,
     calc_glszm: bool = True,
     calc_gldzm: bool = True,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Wrapper for _calculate_zone_features_numba with buffer pooling.
 
@@ -1343,7 +1343,7 @@ def calculate_zone_features(
     res_gl, res_size, res_dist, stack = pool.get_buffers(max_zones)
 
     return cast(
-        Tuple[np.ndarray, np.ndarray],
+        tuple[np.ndarray, np.ndarray],
         _calculate_zone_features_numba(
             data,
             mask,
@@ -1364,7 +1364,7 @@ def calculate_glszm_features(
     mask: np.ndarray,
     n_bins: int,
     glszm_matrix: Optional[np.ndarray] = None,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate Grey Level Size Zone Matrix (GLSZM) features.
 
@@ -1379,7 +1379,7 @@ def calculate_glszm_features(
         glszm_matrix (Optional[np.ndarray]): Pre-calculated GLSZM matrix.
 
     Returns:
-        Dict[str, float]: A dictionary of calculated GLSZM features.
+        dict[str, float]: A dictionary of calculated GLSZM features.
             Example keys: 'small_zone_emphasis_P001', 'zone_percentage_P30P'.
     """
     if glszm_matrix is None:
@@ -1479,7 +1479,7 @@ def calculate_gldzm_features(
     n_bins: int,
     gldzm_matrix: Optional[np.ndarray] = None,
     distance_mask: Optional[np.ndarray] = None,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate Grey Level Distance Zone Matrix (GLDZM) features.
 
@@ -1497,7 +1497,7 @@ def calculate_gldzm_features(
             while analyzing intensities from the intensity mask (e.g., after outlier filtering).
 
     Returns:
-        Dict[str, float]: A dictionary of calculated GLDZM features.
+        dict[str, float]: A dictionary of calculated GLDZM features.
             Example keys: 'small_distance_emphasis_0GBI', 'zone_distance_entropy_GBDU'.
     """
     if gldzm_matrix is None:
@@ -1613,8 +1613,8 @@ def calculate_ngtdm_features(
     data: np.ndarray,
     mask: np.ndarray,
     n_bins: int,
-    ngtdm_matrices: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-) -> Dict[str, float]:
+    ngtdm_matrices: Optional[tuple[np.ndarray, np.ndarray]] = None,
+) -> dict[str, float]:
     """
     Calculate Neighbourhood Grey Tone Difference Matrix (NGTDM) features.
 
@@ -1625,11 +1625,11 @@ def calculate_ngtdm_features(
         data (np.ndarray): The 3D image array containing discretised grey levels.
         mask (np.ndarray): The 3D binary mask array defining the ROI.
         n_bins (int): The number of grey levels.
-        ngtdm_matrices (Optional[Tuple[np.ndarray, np.ndarray]]): Pre-calculated NGTDM matrices
+        ngtdm_matrices (Optional[tuple[np.ndarray, np.ndarray]]): Pre-calculated NGTDM matrices
             (sum of absolute differences `s`, and count `n`).
 
     Returns:
-        Dict[str, float]: A dictionary of calculated NGTDM features.
+        dict[str, float]: A dictionary of calculated NGTDM features.
             Example keys: 'coarseness_QCDE', 'contrast_65HE', 'busyness_NQ30'.
     """
     if ngtdm_matrices is None:
@@ -1754,7 +1754,7 @@ def calculate_ngldm_features(
     n_bins: int,
     ngldm_matrix: Optional[np.ndarray] = None,
     ngldm_alpha: int = 0,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate Neighbourhood Grey Level Dependence Matrix (NGLDM) features.
 
@@ -1770,7 +1770,7 @@ def calculate_ngldm_features(
             if their absolute difference is ≤ α. Default is 0 (exact match, IBSI standard).
 
     Returns:
-        Dict[str, float]: A dictionary of calculated NGLDM features.
+        dict[str, float]: A dictionary of calculated NGLDM features.
             Example keys: 'low_dependence_emphasis_SODN', 'dependence_count_entropy_FCBV'.
     """
     if ngldm_matrix is None:
@@ -1892,7 +1892,7 @@ def calculate_all_texture_features(
     n_bins: int,
     distance_mask_array: Optional[np.ndarray] = None,
     ngldm_alpha: int = 0,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate all texture features (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM).
 

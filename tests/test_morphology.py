@@ -9,19 +9,21 @@ os.environ["NUMBA_DISABLE_JIT"] = "1"
 warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
 import unittest
+from unittest.mock import MagicMock, patch
+
 import numpy as np
-from unittest.mock import patch, MagicMock
+
 from pictologics.features.morphology import (
-    calculate_morphology_features,
-    _get_pca_features,
-    _get_convex_hull_features,
-    _get_bounding_box_features,
-    _get_mvee_features,
     _calculate_ellipsoid_surface_area,
-    _mvee_khachiyan_numba,
+    _get_bounding_box_features,
+    _get_convex_hull_features,
+    _get_mvee_features,
+    _get_pca_features,
     _max_pairwise_distance_numba,
-    _ombb_extents_numba,
     _mesh_area_volume_numba,
+    _mvee_khachiyan_numba,
+    _ombb_extents_numba,
+    calculate_morphology_features,
 )
 from pictologics.loader import Image
 

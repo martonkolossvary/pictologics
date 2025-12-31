@@ -71,6 +71,7 @@ nav:
     - Installation: user_guide/installation.md
     - Quick Start: user_guide/quickstart.md
     - Pipeline Usage: user_guide/pipeline.md
+    - Utilities: user_guide/utilities.md
     - Case Examples: user_guide/case_examples.md
   - API Reference:
     - Loader: api/loader.md
@@ -84,3 +85,4 @@ nav:
   - Benchmarks: benchmarks.md
   - IBSI Compliance: ibsi_compliance.md
   - Quality Report: quality.md
+  - Changelog: CHANGELOG.md

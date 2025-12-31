@@ -1,6 +1,6 @@
 # Code Quality Report
 
-Generated on 2025-12-30 18:41:20
+Generated on 2025-12-31 23:17:46
 
 ## Test Coverage
 
@@ -17,6 +17,8 @@ Generated on 2025-12-30 18:41:20
 | `pictologics/pipeline.py` | 100.00% |
 | `pictologics/preprocessing.py` | 100.00% |
 | `pictologics/results.py` | 100.00% |
+| `pictologics/utilities/__init__.py` | 100.00% |
+| `pictologics/utilities/dicom_database.py` | 100.00% |
 | `pictologics/warmup.py` | 100.00% |
 
 ## Static Type Checking (Mypy)
@@ -25,7 +27,7 @@ Generated on 2025-12-30 18:41:20
 **Errors:** 0
 
 ```
-Success: no issues found in 10 source files
+Success: no issues found in 12 source files
 ```
 
 ## Linting (Ruff)

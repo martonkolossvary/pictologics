@@ -1,9 +1,15 @@
 # Welcome to Pictologics
 
-[![Tests](assets/badges/tests.svg)](quality.md)
-[![Coverage](assets/badges/coverage.svg)](quality.md)
-[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE.md)
+[![CI](https://github.com/martonkolossvary/pictologics/actions/workflows/ci.yml/badge.svg)](https://github.com/martonkolossvary/pictologics/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://martonkolossvary.github.io/pictologics/)
+[![PyPI](https://img.shields.io/pypi/v/pictologics)](https://pypi.org/project/pictologics/)
+[![Python](https://img.shields.io/pypi/pyversions/pictologics)](https://pypi.org/project/pictologics/)
+[![Downloads](https://img.shields.io/pypi/dm/pictologics)](https://pypi.org/project/pictologics/)
+[![License](https://img.shields.io/github/license/martonkolossvary/pictologics)](https://github.com/martonkolossvary/pictologics/blob/main/LICENSE)
+[![codecov](https://codecov.io/gh/martonkolossvary/pictologics/graph/badge.svg)](https://codecov.io/gh/martonkolossvary/pictologics)
+[![Ruff](https://img.shields.io/badge/ruff-0%20issues-261230.svg)](https://github.com/astral-sh/ruff)
+[![Mypy](https://img.shields.io/badge/mypy-0%20errors-blue.svg)](https://mypy-lang.org/)
+
 
 ![Pictologics Icon](assets/logo.png){ align=right width=200 }
 
@@ -15,7 +21,7 @@ See also the [NOTICE](NOTICE.md) file for attribution and third-party library in
 
 *   **🚀 High Performance**: Uses `numba` for JIT compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](benchmarks.md) page for details).
 *   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantom ([IBSI compliance](ibsi_compliance.md) page for details).
-*   **🔧 Flexible**: Configurable pipeline for reproducible research.
+*   **🔧 Flexible**: Configurable pipeline for reproducible research. Provides utilities for DICOM parsing and organization and common image processing tasks.
 *   **✨ Easy to Use**: Simple installation and a straightforward pipeline make it easy to get started quickly.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
 
@@ -28,6 +34,7 @@ See also the [NOTICE](NOTICE.md) file for attribution and third-party library in
     *   **Morphology**: Volume, Surface Area, Compactness, etc.
     *   **Intensity**: Mean, Median, Skewness, Kurtosis, etc.
     *   **Texture**: GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM.
+*   **Utilities**: Built-in DICOM database parsing and organization.
 
 ## Getting Started
 

@@ -1,7 +1,7 @@
 import os
 import unittest
 import warnings
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Filter warnings for the test suite itself if needed
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -83,7 +83,7 @@ class TestWarmup(unittest.TestCase):
             # since we only care about the thread logic at the start of _warmup_texture
             with patch("pictologics.warmup._warmup_intensity"), patch(
                 "pictologics.warmup._warmup_morphology"
-            ), patch("pictologics.warmup.texture") as mock_texture_mod:
+            ), patch("pictologics.warmup.texture") as _mock_texture_mod:
 
                 from pictologics.warmup import warmup_jit
 
@@ -99,9 +99,9 @@ class TestWarmup(unittest.TestCase):
         """
         # We allow this to run slowly. It is critical for checking the dummy data correctness.
         from pictologics.warmup import (
-            _warmup_texture,
             _warmup_intensity,
             _warmup_morphology,
+            _warmup_texture,
         )
 
         # Call them directly to ensure they don't raise exceptions

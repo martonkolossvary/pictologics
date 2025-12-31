@@ -23,7 +23,7 @@ spatial feature calculations.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from numba import jit, prange
@@ -44,7 +44,7 @@ def _sum_sq_centered(values: np.ndarray, mean_val: float) -> float:
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _central_moments_2_3_4(
     values: np.ndarray, mean_val: float
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     n = values.size
     if n == 0:
         return 0.0, 0.0, 0.0
@@ -112,7 +112,7 @@ def _calculate_spatial_features_numba(
     sx: float,
     sy: float,
     sz: float,
-) -> Tuple[float, float, float, float]:
+) -> tuple[float, float, float, float]:
     """
     Calculate Moran's I and Geary's C components using Numba with Parallelization.
 
@@ -236,7 +236,7 @@ def _calculate_local_peaks_numba(
     data: np.ndarray,
     mask_indices: np.ndarray,
     roi_means: np.ndarray,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Compute global/local intensity peaks without allocating ROI intensity arrays."""
     global_peak = -1.0e308
     max_intensity = -1.0e308
@@ -277,7 +277,7 @@ def _max_mean_at_max_intensity(
 
 @lru_cache(maxsize=32)
 def _sphere_offsets_for_radius(
-    spacing: Tuple[float, float, float], radius_mm: float
+    spacing: tuple[float, float, float], radius_mm: float
 ) -> np.ndarray:
     sx, sy, sz = spacing
     rx = int(np.ceil(radius_mm / sx))
@@ -298,14 +298,14 @@ def _sphere_offsets_for_radius(
     return np.ascontiguousarray(np.array(offsets, dtype=np.int32))
 
 
-def calculate_intensity_features(values: np.ndarray) -> Dict[str, float]:
+def calculate_intensity_features(values: np.ndarray) -> dict[str, float]:
     """
     Calculate intensity-based features (First Order Statistics) as defined in IBSI.
     """
     if len(values) == 0:
         return {}
 
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
 
     # 4.1.1 Mean intensity (Q4LE)
     mean_val = np.mean(values)
@@ -391,12 +391,12 @@ def calculate_intensity_features(values: np.ndarray) -> Dict[str, float]:
 
 def calculate_intensity_histogram_features(
     discretised_values: np.ndarray,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Calculate intensity histogram features as defined in IBSI 4.2."""
     if len(discretised_values) == 0:
         return {}
 
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
 
     disc = np.asarray(discretised_values)
     n = disc.size
@@ -508,7 +508,7 @@ def calculate_ivh_features(
     max_val: Optional[float] = None,
     target_range_min: Optional[float] = None,
     target_range_max: Optional[float] = None,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate Intensity-Volume Histogram (IVH) features.
 
@@ -517,7 +517,7 @@ def calculate_ivh_features(
     if len(discretised_values) == 0:
         return {}
 
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
     N = len(discretised_values)
 
     vals = np.asarray(discretised_values)
@@ -731,14 +731,14 @@ def calculate_spatial_intensity_features(
     mask: Image,
     *,
     enabled: bool = True,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate spatial intensity features: Moran's I and Geary's C (IBSI 4.4).
     """
     if not enabled:
         return {}
 
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
 
     mask_array = mask.array
     data = image.array
@@ -797,14 +797,14 @@ def calculate_local_intensity_features(
     mask: Image,
     *,
     enabled: bool = True,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate local intensity features: Local and Global Intensity Peak (IBSI 4.5).
     """
     if not enabled:
         return {}
 
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
 
     mask_array = mask.array
     data = image.array

@@ -24,7 +24,7 @@ Uses `numba` for optimizing the Khachiyan algorithm for MVEE calculation.
 from __future__ import annotations
 
 import math
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 import mcubes
 import numpy as np
@@ -38,7 +38,7 @@ from ..loader import Image
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _accumulate_moments_from_mask_numba(
     mask: np.ndarray,
-) -> Tuple[int, float, float, float, float, float, float, float, float, float]:
+) -> tuple[int, float, float, float, float, float, float, float, float, float]:
     """Accumulate first/second moments of voxel indices for mask>0."""
     n = 0
     s0 = 0.0
@@ -77,7 +77,7 @@ def _accumulate_moments_from_mask_numba(
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _accumulate_intensity_weighted_moments_numba(
     mask: np.ndarray, image: np.ndarray
-) -> Tuple[int, float, float, float, float]:
+) -> tuple[int, float, float, float, float]:
     """Accumulate intensity-weighted index sums over mask>0."""
     count = 0
     sum_w = 0.0
@@ -103,7 +103,7 @@ def _accumulate_intensity_weighted_moments_numba(
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _ombb_extents_numba(
     verts: np.ndarray, center: np.ndarray, evecs: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     min_rot = np.empty(3, dtype=np.float64)
     max_rot = np.empty(3, dtype=np.float64)
     min_rot[:] = np.inf
@@ -180,7 +180,7 @@ def _max_pairwise_distance_numba(points: np.ndarray) -> float:
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _mesh_area_volume_numba(
     verts: np.ndarray, faces: np.ndarray
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Compute mesh surface area and absolute volume in one deterministic pass."""
     n_faces = faces.shape[0]
     area = 0.0
@@ -230,7 +230,7 @@ def _mesh_area_volume_numba(
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _mvee_khachiyan_numba(
     points: np.ndarray, tol: float = 0.001
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
     Find Minimum Volume Enclosing Ellipsoid (MVEE) using the Khachiyan algorithm.
 
@@ -429,14 +429,14 @@ def _calculate_ellipsoid_surface_area(a: float, b: float, c: float) -> float:
 
 def _get_mesh_features(
     mask: Image,
-) -> Tuple[Dict[str, float], Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[dict[str, float], Optional[np.ndarray], Optional[np.ndarray]]:
     """
     Calculate mesh-based features (Surface Area, Volume) and return mesh data.
 
     Uses PyMCubes for marching cubes mesh generation, which produces IBSI-compliant
     results for the digital phantom.
     """
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
     mask_arr = (mask.array > 0).astype(np.uint8, copy=False)
     mask_padded_u8 = np.pad(mask_arr, 1, mode="constant", constant_values=0)
     mask_padded = np.ascontiguousarray(mask_padded_u8.astype(np.float32, copy=False))
@@ -464,9 +464,9 @@ def _get_mesh_features(
         return {}, None, None
 
 
-def _get_shape_features(surface_area: float, mesh_volume: float) -> Dict[str, float]:
+def _get_shape_features(surface_area: float, mesh_volume: float) -> dict[str, float]:
     """Calculate shape features based on mesh volume and area."""
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
     if mesh_volume <= 0 or surface_area <= 0:
         return features
 
@@ -490,9 +490,9 @@ def _get_shape_features(surface_area: float, mesh_volume: float) -> Dict[str, fl
 
 def _get_pca_features(
     mask: Image, mesh_volume: float, surface_area: float
-) -> Tuple[Dict[str, float], Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[dict[str, float], Optional[np.ndarray], Optional[np.ndarray]]:
     """Calculate PCA-based features and return eigenvalues/vectors."""
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
 
     n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = _accumulate_moments_from_mask_numba(
         mask.array
@@ -560,9 +560,9 @@ def _get_pca_features(
 
 def _get_convex_hull_features(
     verts: np.ndarray, mesh_volume: float, surface_area: float
-) -> Tuple[Dict[str, float], Optional[ConvexHull]]:
+) -> tuple[dict[str, float], Optional[ConvexHull]]:
     """Calculate Convex Hull features."""
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
     if len(verts) <= 3:
         return features, None
 
@@ -593,9 +593,9 @@ def _get_bounding_box_features(
     evecs: Optional[np.ndarray],
     mesh_volume: float,
     surface_area: float,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Calculate AABB and OMBB features."""
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
     if len(verts) == 0:
         return features
 
@@ -646,9 +646,9 @@ def _get_mvee_features(
     verts: np.ndarray,
     mesh_volume: float,
     surface_area: float,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Calculate MVEE features."""
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
     if hull is None:
         return features
 
@@ -681,9 +681,9 @@ def _get_mvee_features(
 
 def _get_intensity_morphology_features(
     mask: Image, image: Image, intensity_mask: Image, mesh_volume: float
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Calculate intensity-weighted morphological features."""
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
 
     count_i, sum_w, sum_i0_w, sum_i1_w, sum_i2_w = (
         _accumulate_intensity_weighted_moments_numba(
@@ -733,7 +733,7 @@ def _get_intensity_morphology_features(
 
 def calculate_morphology_features(
     mask: Image, image: Optional[Image] = None, intensity_mask: Optional[Image] = None
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Calculate morphological features from the ROI mask.
     Includes both voxel-based and mesh-based features (IBSI compliant).
@@ -748,7 +748,7 @@ def calculate_morphology_features(
     Returns:
         Dictionary of calculated features.
     """
-    features: Dict[str, float] = {}
+    features: dict[str, float] = {}
     i_mask = intensity_mask if intensity_mask is not None else mask
 
     # 1. Voxel Based Features

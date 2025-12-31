@@ -4,23 +4,25 @@ import warnings
 warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
 import os
+
 import numpy as np
 
 os.environ["NUMBA_DISABLE_JIT"] = "1"
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
 import unittest
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
+
 from pictologics.loader import (
-    load_image,
-    _ensure_3d,
-    _load_nifti,
-    _load_dicom_series,
-    _load_dicom_file,
-    create_full_mask,
     Image,
+    _ensure_3d,
     _find_best_dicom_series_dir,
+    _load_dicom_file,
+    _load_dicom_series,
+    _load_nifti,
+    create_full_mask,
     load_and_merge_images,
+    load_image,
 )
 
 

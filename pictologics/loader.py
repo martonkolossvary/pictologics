@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Optional
 
 import nibabel as nib
 import numpy as np
@@ -40,9 +40,9 @@ class Image:
 
     Attributes:
         array (np.ndarray): The 3D image data with shape (x, y, z).
-        spacing (Tuple[float, float, float]): Voxel spacing in millimeters (mm)
+        spacing (tuple[float, float, float]): Voxel spacing in millimeters (mm)
             along the (x, y, z) axes.
-        origin (Tuple[float, float, float]): World coordinates of the image origin
+        origin (tuple[float, float, float]): World coordinates of the image origin
             (center of the first voxel) in millimeters (mm).
         direction (Optional[np.ndarray]): 3x3 direction cosine matrix defining the
             orientation of the image axes in world space. Defaults to identity matrix.
@@ -50,8 +50,8 @@ class Image:
     """
 
     array: np.ndarray
-    spacing: Tuple[float, float, float]
-    origin: Tuple[float, float, float]
+    spacing: tuple[float, float, float]
+    origin: tuple[float, float, float]
     direction: Optional[np.ndarray] = None
     modality: str = "Unknown"
 
@@ -215,12 +215,12 @@ def load_image(path: str, dataset_index: int = 0, recursive: bool = False) -> Im
 
 
 def load_and_merge_images(
-    image_paths: List[str],
+    image_paths: list[str],
     reference_image: Optional[Image] = None,
     conflict_resolution: str = "max",
     dataset_index: int = 0,
     recursive: bool = False,
-    binarize: Union[bool, int, List[int], Tuple[int, int], None] = None,
+    binarize: bool | int | list[int] | tuple[int, int] | None = None,
 ) -> Image:
     """
     Load multiple images (e.g., masks or partial scans) and merge them into a single image.
@@ -241,7 +241,7 @@ def load_and_merge_images(
     - **Nested directories** (if paths point to folders containing DICOMs).
 
     Args:
-        image_paths (List[str]): List of absolute or relative paths to the images.
+        image_paths (list[str]): List of absolute or relative paths to the images.
             These can be file paths or directory paths.
         reference_image (Optional[Image]): An optional reference image (e.g., the scan
             corresponding to the masks). If provided, the merged image is validated
@@ -256,13 +256,13 @@ def load_and_merge_images(
             (time point) to extract for all images. Defaults to 0.
         recursive (bool, optional): If True, recursively searches subdirectories
             for each path in `image_paths`. Defaults to False.
-        binarize (Union[bool, int, List[int], Tuple[int, int], None], optional):
+        binarize (bool | int | list[int] | tuple[int, int] | None, optional):
             Rules for binarizing the merged image.
             - `None` (default): No binarization.
             - `True`: Sets all voxels > 0 to 1, others to 0.
             - `int` (e.g., 2): Sets voxels == value to 1, others to 0.
-            - `List[int]` (e.g., [1, 2]): Sets voxels in list to 1, others to 0.
-            - `Tuple[int, int]` (e.g., (1, 10)): Sets voxels in inclusive range to 1, others to 0.
+            - `list[int]` (e.g., [1, 2]): Sets voxels in list to 1, others to 0.
+            - `tuple[int, int]` (e.g., (1, 10)): Sets voxels in inclusive range to 1, others to 0.
 
     **Note on Filtering:**
     The `binarize` parameter is intended for **mask filtering** (e.g., selecting specific ROI labels).
@@ -488,7 +488,7 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
     )
 
 
-def _load_dicom_series(path: Union[str, Path]) -> Image:
+def _load_dicom_series(path: str | Path) -> Image:
     """
     Load a DICOM series (a set of DICOM files) from a directory.
 

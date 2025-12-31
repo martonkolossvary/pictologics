@@ -9,14 +9,16 @@ os.environ["NUMBA_DISABLE_JIT"] = "1"
 warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
 import unittest
-import numpy as np
 from unittest.mock import MagicMock
+
+import numpy as np
+
 from pictologics.features.intensity import (
     calculate_intensity_features,
     calculate_intensity_histogram_features,
     calculate_ivh_features,
-    calculate_spatial_intensity_features,
     calculate_local_intensity_features,
+    calculate_spatial_intensity_features,
 )
 
 
@@ -209,7 +211,7 @@ class TestIntensityFeatures(unittest.TestCase):
         # idx = [0, 1, 2].
         # candidates = 0 + idx*0.5 = [0.0, 0.5, 1.0].
         # 10% -> count=0 -> returns largest? No, logic depends on binary search.
-        features = calculate_ivh_features(disc_vals, bin_width=0.5)
+        calculate_ivh_features(disc_vals, bin_width=0.5)
         # Just ensure it runs.
         pass
 
@@ -342,11 +344,11 @@ class TestIntensityFeatures(unittest.TestCase):
     def test_internal_helpers_edge_cases(self) -> None:
         # Test Numba helpers directly for empty input coverage
         from pictologics.features.intensity import (
+            _calculate_local_peaks_numba,
             _central_moments_2_3_4,
+            _max_mean_at_max_intensity,
             _mean_abs_dev,
             _robust_mean_abs_dev,
-            _calculate_local_peaks_numba,
-            _max_mean_at_max_intensity,
         )
 
         # Empty arrays

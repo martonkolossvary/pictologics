@@ -9,19 +9,19 @@ warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 os.environ["NUMBA_DISABLE_JIT"] = "1"
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
-import pytest
 import numpy as np
+import pytest
 
 from pictologics.loader import Image
 from pictologics.preprocessing import (
-    resample_image,
-    discretise_image,
     apply_mask,
+    discretise_image,
     extract_roi,
-    resegment_mask,
     filter_outliers,
-    round_intensities,
     keep_largest_component,
+    resample_image,
+    resegment_mask,
+    round_intensities,
 )
 
 
