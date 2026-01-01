@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
 
+import pandas as pd
 import pytest
 
 from pictologics.utilities import (
@@ -663,8 +664,9 @@ class TestDicomDatabase:
             ],
         )
         db = DicomDatabase(patients=[patient])
-        df = db.get_patients_df()
 
+        # Test default: no instance lists
+        df = db.get_patients_df()
         assert len(df) == 1
         assert df["PatientID"].iloc[0] == "P001"
         assert df["NumStudies"].iloc[0] == 1
@@ -673,8 +675,13 @@ class TestDicomDatabase:
         assert "Manufacturer" in df.columns
         assert df["Manufacturer"].iloc[0] == "TestMfr"
         assert df["EarliestStudyDate"].iloc[0] == "20231231"
-        assert len(df["InstanceSOPUIDs"].iloc[0]) == 2
-        assert len(df["InstanceFilePaths"].iloc[0]) == 2
+        assert "InstanceSOPUIDs" not in df.columns
+        assert "InstanceFilePaths" not in df.columns
+
+        # Test with instance lists
+        df_with = db.get_patients_df(include_instance_lists=True)
+        assert len(df_with["InstanceSOPUIDs"].iloc[0]) == 2
+        assert len(df_with["InstanceFilePaths"].iloc[0]) == 2
 
     def test_get_patients_df_no_study_dates(self) -> None:
         """Test patient DataFrame when studies have no dates."""
@@ -739,6 +746,14 @@ class TestDicomDatabase:
         assert set(df["ModalitiesPresent"].iloc[0]) == {"CT", "MR"}
         assert "InstitutionName" in df.columns
         assert "ProtocolName" in df.columns
+        # Default: no instance lists
+        assert "InstanceSOPUIDs" not in df.columns
+        assert "InstanceFilePaths" not in df.columns
+
+        # Test with instance lists
+        df_with = db.get_studies_df(include_instance_lists=True)
+        assert len(df_with["InstanceSOPUIDs"].iloc[0]) == 2
+        assert len(df_with["InstanceFilePaths"].iloc[0]) == 2
 
     def test_get_series_df_with_metadata(self) -> None:
         """Test series DataFrame with all level metadata."""
@@ -787,6 +802,14 @@ class TestDicomDatabase:
         assert "Manufacturer" in df.columns
         assert "ProtocolName" in df.columns
         assert "SliceThickness" in df.columns
+        # Default: no instance lists
+        assert "InstanceSOPUIDs" not in df.columns
+        assert "InstanceFilePaths" not in df.columns
+
+        # Test with instance lists
+        df_with = db.get_series_df(include_instance_lists=True)
+        assert len(df_with["InstanceSOPUIDs"].iloc[0]) == 2
+        assert len(df_with["InstanceFilePaths"].iloc[0]) == 2
 
     def test_get_series_df_filtering(self) -> None:
         """Test series DataFrame with patient and study filtering."""
@@ -984,6 +1007,67 @@ class TestDicomDatabase:
             for _level, path in created.items():
                 assert Path(path).exists()
 
+    def test_export_csv_invalid_level(self) -> None:
+        """Test CSV export ignores invalid level names."""
+        patient = DicomPatient(
+            patient_id="P001",
+            studies=[
+                DicomStudy(
+                    study_instance_uid="study1",
+                    series=[
+                        DicomSeries(
+                            series_instance_uid="series1",
+                            instances=[DicomInstance("inst1", Path("/a.dcm"))],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        db = DicomDatabase(patients=[patient])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "export"
+            # Include invalid level name
+            created = db.export_csv(
+                str(base_path), levels=["patients", "invalid_level"]
+            )
+
+            # Only valid levels are exported
+            assert "patients" in created
+            assert "invalid_level" not in created
+            assert len(created) == 1
+
+    def test_export_csv_include_instance_lists(self) -> None:
+        """Test CSV export with include_instance_lists parameter."""
+        patient = DicomPatient(
+            patient_id="P001",
+            studies=[
+                DicomStudy(
+                    study_instance_uid="study1",
+                    series=[
+                        DicomSeries(
+                            series_instance_uid="series1",
+                            instances=[DicomInstance("inst1", Path("/a.dcm"))],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        db = DicomDatabase(patients=[patient])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir) / "export"
+            # Export with instance lists
+            created = db.export_csv(
+                str(base_path), levels=["patients"], include_instance_lists=True
+            )
+            assert "patients" in created
+
+            # Read CSV and verify columns exist
+            df = pd.read_csv(created["patients"])
+            assert "InstanceSOPUIDs" in df.columns
+            assert "InstanceFilePaths" in df.columns
+
     def test_export_json_full(self) -> None:
         """Test JSON export with complete hierarchy."""
         patient = DicomPatient(
@@ -1054,6 +1138,45 @@ class TestDicomDatabase:
             assert series_data["series_instance_uid"] == "series1"
             assert "completeness" in series_data
             assert len(series_data["instances"]) == 2
+
+            # Default includes file paths
+            assert "file_path" in series_data["instances"][0]
+            assert "instance_uids" in patient_data
+            assert "file_paths" in patient_data
+
+    def test_export_json_without_instance_lists(self) -> None:
+        """Test JSON export without instance lists."""
+        patient = DicomPatient(
+            patient_id="P001",
+            studies=[
+                DicomStudy(
+                    study_instance_uid="study1",
+                    series=[
+                        DicomSeries(
+                            series_instance_uid="series1",
+                            instances=[DicomInstance("inst1", Path("/a.dcm"))],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        db = DicomDatabase(patients=[patient])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            json_path = Path(tmpdir) / "export.json"
+            result = db.export_json(str(json_path), include_instance_lists=False)
+
+            with open(result) as f:
+                data = json.load(f)
+
+            patient_data = data["patients"][0]
+            # No instance_uids or file_paths at patient level
+            assert "instance_uids" not in patient_data
+            assert "file_paths" not in patient_data
+
+            # No file_path at instance level
+            instance = patient_data["studies"][0]["series"][0]["instances"][0]
+            assert "file_path" not in instance
 
 
 # ============================================================================
@@ -1218,8 +1341,13 @@ class TestSyntheticDicom:
         assert len(series_df) == 1
         assert len(instances_df) == 5
 
-        # Check InstanceSOPUIDs are present
-        assert len(patients_df["InstanceSOPUIDs"].iloc[0]) == 5
+        # Default: no instance lists
+        assert "InstanceSOPUIDs" not in patients_df.columns
+        assert "InstanceFilePaths" not in series_df.columns
+
+        # Test with instance lists
+        patients_df_with = db.get_patients_df(include_instance_lists=True)
+        assert len(patients_df_with["InstanceSOPUIDs"].iloc[0]) == 5
 
     def test_export_csv_synthetic(
         self, synthetic_dicom_dir: Path, tmp_path: Path

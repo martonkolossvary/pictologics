@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import warnings
 
 # Suppress "NumPy module was reloaded" warning which can happen in test setups

@@ -78,6 +78,7 @@ nav:
     - Preprocessing: api/preprocessing.md
     - Pipeline: api/pipeline.md
     - Results Support: api/results.md
+    - Utilities: api/utilities.md
     - Features:
       - Intensity: api/features/intensity.md
       - Morphology: api/features/morphology.md

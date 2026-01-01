@@ -16,7 +16,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -345,15 +345,19 @@ class DicomDatabase:
     # DataFrame Export Methods
     # ========================================================================
 
-    def get_patients_df(self) -> pd.DataFrame:
+    def get_patients_df(self, include_instance_lists: bool = False) -> pd.DataFrame:
         """Export patient-level summary DataFrame.
 
-        Includes all instance UIDs and file paths for each patient,
-        plus aggregated statistics and common child-level metadata.
+        Args:
+            include_instance_lists: Whether to include InstanceSOPUIDs and
+                InstanceFilePaths columns. Defaults to False to reduce memory.
+
+        Returns:
+            DataFrame with patient information and aggregated statistics.
         """
         rows = []
         for patient in self.patients:
-            row = {
+            row: Dict[str, Any] = {
                 "PatientID": patient.patient_id,
                 "PatientsName": patient.patients_name,
                 "PatientsBirthDate": patient.patients_birth_date,
@@ -365,9 +369,10 @@ class DicomDatabase:
                     for study in patient.studies
                     for series in study.series
                 ),
-                "InstanceSOPUIDs": patient.get_instance_uids(),
-                "InstanceFilePaths": patient.get_file_paths(),
             }
+            if include_instance_lists:
+                row["InstanceSOPUIDs"] = patient.get_instance_uids()
+                row["InstanceFilePaths"] = patient.get_file_paths()
 
             # Add study date range
             study_dates = [
@@ -389,14 +394,20 @@ class DicomDatabase:
 
         return pd.DataFrame(rows)
 
-    def get_studies_df(self, patient_id: Optional[str] = None) -> pd.DataFrame:
+    def get_studies_df(
+        self,
+        patient_id: Optional[str] = None,
+        include_instance_lists: bool = False,
+    ) -> pd.DataFrame:
         """Export study-level summary DataFrame.
 
         Args:
             patient_id: Optional filter by patient ID.
+            include_instance_lists: Whether to include InstanceSOPUIDs and
+                InstanceFilePaths columns. Defaults to False to reduce memory.
 
         Returns:
-            DataFrame with study information including instance lists.
+            DataFrame with study information.
         """
         rows = []
         for patient in self.patients:
@@ -404,7 +415,7 @@ class DicomDatabase:
                 continue
 
             for study in patient.studies:
-                row = {
+                row: Dict[str, Any] = {
                     # Patient info
                     "PatientID": patient.patient_id,
                     "PatientsName": patient.patients_name,
@@ -419,9 +430,10 @@ class DicomDatabase:
                     "NumInstances": sum(
                         len(series.instances) for series in study.series
                     ),
-                    "InstanceSOPUIDs": study.get_instance_uids(),
-                    "InstanceFilePaths": study.get_file_paths(),
                 }
+                if include_instance_lists:
+                    row["InstanceSOPUIDs"] = study.get_instance_uids()
+                    row["InstanceFilePaths"] = study.get_file_paths()
 
                 # Collect modalities present
                 modalities = list(set(s.modality for s in study.series if s.modality))
@@ -443,12 +455,15 @@ class DicomDatabase:
         self,
         patient_id: Optional[str] = None,
         study_uid: Optional[str] = None,
+        include_instance_lists: bool = False,
     ) -> pd.DataFrame:
         """Export series-level summary DataFrame with completeness info.
 
         Args:
             patient_id: Optional filter by patient ID.
             study_uid: Optional filter by study UID.
+            include_instance_lists: Whether to include InstanceSOPUIDs and
+                InstanceFilePaths columns. Defaults to False to reduce memory.
 
         Returns:
             DataFrame with series information including completeness validation.
@@ -490,10 +505,10 @@ class DicomDatabase:
                         "FirstSlicePosition": completeness["first_slice_position"],
                         "LastSlicePosition": completeness["last_slice_position"],
                         "CompletenessWarnings": completeness["warnings"],
-                        # Instance lists
-                        "InstanceSOPUIDs": series.get_instance_uids(),
-                        "InstanceFilePaths": series.get_file_paths(),
                     }
+                    if include_instance_lists:
+                        row["InstanceSOPUIDs"] = series.get_instance_uids()
+                        row["InstanceFilePaths"] = series.get_file_paths()
 
                     # Add common metadata from all levels
                     for key, value in patient.common_metadata.items():
@@ -600,6 +615,7 @@ class DicomDatabase:
         self,
         base_path: str,
         levels: Optional[list[str]] = None,
+        include_instance_lists: bool = False,
     ) -> dict[str, str]:
         """Export DataFrames to separate CSV files.
 
@@ -607,6 +623,8 @@ class DicomDatabase:
             base_path: Base path for output files (without extension).
             levels: List of levels to export ('patients', 'studies', 'series',
                    'instances'). Defaults to all levels.
+            include_instance_lists: Whether to include InstanceSOPUIDs and
+                InstanceFilePaths columns. Defaults to False to reduce file size.
 
         Returns:
             Dictionary mapping level names to created file paths.
@@ -616,33 +634,41 @@ class DicomDatabase:
 
         created_files = {}
 
-        level_methods: dict[str, Callable[[], pd.DataFrame]] = {
-            "patients": self.get_patients_df,
-            "studies": self.get_studies_df,
-            "series": self.get_series_df,
-            "instances": self.get_instances_df,
-        }
-
         for level in levels:
-            if level in level_methods:
-                df = level_methods[level]()
-                file_path = f"{base_path}_{level}.csv"
-                # Convert list columns to JSON strings for CSV compatibility
-                for col in df.columns:
-                    if df[col].apply(lambda x: isinstance(x, list)).any():
-                        df[col] = df[col].apply(
-                            lambda x: json.dumps(x) if isinstance(x, list) else x
-                        )
-                df.to_csv(file_path, index=False)
-                created_files[level] = file_path
+            if level == "patients":
+                df = self.get_patients_df(include_instance_lists=include_instance_lists)
+            elif level == "studies":
+                df = self.get_studies_df(include_instance_lists=include_instance_lists)
+            elif level == "series":
+                df = self.get_series_df(include_instance_lists=include_instance_lists)
+            elif level == "instances":
+                df = self.get_instances_df()
+            else:
+                continue
+
+            file_path = f"{base_path}_{level}.csv"
+            # Convert list columns to JSON strings for CSV compatibility
+            for col in df.columns:
+                if df[col].apply(lambda x: isinstance(x, list)).any():
+                    df[col] = df[col].apply(
+                        lambda x: json.dumps(x) if isinstance(x, list) else x
+                    )
+            df.to_csv(file_path, index=False)
+            created_files[level] = file_path
 
         return created_files
 
-    def export_json(self, json_path: str) -> str:
+    def export_json(
+        self,
+        json_path: str,
+        include_instance_lists: bool = True,
+    ) -> str:
         """Export full hierarchy to JSON.
 
         Args:
             json_path: Path for the output JSON file.
+            include_instance_lists: Whether to include per-instance file paths
+                in the JSON output. Defaults to True for full export.
 
         Returns:
             Path to the created file.
@@ -658,6 +684,9 @@ class DicomDatabase:
                 "common_metadata": patient.common_metadata,
                 "studies": [],
             }
+            if include_instance_lists:
+                patient_dict["instance_uids"] = patient.get_instance_uids()
+                patient_dict["file_paths"] = patient.get_file_paths()
 
             for study in patient.studies:
                 study_dict: dict[str, Any] = {
@@ -683,15 +712,16 @@ class DicomDatabase:
                     }
 
                     for instance in series.instances:
-                        instance_dict = {
+                        instance_dict: dict[str, Any] = {
                             "sop_instance_uid": instance.sop_instance_uid,
-                            "file_path": str(instance.file_path),
                             "instance_number": instance.instance_number,
                             "image_position_patient": instance.image_position_patient,
                             "slice_location": instance.slice_location,
                             "projection_score": instance.projection_score,
                             "metadata": instance.metadata,
                         }
+                        if include_instance_lists:
+                            instance_dict["file_path"] = str(instance.file_path)
                         series_dict["instances"].append(instance_dict)
 
                     study_dict["series"].append(series_dict)
