@@ -126,15 +126,32 @@ def _create_overlay_rgba(
     """
     Create an RGBA overlay of mask on image slice.
 
+    This function handles the axis convention difference between medical imaging
+    libraries and matplotlib:
+
+    - **Pictologics convention**: Arrays are stored in (X, Y, Z) order to match
+      ITK/SimpleITK conventions, where X=columns, Y=rows, Z=slices.
+    - **Matplotlib imshow convention**: Expects (height, width) = (rows, cols) = (Y, X)
+
+    This function internally transposes 2D slices from (X, Y) to (Y, X) before
+    rendering, ensuring correct visual orientation without modifying the underlying
+    data storage format.
+
     Args:
-        image_slice: 2D grayscale image array.
-        mask_slice: 2D mask array with integer labels (0=background).
+        image_slice: 2D grayscale image array in (X, Y) format.
+        mask_slice: 2D mask array with integer labels (0=background) in (X, Y) format.
         alpha: Transparency of mask overlay (0-1).
         colormap: Name of colormap for mask labels.
 
     Returns:
-        RGBA array (H, W, 4) as uint8.
+        RGBA array (H, W, 4) as uint8, ready for matplotlib imshow.
     """
+    # Transpose from (X, Y) to (Y, X) for proper display with imshow
+    # Pictologics stores arrays in (X, Y, Z) format to match ITK/SimpleITK conventions
+    # Matplotlib imshow expects (height, width) = (rows, columns) = (Y, X)
+    image_slice = np.transpose(image_slice)
+    mask_slice = np.transpose(mask_slice)
+
     # Normalize image to grayscale
     gray = _normalize_image(image_slice)
 
@@ -233,7 +250,7 @@ def save_mask_overlay_slices(
     slice_selection: Union[str, int, list[int]] = "10%",
     format: str = "png",
     dpi: int = 300,
-    alpha: float = 0.4,
+    alpha: float = 0.25,
     colormap: str = "tab20",
     axis: int = 2,
     filename_prefix: str = "slice",
@@ -349,7 +366,7 @@ def save_mask_overlay_slices(
 def visualize_mask_overlay(
     image: Image,
     mask: Image,
-    alpha: float = 0.4,
+    alpha: float = 0.25,
     colormap: str = "tab20",
     axis: int = 2,
     initial_slice: Optional[int] = None,

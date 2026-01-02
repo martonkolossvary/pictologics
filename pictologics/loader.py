@@ -15,6 +15,23 @@ Key Features:
     - Single DICOM files.
 - **Automatic Detection**: `load_image` automatically detects format and dimensionality.
 - **Robust DICOM Sorting**: Sorts slices based on spatial position and orientation.
+
+Axis Conventions:
+-----------------
+All image arrays are stored in **(X, Y, Z)** order to match ITK/SimpleITK conventions:
+
+- **X (axis 0)**: Left-Right direction (columns in DICOM terminology)
+- **Y (axis 1)**: Anterior-Posterior direction (rows in DICOM terminology)
+- **Z (axis 2)**: Superior-Inferior direction (slices)
+
+This differs from raw DICOM and matplotlib conventions:
+
+- **DICOM pixel_array**: Returns (Rows, Columns) = (Y, X) for 2D slices
+- **Matplotlib imshow**: Expects (height, width) = (Y, X)
+
+The loaders handle the necessary axis transformations automatically. When using
+visualization utilities like `visualize_mask_overlay()`, slices are internally
+transposed for correct display.
 """
 
 from __future__ import annotations
@@ -88,6 +105,134 @@ def create_full_mask(reference_image: Image, dtype: DTypeLike = np.uint8) -> Ima
     )
 
 
+def _position_in_reference(
+    image: Image,
+    reference: Image,
+    fill_value: float = 0.0,
+    transpose_axes: tuple[int, int, int] | None = None,
+) -> Image:
+    """
+    Position a smaller (cropped) image within a larger reference volume.
+
+    Uses spatial metadata (origin, spacing, direction) to calculate the correct
+    position of the cropped image within the reference coordinate space. This is
+    essential for working with cropped segmentation masks that need to be
+    repositioned into the original full-sized image space.
+
+    Args:
+        image: The smaller/cropped image to position.
+        reference: The reference image defining the target coordinate space and shape.
+        fill_value: Value to use for voxels outside the cropped region (default: 0.0).
+        transpose_axes: Optional tuple to transpose the image axes before positioning.
+            Use this if the cropped image has a different axis order than expected.
+            E.g., (0, 2, 1) swaps Y and Z axes.
+
+    Returns:
+        Image: A new Image with the same shape as reference, containing the
+            repositioned data from the input image.
+
+    Raises:
+        ValueError: If spacing is incompatible between image and reference.
+    """
+    import warnings
+
+    # 1. Apply optional axis transposition
+    data = image.array
+    if transpose_axes is not None:
+        data = np.transpose(data, transpose_axes)
+
+    # 2. Validate spacing compatibility (allow 1% tolerance)
+    img_spacing = np.array(image.spacing)
+    ref_spacing = np.array(reference.spacing)
+    if not np.allclose(img_spacing, ref_spacing, rtol=0.01):
+        raise ValueError(
+            f"Spacing mismatch: image {image.spacing} vs reference {reference.spacing}. "
+            "Resampling would be required but is not yet supported."
+        )
+
+    # 3. Get spatial parameters
+    ref_origin = np.array(reference.origin)
+
+    img_origin = np.array(image.origin)
+    img_direction_arr = np.array(
+        image.direction if image.direction is not None else np.eye(3)
+    )
+    ref_direction_arr = np.array(
+        reference.direction if reference.direction is not None else np.eye(3)
+    )
+
+    # 4. Check orientation compatibility
+    # Use np.max(np.abs(...)) for robustness
+    orientation_diff = np.max(np.abs(img_direction_arr - ref_direction_arr))
+    if orientation_diff > 0.01:
+        warnings.warn(
+            f"Orientation mismatch detected (max diff={orientation_diff:.4f}). "
+            "Repositioning may not be accurate for rotated images.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    # 5. Calculate voxel offset
+    # Convert image origin (world coords) to reference voxel indices
+    # For aligned directions: offset = (img_origin - ref_origin) / spacing
+    world_offset = img_origin - ref_origin
+    voxel_offset = np.round(world_offset / ref_spacing).astype(int)
+
+    # 6. Create output array with reference shape, filled with fill_value
+    output = np.full(reference.array.shape, fill_value, dtype=data.dtype)
+
+    # 7. Calculate copy ranges with boundary clipping
+    # Source (cropped image) ranges
+    src_start = np.array([max(0, -voxel_offset[i]) for i in range(3)])
+    src_end = np.array(
+        [
+            min(data.shape[i], reference.array.shape[i] - voxel_offset[i])
+            for i in range(3)
+        ]
+    )
+
+    # Destination (reference) ranges
+    dst_start = np.array([max(0, voxel_offset[i]) for i in range(3)])
+    dst_end = dst_start + (src_end - src_start)
+
+    # 8. Validate ranges are valid (image overlaps with reference)
+    if np.any(src_end <= src_start) or np.any(dst_end <= dst_start):
+        warnings.warn(
+            f"Cropped image does not overlap with reference volume. "
+            f"Image origin: {image.origin}, Reference origin: {reference.origin}",
+            UserWarning,
+            stacklevel=2,
+        )
+        # Return empty volume with reference geometry
+        return Image(
+            array=output,
+            spacing=reference.spacing,
+            origin=reference.origin,
+            direction=reference.direction,
+            modality=image.modality,
+        )
+
+    # 9. Copy data to correct position
+    output[
+        dst_start[0] : dst_end[0],
+        dst_start[1] : dst_end[1],
+        dst_start[2] : dst_end[2],
+    ] = data[
+        src_start[0] : src_end[0],
+        src_start[1] : src_end[1],
+        src_start[2] : src_end[2],
+    ]
+
+    # 10. Return new Image with reference geometry
+    return Image(
+        array=output,
+        spacing=reference.spacing,
+        origin=reference.origin,
+        direction=reference.direction,
+        modality=image.modality,
+    )
+
+
 def _find_best_dicom_series_dir(root: Path) -> Path:
     """Recursively find the subdirectory with the most DICOM files."""
     if not root.exists():
@@ -122,7 +267,14 @@ def _find_best_dicom_series_dir(root: Path) -> Path:
     return best_dir
 
 
-def load_image(path: str, dataset_index: int = 0, recursive: bool = False) -> Image:
+def load_image(
+    path: str,
+    dataset_index: int = 0,
+    recursive: bool = False,
+    reference_image: Optional[Image] = None,
+    transpose_axes: tuple[int, int, int] | None = None,
+    fill_value: float = 0.0,
+) -> Image:
     """
     Load a medical image from a file path or directory.
 
@@ -140,6 +292,15 @@ def load_image(path: str, dataset_index: int = 0, recursive: bool = False) -> Im
         recursive (bool, optional): If True and `path` is a directory, recursively searches
             subdirectories and loads the DICOM series from the folder containing the most
             DICOM files. Defaults to False.
+        reference_image (Optional[Image]): If provided and the loaded image has different
+            dimensions than the reference, it will be repositioned into the reference
+            coordinate space using spatial metadata (origin, spacing). This is useful for
+            loading cropped segmentation masks that need to match a full-sized image.
+        transpose_axes (tuple[int, int, int] | None): Optional axis transposition to apply
+            before repositioning. Use this if the mask's axis order differs from the reference.
+            E.g., (0, 2, 1) swaps Y and Z axes. Only used when reference_image is provided.
+        fill_value (float): Fill value for regions outside the loaded image when
+            repositioning (default: 0.0). Only used when reference_image is provided.
 
     Returns:
         Image: An `Image` object containing the 3D numpy array and metadata (spacing, origin, etc.).
@@ -185,6 +346,13 @@ def load_image(path: str, dataset_index: int = 0, recursive: bool = False) -> Im
         # Load the 5th time point from a 4D fMRI file
         fmri_vol = load_image("data/fmri.nii.gz", dataset_index=4)
         ```
+
+        **Loading a cropped mask and repositioning to match main image:**
+        ```python
+        main_img = load_image("ct_scan/")
+        mask = load_image("cropped_mask.dcm", reference_image=main_img)
+        # mask now has same shape as main_img
+        ```
     """
     path_obj = Path(path)
     if not path_obj.exists():
@@ -195,14 +363,13 @@ def load_image(path: str, dataset_index: int = 0, recursive: bool = False) -> Im
             target_path = path_obj
             if recursive:
                 target_path = _find_best_dicom_series_dir(path_obj)
-            return _load_dicom_series(target_path)
+            loaded_image = _load_dicom_series(target_path)
         elif path.lower().endswith((".nii", ".nii.gz")):
-
-            return _load_nifti(path, dataset_index)
+            loaded_image = _load_nifti(path, dataset_index)
         else:
             # Attempt to load as a single DICOM file if extension is not NIfTI
             try:
-                return _load_dicom_file(path)
+                loaded_image = _load_dicom_file(path)
             except Exception:
                 raise ValueError(
                     f"Unsupported file format or unable to read file: {path}"
@@ -213,6 +380,15 @@ def load_image(path: str, dataset_index: int = 0, recursive: bool = False) -> Im
             raise e
         raise ValueError(f"Failed to load image from '{path}': {e}") from e
 
+    # Apply repositioning if reference_image is provided and shapes differ
+    if reference_image is not None:
+        if loaded_image.array.shape != reference_image.array.shape:
+            loaded_image = _position_in_reference(
+                loaded_image, reference_image, fill_value, transpose_axes
+            )
+
+    return loaded_image
+
 
 def load_and_merge_images(
     image_paths: list[str],
@@ -221,6 +397,10 @@ def load_and_merge_images(
     dataset_index: int = 0,
     recursive: bool = False,
     binarize: bool | int | list[int] | tuple[int, int] | None = None,
+    reposition_to_reference: bool = False,
+    transpose_axes: tuple[int, int, int] | None = None,
+    fill_value: float = 0.0,
+    relabel_masks: bool = False,
 ) -> Image:
     """
     Load multiple images (e.g., masks or partial scans) and merge them into a single image.
@@ -232,6 +412,7 @@ def load_and_merge_images(
     **Use Cases:**
     - Merging multiple segmentation masks into a single ROI.
     - Merging split image volumes (though typically less common than mask merging).
+    - Merging cropped/bounding-box segmentation masks (with `reposition_to_reference=True`).
 
     **Format & Path Support:**
     Since this function uses `load_image` internally for each path, it supports:
@@ -245,7 +426,7 @@ def load_and_merge_images(
             These can be file paths or directory paths.
         reference_image (Optional[Image]): An optional reference image (e.g., the scan
             corresponding to the masks). If provided, the merged image is validated
-            against this image's geometry.
+            against this image's geometry. Required when `reposition_to_reference=True`.
         conflict_resolution (str): Strategy to resolve voxel values when multiple images
             have non-zero values at the same location. Options:
             - 'max': Use the maximum value (default).
@@ -263,6 +444,21 @@ def load_and_merge_images(
             - `int` (e.g., 2): Sets voxels == value to 1, others to 0.
             - `list[int]` (e.g., [1, 2]): Sets voxels in list to 1, others to 0.
             - `tuple[int, int]` (e.g., (1, 10)): Sets voxels in inclusive range to 1, others to 0.
+        reposition_to_reference (bool): If True and reference_image is provided,
+            each loaded image will be repositioned into the reference coordinate
+            space before merging. This is required when loading cropped segmentation
+            masks that have different dimensions than the reference. Geometry validation
+            is performed AFTER repositioning. Defaults to False.
+        transpose_axes (tuple[int, int, int] | None): Axis transposition to apply
+            when repositioning. E.g., (0, 2, 1) swaps Y and Z axes.
+            Only used when `reposition_to_reference=True`.
+        fill_value (float): Fill value for regions outside cropped masks when
+            repositioning (default: 0.0). Only used when `reposition_to_reference=True`.
+        relabel_masks (bool): If True, assigns unique label values (1, 2, 3, ...)
+            to each mask file based on its order in `image_paths`. This converts
+            binary [0,1] masks into multi-label masks where each file gets a
+            distinct label, useful for visualization with different colors.
+            Label assignment respects the order of `image_paths`. Defaults to False.
 
     **Note on Filtering:**
     The `binarize` parameter is intended for **mask filtering** (e.g., selecting specific ROI labels).
@@ -274,7 +470,22 @@ def load_and_merge_images(
 
     Raises:
         ValueError: If `image_paths` is empty, if an invalid `conflict_resolution` is provided,
+            if `reposition_to_reference=True` but `reference_image` is not provided,
             or if the images (or reference) have mismatched geometries.
+
+    Examples:
+        **Merging cropped segmentation masks:**
+        ```python
+        main_img = load_image("ct_scan/", recursive=True)
+        seg_paths = [str(f) for f in Path("masks/").glob("*.dcm")]
+
+        merged = load_and_merge_images(
+            seg_paths,
+            reference_image=main_img,
+            reposition_to_reference=True,
+            conflict_resolution="max",
+        )
+        ```
     """
     if not image_paths:
         raise ValueError("image_paths cannot be empty.")
@@ -286,15 +497,10 @@ def load_and_merge_images(
             f"Must be one of {valid_strategies}."
         )
 
-    # Load the first image to serve as the consensus geometry
-    try:
-        consensus_image = load_image(
-            image_paths[0], dataset_index=dataset_index, recursive=recursive
+    if reposition_to_reference and reference_image is None:
+        raise ValueError(
+            "reference_image must be provided when reposition_to_reference=True."
         )
-    except Exception as e:
-        raise ValueError(f"Failed to load first image '{image_paths[0]}': {e}") from e
-
-    merged_array = consensus_image.array.copy()
 
     # Geometry validation helper
     def _validate_geometry(target: Image, ref: Image, name: str, ref_name: str) -> None:
@@ -317,48 +523,166 @@ def load_and_merge_images(
             if not np.allclose(target.direction, ref.direction, atol=1e-5):
                 raise ValueError(f"Direction mismatch between {name} and {ref_name}.")
 
-    # Iterate through remaining images
-    for path in image_paths[1:]:
-        try:
-            current_image = load_image(
-                path, dataset_index=dataset_index, recursive=recursive
-            )
-        except Exception as e:
-            raise ValueError(f"Failed to load image '{path}': {e}") from e
+    if reposition_to_reference:
+        # Mode: Reposition each image to reference space, then merge
+        assert reference_image is not None  # Already validated above
 
-        _validate_geometry(
-            current_image, consensus_image, f"image '{path}'", "consensus image"
+        # Initialize merged array with reference geometry
+        merged_array = np.full(
+            reference_image.array.shape, fill_value, dtype=np.float64
         )
 
-        current_array = current_image.array
-
-        # Identify regions
-        # Overlap: non-zero in both
-        overlap_mask = (merged_array != 0) & (current_array != 0)
-        # New data: zero in merged, non-zero in current
-        new_data_mask = (merged_array == 0) & (current_array != 0)
-
-        # Apply new data (always acceptable)
-        merged_array[new_data_mask] = current_array[new_data_mask]
-
-        # Resolve conflicts in overlapping regions
-        if np.any(overlap_mask):
-            if conflict_resolution == "max":
-                merged_array[overlap_mask] = np.maximum(
-                    merged_array[overlap_mask], current_array[overlap_mask]
+        for i, path in enumerate(image_paths):
+            try:
+                current_image = load_image(
+                    path, dataset_index=dataset_index, recursive=recursive
                 )
-            elif conflict_resolution == "min":
-                merged_array[overlap_mask] = np.minimum(
-                    merged_array[overlap_mask], current_array[overlap_mask]
+            except Exception as e:
+                raise ValueError(f"Failed to load image '{path}': {e}") from e
+
+            # Reposition to reference space
+            repositioned = _position_in_reference(
+                current_image, reference_image, fill_value, transpose_axes
+            )
+
+            # Validate geometry after repositioning
+            _validate_geometry(
+                repositioned,
+                reference_image,
+                f"repositioned image '{path}'",
+                "reference image",
+            )
+
+            current_array = repositioned.array
+
+            # Apply relabeling: replace all non-zero values with mask index + 1
+            if relabel_masks:
+                label_value = i + 1  # 1-indexed labels
+                current_array = np.where(
+                    current_array != fill_value, label_value, fill_value
                 )
-            elif conflict_resolution == "last":
-                merged_array[overlap_mask] = current_array[overlap_mask]
-            elif conflict_resolution == "first":
-                pass  # Already have the 'first' value, do nothing
+
+            # Merge with conflict resolution
+            if i == 0:
+                # First image: just copy non-fill values
+                non_fill_mask = current_array != fill_value
+                merged_array[non_fill_mask] = current_array[non_fill_mask]
+            else:
+                # Subsequent images: apply conflict resolution
+                # Overlap: non-fill in both
+                overlap_mask = (merged_array != fill_value) & (
+                    current_array != fill_value
+                )
+                # New data: fill in merged, non-fill in current
+                new_data_mask = (merged_array == fill_value) & (
+                    current_array != fill_value
+                )
+
+                # Apply new data
+                merged_array[new_data_mask] = current_array[new_data_mask]
+
+                # Resolve conflicts
+                if np.any(overlap_mask):
+                    if conflict_resolution == "max":
+                        merged_array[overlap_mask] = np.maximum(
+                            merged_array[overlap_mask], current_array[overlap_mask]
+                        )
+                    elif conflict_resolution == "min":
+                        merged_array[overlap_mask] = np.minimum(
+                            merged_array[overlap_mask], current_array[overlap_mask]
+                        )
+                    elif conflict_resolution == "last":
+                        merged_array[overlap_mask] = current_array[overlap_mask]
+                    elif conflict_resolution == "first":
+                        pass  # Keep existing values
+
+        # Use reference geometry for output
+        consensus_spacing = reference_image.spacing
+        consensus_origin = reference_image.origin
+        consensus_direction = reference_image.direction
+
+    else:
+        # Mode: Standard merging with strict geometry validation
+        # Load the first image to serve as the consensus geometry
+        try:
+            consensus_image = load_image(
+                image_paths[0], dataset_index=dataset_index, recursive=recursive
+            )
+        except Exception as e:
+            raise ValueError(
+                f"Failed to load first image '{image_paths[0]}': {e}"
+            ) from e
+
+        merged_array = consensus_image.array.copy()
+
+        # Apply relabeling for the first image
+        if relabel_masks:
+            merged_array = np.where(merged_array != 0, 1, 0).astype(merged_array.dtype)
+
+        # Iterate through remaining images
+        for idx, path in enumerate(image_paths[1:], start=2):
+            try:
+                current_image = load_image(
+                    path, dataset_index=dataset_index, recursive=recursive
+                )
+            except Exception as e:
+                raise ValueError(f"Failed to load image '{path}': {e}") from e
+
+            _validate_geometry(
+                current_image, consensus_image, f"image '{path}'", "consensus image"
+            )
+
+            current_array = current_image.array
+
+            # Apply relabeling: replace all non-zero values with mask index
+            if relabel_masks:
+                label_value = idx  # idx starts at 2 for second file
+                current_array = np.where(current_array != 0, label_value, 0).astype(
+                    current_array.dtype
+                )
+
+            # Identify regions
+            overlap_mask = (merged_array != 0) & (current_array != 0)
+            new_data_mask = (merged_array == 0) & (current_array != 0)
+
+            # Apply new data
+            merged_array[new_data_mask] = current_array[new_data_mask]
+
+            # Resolve conflicts
+            if np.any(overlap_mask):
+                if conflict_resolution == "max":
+                    merged_array[overlap_mask] = np.maximum(
+                        merged_array[overlap_mask], current_array[overlap_mask]
+                    )
+                elif conflict_resolution == "min":
+                    merged_array[overlap_mask] = np.minimum(
+                        merged_array[overlap_mask], current_array[overlap_mask]
+                    )
+                elif conflict_resolution == "last":
+                    merged_array[overlap_mask] = current_array[overlap_mask]
+                elif conflict_resolution == "first":
+                    pass  # Already have the 'first' value
+
+        consensus_spacing = consensus_image.spacing
+        consensus_origin = consensus_image.origin
+        consensus_direction = consensus_image.direction
+
+        # Validate against reference image if provided (for non-reposition mode)
+        if reference_image is not None:
+            final_merged_image = Image(
+                array=merged_array,
+                spacing=consensus_spacing,
+                origin=consensus_origin,
+                direction=consensus_direction,
+                modality="Image",
+            )
+            _validate_geometry(
+                final_merged_image, reference_image, "merged image", "reference image"
+            )
 
     # Apply binarization if requested
     if binarize is not None:
-        mask_out = np.zeros_like(merged_array, dtype=np.uint8)
+        mask_out: np.ndarray = np.zeros_like(merged_array, dtype=np.uint8)
         if isinstance(binarize, bool) and binarize is True:
             mask_out[merged_array > 0] = 1
         elif isinstance(binarize, int) and not isinstance(binarize, bool):
@@ -368,33 +692,18 @@ def load_and_merge_images(
         elif isinstance(binarize, tuple) and len(binarize) == 2:
             mask_out[(merged_array >= binarize[0]) & (merged_array <= binarize[1])] = 1
         else:
-            # Fallback for False or unknown types, though type hint restricts this
             if binarize is not False:
                 raise ValueError(f"Unsupported binarize value: {binarize}")
-            mask_out = merged_array  # return original as fallback
+            mask_out = merged_array
 
         if binarize is not False:
             merged_array = mask_out
 
-    # Validate against reference image if provided
-    if reference_image is not None:
-        # Create a dummy image wrapping the merged array for validation
-        final_merged_image = Image(
-            array=merged_array,
-            spacing=consensus_image.spacing,
-            origin=consensus_image.origin,
-            direction=consensus_image.direction,
-            modality="Image",
-        )
-        _validate_geometry(
-            final_merged_image, reference_image, "merged image", "reference image"
-        )
-
     return Image(
         array=merged_array,
-        spacing=consensus_image.spacing,
-        origin=consensus_image.origin,
-        direction=consensus_image.direction,
+        spacing=consensus_spacing,
+        origin=consensus_origin,
+        direction=consensus_direction,
         modality="MergedImage",
     )
 
@@ -624,8 +933,9 @@ def _load_dicom_file(path: str) -> Image:
     """
     Load a single DICOM file as a 3D image.
 
-    This is useful for 2D X-rays or single slices. The resulting image will
-    have a shape of (x, y, 1).
+    This handles both 2D DICOM files (X-rays, single slices) and 3D DICOM files
+    (segmentation objects, multiframe images). The resulting image will be in
+    (X, Y, Z) format with at least 1 slice in the Z dimension.
 
     Args:
         path (str): Path to the DICOM file.
@@ -643,19 +953,35 @@ def _load_dicom_file(path: str) -> Image:
         raise ValueError(f"Corrupt or invalid DICOM file '{path}': {e}") from e
 
     # Handle dimensions
-    # DICOM pixel_array is (Rows, Columns) -> (Y, X). Swap to (X, Y).
+    # DICOM pixel_array format:
+    #   - 2D: (Rows, Columns) = (Y, X)
+    #   - 3D: (Frames, Rows, Columns) = (Z, Y, X) or (Rows, Columns, Frames) depending on source
+    # We standardize to (X, Y, Z) to match _load_dicom_series behavior
     if data.ndim == 2:
+        # (Y, X) -> (X, Y)
         data = np.swapaxes(data, 0, 1)
+    elif data.ndim == 3:
+        # Most DICOM 3D data (including SEG) is (Frames/Z, Rows/Y, Columns/X)
+        # We need (X, Y, Z), so swap axes appropriately
+        # From (Z, Y, X) to (X, Y, Z): swap 0<->2
+        data = np.swapaxes(data, 0, 2)  # (Z, Y, X) -> (X, Y, Z)
 
     data = _ensure_3d(data)
 
-    # Metadata extraction (simplified for single file)
+    # Metadata extraction
     try:
         ps = dcm.PixelSpacing
+        # Prefer SpacingBetweenSlices over SliceThickness (consistent with _load_dicom_series)
+        if hasattr(dcm, "SpacingBetweenSlices"):
+            spacing_z = float(dcm.SpacingBetweenSlices)
+        elif hasattr(dcm, "SliceThickness"):
+            spacing_z = float(dcm.SliceThickness)
+        else:
+            spacing_z = 1.0
         spacing = (
-            float(ps[1]),
-            float(ps[0]),
-            float(getattr(dcm, "SliceThickness", 1.0)),
+            float(ps[1]),  # Column spacing (X)
+            float(ps[0]),  # Row spacing (Y)
+            spacing_z,
         )
     except (AttributeError, IndexError):
         spacing = (1.0, 1.0, 1.0)
@@ -665,6 +991,16 @@ def _load_dicom_file(path: str) -> Image:
         origin = (float(ipp[0]), float(ipp[1]), float(ipp[2]))
     except AttributeError:
         origin = (0.0, 0.0, 0.0)
+
+    # Extract direction matrix from ImageOrientationPatient if available
+    try:
+        orientation = np.array(dcm.ImageOrientationPatient, dtype=float)
+        row_cosines = orientation[:3]
+        col_cosines = orientation[3:]
+        slice_cosine = np.cross(row_cosines, col_cosines)
+        direction = np.stack([row_cosines, col_cosines, slice_cosine], axis=1)
+    except (AttributeError, ValueError):
+        direction = np.eye(3)
 
     # Rescale
     slope = getattr(dcm, "RescaleSlope", 1.0)
@@ -676,8 +1012,6 @@ def _load_dicom_file(path: str) -> Image:
         array=data,
         spacing=spacing,
         origin=origin,
-        direction=np.eye(
-            3
-        ),  # Direction is ambiguous for single slice without orientation
+        direction=direction,
         modality=getattr(dcm, "Modality", "DICOM"),
     )

@@ -462,6 +462,7 @@ class TestLoader(unittest.TestCase):
         mock_dcm = MagicMock()
         mock_dcm.pixel_array = np.zeros((100, 100))
         mock_dcm.PixelSpacing = [0.5, 0.5]
+        del mock_dcm.SpacingBetweenSlices  # Ensure fallback to SliceThickness
         mock_dcm.SliceThickness = 2.0
         mock_dcm.ImagePositionPatient = [10.0, 10.0, 10.0]
         mock_dcm.Modality = "MR"
@@ -824,6 +825,619 @@ class TestLoader(unittest.TestCase):
         mock_load.return_value = mask1
         with self.assertRaisesRegex(ValueError, "Unsupported binarize value"):
             load_and_merge_images(["p1"], binarize="unsupported string")  # type: ignore
+
+
+class TestRepositioning(unittest.TestCase):
+    """Tests for the image repositioning functionality."""
+
+    def test_position_in_reference_basic(self) -> None:
+        """Test basic repositioning of a cropped image."""
+        from pictologics.loader import _position_in_reference
+
+        # Create a reference image (10x10x10)
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        # Create a cropped image (3x3x3) at position (2, 3, 4)
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(2.0, 3.0, 4.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        result = _position_in_reference(cropped, reference)
+
+        # Check shape matches reference
+        self.assertEqual(result.array.shape, (10, 10, 10))
+
+        # Check data is in correct position
+        self.assertEqual(result.array[2, 3, 4], 1.0)
+        self.assertEqual(result.array[4, 5, 6], 1.0)
+        self.assertEqual(result.array[0, 0, 0], 0.0)  # Outside cropped region
+
+        # Check geometry matches reference
+        self.assertEqual(result.spacing, reference.spacing)
+        self.assertEqual(result.origin, reference.origin)
+
+    def test_position_in_reference_boundary_clipping(self) -> None:
+        """Test that cropped images extending beyond reference are clipped."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        # Cropped image that extends beyond reference (starts at 8, goes to 11)
+        cropped = Image(
+            array=np.ones((5, 5, 5)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(8.0, 8.0, 8.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        result = _position_in_reference(cropped, reference)
+
+        # Should be clipped to fit within reference
+        self.assertEqual(result.array.shape, (10, 10, 10))
+        # Only the portion within reference (8-9 in each dim) should have data
+        self.assertEqual(result.array[8, 8, 8], 1.0)
+        self.assertEqual(result.array[9, 9, 9], 1.0)
+        self.assertEqual(result.array[7, 7, 7], 0.0)
+
+    def test_position_in_reference_no_overlap_warning(self) -> None:
+        """Test warning when cropped image doesn't overlap reference."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        # Cropped image completely outside reference
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(100.0, 100.0, 100.0),  # Far outside
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with self.assertWarns(UserWarning):
+            result = _position_in_reference(cropped, reference)
+
+        # Should return empty array
+        self.assertEqual(result.array.shape, (10, 10, 10))
+        self.assertEqual(result.array.sum(), 0.0)
+
+    def test_position_in_reference_transpose_axes(self) -> None:
+        """Test axis transposition during repositioning."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 5)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        # Create a cropped image with different axis order
+        cropped_data = np.zeros((2, 3, 4))
+        cropped_data[0, 0, 0] = 1.0
+        cropped = Image(
+            array=cropped_data,
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        # Transpose Y and Z (axes 1 and 2)
+        result = _position_in_reference(cropped, reference, transpose_axes=(0, 2, 1))
+
+        # After transposition, shape should work with reference
+        self.assertEqual(result.array.shape, (10, 10, 5))
+        self.assertEqual(result.array[0, 0, 0], 1.0)
+
+    def test_position_in_reference_spacing_mismatch(self) -> None:
+        """Test error when spacing is incompatible."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(2.0, 2.0, 2.0),  # Different spacing
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Spacing mismatch"):
+            _position_in_reference(cropped, reference)
+
+    def test_position_in_reference_orientation_warning(self) -> None:
+        """Test warning when orientations don't match."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        rotated = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=rotated,
+            modality="mask",
+        )
+
+        with self.assertWarns(UserWarning):
+            _position_in_reference(cropped, reference)
+
+    def test_position_in_reference_fill_value(self) -> None:
+        """Test custom fill value."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(5.0, 5.0, 5.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        result = _position_in_reference(cropped, reference, fill_value=-1.0)
+
+        # Background should be -1
+        self.assertEqual(result.array[0, 0, 0], -1.0)
+        # Data region should have original values
+        self.assertEqual(result.array[5, 5, 5], 1.0)
+
+    @patch("pictologics.loader._load_dicom_file")
+    @patch("pictologics.loader.Path")
+    def test_load_image_with_reference_repositioning(
+        self, mock_Path: MagicMock, mock_load_dcm: MagicMock
+    ) -> None:
+        """Test load_image with reference_image triggers repositioning."""
+        mock_Path.return_value.exists.return_value = True
+        mock_Path.return_value.is_dir.return_value = False
+
+        # Create mock loaded image (cropped)
+        cropped_img = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(2.0, 2.0, 2.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+        mock_load_dcm.return_value = cropped_img
+
+        # Reference image
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        result = load_image("cropped.dcm", reference_image=reference)
+
+        # Result should have reference shape
+        self.assertEqual(result.array.shape, (10, 10, 10))
+        # Data should be at correct position
+        self.assertEqual(result.array[2, 2, 2], 1.0)
+
+    @patch("pictologics.loader.load_image")
+    def test_load_and_merge_reposition_to_reference(self, mock_load: MagicMock) -> None:
+        """Test load_and_merge_images with reposition_to_reference=True."""
+        from pictologics.loader import _position_in_reference
+
+        # Reference image
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        # Two cropped masks at different positions
+        mask1 = Image(
+            array=np.ones((2, 2, 2)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+        mask2 = Image(
+            array=np.ones((2, 2, 2)) * 2,
+            spacing=(1.0, 1.0, 1.0),
+            origin=(5.0, 5.0, 5.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        mock_load.side_effect = [mask1, mask2]
+
+        merged = load_and_merge_images(
+            ["p1", "p2"],
+            reference_image=reference,
+            reposition_to_reference=True,
+        )
+
+        # Should have reference shape
+        self.assertEqual(merged.array.shape, (10, 10, 10))
+        # Both masks should be present at their positions
+        self.assertEqual(merged.array[0, 0, 0], 1.0)
+        self.assertEqual(merged.array[5, 5, 5], 2.0)
+
+    def test_load_and_merge_reposition_no_reference_error(self) -> None:
+        """Test error when reposition_to_reference=True but no reference provided."""
+        with self.assertRaisesRegex(ValueError, "reference_image must be provided"):
+            load_and_merge_images(
+                ["p1"], reposition_to_reference=True, reference_image=None
+            )
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_spacing_between_slices_preferred(
+        self, mock_dcmread: MagicMock
+    ) -> None:
+        """Test that SpacingBetweenSlices is preferred over SliceThickness."""
+        from pictologics.loader import _load_dicom_file
+
+        mock_dcm = MagicMock()
+        mock_dcm.pixel_array = np.zeros((10, 10))
+        mock_dcm.PixelSpacing = [0.5, 0.5]
+        mock_dcm.SpacingBetweenSlices = 2.5  # Should be used
+        mock_dcm.SliceThickness = 1.0  # Should be ignored
+        mock_dcm.ImagePositionPatient = [0.0, 0.0, 0.0]
+        mock_dcm.RescaleSlope = 1.0
+        mock_dcm.RescaleIntercept = 0.0
+        mock_dcmread.return_value = mock_dcm
+
+        img = _load_dicom_file("test.dcm")
+        self.assertEqual(img.spacing[2], 2.5)
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_3d_data(self, mock_dcmread: MagicMock) -> None:
+        """Test that 3D DICOM data is handled correctly with axis swap."""
+        from pictologics.loader import _load_dicom_file
+
+        # 3D data in (Z, Y, X) format
+        mock_dcm = MagicMock()
+        mock_dcm.pixel_array = np.zeros((5, 10, 20))  # Z=5, Y=10, X=20
+        mock_dcm.PixelSpacing = [0.5, 0.5]
+        mock_dcm.SliceThickness = 1.0
+        mock_dcm.ImagePositionPatient = [0.0, 0.0, 0.0]
+        mock_dcm.RescaleSlope = 1.0
+        mock_dcm.RescaleIntercept = 0.0
+        # Remove SpacingBetweenSlices to test SliceThickness fallback
+        del mock_dcm.SpacingBetweenSlices
+        mock_dcmread.return_value = mock_dcm
+
+        img = _load_dicom_file("test.dcm")
+        # Should be swapped to (X, Y, Z)
+        self.assertEqual(img.array.shape, (20, 10, 5))
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_no_spacing_fallback(self, mock_dcmread: MagicMock) -> None:
+        """Test fallback to 1.0 when neither SpacingBetweenSlices nor SliceThickness."""
+        from pictologics.loader import _load_dicom_file
+
+        mock_dcm = MagicMock()
+        mock_dcm.pixel_array = np.zeros((10, 10))
+        mock_dcm.PixelSpacing = [0.5, 0.5]
+        # No SpacingBetweenSlices or SliceThickness
+        del mock_dcm.SpacingBetweenSlices
+        del mock_dcm.SliceThickness
+        mock_dcm.ImagePositionPatient = [0.0, 0.0, 0.0]
+        mock_dcm.RescaleSlope = 1.0
+        mock_dcm.RescaleIntercept = 0.0
+        mock_dcmread.return_value = mock_dcm
+
+        img = _load_dicom_file("test.dcm")
+        self.assertEqual(img.spacing[2], 1.0)
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_direction_extraction(
+        self, mock_dcmread: MagicMock
+    ) -> None:
+        """Test direction matrix extraction from ImageOrientationPatient."""
+        from pictologics.loader import _load_dicom_file
+
+        mock_dcm = MagicMock()
+        mock_dcm.pixel_array = np.zeros((10, 10))
+        mock_dcm.PixelSpacing = [0.5, 0.5]
+        mock_dcm.SliceThickness = 1.0
+        mock_dcm.ImagePositionPatient = [0.0, 0.0, 0.0]
+        mock_dcm.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        mock_dcm.RescaleSlope = 1.0
+        mock_dcm.RescaleIntercept = 0.0
+        del mock_dcm.SpacingBetweenSlices
+        mock_dcmread.return_value = mock_dcm
+
+        img = _load_dicom_file("test.dcm")
+        # Direction should be extracted as 3x3 matrix
+        self.assertEqual(img.direction.shape, (3, 3))
+        np.testing.assert_array_almost_equal(img.direction[:, 0], [1.0, 0.0, 0.0])
+        np.testing.assert_array_almost_equal(img.direction[:, 1], [0.0, 1.0, 0.0])
+
+    @patch("pictologics.loader.load_image")
+    def test_load_and_merge_relabel_masks_reposition(
+        self, mock_load_image: MagicMock
+    ) -> None:
+        """Test relabel_masks with reposition_to_reference."""
+        # Reference image
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        # Two cropped masks with binary values
+        mask1 = Image(
+            array=np.ones((3, 3, 3)),  # All 1s
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        mask2 = Image(
+            array=np.ones((3, 3, 3)),  # All 1s
+            spacing=(1.0, 1.0, 1.0),
+            origin=(3.0, 3.0, 3.0),  # Different origin
+            direction=np.eye(3),
+        )
+
+        mock_load_image.side_effect = [mask1, mask2]
+
+        merged = load_and_merge_images(
+            ["p1", "p2"],
+            reference_image=reference,
+            reposition_to_reference=True,
+            relabel_masks=True,  # Should assign 1 to first, 2 to second
+        )
+
+        # Check labels are different
+        self.assertIn(1.0, merged.array)
+        self.assertIn(2.0, merged.array)
+
+    @patch("pictologics.loader.load_image")
+    def test_load_and_merge_conflict_resolution_min_reposition(
+        self, mock_load_image: MagicMock
+    ) -> None:
+        """Test conflict_resolution='min' with reposition."""
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        # Two overlapping masks with different values
+        mask1 = Image(
+            array=np.full((5, 5, 5), 5.0),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        mask2 = Image(
+            array=np.full((5, 5, 5), 3.0),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),  # Same origin - overlap
+            direction=np.eye(3),
+        )
+
+        mock_load_image.side_effect = [mask1, mask2]
+
+        merged = load_and_merge_images(
+            ["p1", "p2"],
+            reference_image=reference,
+            reposition_to_reference=True,
+            conflict_resolution="min",
+        )
+
+        # Min of 5 and 3 is 3
+        self.assertEqual(merged.array[0, 0, 0], 3.0)
+
+    @patch("pictologics.loader.load_image")
+    def test_load_and_merge_conflict_resolution_last_reposition(
+        self, mock_load_image: MagicMock
+    ) -> None:
+        """Test conflict_resolution='last' with reposition."""
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        mask1 = Image(
+            array=np.full((5, 5, 5), 5.0),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        mask2 = Image(
+            array=np.full((5, 5, 5), 9.0),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        mock_load_image.side_effect = [mask1, mask2]
+
+        merged = load_and_merge_images(
+            ["p1", "p2"],
+            reference_image=reference,
+            reposition_to_reference=True,
+            conflict_resolution="last",
+        )
+
+        # Last wins: should be 9
+        self.assertEqual(merged.array[0, 0, 0], 9.0)
+
+    @patch("pictologics.loader.load_image")
+    def test_load_and_merge_conflict_resolution_first_reposition(
+        self, mock_load_image: MagicMock
+    ) -> None:
+        """Test conflict_resolution='first' with reposition."""
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        mask1 = Image(
+            array=np.full((5, 5, 5), 5.0),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        mask2 = Image(
+            array=np.full((5, 5, 5), 9.0),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        mock_load_image.side_effect = [mask1, mask2]
+
+        merged = load_and_merge_images(
+            ["p1", "p2"],
+            reference_image=reference,
+            reposition_to_reference=True,
+            conflict_resolution="first",
+        )
+
+        # First wins: should be 5
+        self.assertEqual(merged.array[0, 0, 0], 5.0)
+
+    @patch("pictologics.loader.load_image")
+    def test_load_and_merge_conflict_resolution_max_reposition(
+        self, mock_load_image: MagicMock
+    ) -> None:
+        """Test conflict_resolution='max' with reposition (default behavior)."""
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        # Overlapping masks
+        mask1 = Image(
+            array=np.full((5, 5, 5), 5.0),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        mask2 = Image(
+            array=np.full((5, 5, 5), 9.0),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        mock_load_image.side_effect = [mask1, mask2]
+
+        merged = load_and_merge_images(
+            ["p1", "p2"],
+            reference_image=reference,
+            reposition_to_reference=True,
+            conflict_resolution="max",
+        )
+
+        # Max wins: should be 9
+        self.assertEqual(merged.array[0, 0, 0], 9.0)
+
+    @patch("pictologics.loader.load_image")
+    def test_load_and_merge_relabel_masks_standard_mode(
+        self, mock_load_image: MagicMock
+    ) -> None:
+        """Test relabel_masks in standard mode (no repositioning)."""
+        # Two masks with identical geometry
+        mask1 = Image(
+            array=np.array([[[1, 0], [0, 0]], [[0, 0], [0, 0]]]),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        mask2 = Image(
+            array=np.array([[[0, 0], [0, 1]], [[0, 0], [0, 0]]]),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        mock_load_image.side_effect = [mask1, mask2]
+
+        merged = load_and_merge_images(
+            ["p1", "p2"],
+            relabel_masks=True,
+        )
+
+        # First mask's 1 should stay as 1, second mask's 1 should become 2
+        self.assertEqual(merged.array[0, 0, 0], 1)
+        self.assertEqual(merged.array[0, 1, 1], 2)
+
+    @patch("pictologics.loader.load_image")
+    def test_load_and_merge_load_error_reposition(
+        self, mock_load_image: MagicMock
+    ) -> None:
+        """Test error handling when load_image fails in reposition mode."""
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        mock_load_image.side_effect = Exception("Failed to read file")
+
+        with self.assertRaisesRegex(ValueError, "Failed to load image"):
+            load_and_merge_images(
+                ["bad_path"],
+                reference_image=reference,
+                reposition_to_reference=True,
+            )
 
 
 if __name__ == "__main__":
