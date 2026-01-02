@@ -97,3 +97,58 @@ for patient in db.patients:
             # Access instances
             # series.instances is a list of DicomInstance objects
 ```
+
+---
+
+## Mask Visualization
+
+Pictologics provides utilities to visualize mask overlays on medical images, helpful for verifying segmentation alignment.
+
+### Interactive Viewer
+
+Scroll through slices with the mask overlay:
+
+```python
+from pictologics import load_image
+from pictologics.utilities import visualize_mask_overlay
+
+img = load_image("scan.nii.gz")
+mask = load_image("segmentation.nii.gz")
+
+visualize_mask_overlay(img, mask, alpha=0.4, colormap="tab20")
+```
+
+### Save Overlay Slices
+
+Export selected slices as images:
+
+```python
+from pictologics.utilities import save_mask_overlay_slices
+
+# Save every 10th slice
+save_mask_overlay_slices(img, mask, "output/", slice_selection="every_10")
+
+# Save at 10% intervals
+save_mask_overlay_slices(img, mask, "output/", slice_selection="10%")
+
+# Save specific slices
+save_mask_overlay_slices(img, mask, "output/", slice_selection=[0, 50, 100])
+```
+
+### Colormap Options
+
+| Colormap | Labels | Description |
+|----------|--------|-------------|
+| `tab10` | 10 | Distinct categorical colors |
+| `tab20` | 20 | Default, 20 distinct colors |
+| `Set1` | 9 | Bold qualitative colors |
+| `Set2` | 8 | Pastel qualitative colors |
+| `Paired` | 12 | Paired colors |
+
+### Output Formats
+
+Supported formats: `png` (default, transparent), `jpeg`, `tiff`
+
+```python
+save_mask_overlay_slices(img, mask, "output/", format="tiff", dpi=300)
+```

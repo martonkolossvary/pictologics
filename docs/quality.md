@@ -1,6 +1,6 @@
 # Code Quality Report
 
-Generated on 2026-01-01 11:32:43
+Generated on 2026-01-01 18:31:50
 
 ## Test Coverage
 
@@ -19,6 +19,7 @@ Generated on 2026-01-01 11:32:43
 | `pictologics/results.py` | 100.00% |
 | `pictologics/utilities/__init__.py` | 100.00% |
 | `pictologics/utilities/dicom_database.py` | 100.00% |
+| `pictologics/utilities/mask_visualization.py` | 100.00% |
 | `pictologics/warmup.py` | 100.00% |
 
 ## Static Type Checking (Mypy)
@@ -27,7 +28,7 @@ Generated on 2026-01-01 11:32:43
 **Errors:** 0
 
 ```
-Success: no issues found in 12 source files
+Success: no issues found in 13 source files
 ```
 
 ## Linting (Ruff)

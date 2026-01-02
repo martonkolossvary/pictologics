@@ -54,19 +54,22 @@ Then, specific feature calculation functions (e.g., `calculate_glcm_features`) c
 using these matrices.
 
 Example:
-    >>> import numpy as np
-    >>> from pictologics.features.texture import calculate_all_texture_matrices, calculate_glcm_features
-    >>>
-    >>> # Create dummy data
-    >>> data = np.random.randint(1, 33, (50, 50, 50))
-    >>> mask = np.ones((50, 50, 50))
-    >>>
-    >>> # Calculate matrices
-    >>> matrices = calculate_all_texture_matrices(data, mask, n_bins=32)
-    >>>
-    >>> # Extract features
-    >>> glcm_feats = calculate_glcm_features(data, mask, n_bins=32, glcm_matrix=matrices['glcm'])
-    >>> print(glcm_feats['contrast_ACUI'])
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.features.texture import calculate_all_texture_matrices, calculate_glcm_features
+
+        # Create dummy data
+        data = np.random.randint(1, 33, (50, 50, 50))
+        mask = np.ones((50, 50, 50))
+
+        # Calculate matrices
+        matrices = calculate_all_texture_matrices(data, mask, n_bins=32)
+
+        # Extract features
+        glcm_feats = calculate_glcm_features(data, mask, n_bins=32, glcm_matrix=matrices['glcm'])
+        print(glcm_feats['contrast_ACUI'])
+        ```
 """
 
 from __future__ import annotations
@@ -661,12 +664,15 @@ def calculate_all_texture_matrices(
             - 'gldzm' (np.ndarray): Grey Level Distance Zone Matrix. Shape: (n_bins, max_distance).
 
     Example:
-        >>> import numpy as np
-        >>> data = np.random.randint(1, 33, (50, 50, 50))
-        >>> mask = np.ones((50, 50, 50))
-        >>> matrices = calculate_all_texture_matrices(data, mask, n_bins=32)
-        >>> print(matrices['glcm'].shape)
-        (13, 32, 32)
+    Example:
+        ```python
+        import numpy as np
+        data = np.random.randint(1, 33, (50, 50, 50))
+        mask = np.ones((50, 50, 50))
+        matrices = calculate_all_texture_matrices(data, mask, n_bins=32)
+        print(matrices['glcm'].shape)
+        # (13, 32, 32)
+        ```
     """
     # Fast exit for empty ROI
     if not bool(np.any(mask != 0)):
@@ -809,8 +815,12 @@ def calculate_glcm_features(
             Example keys: 'joint_maximum_GYBY', 'contrast_ACUI', 'correlation_NI2N'.
 
     Example:
-        >>> features = calculate_glcm_features(data, mask, n_bins=32)
-        >>> print(features['contrast_ACUI'])
+        ```python
+        import numpy as np
+        # ... assuming data and mask defined ...
+        features = calculate_glcm_features(data, mask, n_bins=32)
+        print(features['contrast_ACUI'])
+        ```
         12.5
     """
     if glcm_matrix is None:
