@@ -1,5 +1,5 @@
 Pictologics
-Copyright 2025 Márton Kolossváry
+Copyright 2026 Márton Kolossváry
 
 This product includes software developed by Márton Kolossváry.
 

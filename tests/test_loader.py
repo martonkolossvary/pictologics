@@ -189,7 +189,7 @@ class TestLoader(unittest.TestCase):
         mock_path_obj.is_dir.return_value = True
 
         load_image("some_dir")
-        mock_load_series.assert_called_once_with(mock_path_obj)
+        mock_load_series.assert_called_once_with(mock_path_obj, 0)
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader._load_nifti")
@@ -316,12 +316,13 @@ class TestLoader(unittest.TestCase):
         with self.assertRaises(ValueError):
             _load_nifti("bad.nii")
 
-    # --- _load_dicom_series Tests ---
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader.pydicom.misc.is_dicom")
     @patch("pictologics.loader.pydicom.dcmread")
+    @patch("pictologics.utilities.dicom_utils.split_dicom_phases")
     def test_load_dicom_series_success(
         self,
+        mock_split_phases: MagicMock,
         mock_dcmread: MagicMock,
         mock_is_dicom: MagicMock,
         mock_Path_cls: MagicMock,
@@ -337,6 +338,9 @@ class TestLoader(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
+        # Mock split_dicom_phases to return single phase with all files
+        mock_split_phases.return_value = [[{"file_path": file1}, {"file_path": file2}]]
+
         # Create mock slices
         slice1 = MagicMock()
         slice1.pixel_array = np.zeros((512, 512))  # Y, X
@@ -344,8 +348,6 @@ class TestLoader(unittest.TestCase):
         slice1.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]  # Identity
         slice1.PixelSpacing = [0.5, 0.5]  # Row (Y), Col (X)
         slice1.SliceThickness = 1.0
-        slice1.RescaleSlope = 1.0
-        slice1.RescaleIntercept = -1024.0
         slice1.RescaleSlope = 1.0
         slice1.RescaleIntercept = -1024.0
         slice1.Modality = "CT"
@@ -361,8 +363,8 @@ class TestLoader(unittest.TestCase):
         slice2.RescaleIntercept = -1024.0
         slice2.Modality = "CT"
 
-        # Return in reverse order to test sorting
-        mock_dcmread.side_effect = [slice2, slice1]
+        # First two calls are header reads, next two are full reads
+        mock_dcmread.side_effect = [slice1, slice2, slice2, slice1]
 
         img = _load_dicom_series("dicom_dir")
 
@@ -383,8 +385,10 @@ class TestLoader(unittest.TestCase):
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader.pydicom.misc.is_dicom")
     @patch("pictologics.loader.pydicom.dcmread")
+    @patch("pictologics.utilities.dicom_utils.split_dicom_phases")
     def test_load_dicom_series_fallback_sorting(
         self,
+        mock_split_phases: MagicMock,
         mock_dcmread: MagicMock,
         mock_is_dicom: MagicMock,
         mock_Path_cls: MagicMock,
@@ -395,6 +399,9 @@ class TestLoader(unittest.TestCase):
         file2.is_file.return_value = True
         mock_Path_cls.return_value.iterdir.return_value = [file1, file2]
         mock_is_dicom.return_value = True
+
+        # Mock split_dicom_phases to return single phase with all files
+        mock_split_phases.return_value = [[{"file_path": file1}, {"file_path": file2}]]
 
         # Slices without ImagePositionPatient/Orientation
         slice1 = MagicMock()
@@ -413,7 +420,8 @@ class TestLoader(unittest.TestCase):
         slice2.RescaleSlope = 1.0
         slice2.RescaleIntercept = 0.0
 
-        mock_dcmread.side_effect = [slice2, slice1]
+        # First two calls are header reads, next two are full reads
+        mock_dcmread.side_effect = [slice1, slice2, slice2, slice1]
 
         img = _load_dicom_series("dicom_dir")
         self.assertEqual(img.array.shape, (10, 10, 2))
@@ -422,8 +430,10 @@ class TestLoader(unittest.TestCase):
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader.pydicom.misc.is_dicom")
     @patch("pictologics.loader.pydicom.dcmread")
+    @patch("pictologics.utilities.dicom_utils.split_dicom_phases")
     def test_load_dicom_series_spacing_calculation(
         self,
+        mock_split_phases: MagicMock,
         mock_dcmread: MagicMock,
         mock_is_dicom: MagicMock,
         mock_Path_cls: MagicMock,
@@ -434,6 +444,9 @@ class TestLoader(unittest.TestCase):
         file2.is_file.return_value = True
         mock_Path_cls.return_value.iterdir.return_value = [file1, file2]
         mock_is_dicom.return_value = True
+
+        # Mock split_dicom_phases to return single phase with all files
+        mock_split_phases.return_value = [[{"file_path": file1}, {"file_path": file2}]]
 
         slice1 = MagicMock()
         slice1.pixel_array = np.zeros((10, 10))
@@ -451,7 +464,8 @@ class TestLoader(unittest.TestCase):
         slice2.RescaleSlope = 1.0
         slice2.RescaleIntercept = 0.0
 
-        mock_dcmread.side_effect = [slice1, slice2]
+        # First two calls are header reads, next two are full reads
+        mock_dcmread.side_effect = [slice1, slice2, slice1, slice2]
 
         img = _load_dicom_series("dicom_dir")
         self.assertEqual(img.spacing, (0.5, 0.5, 2.0))
@@ -591,7 +605,7 @@ class TestLoader(unittest.TestCase):
         mock_is_dicom.return_value = True
         mock_dcmread.side_effect = Exception("Corrupt file")
 
-        with self.assertRaisesRegex(ValueError, "Error reading DICOM files"):
+        with self.assertRaisesRegex(ValueError, "Could not read any DICOM files"):
             _load_dicom_series("dicom_dir")
 
     @patch("pictologics.loader.Path")
@@ -619,6 +633,119 @@ class TestLoader(unittest.TestCase):
         # Should fallback to defaults
         self.assertEqual(img.spacing, (1.0, 1.0, 1.0))
         self.assertEqual(img.origin, (0.0, 0.0, 0.0))
+
+    @patch("pictologics.loader.Path")
+    @patch("pictologics.loader.pydicom.misc.is_dicom")
+    @patch("pictologics.loader.pydicom.dcmread")
+    @patch("pictologics.utilities.dicom_utils.split_dicom_phases")
+    def test_load_dicom_series_dataset_index_out_of_range(
+        self,
+        mock_split_phases: MagicMock,
+        mock_dcmread: MagicMock,
+        mock_is_dicom: MagicMock,
+        mock_Path_cls: MagicMock,
+    ) -> None:
+        """Test dataset_index out of range error."""
+        file1 = MagicMock()
+        file1.is_file.return_value = True
+        mock_Path_cls.return_value.iterdir.return_value = [file1]
+        mock_is_dicom.return_value = True
+
+        dcm = MagicMock()
+        dcm.InstanceNumber = 1
+        dcm.ImagePositionPatient = [0, 0, 0]
+        mock_dcmread.return_value = dcm
+
+        # Single phase
+        mock_split_phases.return_value = [[{"file_path": file1}]]
+
+        with self.assertRaisesRegex(ValueError, "dataset_index 5 is out of range"):
+            _load_dicom_series("dicom_dir", dataset_index=5)
+
+    @patch("pictologics.loader.Path")
+    @patch("pictologics.loader.pydicom.misc.is_dicom")
+    @patch("pictologics.loader.pydicom.dcmread")
+    @patch("pictologics.utilities.dicom_utils.split_dicom_phases")
+    def test_load_dicom_series_full_read_error(
+        self,
+        mock_split_phases: MagicMock,
+        mock_dcmread: MagicMock,
+        mock_is_dicom: MagicMock,
+        mock_Path_cls: MagicMock,
+    ) -> None:
+        """Test error when full read (with pixels) fails."""
+        file1 = MagicMock()
+        file1.is_file.return_value = True
+        mock_Path_cls.return_value.iterdir.return_value = [file1]
+        mock_is_dicom.return_value = True
+
+        dcm_header = MagicMock()
+        dcm_header.InstanceNumber = 1
+        dcm_header.ImagePositionPatient = [0, 0, 0]
+
+        mock_split_phases.return_value = [[{"file_path": file1}]]
+
+        # First call (header read) succeeds, second call (full read) fails
+        mock_dcmread.side_effect = [dcm_header, Exception("Read error")]
+
+        with self.assertRaisesRegex(ValueError, "Error reading DICOM files"):
+            _load_dicom_series("dicom_dir")
+
+    @patch("pictologics.loader._is_dicom_seg")
+    @patch("pictologics.loader.Path")
+    def test_load_image_seg_dict_return(
+        self,
+        mock_Path_cls: MagicMock,
+        mock_is_seg: MagicMock,
+    ) -> None:
+        """Test load_image handles dict return from load_seg."""
+        mock_path_obj = mock_Path_cls.return_value
+        mock_path_obj.exists.return_value = True
+        mock_path_obj.is_dir.return_value = False
+
+        mock_is_seg.return_value = True
+
+        # Create mock images for dict return
+        mock_img1 = MagicMock()
+        mock_img2 = MagicMock()
+
+        # Mock at the location where it's used (when import happens inside function)
+        with patch.object(
+            __import__("pictologics.loaders.seg_loader", fromlist=["load_seg"]),
+            "load_seg",
+        ) as mock_load_seg:
+            # Mock load_seg returning a dict (combine_segments=False behavior)
+            mock_load_seg.return_value = {"segment1": mock_img1, "segment2": mock_img2}
+            result = load_image("seg.dcm")
+            # Should return first value from dict
+            self.assertEqual(result, mock_img1)
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    @patch("pictologics.loader.Path")
+    def test_load_image_seg_non_dict_return(
+        self,
+        mock_Path_cls: MagicMock,
+        mock_dcmread: MagicMock,
+    ) -> None:
+        """Test load_image handles Image return from load_seg (line 435)."""
+        mock_path_obj = mock_Path_cls.return_value
+        mock_path_obj.exists.return_value = True
+        mock_path_obj.is_dir.return_value = False
+
+        # Create a mock DICOM object that looks like a SEG
+        mock_dcm = MagicMock()
+        mock_dcm.SOPClassUID = "1.2.840.10008.5.1.4.1.1.66.4"  # SEG SOP Class UID
+        mock_dcmread.return_value = mock_dcm
+
+        mock_img = MagicMock()
+
+        with patch.object(
+            __import__("pictologics.loaders.seg_loader", fromlist=["load_seg"]),
+            "load_seg",
+            return_value=mock_img,
+        ):
+            result = load_image("seg.dcm")
+            self.assertEqual(result, mock_img)
 
     # --- load_and_merge_images Tests ---
     @patch("pictologics.loader.load_image")

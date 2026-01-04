@@ -10,6 +10,7 @@ from .loader import (
     load_and_merge_images,
     load_image,
 )
+from .loaders import load_seg
 from .pipeline import RadiomicsPipeline
 from .results import format_results, save_results
 from .warmup import warmup_jit
@@ -20,6 +21,7 @@ warmup_jit()
 
 __all__ = [
     "load_image",
+    "load_seg",
     "Image",
     "create_full_mask",
     "load_and_merge_images",

@@ -746,90 +746,48 @@ def _split_series_instances(
 ) -> list[list[DicomInstance]]:
     """Split instances of a series into multiple groups (phases).
 
+    Uses the shared split_dicom_phases logic from dicom_utils to ensure
+    consistent multi-phase detection across the library.
+
     Strategy:
     1. Check for distinctive tags (AcquisitionNumber, TemporalPositionIdentifier, etc.).
        If a tag has > 1 unique value, use it to group.
     2. Fallback: Check for duplicate spatial positions (ImagePositionPatient).
        If duplicates exist, group by order of appearance.
     """
+    from pictologics.utilities.dicom_utils import MULTI_PHASE_TAGS, split_dicom_phases
+
     if len(instances) < 2:
         return [instances]
 
-    # Priority list of tags to check for splitting
-    split_tags = [
-        "NominalPercentageOfCardiacPhase",
-        "TemporalPositionIdentifier",
-        "TriggerTime",
-        "AcquisitionNumber",
-        "EchoNumber",
-    ]
+    # Convert DicomInstance objects to metadata dicts for shared logic
+    instance_map: dict[str, DicomInstance] = {}
+    file_metadata: list[dict[str, Any]] = []
 
-    # 1. Try splitting by tags
-    for tag in split_tags:
-        # Check if all instances have this tag (or at least some do)
-        # Actually, if the tag varies, we should split.
-        values: dict[Any, list[DicomInstance]] = {}
-        for inst in instances:
-            val = inst.tags.get(tag)
-            # Treat None as a distinct value group if mixed?
-            # Ideally we only split if we have clear groups.
-            if val is not None:
-                values.setdefault(val, []).append(inst)
-
-        # If we have multiple groups and coverage is good
-        if len(values) > 1:
-            # Check if we covered all instances or if some are None
-            total_grouped = sum(len(g) for g in values.values())
-            if total_grouped == len(instances):
-                # Sort groups by tag value
-                sorted_keys = sorted(values.keys())
-                return [values[k] for k in sorted_keys]
-
-    # 2. Fallback: Spatial duplication check
-    # Group instances by position
-    pos_map: dict[tuple[float, float, float], list[DicomInstance]] = {}
     for inst in instances:
-        if inst.image_position_patient:
-            pos_map.setdefault(inst.image_position_patient, []).append(inst)
+        meta: dict[str, Any] = {
+            "file_path": inst.file_path,
+            "InstanceNumber": inst.instance_number,
+            "ImagePositionPatient": inst.image_position_patient,
+        }
+        # Add multi-phase tags from instance.tags
+        for tag in MULTI_PHASE_TAGS:
+            if tag in inst.tags:
+                meta[tag] = inst.tags[tag]
 
-    # Check if we have duplicates (any position has > 1 instance)
-    if any(len(g) > 1 for g in pos_map.values()):
-        # Max number of phases detected
-        num_phases = max(len(g) for g in pos_map.values())
+        file_metadata.append(meta)
+        instance_map[str(inst.file_path)] = inst
 
-        # Initialize groups
-        phase_groups: list[list[DicomInstance]] = [[] for _ in range(num_phases)]
+    # Use shared splitting logic
+    split_groups = split_dicom_phases(file_metadata)
 
-        # Sort positions to be deterministic
-        # (Though we iterate instances which are not yet sorted by position...
-        #  maybe sort instances by instance number first for stability?)
-        sorted_instances = sorted(
-            instances,
-            key=lambda x: x.instance_number if x.instance_number is not None else 0,
-        )
+    # Convert back to DicomInstance lists
+    result: list[list[DicomInstance]] = []
+    for group in split_groups:
+        instance_group = [instance_map[str(m["file_path"])] for m in group]
+        result.append(instance_group)
 
-        # Re-map with sorted instances
-        pos_map_sorted: dict[tuple[float, float, float], list[DicomInstance]] = {}
-        for inst in sorted_instances:
-            if inst.image_position_patient:
-                pos_map_sorted.setdefault(inst.image_position_patient, []).append(inst)
-            else:
-                # If no position, put in phase 0?
-                phase_groups[0].append(inst)  # pragma: no cover
-
-        # Distribute duplicates across phases
-        for _, insts in pos_map_sorted.items():
-            for i, inst in enumerate(insts):
-                if i < num_phases:
-                    phase_groups[i].append(inst)
-                else:  # pragma: no cover
-                    # Should not happen if num_phases is max(len)
-                    phase_groups[-1].append(inst)
-
-        # Filter empty groups
-        return [g for g in phase_groups if g]
-
-    return [instances]
+    return result
 
 
 # ============================================================================

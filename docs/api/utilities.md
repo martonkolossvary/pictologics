@@ -9,8 +9,25 @@
         - DicomPatient
         - DicomDatabase
 
-::: pictologics.utilities.mask_visualization
+::: pictologics.utilities.dicom_utils
     options:
       members:
-        - visualize_mask_overlay
-        - save_mask_overlay_slices
+        - DicomPhaseInfo
+        - get_dicom_phases
+        - split_dicom_phases
+
+::: pictologics.utilities.sr_parser
+    options:
+      members:
+        - SRMeasurement
+        - SRMeasurementGroup
+        - SRDocument
+        - SRBatch
+        - is_dicom_sr
+
+
+::: pictologics.utilities.visualization
+    options:
+      members:
+        - visualize_slices
+        - save_slices

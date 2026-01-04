@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import nibabel as nib
 import numpy as np
@@ -267,6 +267,26 @@ def _find_best_dicom_series_dir(root: Path) -> Path:
     return best_dir
 
 
+def _is_dicom_seg(path: str) -> bool:
+    """Check if a DICOM file is a Segmentation object.
+
+    Checks if the SOPClassUID matches the DICOM Segmentation Storage class
+    (1.2.840.10008.5.1.4.1.1.66.4).
+
+    Args:
+        path: Path to the potential DICOM file.
+
+    Returns:
+        True if the file is a DICOM SEG object, False otherwise.
+    """
+    try:
+        dcm = pydicom.dcmread(path, stop_before_pixels=True)
+        # DICOM Segmentation Storage SOP Class UID
+        return str(getattr(dcm, "SOPClassUID", "")) == "1.2.840.10008.5.1.4.1.1.66.4"
+    except Exception:
+        return False
+
+
 def load_image(
     path: str,
     dataset_index: int = 0,
@@ -279,16 +299,28 @@ def load_image(
     Load a medical image from a file path or directory.
 
     This is the main entry point for loading data. It automatically detects whether
-    the input is a NIfTI file or a DICOM directory/file (single DICOM or series)
-    and standardizes it into an `Image` object.
+    the input is a NIfTI file, DICOM directory/file (single DICOM or series), or
+    a DICOM Segmentation (SEG) object and standardizes it into an `Image` object.
 
     The resulting image array is always 3D with dimensions (x, y, z).
+
+    Note:
+        For DICOM SEG files, this function uses :func:`pictologics.loaders.load_seg`
+        internally. For more control over segment extraction (e.g., selecting specific
+        segments or extracting them separately), use ``load_seg()`` directly.
 
     Args:
         path (str): The absolute or relative path to the image file (e.g., .nii.gz,
             .dcm or file with no extension) or the directory containing DICOM files.
-        dataset_index (int, optional): For 4D datasets (like fMRI or dynamic PET),
-            this specifies which volume (time point) to extract. Defaults to 0 (the first volume).
+        dataset_index (int, optional): For multi-volume datasets, specifies which
+            volume to extract (0-indexed). This works for:
+
+            - **4D NIfTI files**: Selects which time point/volume to load.
+            - **Multi-phase DICOM series**: Selects which phase to load (e.g., cardiac
+              phases, temporal positions, echo numbers). Use
+              :func:`pictologics.utilities.get_dicom_phases` to discover available phases.
+
+            Defaults to 0 (the first volume/phase).
         recursive (bool, optional): If True and `path` is a directory, recursively searches
             subdirectories and loads the DICOM series from the folder containing the most
             DICOM files. Defaults to False.
@@ -353,6 +385,28 @@ def load_image(
         mask = load_image("cropped_mask.dcm", reference_image=main_img)
         # mask now has same shape as main_img
         ```
+
+        **Loading a DICOM SEG file (auto-detected):**
+        ```python
+        # DICOM SEG files are automatically detected and loaded
+        seg = load_image("segmentation.dcm")
+        print(f"Modality: {seg.modality}")  # Output: Modality: SEG
+        # Segments are combined into a label image by default
+        ```
+
+        **Loading a specific phase from a multi-phase DICOM series:**
+        ```python
+        from pictologics.utilities import get_dicom_phases
+
+        # Discover available phases
+        phases = get_dicom_phases("cardiac_ct/")
+        print(f"Found {len(phases)} phases")
+        for p in phases:
+            print(f"  {p.index}: {p.label} ({p.num_slices} slices)")
+
+        # Load the 5th phase (40%)
+        img = load_image("cardiac_ct/", dataset_index=4)
+        ```
     """
     path_obj = Path(path)
     if not path_obj.exists():
@@ -363,11 +417,23 @@ def load_image(
             target_path = path_obj
             if recursive:
                 target_path = _find_best_dicom_series_dir(path_obj)
-            loaded_image = _load_dicom_series(target_path)
+            loaded_image = _load_dicom_series(target_path, dataset_index)
         elif path.lower().endswith((".nii", ".nii.gz")):
             loaded_image = _load_nifti(path, dataset_index)
         else:
             # Attempt to load as a single DICOM file if extension is not NIfTI
+            # Check if it's a DICOM SEG file first
+            if _is_dicom_seg(path):
+                from pictologics.loaders.seg_loader import load_seg
+
+                seg_result = load_seg(path, reference_image=reference_image)
+                # load_seg can return dict when combine_segments=False, but here we use default
+                if isinstance(seg_result, dict):
+                    # Should not happen with default args, but handle gracefully
+                    return next(iter(seg_result.values()))
+                # Return early since reference alignment is handled by load_seg
+                return seg_result
+
             try:
                 loaded_image = _load_dicom_file(path)
             except Exception:
@@ -433,8 +499,15 @@ def load_and_merge_images(
             - 'min': Use the minimum value.
             - 'first': Keep the value from the first image encountered (earlier in list).
             - 'last': Overwrite with the value from the last image encountered (later in list).
-        dataset_index (int, optional): For 4D datasets, this specifies which volume
-            (time point) to extract for all images. Defaults to 0.
+        dataset_index (int, optional): For multi-volume datasets, specifies which
+            volume to extract for all images (0-indexed). This works for:
+
+            - **4D NIfTI files**: Selects which time point/volume to load.
+            - **Multi-phase DICOM series**: Selects which phase to load (e.g., cardiac
+              phases, temporal positions, echo numbers). Use
+              :func:`pictologics.utilities.get_dicom_phases` to discover available phases.
+
+            Defaults to 0 (the first volume/phase).
         recursive (bool, optional): If True, recursively searches subdirectories
             for each path in `image_paths`. Defaults to False.
         binarize (bool | int | list[int] | tuple[int, int] | None, optional):
@@ -797,12 +870,23 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
     )
 
 
-def _load_dicom_series(path: str | Path) -> Image:
+def _load_dicom_series(path: str | Path, dataset_index: int = 0) -> Image:
     """
     Load a DICOM series (a set of DICOM files) from a directory.
 
-    This function reads all DICOM files in the directory, sorts them spatially
-    to reconstruct the 3D volume, and extracts metadata.
+    This function reads all DICOM files in the directory, detects multi-phase
+    acquisitions (e.g., cardiac phases, temporal positions), and loads the
+    requested phase. Slices are sorted spatially to reconstruct the 3D volume.
+
+    **Multi-Phase Detection:**
+    The function automatically detects multi-phase series using the same logic
+    as :class:`DicomDatabase`. Detection is based on:
+    - Cardiac phase percentage
+    - Temporal position
+    - Trigger time
+    - Acquisition number
+    - Echo number
+    - Duplicate spatial positions (fallback)
 
     **Sorting Logic:**
     Slices are sorted based on the projection of their `ImagePositionPatient`
@@ -811,23 +895,78 @@ def _load_dicom_series(path: str | Path) -> Image:
     If spatial tags are missing, it falls back to `InstanceNumber`.
 
     Args:
-        path (str): Directory containing the DICOM files.
+        path: Directory containing the DICOM files.
+        dataset_index: For multi-phase series, which phase to load (0-indexed).
+            Default is 0, which loads the first (or only) phase.
 
     Returns:
         Image: A standardized `Image` object.
 
     Raises:
-        ValueError: If no DICOM files are found or if they cannot be read/sorted.
+        ValueError: If no DICOM files are found, if they cannot be read/sorted,
+            or if dataset_index is out of range for the available phases.
+
+    See Also:
+        :func:`pictologics.utilities.get_dicom_phases`: Discover available phases.
     """
+    from pictologics.utilities.dicom_utils import MULTI_PHASE_TAGS, split_dicom_phases
+
     # List all DICOM files
     path_obj = Path(path)
     files = [p for p in path_obj.iterdir() if p.is_file() and pydicom.misc.is_dicom(p)]
     if not files:
         raise ValueError(f"No DICOM files found in directory: {path}")
 
-    # Read all slices
+    # Extract metadata for phase detection
+    file_metadata: list[dict[str, Any]] = []
+    for f in files:
+        try:
+            dcm = pydicom.dcmread(f, stop_before_pixels=True)
+            meta: dict[str, Any] = {
+                "file_path": f,
+                "InstanceNumber": getattr(dcm, "InstanceNumber", None),
+            }
+            # Extract position
+            try:
+                ipp = dcm.ImagePositionPatient
+                meta["ImagePositionPatient"] = (
+                    float(ipp[0]),
+                    float(ipp[1]),
+                    float(ipp[2]),
+                )
+            except (AttributeError, IndexError, TypeError):
+                meta["ImagePositionPatient"] = None
+
+            # Extract multi-phase tags
+            for tag in MULTI_PHASE_TAGS:
+                val = getattr(dcm, tag, None)
+                if val is not None:
+                    meta[tag] = val
+
+            file_metadata.append(meta)
+        except Exception:
+            continue
+
+    if not file_metadata:
+        raise ValueError(f"Could not read any DICOM files from: {path}")
+
+    # Detect and split phases
+    phases = split_dicom_phases(file_metadata)
+
+    # Validate dataset_index
+    if dataset_index >= len(phases):
+        raise ValueError(
+            f"dataset_index {dataset_index} is out of range. "
+            f"Series has {len(phases)} phase(s) (valid indices: 0-{len(phases) - 1}). "
+            f"Use pictologics.utilities.get_dicom_phases() to discover available phases."
+        )
+
+    # Get files for the requested phase
+    selected_files = [m["file_path"] for m in phases[dataset_index]]
+
+    # Read all slices for the selected phase
     try:
-        slices = [pydicom.dcmread(f) for f in files]
+        slices = [pydicom.dcmread(f) for f in selected_files]
     except Exception as e:
         raise ValueError(f"Error reading DICOM files in '{path}': {e}") from e
 

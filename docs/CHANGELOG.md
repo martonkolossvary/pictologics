@@ -1,6 +1,51 @@
 # Changelog
 
-## [0.2.0] - 2025-12-31
+## [Unreleased]
+
+### Added
+- **DICOM Multi-Phase Series Support**: `load_image()` now supports multi-phase DICOM series
+  - `dataset_index` parameter works for both 4D NIfTI and multi-phase DICOM
+  - Automatic phase detection using cardiac phase, temporal position, trigger time, acquisition number, or echo number
+  - New `get_dicom_phases()` utility to discover available phases before loading
+  - New `DicomPhaseInfo` dataclass for phase metadata
+  - Shared `split_dicom_phases()` logic ensures consistent detection across library
+- **DICOM SEG Loader**: New `load_seg()` function for loading DICOM Segmentation objects
+  - Returns standard `Image` class compatible with all pictologics functions
+  - Multi-segment handling with `combine_segments` option
+  - Automatic geometry alignment with `reference_image` parameter
+  - `get_segment_info()` for inspecting segment metadata
+  - Auto-detection in `load_image()` for seamless SEG file handling
+- **DICOM SR Parser**: New `SRDocument` class for parsing Structured Reports
+  - Extract measurements to `pandas.DataFrame` with `get_measurements_df()`
+  - Export to CSV with `export_csv()` 
+  - Export to JSON with `export_json()`
+  - Support for TID1500 and other common SR templates
+  - **Batch Processing**: `SRDocument.from_folders()` for parallel batch SR processing
+    - Recursive folder scanning for SR files
+    - Configurable `export_csv` and `export_json` options
+    - Combined measurements export via `SRBatch.get_combined_measurements_df()`
+    - Processing log with status, errors, and output paths
+- Added `highdicom` as core dependency for advanced DICOM handling
+- Updated copyright to 2026
+
+### Changed
+- `DicomDatabase` now uses shared `split_dicom_phases()` for consistent multi-phase detection
+- `load_and_merge_images()` docstring updated to document DICOM multi-phase support alongside NIfTI 4D
+- Updated `pandas` minimum version requirement to `>=2.0.0`
+
+### Documentation
+- Expanded DICOM SEG section in user guide with comprehensive examples:
+  - Merging all segments into one mask
+  - Selecting specific segments
+  - Loading segments separately for radiomics
+  - Alignment with reference image geometry
+  - Complete workflow examples
+- Added DICOM multi-phase discovery and loading examples
+
+
+---
+
+## [0.2.0] - 2025-01-31
 
 ### Added
 - **DICOM Database Utility**: New `DicomDatabase` class for parsing and organizing complex DICOM folder hierarchies
@@ -9,9 +54,11 @@
   - DataFrame exports at all hierarchy levels
   - Completeness checking for series (gap detection, spacing validation)
   - JSON/CSV export capabilities
-- **Mask Visualization Utility**: New functions for visualizing mask overlays
-  - `visualize_mask_overlay()` - Interactive slice viewer with scrolling
-  - `save_mask_overlay_slices()` - Export overlay images (PNG, JPEG, TIFF)
+- **Visualization Utility**: Flexible functions for viewing images and masks
+  - `visualize_slices()` - Interactive slice viewer with optional mask overlay
+  - `save_slices()` - Export slice images (PNG, JPEG, TIFF)
+  - Multiple display modes: image-only, mask-only, or overlay
+  - Window/level normalization support for CT/MR viewing
   - Multiple colormap options (tab10, tab20, Set1, Set2, Paired)
 - **Cropped Image Repositioning**: Support for repositioning cropped images/masks into a reference volume's coordinate space
   - `load_image()` now accepts `reference_image` parameter to automatically reposition cropped masks

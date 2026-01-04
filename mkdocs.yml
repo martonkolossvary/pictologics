@@ -3,7 +3,7 @@ site_description: IBSI-compliant radiomic feature extraction library.
 site_author: Márton Kolossváry
 repo_url: https://github.com/martonkolossvary/pictologics
 repo_name: martonkolossvary/pictologics
-copyright: Copyright &copy; 2025 Márton Kolossváry. Licensed under Apache 2.0.
+copyright: Copyright &copy; 2026 Márton Kolossváry. Licensed under Apache 2.0.
 
 theme:
   name: material
@@ -72,6 +72,7 @@ nav:
     - Quick Start: user_guide/quickstart.md
     - Pipeline Usage: user_guide/pipeline.md
     - Utilities: user_guide/utilities.md
+    - Image Manipulations: user_guide/image_manipulations.md
     - Case Examples: user_guide/case_examples.md
   - API Reference:
     - Loader: api/loader.md

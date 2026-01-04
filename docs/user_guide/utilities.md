@@ -100,39 +100,67 @@ for patient in db.patients:
 
 ---
 
-## Mask Visualization
+## Visualization
 
-Pictologics provides utilities to visualize mask overlays on medical images, helpful for verifying segmentation alignment.
+Pictologics provides flexible utilities for visualizing medical images and segmentation masks. The visualization functions support three display modes:
+
+| Mode | `image` | `mask` | Description |
+|------|---------|--------|-------------|
+| **Overlay** | ✓ | ✓ | Mask overlaid on grayscale image |
+| **Image Only** | ✓ | ✗ | Grayscale image (with optional window/level) |
+| **Mask Only** | ✗ | ✓ | Colormap or grayscale mask display |
 
 ### Interactive Viewer
 
-Scroll through slices with the mask overlay:
+Scroll through slices interactively:
 
 ```python
 from pictologics import load_image
-from pictologics.utilities import visualize_mask_overlay
+from pictologics.utilities import visualize_slices
 
 img = load_image("scan.nii.gz")
 mask = load_image("segmentation.nii.gz")
 
-visualize_mask_overlay(img, mask, alpha=0.4, colormap="tab20")
+# Overlay mode (image + mask)
+visualize_slices(image=img, mask=mask, alpha=0.4, colormap="tab20")
+
+# Image only mode
+visualize_slices(image=img)
+
+# Mask only mode (with colormap)
+visualize_slices(mask=mask)
 ```
 
-### Save Overlay Slices
+### Save Slices to Files
 
 Export selected slices as images:
 
 ```python
-from pictologics.utilities import save_mask_overlay_slices
+from pictologics.utilities import save_slices
+
+# Save overlay slices
+save_slices("output/", image=img, mask=mask, slice_selection="10%")
 
 # Save every 10th slice
-save_mask_overlay_slices(img, mask, "output/", slice_selection="every_10")
-
-# Save at 10% intervals
-save_mask_overlay_slices(img, mask, "output/", slice_selection="10%")
+save_slices("output/", image=img, mask=mask, slice_selection="every_10")
 
 # Save specific slices
-save_mask_overlay_slices(img, mask, "output/", slice_selection=[0, 50, 100])
+save_slices("output/", image=img, slice_selection=[0, 50, 100])
+```
+
+### Window/Level Normalization
+
+For CT and MR images, use window/level controls for proper contrast:
+
+```python
+# Soft tissue window (default: center=200, width=600)
+visualize_slices(image=img, window_center=40, window_width=400)
+
+# Bone window
+visualize_slices(image=img, window_center=400, window_width=1800)
+
+# Lung window
+visualize_slices(image=img, window_center=-600, window_width=1500)
 ```
 
 ### Colormap Options
@@ -147,132 +175,308 @@ save_mask_overlay_slices(img, mask, "output/", slice_selection=[0, 50, 100])
 
 ### Output Formats
 
-Supported formats: `png` (default, transparent), `jpeg`, `tiff`
+Supported formats: `png` (default), `jpeg`, `tiff`
 
 ```python
-save_mask_overlay_slices(img, mask, "output/", format="tiff", dpi=300)
+save_slices("output/", image=img, mask=mask, format="tiff", dpi=300)
 ```
 
----
+### Parallel Batch Processing
 
-## Cropped Image Repositioning
+For processing multiple images efficiently, use `concurrent.futures`:
 
-Medical imaging software often stores segmentation masks as **cropped volumes** (bounding boxes around the region of interest) to minimize storage. When loading these cropped masks, they need to be repositioned into the original image's coordinate space for proper visualization and analysis.
+```python
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+from pictologics import load_image
+from pictologics.utilities import save_slices
 
-### Why is this needed?
+def process_case(args):
+    """Process a single image/mask pair."""
+    image_path, mask_path, output_dir = args
+    
+    # Load images
+    img = load_image(image_path, recursive=True)
+    mask = load_image(mask_path, recursive=True)
+    
+    # Save slices
+    return save_slices(
+        output_dir,
+        image=img,
+        mask=mask,
+        slice_selection="10%",
+        window_center=40,
+        window_width=400
+    )
 
-Cropped masks have smaller dimensions than the full image and are stored with their own spatial origin. The `pictologics` loader uses the spatial metadata (`ImagePositionPatient` for DICOM, affine matrix for NIfTI) to calculate where the cropped mask belongs in the full volume.
+# Prepare list of (image, mask, output) tuples
+cases = [
+    ("patient_001/ct/", "patient_001/seg.dcm", "output/patient_001/"),
+    ("patient_002/ct/", "patient_002/seg.dcm", "output/patient_002/"),
+    ("patient_003/ct/", "patient_003/seg.dcm", "output/patient_003/"),
+]
 
-### Loading Cropped Masks
+# Process in parallel
+with ProcessPoolExecutor(max_workers=4) as executor:
+    results = list(executor.map(process_case, cases))
+    
+print(f"Processed {len(results)} cases")
+```
 
-#### Single Image with Reference
+!!! tip "Performance Notes"
+    - Use `ProcessPoolExecutor` (not `ThreadPoolExecutor`) to avoid Python's GIL
+    - Set `max_workers` to the number of CPU cores (4-8 is typically optimal)
+    - Each worker loads one image at a time, so memory usage scales with `max_workers`
+
+
+## DICOM Multi-Phase Series
+
+Medical imaging datasets often contain multiple phases within a single DICOM series (e.g., cardiac CT with 10 phases at 0%, 10%, 20%...). Pictologics automatically detects and handles these multi-phase acquisitions.
+
+### Discovering Phases
+
+Use `get_dicom_phases()` to discover available phases before loading:
+
+```python
+from pictologics.utilities import get_dicom_phases
+
+# Discover phases in a cardiac CT
+phases = get_dicom_phases("cardiac_ct/")
+print(f"Found {len(phases)} phases:")
+for p in phases:
+    print(f"  {p.index}: {p.label} ({p.num_slices} slices)")
+```
+
+Output:
+```
+Found 10 phases:
+  0: Phase 0% (64 slices)
+  1: Phase 10% (64 slices)
+  2: Phase 20% (64 slices)
+  ...
+```
+
+### Loading a Specific Phase
+
+Use the `dataset_index` parameter to load a specific phase:
 
 ```python
 from pictologics import load_image
 
-# Load the main image first
-main_image = load_image("ct_scan/", recursive=True)
-
-# Load a cropped mask and automatically reposition it
-mask = load_image(
-    "cropped_mask.dcm",
-    reference_image=main_image  # Repositions to match main_image's space
-)
-
-# mask now has the same shape as main_image
-print(f"Main image shape: {main_image.array.shape}")
-print(f"Mask shape: {mask.array.shape}")  # Same as main_image
+# Load the 5th phase (40%) - 0-indexed
+img = load_image("cardiac_ct/", dataset_index=4)
+print(f"Loaded phase 4: {img.array.shape}")
 ```
 
-#### Merging Multiple Cropped Masks
+### Phase Detection Methods
 
-When you have multiple cropped segmentation files (e.g., one per anatomical region), use `load_and_merge_images` with `reposition_to_reference=True`:
+Multi-phase detection uses these DICOM tags (in priority order):
+
+1. `NominalPercentageOfCardiacPhase` - Cardiac phases
+2. `TemporalPositionIdentifier` - Temporal positions
+3. `TriggerTime` - Trigger times
+4. `AcquisitionNumber` - Acquisition numbers
+5. `EchoNumber` - Echo numbers
+6. Duplicate spatial positions (fallback)
+
+---
+
+## DICOM Segmentation (SEG) Loading
+
+Pictologics supports loading DICOM Segmentation objects (SEG files). SEG files contain segmentation masks in DICOM format, often with multiple labeled structures (segments).
+
+### Basic SEG Loading
 
 ```python
-from pictologics import load_image, load_and_merge_images
-from pathlib import Path
+from pictologics import load_seg, load_image
+from pictologics.utilities import visualize_slices
 
-# Load the main image
-main_image = load_image("patient/ct_scan/", recursive=True)
+# Load a DICOM SEG file
+mask = load_seg("segmentation.dcm")
 
-# Find all segmentation files
-seg_folder = Path("patient/segmentations/")
-seg_files = [str(f) for f in seg_folder.glob("*.dcm")]
-
-# Load and merge all cropped masks
-merged_mask = load_and_merge_images(
-    image_paths=seg_files,
-    reference_image=main_image,
-    reposition_to_reference=True,  # Enable cropped mask repositioning
-    conflict_resolution="max",      # How to handle overlapping regions
-)
-
-# Now visualize
-from pictologics.utilities import visualize_mask_overlay
-visualize_mask_overlay(main_image, merged_mask)
+# Auto-detection also works with load_image()
+mask = load_image("segmentation.dcm")
 ```
 
-### Handling Axis Transposition
+### Merging All Segments into One Mask
 
-Some imaging software may store masks with different axis orderings. Use the `transpose_axes` parameter to correct this:
+By default, `load_seg()` combines all segments into a single label image where each segment gets its numeric label (1, 2, 3, etc.):
 
 ```python
-# If the mask has Y and Z axes swapped
-merged_mask = load_and_merge_images(
-    image_paths=seg_files,
-    reference_image=main_image,
-    reposition_to_reference=True,
-    transpose_axes=(0, 2, 1),  # Swap Y and Z before repositioning
-)
+# All segments combined - voxel values are segment numbers
+combined_mask = load_seg("cardiac_seg.dcm")
+print(np.unique(combined_mask.array))  # [0, 1, 2, 3, ...]
+
+# Background = 0, Segment 1 = 1, Segment 2 = 2, etc.
 ```
 
-### Error Handling
+### Selecting Specific Segments
 
-| Issue | Behavior |
-|-------|----------|
-| Spacing mismatch | `ValueError` raised (resampling not yet supported) |
-| Orientation mismatch | Warning emitted, positioning continues |
-| Mask outside reference bounds | Warning emitted, empty volume returned |
-| Partial overlap | Valid region is positioned, rest is clipped |
-
-### Multi-Label Masks with `relabel_masks`
-
-When loading multiple binary mask files (each containing only 0 and 1), you often want to distinguish them visually with different colors. The `relabel_masks` parameter automatically assigns unique label values (1, 2, 3, ...) to each file:
+Use `segment_numbers` to load only specific segments:
 
 ```python
-from pictologics import load_image, load_and_merge_images
-from pictologics.utilities import visualize_mask_overlay
-from pathlib import Path
+# Load only segments 1 and 3 (skip segment 2)
+mask = load_seg("seg.dcm", segment_numbers=[1, 3])
 
-# Load the main CT scan
-main_image = load_image("patient/ct_scan/", recursive=True)
-
-# Find all AHA segment mask files (17 files)
-seg_folder = Path("patient/aha_segments/")
-seg_files = sorted(seg_folder.glob("*.dcm"))  # Sorted for consistent labeling
-
-# Merge with unique labels per file
-merged_mask = load_and_merge_images(
-    image_paths=[str(f) for f in seg_files],
-    reference_image=main_image,
-    reposition_to_reference=True,
-    relabel_masks=True,  # Each file gets a unique label: 1, 2, 3, ...
-    conflict_resolution="max",
-)
-
-# Result: merged_mask.array contains values [0, 1, 2, 3, ..., 17]
-# where 0 = background, 1 = first file, 2 = second file, etc.
-
-# Visualize with different colors per segment
-visualize_mask_overlay(main_image, merged_mask, colormap="tab20")
+# Load just the first segment
+single_mask = load_seg("seg.dcm", segment_numbers=[1])
 ```
 
-!!! tip "Label Order"
-    Labels are assigned based on the order of files in `image_paths`. Use `sorted()` for consistent ordering, or specify the exact order you want.
+### Loading Segments Separately
 
-**Without vs With `relabel_masks`:**
+Use `combine_segments=False` to get each segment as a separate binary mask:
 
-| Parameter | Resulting Values | Use Case |
-|-----------|-----------------|----------|
-| `relabel_masks=False` (default) | `[0, 1]` (binary) | Single combined ROI |
-| `relabel_masks=True` | `[0, 1, 2, ..., N]` (multi-label) | Visualizing distinct regions |
+```python
+# Get each segment as a separate binary mask
+masks = load_seg("seg.dcm", combine_segments=False)
+
+# Iterate over segments
+for seg_num, mask in masks.items():
+    print(f"Segment {seg_num}: {mask.array.sum()} voxels")
+    
+# Process each segment for radiomics
+for seg_num, mask in masks.items():
+    features = pipeline.run(image=ct, mask=mask)
+```
+
+### Combining Specific Segments into One Binary Mask
+
+To merge selected segments into a single binary mask:
+
+```python
+# Load specific segments separately
+masks = load_seg("seg.dcm", segment_numbers=[1, 2], combine_segments=False)
+
+# Combine into single binary mask
+combined = masks[1].array | masks[2].array  # Logical OR
+```
+
+### Alignment with Reference Image
+
+SEG files may have different geometry than the original image. Use `reference_image` to align:
+
+```python
+# Load the reference CT image
+ct = load_image("ct_scan/", recursive=True)
+
+# Load SEG aligned to CT geometry
+mask = load_seg("seg.dcm", reference_image=ct)
+
+# Now mask has the same dimensions as ct
+print(f"CT shape: {ct.array.shape}")
+print(f"Mask shape: {mask.array.shape}")  # Matches CT
+
+# Visualize overlay
+visualize_slices(image=ct, mask=mask, colormap="tab20")
+```
+
+### Complete Workflow Example
+
+```python
+from pictologics import load_image, load_seg
+from pictologics.loaders import get_segment_info
+from pictologics.utilities import visualize_slices
+
+# 1. Inspect segment metadata
+segments = get_segment_info("cardiac_seg.dcm")
+for seg in segments:
+    print(f"Segment {seg['SegmentNumber']}: {seg['SegmentLabel']}")
+
+# 2. Load reference image
+ct = load_image("ct_series/", recursive=True)
+
+# 3. Load specific segments aligned to reference
+# Example: Load left ventricle (1) and myocardium (2)
+mask = load_seg(
+    "cardiac_seg.dcm",
+    segment_numbers=[1, 2],
+    combine_segments=True,
+    reference_image=ct
+)
+
+# 4. Visualize
+visualize_slices(image=ct, mask=mask, colormap="tab10", alpha=0.5)
+```
+
+
+
+## DICOM Structured Reports (SR)
+
+Parse DICOM Structured Reports to extract measurements and tabular data.
+
+### Loading and Parsing SR
+
+```python
+from pictologics.utilities import SRDocument
+
+sr = SRDocument.from_file("measurements.dcm")
+print(f"Template: {sr.template_id}")
+print(f"Groups: {len(sr.measurement_groups)}")
+```
+
+### Extracting Measurements
+
+```python
+# Get as DataFrame
+df = sr.get_measurements_df()
+print(df[["measurement_name", "value", "unit"]])
+
+# Export to files
+sr.export_csv("measurements.csv")
+sr.export_json("measurements.json")
+```
+
+### Batch SR Processing
+
+For processing multiple SR files from folders, use `SRDocument.from_folders()`:
+
+```python
+from pictologics.utilities import SRDocument
+
+# Process all SR files in a folder (recursive by default)
+batch = SRDocument.from_folders(
+    paths=["dicom_data/"],
+    num_workers=4,  # Parallel processing
+    output_dir="sr_exports/",  # Auto-export each SR
+    export_csv=True,
+    export_json=True,
+)
+
+# Access results
+print(f"Processed {len(batch.documents)} SR files")
+
+# Get combined measurements from all SRs
+df = batch.get_combined_measurements_df()
+print(df.head())
+
+# Export combined data
+batch.export_combined_csv("sr_exports/all_measurements.csv")
+batch.export_log("sr_exports/processing_log.csv")
+```
+
+### Output Structure
+
+When `output_dir` is specified:
+```
+sr_exports/
+├── all_measurements.csv       # Combined measurements (optional)
+├── processing_log.csv         # Log of all processed files
+├── 1_2_3_4_5_6.csv           # Individual SR (if export_csv=True)
+├── 1_2_3_4_5_6.json          # Individual SR (if export_json=True)
+└── ...
+```
+
+### Processing Log
+
+The processing log tracks each file:
+
+| Column | Description |
+|--------|-------------|
+| file_path | Source SR file path |
+| sop_instance_uid | SOP Instance UID |
+| status | "success" or "error" |
+| num_measurements | Count of measurements |
+| csv_path | Path to exported CSV |
+| json_path | Path to exported JSON |
+| error_message | Error details if failed |
+

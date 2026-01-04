@@ -8,7 +8,7 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://martonkolossvary.github.io/pictologics/)
 [![PyPI](https://img.shields.io/pypi/v/pictologics)](https://pypi.org/project/pictologics/)
 [![Python](https://img.shields.io/pypi/pyversions/pictologics)](https://pypi.org/project/pictologics/)
-[![Downloads](https://img.shields.io/pepy/dt/pictologics)](https://pypi.org/project/pictologics/)
+[![Downloads](https://img.shields.io/pypi/dm/pictologics)](https://pypi.org/project/pictologics/)
 [![License](https://img.shields.io/github/license/martonkolossvary/pictologics)](https://github.com/martonkolossvary/pictologics/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/martonkolossvary/pictologics/graph/badge.svg)](https://codecov.io/gh/martonkolossvary/pictologics)
 [![Ruff](https://img.shields.io/badge/ruff-0%20issues-261230.svg)](https://github.com/astral-sh/ruff)
@@ -130,7 +130,7 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 ### Code Health
 
-- **Test Coverage**: 100.00%
+- **Test Coverage**: 99.87%
 - **Mypy Errors**: 0
 - **Ruff Issues**: 0
 

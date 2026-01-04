@@ -181,6 +181,16 @@ You want to:
     the most `.dcm` files and uses that as the series root.
 - **Multiple masks in one SEG**: If your segmentation DICOM encodes multiple labels (e.g., values 1..N), the
     `_binarize_segmentation_mask(...)` step turns it into a single ROI by keeping all voxels where the value is `> 0`.
+- **Multi-phase DICOM series**: If your image series contains multiple phases (e.g., cardiac CT with 10%, 20%... phases),
+    use `get_dicom_phases()` to discover available phases and `dataset_index` to select one:
+    ```python
+    from pictologics.utilities import get_dicom_phases
+    
+    phases = get_dicom_phases(str(image_root))
+    print(f"Found {len(phases)} phases")
+    # Load a specific phase (default is 0)
+    image = load_image(str(image_root), recursive=True, dataset_index=0)
+    ```
 
 ### Full example script
 

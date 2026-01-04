@@ -4,7 +4,9 @@ Pictologics Utilities
 
 This module provides utilities for:
 - Organizing DICOM files into hierarchical databases
-- Visualizing mask overlays on medical images
+- Detecting multi-phase DICOM series
+- Parsing DICOM Structured Reports (SR) for measurement extraction
+- Visualizing medical images and segmentation masks
 
 Key Features:
 - Recursive folder scanning with progress indication
@@ -12,8 +14,10 @@ Key Features:
 - Multi-level DataFrame exports (Patient/Study/Series/Instance)
 - Completeness validation using spatial geometry
 - CSV and JSON export capabilities
-- Interactive mask overlay visualization
-- Batch export of overlay images
+- SR measurement extraction to DataFrame/CSV/JSON
+- Interactive slice visualization with optional mask overlay
+- Batch export of slice images (PNG, JPEG, TIFF)
+- Window/Level normalization for CT/MR viewing
 """
 
 from .dicom_database import (
@@ -23,9 +27,21 @@ from .dicom_database import (
     DicomSeries,
     DicomStudy,
 )
-from .mask_visualization import (
-    save_mask_overlay_slices,
-    visualize_mask_overlay,
+from .dicom_utils import (
+    DicomPhaseInfo,
+    get_dicom_phases,
+    split_dicom_phases,
+)
+from .sr_parser import (
+    SRBatch,
+    SRDocument,
+    SRMeasurement,
+    SRMeasurementGroup,
+    is_dicom_sr,
+)
+from .visualization import (
+    save_slices,
+    visualize_slices,
 )
 
 __all__ = [
@@ -35,7 +51,17 @@ __all__ = [
     "DicomStudy",
     "DicomSeries",
     "DicomInstance",
-    # Mask Visualization
-    "save_mask_overlay_slices",
-    "visualize_mask_overlay",
+    # DICOM Utilities
+    "DicomPhaseInfo",
+    "get_dicom_phases",
+    "split_dicom_phases",
+    # SR Parser
+    "SRBatch",
+    "SRDocument",
+    "SRMeasurement",
+    "SRMeasurementGroup",
+    "is_dicom_sr",
+    # Visualization
+    "save_slices",
+    "visualize_slices",
 ]
