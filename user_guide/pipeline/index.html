@@ -13,10 +13,10 @@
       
       
       
-        <link rel="prev" href="../quickstart/">
+        <link rel="prev" href="../feature_calculations/">
       
       
-        <link rel="next" href="../case_examples/">
+        <link rel="next" href="../utilities/">
       
       
         
@@ -346,6 +346,63 @@
   
 
       
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CHANGELOG/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../LICENSE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  License
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../NOTICE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notice
+
+      </a>
+    </li>
+  
+
+      
     </ul>
   </div>
 </nav>
@@ -509,14 +566,42 @@
   
   
     <li class="md-nav__item">
-      <a href="../quickstart/" class="md-nav__link">
+      <a href="../data_loading/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Quick Start
+    Data Loading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../feature_calculations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Feature Calculations
   
 
     
@@ -944,6 +1029,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../utilities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utilities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../case_examples/" class="md-nav__link">
         
   
@@ -1038,7 +1151,7 @@
   <span class="md-ellipsis">
     
   
-    Loader
+    Loaders
   
 
     
@@ -1122,7 +1235,35 @@
   <span class="md-ellipsis">
     
   
-    Results Support
+    Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utilities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utilities
   
 
     
@@ -1156,10 +1297,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
         
           
-          <label class="md-nav__link" for="__nav_3_5" id="__nav_3_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
             
   
   
@@ -1177,8 +1318,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_5">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1356,6 +1497,87 @@
     
   
     Quality Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../LICENSE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    License
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../NOTICE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notice
   
 
     
@@ -1929,7 +2151,9 @@ For images larger than <strong>50×50×50</strong> voxels, this is generally <st
 <li><code>round_intensities</code>: Whether to round image intensities to nearest integer after resampling. Default: <code>False</code>.</li>
 </ul>
 <h4 id="2-resegment">2. <code>resegment</code></h4>
-<p>Refines the mask based on intensity thresholds (e.g., excluding bone from a soft tissue mask).</p>
+<p>Refines the mask based on intensity thresholds (e.g., excluding bone from a soft tissue mask).
+This is also the <strong>IBSI-recommended approach</strong> for filtering out <strong>sentinel/NA values</strong> (e.g., -1024, -2048 in DICOM)
+that represent missing or invalid data.</p>
 <ul>
 <li><code>range_min</code>: Minimum intensity value.</li>
 <li><code>range_max</code>: Maximum intensity value.</li>
@@ -2200,7 +2424,7 @@ but may not be scientifically meaningful for many radiomics studies.</p>
       <div class="md-copyright">
   
     <div class="md-copyright__highlight">
-      Copyright &copy; 2025 Márton Kolossváry. Licensed under Apache 2.0.
+      Copyright &copy; 2026 Márton Kolossváry. Licensed under Apache 2.0.
     </div>
   
   

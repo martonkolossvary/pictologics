@@ -346,6 +346,63 @@
   
 
       
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../CHANGELOG/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../LICENSE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  License
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../NOTICE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notice
+
+      </a>
+    </li>
+  
+
+      
     </ul>
   </div>
 </nav>
@@ -504,14 +561,42 @@
   
   
     <li class="md-nav__item">
-      <a href="../user_guide/quickstart/" class="md-nav__link">
+      <a href="../user_guide/data_loading/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Quick Start
+    Data Loading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_guide/feature_calculations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Feature Calculations
   
 
     
@@ -540,6 +625,34 @@
     
   
     Pipeline Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_guide/utilities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utilities
   
 
     
@@ -654,7 +767,7 @@
   <span class="md-ellipsis">
     
   
-    Loader
+    Loaders
   
 
     
@@ -738,7 +851,35 @@
   <span class="md-ellipsis">
     
   
-    Results Support
+    Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/utilities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utilities
   
 
     
@@ -772,10 +913,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
         
           
-          <label class="md-nav__link" for="__nav_3_5" id="__nav_3_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
             
   
   
@@ -793,8 +934,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_5">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1589,6 +1730,87 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../LICENSE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    License
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../NOTICE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -2264,11 +2486,8 @@
 <a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a><span class="nb">print</span><span class="p">(</span><span class="n">results</span><span class="p">[</span><span class="s2">&quot;ibsi_config_c&quot;</span><span class="p">])</span>
 </code></pre></div>
 <h2 id="known-deviations">Known Deviations</h2>
-<p>For configuration D, Zone size non-uniformity and Zone size entropy are known to fail with minimal differences, but pass for all other conffigurations. The following morphological features consistently fail across all configurations due to differences in surface mesh generation algorithms:</p>
-<ul>
-<li><strong>Compactness 2 (BQWJ)</strong>: Sensitive to surface area calculation differences.</li>
-<li><strong>Asphericity (25C7)</strong>: Derived from Compactness 2, inheriting the same deviation.</li>
-</ul>
+<p>For configuration D, <em>Zone size non-uniformity</em> and <em>Zone size entropy</em> fail with minimal differences, but pass for all other conffigurations. <em>Compactness 2</em> and <em>Asphericity</em> fail across all configurations due to differences in surface mesh generation algorithms.
+Pictologics considers all data as 3D volumes (even 2D slices are converted to 3D volumes) and does not support 2D radiomic extraction mechanisms. Therefore, benchmark comparisons to configuration A and B are not possible.</p>
 <h2 id="digital-phantom">Digital Phantom</h2>
 <h3 id="morphology">Morphology</h3>
 <table>
@@ -8478,7 +8697,7 @@
       <div class="md-copyright">
   
     <div class="md-copyright__highlight">
-      Copyright &copy; 2025 Márton Kolossváry. Licensed under Apache 2.0.
+      Copyright &copy; 2026 Márton Kolossváry. Licensed under Apache 2.0.
     </div>
   
   

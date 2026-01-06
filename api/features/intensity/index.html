@@ -13,7 +13,7 @@
       
       
       
-        <link rel="prev" href="../../results/">
+        <link rel="prev" href="../../utilities/">
       
       
         <link rel="next" href="../morphology/">
@@ -346,6 +346,63 @@
   
 
       
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../CHANGELOG/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../LICENSE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  License
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../NOTICE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Notice
+
+      </a>
+    </li>
+  
+
+      
     </ul>
   </div>
 </nav>
@@ -504,14 +561,42 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../user_guide/quickstart/" class="md-nav__link">
+      <a href="../../../user_guide/data_loading/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Quick Start
+    Data Loading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../user_guide/feature_calculations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Feature Calculations
   
 
     
@@ -540,6 +625,34 @@
     
   
     Pipeline Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../user_guide/utilities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utilities
   
 
     
@@ -659,7 +772,7 @@
   <span class="md-ellipsis">
     
   
-    Loader
+    Loaders
   
 
     
@@ -743,7 +856,35 @@
   <span class="md-ellipsis">
     
   
-    Results Support
+    Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utilities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utilities
   
 
     
@@ -782,10 +923,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_3_5" id="__nav_3_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="">
             
   
   
@@ -803,8 +944,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_5_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_3_5">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1152,6 +1293,87 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../LICENSE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    License
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../NOTICE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -1464,14 +1686,14 @@ spatial feature calculations.</p>
 <span class="normal"><a href="#__codelineno-0-386">386</a></span>
 <span class="normal"><a href="#__codelineno-0-387">387</a></span>
 <span class="normal"><a href="#__codelineno-0-388">388</a></span>
-<span class="normal"><a href="#__codelineno-0-389">389</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-301" name="__codelineno-0-301"></a><span class="k">def</span><span class="w"> </span><span class="nf">calculate_intensity_features</span><span class="p">(</span><span class="n">values</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="normal"><a href="#__codelineno-0-389">389</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-301" name="__codelineno-0-301"></a><span class="k">def</span><span class="w"> </span><span class="nf">calculate_intensity_features</span><span class="p">(</span><span class="n">values</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
 <a id="__codelineno-0-302" name="__codelineno-0-302"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <a id="__codelineno-0-303" name="__codelineno-0-303"></a><span class="sd">    Calculate intensity-based features (First Order Statistics) as defined in IBSI.</span>
 <a id="__codelineno-0-304" name="__codelineno-0-304"></a><span class="sd">    &quot;&quot;&quot;</span>
 <a id="__codelineno-0-305" name="__codelineno-0-305"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">values</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
 <a id="__codelineno-0-306" name="__codelineno-0-306"></a>        <span class="k">return</span> <span class="p">{}</span>
 <a id="__codelineno-0-307" name="__codelineno-0-307"></a>
-<a id="__codelineno-0-308" name="__codelineno-0-308"></a>    <span class="n">features</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-308" name="__codelineno-0-308"></a>    <span class="n">features</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
 <a id="__codelineno-0-309" name="__codelineno-0-309"></a>
 <a id="__codelineno-0-310" name="__codelineno-0-310"></a>    <span class="c1"># 4.1.1 Mean intensity (Q4LE)</span>
 <a id="__codelineno-0-311" name="__codelineno-0-311"></a>    <span class="n">mean_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">values</span><span class="p">)</span>
@@ -1686,12 +1908,12 @@ spatial feature calculations.</p>
 <span class="normal"><a href="#__codelineno-0-500">500</a></span>
 <span class="normal"><a href="#__codelineno-0-501">501</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-392" name="__codelineno-0-392"></a><span class="k">def</span><span class="w"> </span><span class="nf">calculate_intensity_histogram_features</span><span class="p">(</span>
 <a id="__codelineno-0-393" name="__codelineno-0-393"></a>    <span class="n">discretised_values</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
-<a id="__codelineno-0-394" name="__codelineno-0-394"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<a id="__codelineno-0-394" name="__codelineno-0-394"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
 <a id="__codelineno-0-395" name="__codelineno-0-395"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate intensity histogram features as defined in IBSI 4.2.&quot;&quot;&quot;</span>
 <a id="__codelineno-0-396" name="__codelineno-0-396"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">discretised_values</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
 <a id="__codelineno-0-397" name="__codelineno-0-397"></a>        <span class="k">return</span> <span class="p">{}</span>
 <a id="__codelineno-0-398" name="__codelineno-0-398"></a>
-<a id="__codelineno-0-399" name="__codelineno-0-399"></a>    <span class="n">features</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-399" name="__codelineno-0-399"></a>    <span class="n">features</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
 <a id="__codelineno-0-400" name="__codelineno-0-400"></a>
 <a id="__codelineno-0-401" name="__codelineno-0-401"></a>    <span class="n">disc</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">discretised_values</span><span class="p">)</span>
 <a id="__codelineno-0-402" name="__codelineno-0-402"></a>    <span class="n">n</span> <span class="o">=</span> <span class="n">disc</span><span class="o">.</span><span class="n">size</span>
@@ -2046,7 +2268,7 @@ spatial feature calculations.</p>
 <a id="__codelineno-0-508" name="__codelineno-0-508"></a>    <span class="n">max_val</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <a id="__codelineno-0-509" name="__codelineno-0-509"></a>    <span class="n">target_range_min</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <a id="__codelineno-0-510" name="__codelineno-0-510"></a>    <span class="n">target_range_max</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-511" name="__codelineno-0-511"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<a id="__codelineno-0-511" name="__codelineno-0-511"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
 <a id="__codelineno-0-512" name="__codelineno-0-512"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <a id="__codelineno-0-513" name="__codelineno-0-513"></a><span class="sd">    Calculate Intensity-Volume Histogram (IVH) features.</span>
 <a id="__codelineno-0-514" name="__codelineno-0-514"></a>
@@ -2055,7 +2277,7 @@ spatial feature calculations.</p>
 <a id="__codelineno-0-517" name="__codelineno-0-517"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">discretised_values</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
 <a id="__codelineno-0-518" name="__codelineno-0-518"></a>        <span class="k">return</span> <span class="p">{}</span>
 <a id="__codelineno-0-519" name="__codelineno-0-519"></a>
-<a id="__codelineno-0-520" name="__codelineno-0-520"></a>    <span class="n">features</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-520" name="__codelineno-0-520"></a>    <span class="n">features</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
 <a id="__codelineno-0-521" name="__codelineno-0-521"></a>    <span class="n">N</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">discretised_values</span><span class="p">)</span>
 <a id="__codelineno-0-522" name="__codelineno-0-522"></a>
 <a id="__codelineno-0-523" name="__codelineno-0-523"></a>    <span class="n">vals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">discretised_values</span><span class="p">)</span>
@@ -2334,14 +2556,14 @@ spatial feature calculations.</p>
 <a id="__codelineno-0-797" name="__codelineno-0-797"></a>    <span class="n">mask</span><span class="p">:</span> <span class="n">Image</span><span class="p">,</span>
 <a id="__codelineno-0-798" name="__codelineno-0-798"></a>    <span class="o">*</span><span class="p">,</span>
 <a id="__codelineno-0-799" name="__codelineno-0-799"></a>    <span class="n">enabled</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-0-800" name="__codelineno-0-800"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<a id="__codelineno-0-800" name="__codelineno-0-800"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
 <a id="__codelineno-0-801" name="__codelineno-0-801"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <a id="__codelineno-0-802" name="__codelineno-0-802"></a><span class="sd">    Calculate local intensity features: Local and Global Intensity Peak (IBSI 4.5).</span>
 <a id="__codelineno-0-803" name="__codelineno-0-803"></a><span class="sd">    &quot;&quot;&quot;</span>
 <a id="__codelineno-0-804" name="__codelineno-0-804"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">enabled</span><span class="p">:</span>
 <a id="__codelineno-0-805" name="__codelineno-0-805"></a>        <span class="k">return</span> <span class="p">{}</span>
 <a id="__codelineno-0-806" name="__codelineno-0-806"></a>
-<a id="__codelineno-0-807" name="__codelineno-0-807"></a>    <span class="n">features</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-807" name="__codelineno-0-807"></a>    <span class="n">features</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
 <a id="__codelineno-0-808" name="__codelineno-0-808"></a>
 <a id="__codelineno-0-809" name="__codelineno-0-809"></a>    <span class="n">mask_array</span> <span class="o">=</span> <span class="n">mask</span><span class="o">.</span><span class="n">array</span>
 <a id="__codelineno-0-810" name="__codelineno-0-810"></a>    <span class="n">data</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">array</span>
@@ -2465,14 +2687,14 @@ spatial feature calculations.</p>
 <a id="__codelineno-0-731" name="__codelineno-0-731"></a>    <span class="n">mask</span><span class="p">:</span> <span class="n">Image</span><span class="p">,</span>
 <a id="__codelineno-0-732" name="__codelineno-0-732"></a>    <span class="o">*</span><span class="p">,</span>
 <a id="__codelineno-0-733" name="__codelineno-0-733"></a>    <span class="n">enabled</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-0-734" name="__codelineno-0-734"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<a id="__codelineno-0-734" name="__codelineno-0-734"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
 <a id="__codelineno-0-735" name="__codelineno-0-735"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <a id="__codelineno-0-736" name="__codelineno-0-736"></a><span class="sd">    Calculate spatial intensity features: Moran&#39;s I and Geary&#39;s C (IBSI 4.4).</span>
 <a id="__codelineno-0-737" name="__codelineno-0-737"></a><span class="sd">    &quot;&quot;&quot;</span>
 <a id="__codelineno-0-738" name="__codelineno-0-738"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">enabled</span><span class="p">:</span>
 <a id="__codelineno-0-739" name="__codelineno-0-739"></a>        <span class="k">return</span> <span class="p">{}</span>
 <a id="__codelineno-0-740" name="__codelineno-0-740"></a>
-<a id="__codelineno-0-741" name="__codelineno-0-741"></a>    <span class="n">features</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-741" name="__codelineno-0-741"></a>    <span class="n">features</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
 <a id="__codelineno-0-742" name="__codelineno-0-742"></a>
 <a id="__codelineno-0-743" name="__codelineno-0-743"></a>    <span class="n">mask_array</span> <span class="o">=</span> <span class="n">mask</span><span class="o">.</span><span class="n">array</span>
 <a id="__codelineno-0-744" name="__codelineno-0-744"></a>    <span class="n">data</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">array</span>
@@ -2574,7 +2796,7 @@ spatial feature calculations.</p>
       <div class="md-copyright">
   
     <div class="md-copyright__highlight">
-      Copyright &copy; 2025 Márton Kolossváry. Licensed under Apache 2.0.
+      Copyright &copy; 2026 Márton Kolossváry. Licensed under Apache 2.0.
     </div>
   
   
