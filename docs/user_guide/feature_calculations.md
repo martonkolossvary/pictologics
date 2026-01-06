@@ -1,15 +1,11 @@
-# Quick Start Guide
+# Feature Calculations
 
-This guide will walk you through the process of extracting radiomic features from a medical image using **Pictologics**.
+This guide walks you through extracting radiomic features from medical images using **Pictologics**.
 
 ## Prerequisites
 
-Ensure you have installed the package:
-```bash
-pip install pictologics
-```
-
 You will need:
+
 1.  A medical image (e.g., `image.nii.gz`, DICOM folder, or a single DICOM file).
 2.  Optionally a corresponding mask/segmentation (e.g., `mask.nii.gz`).
 
@@ -19,16 +15,18 @@ You will need:
     generating a full (all-ones) mask internally. This can be useful for certain workflows (see the
     [Case examples](case_examples.md) page), but it may not be scientifically appropriate for all studies.
 
+Detailed information on how to load images and masks can be found in the [Data Loading](data_loading.md) guide.
+
 ## Method 1: The Radiomics Pipeline (Recommended)
 
-For reproducible research and standardisation, we recommend using the `RadiomicsPipeline`. This ensures that all preprocessing steps (resampling, resegmentation, discretisation) are applied consistently.
+For reproducible research and standardisation, use the `RadiomicsPipeline`. This ensures that all preprocessing steps (resampling, resegmentation, discretisation) are applied consistently.
 
 Pictologics includes a set of **Standard Configurations** commonly used in radiomic analyses. You can run all of them with a single command.
 
 !!! note
     **Default performance behavior**
     The built-in `standard_*` configurations disable the two most time-intensive intensity extras by default:
-    spatial intensity (Moran’s I / Geary’s C) and local intensity peak features.
+    spatial intensity (Moran's I / Geary's C) and local intensity peak features.
     
     If you need these metrics, see the customization examples below.
 
@@ -46,36 +44,84 @@ results = pipeline.run(
     config_names=["all_standard"]
 )
 
-# 3. Format and Export Results
-print(f"Successfully ran {len(results)} configurations.")
-
-#  Option A: Get a flat dictionary (Wide Format)
-#  Inject subject ID or other metadata directly into the row
+# 3. Format and Save Results
 row = format_results(
     results, 
     fmt="wide", 
-    meta={"subject_id": "Subject_001", "group": "control"}
+    meta={"subject_id": "Subject_001"}
 )
-
-#  Option B: Save to CSV immediately
-#  save_results handles list of dicts/dataframes automatically
 save_results([row], "results.csv")
+
+print(f"Saved {len(results)} configurations to results.csv")
 ```
+
+### Intelligent image routing
+
+The pipeline automatically uses the correct image for each feature family. After discretisation, the pipeline maintains both the **original (raw)** image and the **discretised** image, ensuring each feature type gets the appropriate input.
+
+| Feature Family | Image Used | Why |
+|----------------|------------|-----|
+| **Intensity** | Raw image | Statistics require original continuous values |
+| **Morphology** | Raw image | Volume/surface calculations use original geometry |
+| **Histogram** | Discretised | Bin-based statistics require integer bins |
+| **Texture** (GLCM, GLRLM, etc.) | Discretised | Co-occurrence matrices require discrete grey levels |
+| **IVH** | Configurable | Can use raw (continuous) or discretised values |
+
+**Example workflow:**
+
+```python
+pipeline.add_config("my_config", [
+    # Step 1: Resample to 0.5mm isotropic
+    {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5)}},
+    
+    # Step 2: Discretise with 32 bins (creates discretised copy)
+    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+    
+    # Step 3: Extract features (routing happens automatically)
+    {"step": "extract_features", "params": {
+        "families": ["intensity", "morphology", "texture", "histogram"]
+    }}
+])
+
+# When extract_features runs:
+# - intensity features → uses resampled raw image
+# - morphology features → uses resampled raw image  
+# - histogram features → uses discretised image
+# - texture features → uses discretised image
+```
+
+This means you don't need to worry about which image to pass — the pipeline handles it correctly.
 
 ### Working with results
 
-The `pictologics.results` module makes it easy to handle outputs, especially for batch processing.
+The `format_results()` function converts pipeline output into different formats for analysis or export.
 
-1.  **Wide Format**: One row per case, huge column count (e.g. `standard_fbn_32__original_glcm_Energy`).
+**Format Options (`fmt`):**
+
+1.  **Wide Format** (`fmt="wide"`): One row per subject with all features as columns.
+    Column names use the pattern `{config}__{feature}` (e.g., `standard_fbn_32__mean_intensity_Q4LE`).
     ```python
-    row = format_results(results, fmt="wide", meta={"id": "case1"})
+    row = format_results(results, fmt="wide", meta={"subject_id": "case1"})
+    # Returns: {"subject_id": "case1", "standard_fbn_32__mean_intensity_Q4LE": 123.4, ...}
     ```
 
-2.  **Long Format**: Tidy data, one row per feature. Great for analysis in R/Seaborn.
+2.  **Long Format** (`fmt="long"`): Tidy data with one row per feature. The configuration name is automatically included in a `config` column — you don't need to specify it in `meta`.
     ```python
-    df = format_results(results, fmt="long", meta={"id": "case1"}, output_type="pandas")
-    # Columns: [id, config, feature_name, value]
+    df = format_results(results, fmt="long", meta={"subject_id": "case1"}, output_type="pandas")
+    # Returns DataFrame with columns: [subject_id, config, feature_name, value]
+    # Example rows:
+    # | subject_id | config          | feature_name        | value  |
+    # |------------|-----------------|---------------------|--------|
+    # | case1      | standard_fbn_32 | mean_intensity_Q4LE | 123.4  |
+    # | case1      | standard_fbn_32 | volume_RNU0         | 5420.0 |
+    # | case1      | standard_fbs_8  | mean_intensity_Q4LE | 123.4  |
     ```
+
+**Output Types (`output_type`):**
+
+- `"dict"` (default): Returns a Python dictionary (wide) or list of dicts (long)
+- `"pandas"`: Returns a `pandas.DataFrame`
+- `"json"`: Returns a JSON string
 
 ### Batch Processing Pattern
 
@@ -120,7 +166,7 @@ pipeline = RadiomicsPipeline().add_config("my_custom_config", cfg)
 ## Performance notes (practical)
 
 *   **Spatial/local intensity** can be extremely slow on large ROIs. If you do not need them, keep `include_spatial_intensity=False` and `include_local_intensity=False`.
-*   **Texture** requires discretisation. If you request `"texture"` without discretising first, the pipeline can temporarily discretise **only** if you provide `texture_settings` in `extract_features` (e.g., `{"method": "FBN", "n_bins": 32}`). *However, doing this repeatedly for every texture family is slower than a single `discretise` step.*
+*   **Texture** requires discretisation. If you request `"texture"` without including a `discretise` step first, the pipeline will raise an error.
 *   If you are working with large 3D images, consider resampling to a coarser spacing for exploratory work.
 
 ## Method 2: Step-by-Step Manual Extraction

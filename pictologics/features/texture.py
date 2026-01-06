@@ -82,34 +82,7 @@ from numba import jit, prange
 from numba.np.ufunc.parallel import get_thread_id
 from scipy.ndimage import distance_transform_cdt
 
-
-def _compute_nonzero_bbox(mask: np.ndarray) -> Optional[tuple[slice, slice, slice]]:
-    """Compute the tight bounding box of non-zero voxels in a 3D mask.
-
-    Args:
-        mask: 3D array where non-zero indicates ROI.
-
-    Returns:
-        A tuple of slices (z, y, x) covering the non-zero region, or None if the mask is empty.
-    """
-    if mask.ndim != 3:
-        raise ValueError(f"Expected a 3D mask, got shape={mask.shape!r}")
-
-    m = mask != 0
-    z_any = np.any(m, axis=(1, 2))
-    if not bool(np.any(z_any)):
-        return None
-    y_any = np.any(m, axis=(0, 2))
-    x_any = np.any(m, axis=(0, 1))
-
-    z0 = int(np.argmax(z_any))
-    z1 = int(len(z_any) - 1 - np.argmax(z_any[::-1]))
-    y0 = int(np.argmax(y_any))
-    y1 = int(len(y_any) - 1 - np.argmax(y_any[::-1]))
-    x0 = int(np.argmax(x_any))
-    x1 = int(len(x_any) - 1 - np.argmax(x_any[::-1]))
-
-    return slice(z0, z1 + 1), slice(y0, y1 + 1), slice(x0, x1 + 1)
+from ._utils import compute_nonzero_bbox
 
 
 def _maybe_crop_to_bbox(
@@ -139,7 +112,7 @@ def _maybe_crop_to_bbox(
     if distance_mask is not None:
         union = union | (distance_mask != 0)
 
-    bbox = _compute_nonzero_bbox(union)
+    bbox = compute_nonzero_bbox(union)
     if bbox is None:
         return data, mask, distance_mask
 
@@ -297,8 +270,24 @@ def _calculate_local_features_numba(
     if margin >= min(depth, height, width) // 2:
         margin = 0  # Fallback to full checks if image is too small relative to margin
 
+    # Pre-compute which z-slices have any ROI voxels (for slice-level skipping)
+    # This optimizes cases with disjoint ROIs or sparse masks
+    z_has_voxels = np.zeros(depth, dtype=np.uint8)
+    for z in range(depth):
+        for y in range(height):
+            for x in range(width):
+                if mask[z, y, x] > 0:
+                    z_has_voxels[z] = 1
+                    break
+            if z_has_voxels[z] > 0:
+                break
+
     # Iterate over all voxels (parallelized over z)
     for z in prange(depth):
+        # Skip entire z-slices with no ROI voxels
+        if z_has_voxels[z] == 0:
+            continue
+
         tid = get_thread_id()
 
         # Check if Z is in the safe interior

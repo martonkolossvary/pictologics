@@ -1,3 +1,17 @@
+"""
+Results Module
+==============
+
+This module provides utilities for formatting and saving radiomic feature
+extraction results. It supports multiple output formats (wide, long) and
+file formats (CSV, JSON).
+
+Key Functions:
+--------------
+- **format_results**: Convert pipeline output to various formats (dict, pandas DataFrame, JSON).
+- **save_results**: Save results to CSV or JSON files with automatic format detection.
+"""
+
 from __future__ import annotations
 
 import json

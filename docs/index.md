@@ -19,25 +19,25 @@ See also the [NOTICE](NOTICE.md) file for attribution and third-party library in
 
 ## Why Pictologics?
 
-*   **🚀 High Performance**: Uses `numba` for JIT compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](benchmarks.md) page for details).
+*   **🚀 High Performance**: Uses `numba` for Just In Time (JIT) compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](benchmarks.md) page for details).
 *   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantom ([IBSI compliance](ibsi_compliance.md) page for details).
-*   **🔧 Flexible**: Configurable pipeline for reproducible research. Provides utilities for DICOM parsing, organization and common image processing tasks.
-*   **✨ Easy to Use**: Pure python package, simple installation and a straightforward pipeline make it easy to get started quickly.
+*   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, DICOM, DICOM-SEG, DICOM-SR).
+*   **✨ User-Friendly**: Pure Python implementation with a simple installation process and an intuitive API, ensuring a smooth experience from setup to analysis.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
 
 
 ## Key Features
 
-*   **Loaders**: Support for NIfTI and DICOM image formats.
+*   **Loaders**: Support for NIfTI and DICOM image, segmentation (DICOM-SEG), and report (DICOM-SR) formats.
 *   **Preprocessing**: Resampling, resegmentation, outlier filtering, and discretisation.
 *   **Features**:
     *   **Morphology**: Volume, Surface Area, Compactness, etc.
     *   **Intensity**: Mean, Median, Skewness, Kurtosis, etc.
     *   **Texture**: GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM.
-*   **Utilities**: Built-in DICOM database parsing and organization.
+*   **Utilities**: Built-in DICOM database parsing, organization and viewing tools.
 
 ## Getting Started
 
 1.  **Install**: Follow the [Installation](user_guide/installation.md) guide.
-2.  **Learn**: Check the [Quick Start](user_guide/quickstart.md) tutorial.
+2.  **Learn**: Check the [Feature Calculations](user_guide/feature_calculations.md) guide.
 3.  **Reference**: Explore the [API Documentation](api/pipeline.md).

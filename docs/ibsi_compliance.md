@@ -76,10 +76,8 @@ print(results["ibsi_config_c"])
 ```
 
 ## Known Deviations
-For configuration D, Zone size non-uniformity and Zone size entropy are known to fail with minimal differences, but pass for all other conffigurations. The following morphological features consistently fail across all configurations due to differences in surface mesh generation algorithms:
-
-- **Compactness 2 (BQWJ)**: Sensitive to surface area calculation differences.
-- **Asphericity (25C7)**: Derived from Compactness 2, inheriting the same deviation.
+For configuration D, *Zone size non-uniformity* and *Zone size entropy* fail with minimal differences, but pass for all other conffigurations. *Compactness 2* and *Asphericity* fail across all configurations due to differences in surface mesh generation algorithms.
+Pictologics considers all data as 3D volumes (even 2D slices are converted to 3D volumes) and does not support 2D radiomic extraction mechanisms. Therefore, benchmark comparisons to configuration A and B are not possible.
 
 ## Digital Phantom
 ### Morphology

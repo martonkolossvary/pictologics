@@ -162,6 +162,8 @@ Resamples the image and mask to a new voxel spacing.
 
 #### 2. `resegment`
 Refines the mask based on intensity thresholds (e.g., excluding bone from a soft tissue mask).
+This is also the **IBSI-recommended approach** for filtering out **sentinel/NA values** (e.g., -1024, -2048 in DICOM)
+that represent missing or invalid data.
 
 *   `range_min`: Minimum intensity value.
 *   `range_max`: Maximum intensity value.

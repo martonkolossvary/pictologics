@@ -69,16 +69,16 @@ nav:
   - Home: index.md
   - User Guide:
     - Installation: user_guide/installation.md
-    - Quick Start: user_guide/quickstart.md
+    - Data Loading: user_guide/data_loading.md
+    - Feature Calculations: user_guide/feature_calculations.md
     - Pipeline Usage: user_guide/pipeline.md
     - Utilities: user_guide/utilities.md
-    - Image Manipulations: user_guide/image_manipulations.md
     - Case Examples: user_guide/case_examples.md
   - API Reference:
-    - Loader: api/loader.md
+    - Loaders: api/loader.md
     - Preprocessing: api/preprocessing.md
     - Pipeline: api/pipeline.md
-    - Results Support: api/results.md
+    - Results: api/results.md
     - Utilities: api/utilities.md
     - Features:
       - Intensity: api/features/intensity.md
@@ -88,3 +88,6 @@ nav:
   - IBSI Compliance: ibsi_compliance.md
   - Quality Report: quality.md
   - Changelog: CHANGELOG.md
+  - License: LICENSE.md
+  - Notice: NOTICE.md
+

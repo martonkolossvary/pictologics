@@ -294,6 +294,7 @@ def load_image(
     reference_image: Optional[Image] = None,
     transpose_axes: tuple[int, int, int] | None = None,
     fill_value: float = 0.0,
+    apply_rescale: bool = True,
 ) -> Image:
     """
     Load a medical image from a file path or directory.
@@ -333,6 +334,10 @@ def load_image(
             E.g., (0, 2, 1) swaps Y and Z axes. Only used when reference_image is provided.
         fill_value (float): Fill value for regions outside the loaded image when
             repositioning (default: 0.0). Only used when reference_image is provided.
+        apply_rescale (bool): If True (default), apply RescaleSlope and RescaleIntercept
+            transformation for DICOM files to convert stored pixel values to real-world
+            values (e.g., Hounsfield Units for CT). NIfTI files always apply their scaling
+            factors via nibabel's get_fdata(). Set to False if you need raw stored values.
 
     Returns:
         Image: An `Image` object containing the 3D numpy array and metadata (spacing, origin, etc.).
@@ -417,7 +422,7 @@ def load_image(
             target_path = path_obj
             if recursive:
                 target_path = _find_best_dicom_series_dir(path_obj)
-            loaded_image = _load_dicom_series(target_path, dataset_index)
+            loaded_image = _load_dicom_series(target_path, dataset_index, apply_rescale)
         elif path.lower().endswith((".nii", ".nii.gz")):
             loaded_image = _load_nifti(path, dataset_index)
         else:
@@ -435,7 +440,7 @@ def load_image(
                 return seg_result
 
             try:
-                loaded_image = _load_dicom_file(path)
+                loaded_image = _load_dicom_file(path, apply_rescale)
             except Exception:
                 raise ValueError(
                     f"Unsupported file format or unable to read file: {path}"
@@ -467,6 +472,7 @@ def load_and_merge_images(
     transpose_axes: tuple[int, int, int] | None = None,
     fill_value: float = 0.0,
     relabel_masks: bool = False,
+    apply_rescale: bool = True,
 ) -> Image:
     """
     Load multiple images (e.g., masks or partial scans) and merge them into a single image.
@@ -532,6 +538,9 @@ def load_and_merge_images(
             binary [0,1] masks into multi-label masks where each file gets a
             distinct label, useful for visualization with different colors.
             Label assignment respects the order of `image_paths`. Defaults to False.
+        apply_rescale (bool): If True (default), apply RescaleSlope and RescaleIntercept
+            transformation for DICOM files to convert stored pixel values to real-world
+            values (e.g., Hounsfield Units for CT). Set to False if you need raw stored values.
 
     **Note on Filtering:**
     The `binarize` parameter is intended for **mask filtering** (e.g., selecting specific ROI labels).
@@ -608,7 +617,10 @@ def load_and_merge_images(
         for i, path in enumerate(image_paths):
             try:
                 current_image = load_image(
-                    path, dataset_index=dataset_index, recursive=recursive
+                    path,
+                    dataset_index=dataset_index,
+                    recursive=recursive,
+                    apply_rescale=apply_rescale,
                 )
             except Exception as e:
                 raise ValueError(f"Failed to load image '{path}': {e}") from e
@@ -679,7 +691,10 @@ def load_and_merge_images(
         # Load the first image to serve as the consensus geometry
         try:
             consensus_image = load_image(
-                image_paths[0], dataset_index=dataset_index, recursive=recursive
+                image_paths[0],
+                dataset_index=dataset_index,
+                recursive=recursive,
+                apply_rescale=apply_rescale,
             )
         except Exception as e:
             raise ValueError(
@@ -696,7 +711,10 @@ def load_and_merge_images(
         for idx, path in enumerate(image_paths[1:], start=2):
             try:
                 current_image = load_image(
-                    path, dataset_index=dataset_index, recursive=recursive
+                    path,
+                    dataset_index=dataset_index,
+                    recursive=recursive,
+                    apply_rescale=apply_rescale,
                 )
             except Exception as e:
                 raise ValueError(f"Failed to load image '{path}': {e}") from e
@@ -870,7 +888,9 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
     )
 
 
-def _load_dicom_series(path: str | Path, dataset_index: int = 0) -> Image:
+def _load_dicom_series(
+    path: str | Path, dataset_index: int = 0, apply_rescale: bool = True
+) -> Image:
     """
     Load a DICOM series (a set of DICOM files) from a directory.
 
@@ -898,6 +918,9 @@ def _load_dicom_series(path: str | Path, dataset_index: int = 0) -> Image:
         path: Directory containing the DICOM files.
         dataset_index: For multi-phase series, which phase to load (0-indexed).
             Default is 0, which loads the first (or only) phase.
+        apply_rescale: If True (default), apply RescaleSlope and RescaleIntercept
+            to convert stored pixel values to real-world values (e.g., Hounsfield
+            Units for CT). Set to False to get raw stored values.
 
     Returns:
         Image: A standardized `Image` object.
@@ -1053,11 +1076,12 @@ def _load_dicom_series(path: str | Path, dataset_index: int = 0) -> Image:
         direction = np.eye(3)
 
     # Apply Rescale Slope and Intercept (Hounsfield Units conversion)
-    slope = getattr(ref, "RescaleSlope", 1.0)
-    intercept = getattr(ref, "RescaleIntercept", 0.0)
+    if apply_rescale:
+        slope = getattr(ref, "RescaleSlope", 1.0)
+        intercept = getattr(ref, "RescaleIntercept", 0.0)
 
-    if slope != 1.0 or intercept != 0.0:
-        volume = volume * slope + intercept
+        if slope != 1.0 or intercept != 0.0:
+            volume = volume.astype(np.float64) * float(slope) + float(intercept)
 
     return Image(
         array=volume,
@@ -1068,7 +1092,7 @@ def _load_dicom_series(path: str | Path, dataset_index: int = 0) -> Image:
     )
 
 
-def _load_dicom_file(path: str) -> Image:
+def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
     """
     Load a single DICOM file as a 3D image.
 
@@ -1078,6 +1102,9 @@ def _load_dicom_file(path: str) -> Image:
 
     Args:
         path (str): Path to the DICOM file.
+        apply_rescale (bool): If True (default), apply RescaleSlope and RescaleIntercept
+            to convert stored pixel values to real-world values (e.g., Hounsfield
+            Units for CT). Set to False to get raw stored values.
 
     Returns:
         Image: A standardized `Image` object.
@@ -1141,11 +1168,12 @@ def _load_dicom_file(path: str) -> Image:
     except (AttributeError, ValueError):
         direction = np.eye(3)
 
-    # Rescale
-    slope = getattr(dcm, "RescaleSlope", 1.0)
-    intercept = getattr(dcm, "RescaleIntercept", 0.0)
-    if slope != 1.0 or intercept != 0.0:
-        data = data * slope + intercept
+    # Rescale to real-world values (e.g., Hounsfield Units)
+    if apply_rescale:
+        slope = getattr(dcm, "RescaleSlope", 1.0)
+        intercept = getattr(dcm, "RescaleIntercept", 0.0)
+        if slope != 1.0 or intercept != 0.0:
+            data = data.astype(np.float64) * float(slope) + float(intercept)
 
     return Image(
         array=data,

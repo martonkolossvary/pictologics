@@ -1,3 +1,3 @@
-# Results Support
+# Results API
 
 ::: pictologics.results

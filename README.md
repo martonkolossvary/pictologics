@@ -130,7 +130,7 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 ### Code Health
 
-- **Test Coverage**: 99.87%
+- **Test Coverage**: 100.00%
 - **Mypy Errors**: 0
 - **Ruff Issues**: 0
 

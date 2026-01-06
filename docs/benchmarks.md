@@ -34,18 +34,18 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 |   Size | Discretization   | Pictologics-only Time   | Pictologics-only Mem   |
 |-------:|:-----------------|:------------------------|:-----------------------|
-|     25 | FBS 10.0         | 0.0306 s                | 0.81 MB                |
-|     25 | FBS 25.0         | 0.0300 s                | 0.81 MB                |
-|     25 | FBS 50.0         | 0.0295 s                | 0.81 MB                |
-|     25 | FBN 16           | 0.0275 s                | 0.81 MB                |
-|     25 | FBN 32           | 0.0356 s                | 0.81 MB                |
-|     25 | FBN 64           | 0.0339 s                | 0.81 MB                |
-|     50 | FBS 10.0         | 1.4161 s                | 6.33 MB                |
-|     50 | FBS 25.0         | 1.3752 s                | 6.33 MB                |
-|     50 | FBS 50.0         | 1.4271 s                | 6.33 MB                |
-|     50 | FBN 16           | 1.3548 s                | 6.33 MB                |
-|     50 | FBN 32           | 1.3427 s                | 6.33 MB                |
-|     50 | FBN 64           | 1.3978 s                | 6.33 MB                |
+|     25 | FBS 10.0         | 0.0274 s                | 0.81 MB                |
+|     25 | FBS 25.0         | 0.0271 s                | 0.81 MB                |
+|     25 | FBS 50.0         | 0.0278 s                | 0.81 MB                |
+|     25 | FBN 16           | 0.0289 s                | 0.81 MB                |
+|     25 | FBN 32           | 0.0286 s                | 0.81 MB                |
+|     25 | FBN 64           | 0.0271 s                | 0.81 MB                |
+|     50 | FBS 10.0         | 1.3368 s                | 6.33 MB                |
+|     50 | FBS 25.0         | 1.3378 s                | 6.33 MB                |
+|     50 | FBS 50.0         | 1.3259 s                | 6.33 MB                |
+|     50 | FBN 16           | 1.3124 s                | 6.33 MB                |
+|     50 | FBN 32           | 1.3183 s                | 6.33 MB                |
+|     50 | FBN 64           | 1.3167 s                | 6.33 MB                |
 |     75 | FBS 10.0         | Not calculated          | Not calculated         |
 |     75 | FBS 25.0         | Not calculated          | Not calculated         |
 |     75 | FBS 50.0         | Not calculated          | Not calculated         |
@@ -70,30 +70,30 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 |   Size | Discretization   | Pictologics-only Time   | Pictologics-only Mem   |
 |-------:|:-----------------|:------------------------|:-----------------------|
-|     25 | FBS 10.0         | 0.0044 s                | 1.11 MB                |
-|     25 | FBS 25.0         | 0.0046 s                | 1.10 MB                |
-|     25 | FBS 50.0         | 0.0044 s                | 1.11 MB                |
-|     25 | FBN 16           | 0.0043 s                | 1.10 MB                |
-|     25 | FBN 32           | 0.0049 s                | 1.10 MB                |
-|     25 | FBN 64           | 0.0043 s                | 1.10 MB                |
-|     50 | FBS 10.0         | 0.0104 s                | 5.37 MB                |
-|     50 | FBS 25.0         | 0.0107 s                | 5.37 MB                |
-|     50 | FBS 50.0         | 0.0107 s                | 5.37 MB                |
-|     50 | FBN 16           | 0.0110 s                | 5.37 MB                |
-|     50 | FBN 32           | 0.0105 s                | 5.37 MB                |
-|     50 | FBN 64           | 0.0110 s                | 5.37 MB                |
-|     75 | FBS 10.0         | 0.0170 s                | 8.77 MB                |
-|     75 | FBS 25.0         | 0.0180 s                | 8.77 MB                |
-|     75 | FBS 50.0         | 0.0168 s                | 8.77 MB                |
-|     75 | FBN 16           | 0.0170 s                | 8.77 MB                |
-|     75 | FBN 32           | 0.0172 s                | 8.77 MB                |
-|     75 | FBN 64           | 0.0161 s                | 8.77 MB                |
-|    100 | FBS 10.0         | 0.0312 s                | 20.40 MB               |
-|    100 | FBS 25.0         | 0.0351 s                | 20.40 MB               |
-|    100 | FBS 50.0         | 0.0343 s                | 20.40 MB               |
-|    100 | FBN 16           | 0.0351 s                | 20.40 MB               |
-|    100 | FBN 32           | 0.0349 s                | 20.40 MB               |
-|    100 | FBN 64           | 0.0342 s                | 20.40 MB               |
+|     25 | FBS 10.0         | 0.0042 s                | 1.17 MB                |
+|     25 | FBS 25.0         | 0.0039 s                | 1.17 MB                |
+|     25 | FBS 50.0         | 0.0041 s                | 1.17 MB                |
+|     25 | FBN 16           | 0.0041 s                | 1.17 MB                |
+|     25 | FBN 32           | 0.0041 s                | 1.17 MB                |
+|     25 | FBN 64           | 0.0041 s                | 1.17 MB                |
+|     50 | FBS 10.0         | 0.0101 s                | 5.43 MB                |
+|     50 | FBS 25.0         | 0.0102 s                | 5.43 MB                |
+|     50 | FBS 50.0         | 0.0107 s                | 5.43 MB                |
+|     50 | FBN 16           | 0.0104 s                | 5.43 MB                |
+|     50 | FBN 32           | 0.0105 s                | 5.43 MB                |
+|     50 | FBN 64           | 0.0108 s                | 5.43 MB                |
+|     75 | FBS 10.0         | 0.0168 s                | 8.84 MB                |
+|     75 | FBS 25.0         | 0.0166 s                | 8.84 MB                |
+|     75 | FBS 50.0         | 0.0166 s                | 8.84 MB                |
+|     75 | FBN 16           | 0.0172 s                | 8.84 MB                |
+|     75 | FBN 32           | 0.0165 s                | 8.84 MB                |
+|     75 | FBN 64           | 0.0164 s                | 8.84 MB                |
+|    100 | FBS 10.0         | 0.0325 s                | 20.46 MB               |
+|    100 | FBS 25.0         | 0.0317 s                | 20.46 MB               |
+|    100 | FBS 50.0         | 0.0316 s                | 20.46 MB               |
+|    100 | FBN 16           | 0.0317 s                | 20.46 MB               |
+|    100 | FBN 32           | 0.0325 s                | 20.46 MB               |
+|    100 | FBN 64           | 0.0320 s                | 20.46 MB               |
 
 
 ### Texture
@@ -127,8 +127,8 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 |    100 | FBS 10.0         | 0.0004 s                | 0.14 MB                |
 |    100 | FBS 25.0         | 0.0004 s                | 0.09 MB                |
 |    100 | FBS 50.0         | 0.0003 s                | 0.08 MB                |
-|    100 | FBN 16           | 0.0003 s                | 0.07 MB                |
-|    100 | FBN 32           | 0.0004 s                | 0.09 MB                |
+|    100 | FBN 16           | 0.0004 s                | 0.07 MB                |
+|    100 | FBN 32           | 0.0003 s                | 0.09 MB                |
 |    100 | FBN 64           | 0.0004 s                | 0.11 MB                |
 
 
@@ -136,76 +136,76 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 | Family     |   Size | Discretization   | Pictologics Time   | PyRadiomics Time   | Speedup   | Pictologics Mem   | PyRadiomics Mem   |
 |:-----------|-------:|:-----------------|:-------------------|:-------------------|:----------|:------------------|:------------------|
-| Intensity  |     25 | FBN 16           | 0.0009 s           | 0.0147 s           | 17.16x    | 0.24 MB           | 0.71 MB           |
-| Intensity  |     25 | FBN 32           | 0.0010 s           | 0.0144 s           | 15.01x    | 0.24 MB           | 0.71 MB           |
-| Intensity  |     25 | FBN 64           | 0.0010 s           | 0.0142 s           | 14.47x    | 0.24 MB           | 0.71 MB           |
-| Intensity  |     25 | FBS 10.0         | 0.0008 s           | 0.0169 s           | 20.63x    | 0.24 MB           | 0.74 MB           |
-| Intensity  |     25 | FBS 25.0         | 0.0008 s           | 0.0137 s           | 17.34x    | 0.24 MB           | 0.71 MB           |
-| Intensity  |     25 | FBS 50.0         | 0.0008 s           | 0.0138 s           | 16.95x    | 0.24 MB           | 0.71 MB           |
-| Intensity  |     50 | FBN 16           | 0.0030 s           | 0.0667 s           | 21.96x    | 1.40 MB           | 4.61 MB           |
-| Intensity  |     50 | FBN 32           | 0.0032 s           | 0.0648 s           | 20.46x    | 1.40 MB           | 4.61 MB           |
-| Intensity  |     50 | FBN 64           | 0.0033 s           | 0.0663 s           | 20.22x    | 1.40 MB           | 4.61 MB           |
-| Intensity  |     50 | FBS 10.0         | 0.0029 s           | 0.0672 s           | 22.91x    | 1.40 MB           | 4.61 MB           |
-| Intensity  |     50 | FBS 25.0         | 0.0031 s           | 0.0660 s           | 21.03x    | 1.40 MB           | 4.61 MB           |
-| Intensity  |     50 | FBS 50.0         | 0.0029 s           | 0.0668 s           | 22.83x    | 1.40 MB           | 4.61 MB           |
-| Intensity  |     75 | FBN 16           | 0.0111 s           | 0.2501 s           | 22.47x    | 5.81 MB           | 17.95 MB          |
-| Intensity  |     75 | FBN 32           | 0.0116 s           | 0.2554 s           | 21.95x    | 5.81 MB           | 17.95 MB          |
-| Intensity  |     75 | FBN 64           | 0.0114 s           | 0.2545 s           | 22.30x    | 5.81 MB           | 17.95 MB          |
-| Intensity  |     75 | FBS 10.0         | 0.0121 s           | 0.2655 s           | 22.00x    | 5.81 MB           | 17.95 MB          |
-| Intensity  |     75 | FBS 25.0         | 0.0118 s           | 0.2581 s           | 21.84x    | 5.81 MB           | 17.95 MB          |
-| Intensity  |     75 | FBS 50.0         | 0.0113 s           | 0.2597 s           | 23.05x    | 5.81 MB           | 17.95 MB          |
-| Intensity  |    100 | FBN 16           | 0.0286 s           | 0.5406 s           | 18.91x    | 12.16 MB          | 39.01 MB          |
-| Intensity  |    100 | FBN 32           | 0.0243 s           | 0.5494 s           | 22.57x    | 12.16 MB          | 39.01 MB          |
-| Intensity  |    100 | FBN 64           | 0.0256 s           | 0.5530 s           | 21.64x    | 12.16 MB          | 39.01 MB          |
-| Intensity  |    100 | FBS 10.0         | 0.0225 s           | 0.5270 s           | 23.44x    | 12.16 MB          | 39.01 MB          |
-| Intensity  |    100 | FBS 25.0         | 0.0242 s           | 0.5531 s           | 22.86x    | 12.16 MB          | 39.01 MB          |
-| Intensity  |    100 | FBS 50.0         | 0.0243 s           | 0.5535 s           | 22.77x    | 12.16 MB          | 39.01 MB          |
-| Morphology |     25 | FBN 16           | 0.0039 s           | 0.0542 s           | 13.89x    | 1.11 MB           | 1.18 MB           |
-| Morphology |     25 | FBN 32           | 0.0045 s           | 0.0555 s           | 12.31x    | 1.11 MB           | 1.18 MB           |
-| Morphology |     25 | FBN 64           | 0.0042 s           | 0.0554 s           | 13.30x    | 1.11 MB           | 1.18 MB           |
-| Morphology |     25 | FBS 10.0         | 0.0040 s           | 0.0547 s           | 13.61x    | 1.11 MB           | 1.18 MB           |
-| Morphology |     25 | FBS 25.0         | 0.0044 s           | 0.0543 s           | 12.40x    | 1.11 MB           | 1.18 MB           |
-| Morphology |     25 | FBS 50.0         | 0.0040 s           | 0.0541 s           | 13.54x    | 1.11 MB           | 1.18 MB           |
-| Morphology |     50 | FBN 16           | 0.0112 s           | 0.9511 s           | 85.25x    | 5.37 MB           | 8.68 MB           |
-| Morphology |     50 | FBN 32           | 0.0102 s           | 0.9521 s           | 93.71x    | 5.37 MB           | 8.68 MB           |
-| Morphology |     50 | FBN 64           | 0.0104 s           | 0.9533 s           | 91.49x    | 5.37 MB           | 8.68 MB           |
-| Morphology |     50 | FBS 10.0         | 0.0105 s           | 0.9559 s           | 90.90x    | 5.37 MB           | 8.68 MB           |
-| Morphology |     50 | FBS 25.0         | 0.0102 s           | 0.9498 s           | 93.31x    | 5.37 MB           | 8.68 MB           |
-| Morphology |     50 | FBS 50.0         | 0.0102 s           | 0.9475 s           | 92.82x    | 5.37 MB           | 8.68 MB           |
-| Morphology |     75 | FBN 16           | 0.0159 s           | 1.7204 s           | 108.02x   | 8.77 MB           | 36.60 MB          |
-| Morphology |     75 | FBN 32           | 0.0161 s           | 1.7285 s           | 107.06x   | 8.77 MB           | 36.60 MB          |
-| Morphology |     75 | FBN 64           | 0.0159 s           | 1.7150 s           | 107.60x   | 8.77 MB           | 36.60 MB          |
-| Morphology |     75 | FBS 10.0         | 0.0162 s           | 1.7469 s           | 107.98x   | 8.77 MB           | 36.60 MB          |
-| Morphology |     75 | FBS 25.0         | 0.0171 s           | 1.7401 s           | 101.56x   | 8.77 MB           | 36.60 MB          |
-| Morphology |     75 | FBS 50.0         | 0.0165 s           | 1.7340 s           | 105.06x   | 8.77 MB           | 36.60 MB          |
-| Morphology |    100 | FBN 16           | 0.0350 s           | 10.6975 s          | 305.45x   | 20.40 MB          | 77.49 MB          |
-| Morphology |    100 | FBN 32           | 0.0349 s           | 9.0469 s           | 259.51x   | 20.40 MB          | 77.49 MB          |
-| Morphology |    100 | FBN 64           | 0.0340 s           | 9.0318 s           | 265.49x   | 20.40 MB          | 77.49 MB          |
-| Morphology |    100 | FBS 10.0         | 0.0309 s           | 8.6890 s           | 281.09x   | 20.40 MB          | 77.49 MB          |
-| Morphology |    100 | FBS 25.0         | 0.0340 s           | 9.4016 s           | 276.65x   | 20.40 MB          | 77.49 MB          |
-| Morphology |    100 | FBS 50.0         | 0.0351 s           | 9.0966 s           | 258.90x   | 20.40 MB          | 77.49 MB          |
-| Texture    |     25 | FBN 16           | 0.0049 s           | 0.0514 s           | 10.43x    | 2.13 MB           | 0.69 MB           |
-| Texture    |     25 | FBN 32           | 0.0058 s           | 0.0542 s           | 9.34x     | 2.07 MB           | 0.75 MB           |
-| Texture    |     25 | FBN 64           | 0.0058 s           | 0.0672 s           | 11.55x    | 4.53 MB           | 1.94 MB           |
-| Texture    |     25 | FBS 10.0         | 0.0074 s           | 0.0999 s           | 13.47x    | 10.10 MB          | 3.77 MB           |
-| Texture    |     25 | FBS 25.0         | 0.0055 s           | 0.0552 s           | 9.94x     | 2.16 MB           | 0.91 MB           |
-| Texture    |     25 | FBS 50.0         | 0.0053 s           | 0.0515 s           | 9.78x     | 2.13 MB           | 0.71 MB           |
-| Texture    |     50 | FBN 16           | 0.0241 s           | 0.3061 s           | 12.69x    | 19.85 MB          | 6.29 MB           |
-| Texture    |     50 | FBN 32           | 0.0232 s           | 0.3062 s           | 13.19x    | 19.95 MB          | 6.29 MB           |
-| Texture    |     50 | FBN 64           | 0.0189 s           | 0.3191 s           | 16.90x    | 9.83 MB           | 4.82 MB           |
-| Texture    |     50 | FBS 10.0         | 0.0183 s           | 0.3598 s           | 19.66x    | 11.96 MB          | 5.41 MB           |
-| Texture    |     50 | FBS 25.0         | 0.0234 s           | 0.3079 s           | 13.17x    | 19.30 MB          | 6.09 MB           |
-| Texture    |     50 | FBS 50.0         | 0.0247 s           | 0.3012 s           | 12.22x    | 21.08 MB          | 6.60 MB           |
-| Texture    |     75 | FBN 16           | 0.0787 s           | 1.2109 s           | 15.38x    | 84.43 MB          | 25.62 MB          |
-| Texture    |     75 | FBN 32           | 0.0795 s           | 1.2032 s           | 15.13x    | 86.59 MB          | 26.23 MB          |
-| Texture    |     75 | FBN 64           | 0.0638 s           | 1.2195 s           | 19.12x    | 63.72 MB          | 20.14 MB          |
-| Texture    |     75 | FBS 10.0         | 0.0495 s           | 1.2798 s           | 25.83x    | 13.36 MB          | 17.08 MB          |
-| Texture    |     75 | FBS 25.0         | 0.0850 s           | 1.2267 s           | 14.43x    | 89.44 MB          | 25.80 MB          |
-| Texture    |     75 | FBS 50.0         | 0.0781 s           | 1.1993 s           | 15.35x    | 88.88 MB          | 25.65 MB          |
-| Texture    |    100 | FBN 16           | 0.2046 s           | 3.0934 s           | 15.12x    | 213.37 MB         | 64.12 MB          |
-| Texture    |    100 | FBN 32           | 0.2234 s           | 2.6080 s           | 11.67x    | 224.11 MB         | 66.17 MB          |
-| Texture    |    100 | FBN 64           | 0.2048 s           | 2.6290 s           | 12.84x    | 204.71 MB         | 60.72 MB          |
-| Texture    |    100 | FBS 10.0         | 0.0980 s           | 2.7150 s           | 27.71x    | 22.17 MB          | 37.15 MB          |
-| Texture    |    100 | FBS 25.0         | 0.2199 s           | 2.6987 s           | 12.27x    | 230.74 MB         | 68.10 MB          |
-| Texture    |    100 | FBS 50.0         | 0.2248 s           | 3.1756 s           | 14.13x    | 229.77 MB         | 68.48 MB          |
+| Intensity  |     25 | FBN 16           | 0.0007 s           | 0.0122 s           | 16.98x    | 0.24 MB           | 0.71 MB           |
+| Intensity  |     25 | FBN 32           | 0.0008 s           | 0.0126 s           | 16.57x    | 0.24 MB           | 0.71 MB           |
+| Intensity  |     25 | FBN 64           | 0.0009 s           | 0.0131 s           | 15.18x    | 0.24 MB           | 0.71 MB           |
+| Intensity  |     25 | FBS 10.0         | 0.0007 s           | 0.0134 s           | 17.95x    | 0.24 MB           | 0.74 MB           |
+| Intensity  |     25 | FBS 25.0         | 0.0008 s           | 0.0125 s           | 15.80x    | 0.24 MB           | 0.71 MB           |
+| Intensity  |     25 | FBS 50.0         | 0.0007 s           | 0.0126 s           | 17.73x    | 0.24 MB           | 0.71 MB           |
+| Intensity  |     50 | FBN 16           | 0.0029 s           | 0.0625 s           | 21.39x    | 1.40 MB           | 4.61 MB           |
+| Intensity  |     50 | FBN 32           | 0.0028 s           | 0.0628 s           | 22.06x    | 1.40 MB           | 4.61 MB           |
+| Intensity  |     50 | FBN 64           | 0.0029 s           | 0.0642 s           | 21.84x    | 1.40 MB           | 4.61 MB           |
+| Intensity  |     50 | FBS 10.0         | 0.0029 s           | 0.0637 s           | 22.20x    | 1.40 MB           | 4.61 MB           |
+| Intensity  |     50 | FBS 25.0         | 0.0028 s           | 0.0624 s           | 22.13x    | 1.40 MB           | 4.61 MB           |
+| Intensity  |     50 | FBS 50.0         | 0.0030 s           | 0.0646 s           | 21.67x    | 1.40 MB           | 4.61 MB           |
+| Intensity  |     75 | FBN 16           | 0.0106 s           | 0.2456 s           | 23.17x    | 5.81 MB           | 17.95 MB          |
+| Intensity  |     75 | FBN 32           | 0.0111 s           | 0.2502 s           | 22.61x    | 5.81 MB           | 17.95 MB          |
+| Intensity  |     75 | FBN 64           | 0.0114 s           | 0.2509 s           | 21.99x    | 5.81 MB           | 17.95 MB          |
+| Intensity  |     75 | FBS 10.0         | 0.0115 s           | 0.2526 s           | 21.92x    | 5.81 MB           | 17.95 MB          |
+| Intensity  |     75 | FBS 25.0         | 0.0110 s           | 0.2515 s           | 22.93x    | 5.81 MB           | 17.95 MB          |
+| Intensity  |     75 | FBS 50.0         | 0.0110 s           | 0.2547 s           | 23.15x    | 5.81 MB           | 17.95 MB          |
+| Intensity  |    100 | FBN 16           | 0.0204 s           | 0.5069 s           | 24.91x    | 12.16 MB          | 39.01 MB          |
+| Intensity  |    100 | FBN 32           | 0.0216 s           | 0.5116 s           | 23.65x    | 12.16 MB          | 39.01 MB          |
+| Intensity  |    100 | FBN 64           | 0.0218 s           | 0.5145 s           | 23.56x    | 12.16 MB          | 39.01 MB          |
+| Intensity  |    100 | FBS 10.0         | 0.0228 s           | 0.5270 s           | 23.11x    | 12.16 MB          | 39.01 MB          |
+| Intensity  |    100 | FBS 25.0         | 0.0213 s           | 0.5037 s           | 23.69x    | 12.16 MB          | 39.01 MB          |
+| Intensity  |    100 | FBS 50.0         | 0.0204 s           | 0.5191 s           | 25.39x    | 12.16 MB          | 39.01 MB          |
+| Morphology |     25 | FBN 16           | 0.0038 s           | 0.0501 s           | 13.31x    | 1.17 MB           | 1.18 MB           |
+| Morphology |     25 | FBN 32           | 0.0038 s           | 0.0508 s           | 13.26x    | 1.17 MB           | 1.18 MB           |
+| Morphology |     25 | FBN 64           | 0.0039 s           | 0.0508 s           | 12.99x    | 1.17 MB           | 1.18 MB           |
+| Morphology |     25 | FBS 10.0         | 0.0040 s           | 0.0513 s           | 12.95x    | 1.17 MB           | 1.18 MB           |
+| Morphology |     25 | FBS 25.0         | 0.0039 s           | 0.0497 s           | 12.66x    | 1.17 MB           | 1.18 MB           |
+| Morphology |     25 | FBS 50.0         | 0.0040 s           | 0.0497 s           | 12.58x    | 1.17 MB           | 1.18 MB           |
+| Morphology |     50 | FBN 16           | 0.0104 s           | 0.9506 s           | 91.79x    | 5.43 MB           | 8.68 MB           |
+| Morphology |     50 | FBN 32           | 0.0102 s           | 0.9455 s           | 92.27x    | 5.43 MB           | 8.68 MB           |
+| Morphology |     50 | FBN 64           | 0.0107 s           | 0.9464 s           | 88.34x    | 5.43 MB           | 8.68 MB           |
+| Morphology |     50 | FBS 10.0         | 0.0100 s           | 0.9143 s           | 91.23x    | 5.43 MB           | 8.68 MB           |
+| Morphology |     50 | FBS 25.0         | 0.0101 s           | 0.9339 s           | 92.37x    | 5.43 MB           | 8.68 MB           |
+| Morphology |     50 | FBS 50.0         | 0.0102 s           | 0.9440 s           | 92.57x    | 5.43 MB           | 8.68 MB           |
+| Morphology |     75 | FBN 16           | 0.0164 s           | 1.6907 s           | 103.05x   | 8.84 MB           | 36.60 MB          |
+| Morphology |     75 | FBN 32           | 0.0165 s           | 1.6991 s           | 102.81x   | 8.84 MB           | 36.60 MB          |
+| Morphology |     75 | FBN 64           | 0.0164 s           | 1.6896 s           | 103.33x   | 8.84 MB           | 36.60 MB          |
+| Morphology |     75 | FBS 10.0         | 0.0165 s           | 1.7352 s           | 105.47x   | 8.84 MB           | 36.60 MB          |
+| Morphology |     75 | FBS 25.0         | 0.0165 s           | 1.7137 s           | 103.67x   | 8.84 MB           | 36.60 MB          |
+| Morphology |     75 | FBS 50.0         | 0.0163 s           | 1.7059 s           | 104.39x   | 8.84 MB           | 36.60 MB          |
+| Morphology |    100 | FBN 16           | 0.0315 s           | 8.4146 s           | 266.92x   | 20.46 MB          | 77.49 MB          |
+| Morphology |    100 | FBN 32           | 0.0321 s           | 8.4263 s           | 262.89x   | 20.46 MB          | 77.49 MB          |
+| Morphology |    100 | FBN 64           | 0.0318 s           | 8.4179 s           | 265.02x   | 20.46 MB          | 77.49 MB          |
+| Morphology |    100 | FBS 10.0         | 0.0326 s           | 8.5908 s           | 263.90x   | 20.46 MB          | 77.49 MB          |
+| Morphology |    100 | FBS 25.0         | 0.0313 s           | 8.4611 s           | 270.35x   | 20.46 MB          | 77.49 MB          |
+| Morphology |    100 | FBS 50.0         | 0.0311 s           | 8.4232 s           | 270.57x   | 20.46 MB          | 77.49 MB          |
+| Texture    |     25 | FBN 16           | 0.0049 s           | 0.0452 s           | 9.30x     | 2.13 MB           | 0.69 MB           |
+| Texture    |     25 | FBN 32           | 0.0051 s           | 0.0505 s           | 9.80x     | 2.07 MB           | 0.75 MB           |
+| Texture    |     25 | FBN 64           | 0.0056 s           | 0.0635 s           | 11.31x    | 4.53 MB           | 1.94 MB           |
+| Texture    |     25 | FBS 10.0         | 0.0072 s           | 0.0916 s           | 12.66x    | 10.10 MB          | 3.77 MB           |
+| Texture    |     25 | FBS 25.0         | 0.0051 s           | 0.0513 s           | 10.02x    | 2.16 MB           | 0.91 MB           |
+| Texture    |     25 | FBS 50.0         | 0.0051 s           | 0.0461 s           | 9.06x     | 2.13 MB           | 0.71 MB           |
+| Texture    |     50 | FBN 16           | 0.0210 s           | 0.2953 s           | 14.03x    | 19.85 MB          | 6.28 MB           |
+| Texture    |     50 | FBN 32           | 0.0220 s           | 0.2981 s           | 13.54x    | 19.95 MB          | 6.29 MB           |
+| Texture    |     50 | FBN 64           | 0.0182 s           | 0.3131 s           | 17.20x    | 9.83 MB           | 4.82 MB           |
+| Texture    |     50 | FBS 10.0         | 0.0166 s           | 0.3431 s           | 20.62x    | 11.96 MB          | 5.41 MB           |
+| Texture    |     50 | FBS 25.0         | 0.0217 s           | 0.3101 s           | 14.32x    | 19.30 MB          | 6.09 MB           |
+| Texture    |     50 | FBS 50.0         | 0.0254 s           | 0.2953 s           | 11.63x    | 21.08 MB          | 6.60 MB           |
+| Texture    |     75 | FBN 16           | 0.0705 s           | 1.2014 s           | 17.04x    | 84.43 MB          | 25.62 MB          |
+| Texture    |     75 | FBN 32           | 0.0768 s           | 1.1928 s           | 15.54x    | 86.59 MB          | 26.23 MB          |
+| Texture    |     75 | FBN 64           | 0.0646 s           | 1.2124 s           | 18.77x    | 63.72 MB          | 20.14 MB          |
+| Texture    |     75 | FBS 10.0         | 0.0479 s           | 1.2394 s           | 25.87x    | 13.36 MB          | 17.08 MB          |
+| Texture    |     75 | FBS 25.0         | 0.0763 s           | 1.2012 s           | 15.75x    | 89.44 MB          | 25.79 MB          |
+| Texture    |     75 | FBS 50.0         | 0.0737 s           | 1.1793 s           | 15.99x    | 88.88 MB          | 25.65 MB          |
+| Texture    |    100 | FBN 16           | 0.1701 s           | 2.4634 s           | 14.48x    | 213.37 MB         | 64.12 MB          |
+| Texture    |    100 | FBN 32           | 0.1919 s           | 2.4812 s           | 12.93x    | 224.11 MB         | 66.17 MB          |
+| Texture    |    100 | FBN 64           | 0.1844 s           | 2.4722 s           | 13.41x    | 204.71 MB         | 60.72 MB          |
+| Texture    |    100 | FBS 10.0         | 0.1012 s           | 2.5159 s           | 24.85x    | 22.17 MB          | 37.15 MB          |
+| Texture    |    100 | FBS 25.0         | 0.1872 s           | 2.4473 s           | 13.08x    | 230.74 MB         | 68.10 MB          |
+| Texture    |    100 | FBS 50.0         | 0.1862 s           | 2.4768 s           | 13.30x    | 229.77 MB         | 68.48 MB          |
 

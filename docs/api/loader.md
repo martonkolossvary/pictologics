@@ -1,4 +1,4 @@
-# Loader API
+# Loaders API
 
 ::: pictologics.loader
     options:

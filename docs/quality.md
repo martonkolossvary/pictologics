@@ -1,19 +1,18 @@
 # Code Quality Report
 
-Generated on 2026-01-04 19:10:09
-
 ## Test Coverage
 
-**Total Coverage:** 99.87%
+**Total Coverage:** 100.00%
 
 | Module | Coverage |
 |:---|:---:|
 | `pictologics/__init__.py` | 100.00% |
 | `pictologics/features/__init__.py` | 100.00% |
+| `pictologics/features/_utils.py` | 100.00% |
 | `pictologics/features/intensity.py` | 100.00% |
 | `pictologics/features/morphology.py` | 100.00% |
 | `pictologics/features/texture.py` | 100.00% |
-| `pictologics/loader.py` | 98.88% |
+| `pictologics/loader.py` | 100.00% |
 | `pictologics/loaders/__init__.py` | 100.00% |
 | `pictologics/loaders/seg_loader.py` | 100.00% |
 | `pictologics/pipeline.py` | 100.00% |
@@ -21,7 +20,7 @@ Generated on 2026-01-04 19:10:09
 | `pictologics/results.py` | 100.00% |
 | `pictologics/utilities/__init__.py` | 100.00% |
 | `pictologics/utilities/dicom_database.py` | 100.00% |
-| `pictologics/utilities/dicom_utils.py` | 99.15% |
+| `pictologics/utilities/dicom_utils.py` | 100.00% |
 | `pictologics/utilities/sr_parser.py` | 100.00% |
 | `pictologics/utilities/visualization.py` | 100.00% |
 | `pictologics/warmup.py` | 100.00% |
@@ -32,7 +31,7 @@ Generated on 2026-01-04 19:10:09
 **Errors:** 0
 
 ```
-Success: no issues found in 17 source files
+Success: no issues found in 18 source files
 ```
 
 ## Linting (Ruff)

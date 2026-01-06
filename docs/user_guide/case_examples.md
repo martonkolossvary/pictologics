@@ -36,6 +36,9 @@ You want to:
 - **Morphology on whole-image ROI**: Shape features will describe the shape of the ROI mask.
   With a maskless run, that ROI starts as the full image volume, then becomes whatever remains after resegmentation
   and connected-component filtering. This is valid computationally, but make sure it matches your scientific intent.
+- **Sentinel value filtering**: The `resegment` step with `range_min=-100` also filters out common DICOM sentinel
+  values (e.g., -1024, -2048) that represent missing/invalid data. This is the IBSI-recommended approach for
+  handling NA values in medical imaging data.
 
 ### Full example script
 
@@ -650,65 +653,140 @@ if __name__ == "__main__":
 
 ---
 
-## Output Options and Formats
+## Case 5: Batch radiomics from DICOM SEG files with multiple segments
 
-You can customize how results are formatted and exported using `format_results` and `save_results`.
+### Scenario
 
-### Wide Format (Default)
+You have a folder of *cases*. Each case contains:
 
-Produces a single row per case, with columns like `configName__featureName`.
+- `Image/`: the DICOM image series (CT/MR/etc.)
+- `segmentation.dcm`: a DICOM SEG file with multiple labeled segments (e.g., liver, spleen, kidneys)
 
-```python
-# Format as a flat dictionary for spreadsheet-style output
-row = format_results(
-    results, 
-    fmt="wide", 
-    meta={"subject_id": "001"}
-)
-# Returns: {"subject_id": "001", "configA__val": 1.5, ...}
-```
+You want to:
 
-### Long Format (Tidy)
+- Load the image and inspect the available segments in the SEG file.
+- Process **each segment separately** to get per-organ radiomics.
+- Apply standard preprocessing and compute features for each segment.
+- Export results with segment labels in the output.
 
-Produces multiple rows per case. This is often better for analysis in R/tidyverse or seaborn.
+### Notes
 
-```python
-# Format as a tidy DataFrame (long format)
-df = format_results(
-    results, 
-    fmt="long", 
-    meta={"subject_id": "001"},
-    output_type="pandas"
-)
-# Returns DataFrame columns: [subject_id, config, feature_name, value]
-```
+- **`get_segment_info()`** returns metadata about each segment (number, label, algorithm).
+- **`load_seg()` with `combine_segments=False`** returns a dict mapping segment numbers to `Image` objects.
+- **Alignment**: Use `reference_image` to ensure the SEG mask matches the CT geometry.
 
-To export long-format results for a batch:
+### Full example script
 
 ```python
-dfs = []
-for case in cases:
-    # ... process image and run pipeline ...
-    # Format current result as tidy DataFrame
-    df = format_results(results, fmt="long", meta={"subject_id": case.id}, output_type="pandas")
-    dfs.append(df)
+from pathlib import Path
+from pictologics import load_image, load_seg, RadiomicsPipeline
+from pictologics.loaders import get_segment_info
+from pictologics.results import format_results, save_results
 
-# save_results automatically concatenates list of DataFrames
-save_results(dfs, "results_long.csv")
+
+def main():
+    # Configure paths
+    cases_dir = Path("path/to/cases_root")
+    output_csv = Path("case5_per_segment_results.csv")
+    log_dir = Path("case5_logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find all case directories
+    case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
+    if not case_dirs:
+        raise ValueError(f"No case folders found in: {cases_dir}")
+
+    # Initialize pipeline with standard config
+    pipeline = RadiomicsPipeline()
+    pipeline.add_config(
+        "case5_fbn_32",
+        [
+            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["intensity", "morphology", "texture", "histogram"],
+                    "include_spatial_intensity": False,
+                    "include_local_intensity": False,
+                },
+            },
+        ],
+    )
+
+    from tqdm import tqdm
+    rows = []
+
+    for case_dir in tqdm(case_dirs, desc="Radiomics (per-segment)", unit="case"):
+        subject_id = case_dir.name
+        image_root = case_dir / "Image"
+        seg_file = case_dir / "segmentation.dcm"
+
+        # Load the reference image
+        image = load_image(str(image_root), recursive=True)
+
+        # Inspect available segments
+        segments = get_segment_info(str(seg_file))
+        print(f"\n{subject_id}: Found {len(segments)} segments")
+        for seg in segments:
+            print(f"  Segment {seg['segment_number']}: {seg['segment_label']}")
+
+        # Load each segment separately, aligned to image geometry
+        segment_masks = load_seg(
+            str(seg_file),
+            combine_segments=False,  # Returns dict {seg_num: Image}
+            reference_image=image
+        )
+
+        # Process each segment
+        for seg_num, mask in segment_masks.items():
+            # Find segment label from metadata
+            seg_info = next(s for s in segments if s["segment_number"] == seg_num)
+            seg_label = seg_info["segment_label"]
+
+            pipeline.clear_log()
+            results = pipeline.run(
+                image=image,
+                mask=mask,
+                subject_id=f"{subject_id}_{seg_label}",
+                config_names=["case5_fbn_32"],
+            )
+
+            row = format_results(
+                results,
+                fmt="wide",
+                meta={
+                    "subject_id": subject_id,
+                    "segment_number": seg_num,
+                    "segment_label": seg_label,
+                },
+            )
+            rows.append(row)
+
+            # Save per-segment log
+            pipeline.save_log(str(log_dir / f"{subject_id}_{seg_label}.json"))
+
+    # Export all results
+    save_results(rows, output_csv)
+    print(f"\nWrote {len(rows)} rows to {output_csv}")
+
+
+if __name__ == "__main__":
+    main()
 ```
 
-### JSON Export
+### Output format
 
-If you prefer JSON output (e.g. for Web/NoSQL):
+- One row per segment per case.
+- Columns include:
+  - `subject_id` - Case identifier
+  - `segment_number` - Numeric segment ID from SEG file
+  - `segment_label` - Human-readable segment name (e.g., "Liver", "Spleen")
+  - Feature columns prefixed by configuration name
 
-```python
-# Save result list directly to JSON
-save_results(rows, "results.json")
-```
+---
 
-Or get a JSON string directly for a single result:
+## Output Options
 
-```python
-# Convert result to JSON string
-json_str = format_results(results, fmt="wide", output_type="json")
-```
+For details on result formatting (`wide` vs `long`, `output_type` options) and export functions, see the [Feature Calculations - Working with Results](feature_calculations.md#working-with-results).
+

@@ -27,6 +27,30 @@ print(df_series.head())
 df_instances = db.get_instances_df()
 ```
 
+### Parallel Processing and Progress Bar
+
+For large DICOM datasets, parsing can take significant time. `DicomDatabase.from_folders()` supports **parallel processing** to speed up the scan and displays a **progress bar** showing progress and estimated time remaining.
+
+```python
+# Parallel processing with all available cores
+db = DicomDatabase.from_folders(
+    paths=["large_dataset/"],
+    num_workers=8,          # Use 8 parallel workers
+    show_progress=True      # Show progress bar (default: True)
+)
+
+# Disable progress bar for silent operation
+db = DicomDatabase.from_folders(
+    paths=["data/"],
+    show_progress=False
+)
+```
+
+The progress bar shows:
+- Number of files processed
+- Percentage complete
+- Elapsed time and estimated time remaining
+
 ### Memory-Efficient Exports
 
 By default, DataFrame exports exclude the large `InstanceSOPUIDs` and `InstanceFilePaths` columns to reduce memory usage. To include them:
@@ -228,177 +252,7 @@ print(f"Processed {len(results)} cases")
     - Set `max_workers` to the number of CPU cores (4-8 is typically optimal)
     - Each worker loads one image at a time, so memory usage scales with `max_workers`
 
-
-## DICOM Multi-Phase Series
-
-Medical imaging datasets often contain multiple phases within a single DICOM series (e.g., cardiac CT with 10 phases at 0%, 10%, 20%...). Pictologics automatically detects and handles these multi-phase acquisitions.
-
-### Discovering Phases
-
-Use `get_dicom_phases()` to discover available phases before loading:
-
-```python
-from pictologics.utilities import get_dicom_phases
-
-# Discover phases in a cardiac CT
-phases = get_dicom_phases("cardiac_ct/")
-print(f"Found {len(phases)} phases:")
-for p in phases:
-    print(f"  {p.index}: {p.label} ({p.num_slices} slices)")
-```
-
-Output:
-```
-Found 10 phases:
-  0: Phase 0% (64 slices)
-  1: Phase 10% (64 slices)
-  2: Phase 20% (64 slices)
-  ...
-```
-
-### Loading a Specific Phase
-
-Use the `dataset_index` parameter to load a specific phase:
-
-```python
-from pictologics import load_image
-
-# Load the 5th phase (40%) - 0-indexed
-img = load_image("cardiac_ct/", dataset_index=4)
-print(f"Loaded phase 4: {img.array.shape}")
-```
-
-### Phase Detection Methods
-
-Multi-phase detection uses these DICOM tags (in priority order):
-
-1. `NominalPercentageOfCardiacPhase` - Cardiac phases
-2. `TemporalPositionIdentifier` - Temporal positions
-3. `TriggerTime` - Trigger times
-4. `AcquisitionNumber` - Acquisition numbers
-5. `EchoNumber` - Echo numbers
-6. Duplicate spatial positions (fallback)
-
 ---
-
-## DICOM Segmentation (SEG) Loading
-
-Pictologics supports loading DICOM Segmentation objects (SEG files). SEG files contain segmentation masks in DICOM format, often with multiple labeled structures (segments).
-
-### Basic SEG Loading
-
-```python
-from pictologics import load_seg, load_image
-from pictologics.utilities import visualize_slices
-
-# Load a DICOM SEG file
-mask = load_seg("segmentation.dcm")
-
-# Auto-detection also works with load_image()
-mask = load_image("segmentation.dcm")
-```
-
-### Merging All Segments into One Mask
-
-By default, `load_seg()` combines all segments into a single label image where each segment gets its numeric label (1, 2, 3, etc.):
-
-```python
-# All segments combined - voxel values are segment numbers
-combined_mask = load_seg("cardiac_seg.dcm")
-print(np.unique(combined_mask.array))  # [0, 1, 2, 3, ...]
-
-# Background = 0, Segment 1 = 1, Segment 2 = 2, etc.
-```
-
-### Selecting Specific Segments
-
-Use `segment_numbers` to load only specific segments:
-
-```python
-# Load only segments 1 and 3 (skip segment 2)
-mask = load_seg("seg.dcm", segment_numbers=[1, 3])
-
-# Load just the first segment
-single_mask = load_seg("seg.dcm", segment_numbers=[1])
-```
-
-### Loading Segments Separately
-
-Use `combine_segments=False` to get each segment as a separate binary mask:
-
-```python
-# Get each segment as a separate binary mask
-masks = load_seg("seg.dcm", combine_segments=False)
-
-# Iterate over segments
-for seg_num, mask in masks.items():
-    print(f"Segment {seg_num}: {mask.array.sum()} voxels")
-    
-# Process each segment for radiomics
-for seg_num, mask in masks.items():
-    features = pipeline.run(image=ct, mask=mask)
-```
-
-### Combining Specific Segments into One Binary Mask
-
-To merge selected segments into a single binary mask:
-
-```python
-# Load specific segments separately
-masks = load_seg("seg.dcm", segment_numbers=[1, 2], combine_segments=False)
-
-# Combine into single binary mask
-combined = masks[1].array | masks[2].array  # Logical OR
-```
-
-### Alignment with Reference Image
-
-SEG files may have different geometry than the original image. Use `reference_image` to align:
-
-```python
-# Load the reference CT image
-ct = load_image("ct_scan/", recursive=True)
-
-# Load SEG aligned to CT geometry
-mask = load_seg("seg.dcm", reference_image=ct)
-
-# Now mask has the same dimensions as ct
-print(f"CT shape: {ct.array.shape}")
-print(f"Mask shape: {mask.array.shape}")  # Matches CT
-
-# Visualize overlay
-visualize_slices(image=ct, mask=mask, colormap="tab20")
-```
-
-### Complete Workflow Example
-
-```python
-from pictologics import load_image, load_seg
-from pictologics.loaders import get_segment_info
-from pictologics.utilities import visualize_slices
-
-# 1. Inspect segment metadata
-segments = get_segment_info("cardiac_seg.dcm")
-for seg in segments:
-    print(f"Segment {seg['SegmentNumber']}: {seg['SegmentLabel']}")
-
-# 2. Load reference image
-ct = load_image("ct_series/", recursive=True)
-
-# 3. Load specific segments aligned to reference
-# Example: Load left ventricle (1) and myocardium (2)
-mask = load_seg(
-    "cardiac_seg.dcm",
-    segment_numbers=[1, 2],
-    combine_segments=True,
-    reference_image=ct
-)
-
-# 4. Visualize
-visualize_slices(image=ct, mask=mask, colormap="tab10", alpha=0.5)
-```
-
-
 
 ## DICOM Structured Reports (SR)
 
@@ -453,6 +307,30 @@ print(df.head())
 batch.export_combined_csv("sr_exports/all_measurements.csv")
 batch.export_log("sr_exports/processing_log.csv")
 ```
+
+### Parallel Processing and Progress Bar
+
+For large collections of SR files, `SRDocument.from_folders()` supports **parallel processing** for faster parsing and displays a **progress bar** showing progress and estimated time remaining.
+
+```python
+# Parallel processing with 8 workers
+batch = SRDocument.from_folders(
+    paths=["large_dataset/"],
+    num_workers=8,          # Use 8 parallel workers
+    show_progress=True      # Show progress bar (default: True)
+)
+
+# Disable progress bar for silent operation
+batch = SRDocument.from_folders(
+    paths=["data/"],
+    show_progress=False
+)
+```
+
+The progress bar shows:
+- Number of SR files processed
+- Percentage complete
+- Elapsed time and estimated time remaining
 
 ### Output Structure
 

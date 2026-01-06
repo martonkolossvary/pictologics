@@ -109,7 +109,7 @@ class TestTextureFeatures(unittest.TestCase):
 
     def test_missing_coverage_branches(self):
         with self.assertRaises(ValueError):
-            texture_module._compute_nonzero_bbox(np.zeros((5, 5), dtype=int))
+            texture_module.compute_nonzero_bbox(np.zeros((5, 5), dtype=int))
 
         glcm = np.zeros((13, 2, 2), dtype=float)
         glcm[0, 0, 0] = 1.0
@@ -128,7 +128,7 @@ class TestTextureFeatures(unittest.TestCase):
             texture_module._maybe_crop_to_bbox(np.zeros((3, 3, 3)), np.zeros((2, 2, 2)))
 
         self.assertIsNone(
-            texture_module._compute_nonzero_bbox(np.zeros(self.shape, dtype=int))
+            texture_module.compute_nonzero_bbox(np.zeros(self.shape, dtype=int))
         )
 
         data_orig, mask_orig, dist_orig = texture_module._maybe_crop_to_bbox(

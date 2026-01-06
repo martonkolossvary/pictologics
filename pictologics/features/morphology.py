@@ -33,6 +33,7 @@ from scipy.spatial import ConvexHull
 from scipy.special import eval_legendre
 
 from ..loader import Image
+from ._utils import compute_nonzero_bbox
 
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
@@ -435,10 +436,23 @@ def _get_mesh_features(
 
     Uses PyMCubes for marching cubes mesh generation, which produces IBSI-compliant
     results for the digital phantom.
+
+    Optimization: Crops mask to bounding box before mesh generation for large sparse ROIs.
     """
     features: dict[str, float] = {}
     mask_arr = (mask.array > 0).astype(np.uint8, copy=False)
-    mask_padded_u8 = np.pad(mask_arr, 1, mode="constant", constant_values=0)
+
+    # Crop to bounding box for performance on large sparse ROIs
+    bbox = compute_nonzero_bbox(mask_arr)
+    if bbox is None:
+        return {}, None, None
+
+    mask_cropped = mask_arr[bbox]
+    origin_offset = np.array(
+        [bbox[0].start, bbox[1].start, bbox[2].start], dtype=np.float64
+    )
+
+    mask_padded_u8 = np.pad(mask_cropped, 1, mode="constant", constant_values=0)
     mask_padded = np.ascontiguousarray(mask_padded_u8.astype(np.float32, copy=False))
 
     try:
@@ -448,10 +462,12 @@ def _get_mesh_features(
         if len(verts) == 0 or len(faces) == 0:
             return {}, None, None
 
-        # Apply spacing to vertices
-        verts = np.asarray(verts, dtype=np.float64) * np.asarray(
-            mask.spacing, dtype=np.float64
-        )
+        # Adjust vertices: account for padding (-1) and bbox offset
+        spacing = np.asarray(mask.spacing, dtype=np.float64)
+        verts = np.asarray(verts, dtype=np.float64)
+        # Subtract 1 for padding, add origin_offset for bbox cropping
+        verts = (verts - 1.0 + origin_offset) * spacing
+
         faces_i64 = np.asarray(faces, dtype=np.int64)
 
         surface_area, mesh_volume = _mesh_area_volume_numba(verts, faces_i64)
