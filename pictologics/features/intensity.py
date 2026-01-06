@@ -53,14 +53,20 @@ def _central_moments_2_3_4(
     m3 = 0.0
     m4 = 0.0
     for i in range(n):
-        d = float(values[i]) - mean_val
+        d = float(values[i])
         d2 = d * d
         m2 += d2
         m3 += d2 * d
         m4 += d2 * d2
 
-    inv_n = 1.0 / n
-    return m2 * inv_n, m3 * inv_n, m4 * inv_n
+    m2 = m2 / n
+    m3 = m3 / n
+    m4 = m4 / n
+    mean_val2 = mean_val * mean_val
+
+    return (m2 - mean_val2,
+            m3 - 3 * mean_val * m2 + 2 * mean_val2 * mean_val,
+            m4 - 4 * mean_val * m3 + 6 * mean_val2 * m2 - 3 * mean_val2 * mean_val2)
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
