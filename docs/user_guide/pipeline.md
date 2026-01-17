@@ -193,7 +193,39 @@ Discretises the image intensities into bins. This is **crucial** for texture ana
 *   `n_bins`: Number of bins (for FBN).
 *   `bin_width`: Width of each bin (for FBS).
 
-#### 7. `extract_features`
+#### 7. `filter`
+Applies an image filter (convolutional filter) to the image. Supports IBSI 2 standard filters.
+
+*   `type`: Filter type (required). Options:
+    *   `"mean"`: Mean filter
+    *   `"log"`: Laplacian of Gaussian
+    *   `"laws"`: Laws' texture energy kernels
+    *   `"gabor"`: Gabor filter
+    *   `"wavelet"`: Separable wavelets (Haar, Daubechies, Coiflet)
+    *   `"simoncelli"`: Non-separable Simoncelli wavelet
+    *   `"riesz"`: Riesz transform
+*   `boundary`: Boundary condition. Options: `"mirror"` (default), `"nearest"`, `"zero"`, `"periodic"`.
+*   Additional filter-specific parameters (see table below).
+
+**Filter Parameter Reference:**
+
+| Filter | Required Params | Optional Params |
+|:-------|:----------------|:----------------|
+| `mean` | `support` | `boundary` |
+| `log` | `sigma_mm` | `truncate`, `boundary`, `spacing_mm` |
+| `laws` | `kernel` | `rotation_invariant`, `pooling`, `compute_energy`, `energy_distance`, `boundary` |
+| `gabor` | `sigma_mm`, `lambda_mm`, `gamma` | `rotation_invariant`, `delta_theta`, `pooling`, `average_over_planes`, `spacing_mm`, `boundary` |
+| `wavelet` | `wavelet`, `level`, `decomposition` | `rotation_invariant`, `pooling`, `boundary` |
+| `simoncelli` | `level` | *(no boundary)* |
+| `riesz` | `order` | `variant` (`"base"`, `"log"`, `"simoncelli"`), `sigma_mm`, `level` |
+
+!!! note "Automatic spacing injection"
+    For filters that require physical spacing (`log`, `gabor`), the pipeline automatically uses the image's voxel spacing if `spacing_mm` is not explicitly provided.
+
+!!! tip "IBSI 2 Compliance"
+    For IBSI 2 Phase 2 compliance, use `boundary="mirror"` and apply filters after resampling and intensity rounding.
+
+#### 8. `extract_features`
 Calculates the radiomic features based on the current state of the image and mask.
 
 !!! important "Feature Calculation Inputs"
@@ -402,6 +434,75 @@ custom_config = [
 pipeline = RadiomicsPipeline()
 pipeline.add_config("my_custom_ct", custom_config)
 results = pipeline.run(image, mask, config_names=["my_custom_ct"])
+```
+
+---
+
+### Example 7: Laplacian of Gaussian (LoG) Filter
+
+Apply LoG filter for edge/blob detection before feature extraction:
+
+```python
+from pictologics import RadiomicsPipeline
+
+log_config = [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic"}},
+    {"step": "round_intensities", "params": {}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    {"step": "filter", "params": {
+        "type": "log",
+        "sigma_mm": 1.5,
+        "truncate": 4.0,
+    }},
+    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "histogram"]}},
+]
+
+pipeline = RadiomicsPipeline().add_config("log_filtered", log_config)
+results = pipeline.run("image.nii.gz", "mask.nii.gz", config_names=["log_filtered"])
+```
+
+### Example 8: Laws Texture Energy (IBSI 2)
+
+Extract texture energy using Laws kernel with rotation invariance:
+
+```python
+laws_config = [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic"}},
+    {"step": "round_intensities", "params": {}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    {"step": "filter", "params": {
+        "type": "laws",
+        "kernel": "L5E5E5",
+        "rotation_invariant": True,
+        "pooling": "max",
+        "compute_energy": True,
+        "energy_distance": 7,
+    }},
+    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+    {"step": "extract_features", "params": {"families": ["intensity", "texture", "histogram"]}},
+]
+```
+
+### Example 9: Wavelet Decomposition
+
+Apply Daubechies 3 wavelet with rotation-invariant averaging:
+
+```python
+wavelet_config = [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic"}},
+    {"step": "round_intensities", "params": {}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    {"step": "filter", "params": {
+        "type": "wavelet",
+        "wavelet": "db3",
+        "level": 1,
+        "decomposition": "LLH",
+        "rotation_invariant": True,
+        "pooling": "average",
+    }},
+    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture"]}},
+]
 ```
 
 ---

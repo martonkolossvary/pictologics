@@ -78,6 +78,7 @@ nav:
     - Loaders: api/loader.md
     - Preprocessing: api/preprocessing.md
     - Pipeline: api/pipeline.md
+    - Filters: api/filters.md
     - Results: api/results.md
     - Utilities: api/utilities.md
     - Features:
@@ -85,7 +86,11 @@ nav:
       - Morphology: api/features/morphology.md
       - Texture: api/features/texture.md
   - Benchmarks: benchmarks.md
-  - IBSI Compliance: ibsi_compliance.md
+  - IBSI Compliance:
+    - IBSI 1 (Features): ibsi1_compliance.md
+    - IBSI 2 Phase 1 (Filters): ibsi2_compliance.md
+    - IBSI 2 Phase 2 (Filtered Features): ibsi2_phase2_compliance.md
+    - IBSI 2 Phase 3 (Reproducibility): ibsi2_phase3_compliance.md
   - Quality Report: quality.md
   - Changelog: CHANGELOG.md
   - License: LICENSE.md

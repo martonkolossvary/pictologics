@@ -786,7 +786,184 @@ if __name__ == "__main__":
 
 ---
 
+## Case 6: Filtered radiomics using IBSI 2 filters
+
+### Scenario
+
+You want to extract radiomic features from filtered response maps (IBSI 2 paradigm). This is useful for:
+
+- Capturing texture at multiple scales (LoG with different σ values).
+- Extracting directional texture patterns (Gabor filters).
+- Multi-resolution analysis (wavelet decomposition).
+
+You want to:
+
+- Apply multiple filters to each image.
+- Extract intensity features from each filtered response map.
+- Compare features across filter types and parameters.
+
+### Key concepts
+
+- **Filter step before feature extraction**: Apply `filter` after preprocessing but before `extract_features`.
+- **Intensity features make sense**: For filtered images, first-order statistics (mean, variance, skewness) capture texture properties.
+- **No discretisation for filtered images**: IBSI 2 Phase 2 recommends intensity features from continuous filtered values.
+
+### Full example script
+
+```python
+from pathlib import Path
+from pictologics import RadiomicsPipeline
+from pictologics.results import format_results, save_results
+
+
+def main():
+    # Configure paths
+    image_path = Path("path/to/image.nii.gz")
+    mask_path = Path("path/to/mask.nii.gz")
+    output_csv = Path("filtered_radiomics.csv")
+
+    # Initialize pipeline
+    pipeline = RadiomicsPipeline()
+
+    # IBSI 2 Phase 2 preprocessing (Config B)
+    preprocess_steps = [
+        {"step": "resample", "params": {
+            "new_spacing": (1.0, 1.0, 1.0), 
+            "interpolation": "cubic"
+        }},
+        {"step": "round_intensities", "params": {}},
+        {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    ]
+
+    # Feature extraction (intensity only for filtered images)
+    extract_intensity = {
+        "step": "extract_features",
+        "params": {"families": ["intensity"]},
+    }
+
+    # --- Configuration 1: LoG at multiple scales ---
+    for sigma in [1.5, 3.0, 5.0]:
+        pipeline.add_config(
+            f"log_sigma_{sigma}",
+            preprocess_steps + [
+                {"step": "filter", "params": {
+                    "type": "log",
+                    "sigma_mm": sigma,
+                    "truncate": 4.0,
+                }},
+                extract_intensity,
+            ],
+        )
+
+    # --- Configuration 2: Gabor filter ---
+    pipeline.add_config(
+        "gabor_5mm",
+        preprocess_steps + [
+            {"step": "filter", "params": {
+                "type": "gabor",
+                "sigma_mm": 5.0,
+                "lambda_mm": 2.0,
+                "gamma": 1.5,
+                "rotation_invariant": True,
+                "pooling": "average",
+            }},
+            extract_intensity,
+        ],
+    )
+
+    # --- Configuration 3: Wavelet decomposition ---
+    for decomp in ["LLH", "HHL", "HHH"]:
+        pipeline.add_config(
+            f"wavelet_{decomp}",
+            preprocess_steps + [
+                {"step": "filter", "params": {
+                    "type": "wavelet",
+                    "wavelet": "db3",
+                    "level": 1,
+                    "decomposition": decomp,
+                    "rotation_invariant": True,
+                    "pooling": "average",
+                }},
+                extract_intensity,
+            ],
+        )
+
+    # --- Configuration 4: Laws texture energy ---
+    pipeline.add_config(
+        "laws_L5E5E5",
+        preprocess_steps + [
+            {"step": "filter", "params": {
+                "type": "laws",
+                "kernel": "L5E5E5",
+                "rotation_invariant": True,
+                "pooling": "max",
+                "compute_energy": True,
+                "energy_distance": 7,
+            }},
+            extract_intensity,
+        ],
+    )
+
+    # Get all filter config names
+    filter_configs = [
+        "log_sigma_1.5", "log_sigma_3.0", "log_sigma_5.0",
+        "gabor_5mm",
+        "wavelet_LLH", "wavelet_HHL", "wavelet_HHH",
+        "laws_L5E5E5",
+    ]
+
+    # Run pipeline
+    results = pipeline.run(
+        image=str(image_path),
+        mask=str(mask_path),
+        subject_id="subject_001",
+        config_names=filter_configs,
+    )
+
+    # Format and save
+    row = format_results(
+        results,
+        fmt="wide",
+        meta={"subject_id": "subject_001"},
+    )
+    save_results([row], output_csv)
+    print(f"Saved filtered radiomics to {output_csv}")
+
+    # Display key features for each filter
+    print("\nMean values from each filter:")
+    for config in filter_configs:
+        mean_val = results[config].get("mean_intensity_Q4LE", "N/A")
+        print(f"  {config}: {mean_val:.4f}" if isinstance(mean_val, float) else f"  {config}: {mean_val}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### Output format
+
+- One row per subject with features from each filter as separate columns.
+- Column names use the pattern `{filter_config}__mean_intensity_Q4LE` (e.g., `log_sigma_1.5__mean_intensity_Q4LE`).
+
+### Combining with standard texture features
+
+You can also run both filtered and standard texture configs together:
+
+```python
+# Standard texture config (unfiltered)
+pipeline.add_config("standard_fbn_32", [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+    {"step": "extract_features", "params": {"families": ["texture"]}},
+])
+
+# Run all configs together
+all_configs = filter_configs + ["standard_fbn_32"]
+results = pipeline.run(image, mask, config_names=all_configs)
+```
+
+---
+
 ## Output Options
 
 For details on result formatting (`wide` vs `long`, `output_type` options) and export functions, see the [Feature Calculations - Working with Results](feature_calculations.md#working-with-results).
-

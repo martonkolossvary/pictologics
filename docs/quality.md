@@ -12,6 +12,14 @@
 | `pictologics/features/intensity.py` | 100.00% |
 | `pictologics/features/morphology.py` | 100.00% |
 | `pictologics/features/texture.py` | 100.00% |
+| `pictologics/filters/__init__.py` | 100.00% |
+| `pictologics/filters/base.py` | 100.00% |
+| `pictologics/filters/gabor.py` | 100.00% |
+| `pictologics/filters/laws.py` | 100.00% |
+| `pictologics/filters/log.py` | 100.00% |
+| `pictologics/filters/mean.py` | 100.00% |
+| `pictologics/filters/riesz.py` | 100.00% |
+| `pictologics/filters/wavelets.py` | 100.00% |
 | `pictologics/loader.py` | 100.00% |
 | `pictologics/loaders/__init__.py` | 100.00% |
 | `pictologics/loaders/seg_loader.py` | 100.00% |
@@ -31,7 +39,7 @@
 **Errors:** 0
 
 ```
-Success: no issues found in 18 source files
+Success: no issues found in 26 source files
 ```
 
 ## Linting (Ruff)

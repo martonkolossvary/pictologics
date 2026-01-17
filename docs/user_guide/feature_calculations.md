@@ -232,8 +232,117 @@ print(f"Mean Intensity (Q4LE): {all_features.get('mean_intensity_Q4LE', 'N/A')}"
 print(f"Contrast (ACUI): {all_features.get('contrast_ACUI', 'N/A')}")
 ```
 
+
+---
+
+## Image Filtering (IBSI 2)
+
+Pictologics includes IBSI 2-compliant image filters for creating response maps. Filters can be applied via the pipeline or called directly.
+
+### Filter Types
+
+| Filter | Description | Key Parameters |
+|:-------|:------------|:---------------|
+| `mean` | Averaging filter | `support` (kernel size) |
+| `log` | Laplacian of Gaussian | `sigma_mm`, `truncate` |
+| `laws` | Laws' texture kernels | `kernel`, `rotation_invariant`, `compute_energy` |
+| `gabor` | Gabor filter bank | `sigma_mm`, `lambda_mm`, `gamma` |
+| `wavelet` | Separable wavelets | `wavelet` (db3, haar, coif1), `level`, `decomposition` |
+| `simoncelli` | Non-separable wavelet | `level` |
+| `riesz` | Riesz transform | `order`, `variant` |
+
+### Using Filters in the Pipeline
+
+```python
+from pictologics import RadiomicsPipeline
+
+# Create pipeline with LoG filter
+pipeline = RadiomicsPipeline()
+
+cfg = [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic"}},
+    {"step": "round_intensities", "params": {}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    {"step": "filter", "params": {
+        "type": "log",
+        "sigma_mm": 1.5,
+        "truncate": 4.0,
+    }},
+    {"step": "extract_features", "params": {"families": ["intensity"]}},
+]
+
+pipeline.add_config("log_filtered", cfg)
+results = pipeline.run("image.nii.gz", "mask.nii.gz", config_names=["log_filtered"])
+```
+
+### More Filter Examples
+
+```python
+# Laws filter with rotation invariance
+{"step": "filter", "params": {
+    "type": "laws",
+    "kernel": "L5E5E5",
+    "rotation_invariant": True,
+    "pooling": "max",
+    "compute_energy": True,
+}}
+
+# Gabor filter
+{"step": "filter", "params": {
+    "type": "gabor",
+    "sigma_mm": 5.0,
+    "lambda_mm": 2.0,
+    "gamma": 1.5,
+    "rotation_invariant": True,
+}}
+
+# Daubechies wavelet
+{"step": "filter", "params": {
+    "type": "wavelet",
+    "wavelet": "db3",
+    "level": 1,
+    "decomposition": "LLH",
+    "rotation_invariant": True,
+}}
+```
+
+### Direct Filter Usage
+
+For granular control, call filter functions directly:
+
+```python
+from pictologics import load_image
+from pictologics.preprocessing import resample_image, apply_mask
+from pictologics.filters import laplacian_of_gaussian, BoundaryCondition
+from pictologics.features.intensity import calculate_intensity_features
+
+# Load and preprocess
+image = load_image("image.nii.gz")
+mask = load_image("mask.nii.gz")
+image = resample_image(image, (1.0, 1.0, 1.0), interpolation="cubic")
+
+# Apply LoG filter
+response = laplacian_of_gaussian(
+    image.array,
+    sigma_mm=1.5,
+    spacing_mm=image.spacing,
+    truncate=4.0,
+    boundary=BoundaryCondition.MIRROR
+)
+
+# Extract features from filtered image
+roi_values = apply_mask(response, mask)
+features = calculate_intensity_features(roi_values)
+```
+
+!!! tip "IBSI 2 Compliance"
+    For IBSI 2 Phase 2 compliance, use `boundary="mirror"` (default) and apply filters after resampling to isotropic spacing.
+
+See the [Pipeline guide](pipeline.md) for the full filter parameter reference table.
+
+---
+
 ## Next Steps
 
 *   Read the [Pipeline guide](pipeline.md) for configuration patterns and advanced parameter pass-through.
 *   See the [Benchmarks](../benchmarks.md) to understand performance and compliance.
-

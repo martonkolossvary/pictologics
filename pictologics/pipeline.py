@@ -44,6 +44,18 @@ from .features.texture import (
     calculate_ngldm_features,
     calculate_ngtdm_features,
 )
+from .filters import (
+    BoundaryCondition,
+    gabor_filter,
+    laplacian_of_gaussian,
+    laws_filter,
+    mean_filter,
+    riesz_log,
+    riesz_simoncelli,
+    riesz_transform,
+    simoncelli_wavelet,
+    wavelet_transform,
+)
 from .loader import Image, create_full_mask, load_image
 from .preprocessing import (
     apply_mask,
@@ -73,6 +85,8 @@ class PipelineState:
     discretisation_min: Optional[float] = None
     discretisation_max: Optional[float] = None
     mask_was_generated: bool = False
+    is_filtered: bool = False
+    filter_type: Optional[str] = None
 
 
 class EmptyROIMaskError(ValueError):
@@ -489,6 +503,97 @@ class RadiomicsPipeline:
                         "ROI is empty after preprocessing (discretise). "
                         "Cannot infer FBS bin count from an empty ROI."
                     )
+
+        elif step_name == "filter":
+            # Apply image filter
+            filter_type = params.get("type")
+            if not filter_type:
+                raise ValueError("Filter step requires 'type' parameter.")
+
+            # Get boundary condition (default: mirror per IBSI 2)
+            boundary_str = params.get("boundary", "mirror")
+            boundary_map = {
+                "mirror": BoundaryCondition.MIRROR,
+                "nearest": BoundaryCondition.NEAREST,
+                "constant": BoundaryCondition.ZERO,
+                "wrap": BoundaryCondition.PERIODIC,
+                "zero": BoundaryCondition.ZERO,
+                "periodic": BoundaryCondition.PERIODIC,
+            }
+            boundary = boundary_map.get(boundary_str, BoundaryCondition.MIRROR)
+
+            # Extract filter-specific params (exclude type and boundary)
+            filter_params = {
+                k: v for k, v in params.items() if k not in ("type", "boundary")
+            }
+
+            # Apply filter based on type
+            filtered_array: np.ndarray
+
+            if filter_type == "mean":
+                filter_params["boundary"] = boundary
+                filtered_array = mean_filter(state.image.array, **filter_params)
+
+            elif filter_type == "log":
+                filter_params["boundary"] = boundary
+                # Use image spacing if not provided
+                if "spacing_mm" not in filter_params:
+                    filter_params["spacing_mm"] = state.image.spacing
+                filtered_array = laplacian_of_gaussian(
+                    state.image.array, **filter_params
+                )
+
+            elif filter_type == "laws":
+                filter_params["boundary"] = boundary
+                # 'kernel' param maps to first positional arg
+                kernel = filter_params.pop("kernel", "L5E5E5")
+                filtered_array = laws_filter(state.image.array, kernel, **filter_params)
+
+            elif filter_type == "gabor":
+                filter_params["boundary"] = boundary
+                if "spacing_mm" not in filter_params:
+                    filter_params["spacing_mm"] = state.image.spacing
+                filtered_array = gabor_filter(state.image.array, **filter_params)
+
+            elif filter_type == "wavelet":
+                filter_params["boundary"] = boundary
+                filtered_array = wavelet_transform(state.image.array, **filter_params)
+
+            elif filter_type == "simoncelli":
+                # Simoncelli doesn't use boundary param
+                filtered_array = simoncelli_wavelet(state.image.array, **filter_params)
+
+            elif filter_type == "riesz":
+                # Riesz transform variants
+                variant = filter_params.pop("variant", "base")
+                if variant == "log":
+                    if "spacing_mm" not in filter_params:
+                        filter_params["spacing_mm"] = state.image.spacing
+                    filtered_array = riesz_log(state.image.array, **filter_params)
+                elif variant == "simoncelli":
+                    filtered_array = riesz_simoncelli(
+                        state.image.array, **filter_params
+                    )
+                else:
+                    filtered_array = riesz_transform(state.image.array, **filter_params)
+
+            else:
+                raise ValueError(
+                    f"Unknown filter type: {filter_type}. "
+                    "Supported: mean, log, laws, gabor, wavelet, simoncelli, riesz"
+                )
+
+            # Update state with filtered image
+            state.image = Image(
+                array=filtered_array,
+                spacing=state.image.spacing,
+                origin=state.image.origin,
+                direction=state.image.direction,
+                modality=state.image.modality,
+            )
+            state.raw_image = state.image  # Update raw_image post-filter
+            state.is_filtered = True
+            state.filter_type = filter_type
 
         else:
             raise ValueError(f"Unknown preprocessing step: {step_name}")

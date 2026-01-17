@@ -1116,3 +1116,298 @@ def test_texture_legacy_alpha(
         # Check if 'ngldm_alpha' passed to calculate_all_texture_matrices
         args, kwargs = mock_matrices.call_args
         assert kwargs.get("ngldm_alpha") == 5
+
+
+# --- Filter Step Tests ---
+
+
+@patch("pictologics.pipeline.mean_filter")
+def test_step_filter_mean(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test mean filter step."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_mean",
+        [{"step": "filter", "params": {"type": "mean", "support": 5}}],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_mean"])
+    mock_filter.assert_called_once()
+    call_kwargs = mock_filter.call_args.kwargs
+    assert call_kwargs.get("support") == 5
+    assert call_kwargs.get("boundary") is not None
+
+
+@patch("pictologics.pipeline.laplacian_of_gaussian")
+def test_step_filter_log(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test LoG filter step with auto-spacing injection."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_log",
+        [
+            {
+                "step": "filter",
+                "params": {"type": "log", "sigma_mm": 1.5, "truncate": 4.0},
+            }
+        ],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_log"])
+    mock_filter.assert_called_once()
+    call_kwargs = mock_filter.call_args.kwargs
+    assert call_kwargs.get("sigma_mm") == 1.5
+    assert call_kwargs.get("spacing_mm") is not None  # Auto-injected
+
+
+@patch("pictologics.pipeline.laws_filter")
+def test_step_filter_laws(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test Laws filter step."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_laws",
+        [
+            {
+                "step": "filter",
+                "params": {
+                    "type": "laws",
+                    "kernel": "L5E5E5",
+                    "rotation_invariant": True,
+                    "pooling": "max",
+                },
+            }
+        ],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_laws"])
+    mock_filter.assert_called_once()
+    # Check kernel is passed as first positional arg
+    call_args = mock_filter.call_args
+    assert call_args.args[1] == "L5E5E5"
+
+
+@patch("pictologics.pipeline.gabor_filter")
+def test_step_filter_gabor(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test Gabor filter step."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_gabor",
+        [
+            {
+                "step": "filter",
+                "params": {
+                    "type": "gabor",
+                    "sigma_mm": 5.0,
+                    "lambda_mm": 2.0,
+                    "gamma": 1.5,
+                },
+            }
+        ],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_gabor"])
+    mock_filter.assert_called_once()
+    call_kwargs = mock_filter.call_args.kwargs
+    assert call_kwargs.get("sigma_mm") == 5.0
+    assert call_kwargs.get("spacing_mm") is not None  # Auto-injected
+
+
+@patch("pictologics.pipeline.wavelet_transform")
+def test_step_filter_wavelet(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test wavelet filter step."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_wavelet",
+        [
+            {
+                "step": "filter",
+                "params": {
+                    "type": "wavelet",
+                    "wavelet": "db3",
+                    "level": 1,
+                    "decomposition": "LLH",
+                },
+            }
+        ],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_wavelet"])
+    mock_filter.assert_called_once()
+    call_kwargs = mock_filter.call_args.kwargs
+    assert call_kwargs.get("wavelet") == "db3"
+
+
+@patch("pictologics.pipeline.simoncelli_wavelet")
+def test_step_filter_simoncelli(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test Simoncelli wavelet step (no boundary param)."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_simon",
+        [{"step": "filter", "params": {"type": "simoncelli", "level": 2}}],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_simon"])
+    mock_filter.assert_called_once()
+    call_kwargs = mock_filter.call_args.kwargs
+    assert call_kwargs.get("level") == 2
+    assert "boundary" not in call_kwargs  # Simoncelli doesn't use boundary
+
+
+@patch("pictologics.pipeline.riesz_transform")
+def test_step_filter_riesz_base(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test Riesz transform base variant."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_riesz",
+        [{"step": "filter", "params": {"type": "riesz", "order": 1}}],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_riesz"])
+    mock_filter.assert_called_once()
+
+
+@patch("pictologics.pipeline.riesz_log")
+def test_step_filter_riesz_log(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test Riesz-LoG variant with spacing injection."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_riesz_log",
+        [
+            {
+                "step": "filter",
+                "params": {"type": "riesz", "variant": "log", "sigma_mm": 2.0},
+            }
+        ],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_riesz_log"])
+    mock_filter.assert_called_once()
+    call_kwargs = mock_filter.call_args.kwargs
+    assert call_kwargs.get("spacing_mm") is not None
+
+
+@patch("pictologics.pipeline.riesz_simoncelli")
+def test_step_filter_riesz_simoncelli(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test Riesz-Simoncelli variant."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_riesz_simon",
+        [{"step": "filter", "params": {"type": "riesz", "variant": "simoncelli"}}],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_riesz_simon"])
+    mock_filter.assert_called_once()
+
+
+def test_step_filter_missing_type(
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test filter step error when type is missing."""
+    pipeline.add_config(
+        "filter_no_type",
+        [{"step": "filter", "params": {"support": 5}}],  # Missing 'type'
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_no_type"])
+    log = pipeline._log[-1]
+    assert "error" in log
+    assert "Filter step requires 'type' parameter" in log["error"]
+
+
+def test_step_filter_unknown_type(
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test filter step error when type is unknown."""
+    pipeline.add_config(
+        "filter_bad_type",
+        [{"step": "filter", "params": {"type": "invalid_filter"}}],
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["filter_bad_type"])
+    log = pipeline._log[-1]
+    assert "error" in log
+    assert "Unknown filter type: invalid_filter" in log["error"]
+
+
+@patch("pictologics.pipeline.mean_filter")
+def test_step_filter_boundary_options(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test all boundary condition options."""
+    from pictologics.filters import BoundaryCondition
+
+    mock_filter.return_value = mock_image.array
+
+    # Test each boundary option
+    for boundary_name, expected in [
+        ("mirror", BoundaryCondition.MIRROR),
+        ("nearest", BoundaryCondition.NEAREST),
+        ("zero", BoundaryCondition.ZERO),
+        ("constant", BoundaryCondition.ZERO),
+        ("periodic", BoundaryCondition.PERIODIC),
+        ("wrap", BoundaryCondition.PERIODIC),
+    ]:
+        mock_filter.reset_mock()
+        config_name = f"filter_boundary_{boundary_name}"
+        pipeline.add_config(
+            config_name,
+            [
+                {
+                    "step": "filter",
+                    "params": {"type": "mean", "support": 3, "boundary": boundary_name},
+                }
+            ],
+        )
+        pipeline.run(mock_image, mock_mask, config_names=[config_name])
+        call_kwargs = mock_filter.call_args.kwargs
+        assert call_kwargs.get("boundary") == expected, f"Failed for {boundary_name}"
