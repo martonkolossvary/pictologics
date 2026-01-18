@@ -24,11 +24,12 @@ Uses `numba` for optimizing the Khachiyan algorithm for MVEE calculation.
 from __future__ import annotations
 
 import math
-from typing import Optional
+from typing import Any, Optional
 
 import mcubes
 import numpy as np
 from numba import jit, prange
+from numpy import typing as npt
 from scipy.spatial import ConvexHull
 from scipy.special import eval_legendre
 
@@ -38,7 +39,7 @@ from ._utils import compute_nonzero_bbox
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _accumulate_moments_from_mask_numba(
-    mask: np.ndarray,
+    mask: npt.NDArray[np.floating[Any]],
 ) -> tuple[int, float, float, float, float, float, float, float, float, float]:
     """Accumulate first/second moments of voxel indices for mask>0."""
     n = 0
@@ -77,7 +78,7 @@ def _accumulate_moments_from_mask_numba(
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _accumulate_intensity_weighted_moments_numba(
-    mask: np.ndarray, image: np.ndarray
+    mask: npt.NDArray[np.floating[Any]], image: npt.NDArray[np.floating[Any]]
 ) -> tuple[int, float, float, float, float]:
     """Accumulate intensity-weighted index sums over mask>0."""
     count = 0
@@ -103,8 +104,11 @@ def _accumulate_intensity_weighted_moments_numba(
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _ombb_extents_numba(
-    verts: np.ndarray, center: np.ndarray, evecs: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+    verts: npt.NDArray[np.floating[Any]],
+    center: npt.NDArray[np.floating[Any]],
+    evecs: npt.NDArray[np.floating[Any]],
+) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
+    """Compute min/max extents of vertices projected onto PCA axes (for OMBB)."""
     min_rot = np.empty(3, dtype=np.float64)
     max_rot = np.empty(3, dtype=np.float64)
     min_rot[:] = np.inf
@@ -147,7 +151,7 @@ def _ombb_extents_numba(
 
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
-def _max_pairwise_distance_numba(points: np.ndarray) -> float:
+def _max_pairwise_distance_numba(points: npt.NDArray[np.floating[Any]]) -> float:
     """Compute the maximum pairwise Euclidean distance."""
     n = points.shape[0]
     if n < 2:
@@ -180,7 +184,7 @@ def _max_pairwise_distance_numba(points: np.ndarray) -> float:
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _mesh_area_volume_numba(
-    verts: np.ndarray, faces: np.ndarray
+    verts: npt.NDArray[np.floating[Any]], faces: npt.NDArray[np.floating[Any]]
 ) -> tuple[float, float]:
     """Compute mesh surface area and absolute volume in one deterministic pass."""
     n_faces = faces.shape[0]
@@ -230,8 +234,10 @@ def _mesh_area_volume_numba(
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _mvee_khachiyan_numba(
-    points: np.ndarray, tol: float = 0.001
-) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    points: npt.NDArray[np.floating[Any]], tol: float = 0.001
+) -> tuple[
+    Optional[npt.NDArray[np.floating[Any]]], Optional[npt.NDArray[np.floating[Any]]]
+]:
     """
     Find Minimum Volume Enclosing Ellipsoid (MVEE) using the Khachiyan algorithm.
 
@@ -430,7 +436,11 @@ def _calculate_ellipsoid_surface_area(a: float, b: float, c: float) -> float:
 
 def _get_mesh_features(
     mask: Image,
-) -> tuple[dict[str, float], Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[
+    dict[str, float],
+    Optional[npt.NDArray[np.floating[Any]]],
+    Optional[npt.NDArray[np.floating[Any]]],
+]:
     """
     Calculate mesh-based features (Surface Area, Volume) and return mesh data.
 
@@ -443,7 +453,7 @@ def _get_mesh_features(
     mask_arr = (mask.array > 0).astype(np.uint8, copy=False)
 
     # Crop to bounding box for performance on large sparse ROIs
-    bbox = compute_nonzero_bbox(mask_arr)
+    bbox = compute_nonzero_bbox(mask_arr)  # type: ignore[arg-type]
     if bbox is None:
         return {}, None, None
 
@@ -474,7 +484,7 @@ def _get_mesh_features(
         features["surface_area_C0JK"] = float(surface_area)
         features["volume_RNU0"] = float(mesh_volume)
 
-        return features, verts, faces_i64
+        return features, verts, faces_i64  # type: ignore[return-value]
     except (ValueError, RuntimeError):
         # Marching cubes failed
         return {}, None, None
@@ -504,9 +514,11 @@ def _get_shape_features(surface_area: float, mesh_volume: float) -> dict[str, fl
     return features
 
 
-def _get_pca_features(
-    mask: Image, mesh_volume: float, surface_area: float
-) -> tuple[dict[str, float], Optional[np.ndarray], Optional[np.ndarray]]:
+def _get_pca_features(mask: Image, mesh_volume: float, surface_area: float) -> tuple[
+    dict[str, float],
+    Optional[npt.NDArray[np.floating[Any]]],
+    Optional[npt.NDArray[np.floating[Any]]],
+]:
     """Calculate PCA-based features and return eigenvalues/vectors."""
     features: dict[str, float] = {}
 
@@ -575,7 +587,7 @@ def _get_pca_features(
 
 
 def _get_convex_hull_features(
-    verts: np.ndarray, mesh_volume: float, surface_area: float
+    verts: npt.NDArray[np.floating[Any]], mesh_volume: float, surface_area: float
 ) -> tuple[dict[str, float], Optional[ConvexHull]]:
     """Calculate Convex Hull features."""
     features: dict[str, float] = {}
@@ -605,8 +617,8 @@ def _get_convex_hull_features(
 
 
 def _get_bounding_box_features(
-    verts: np.ndarray,
-    evecs: Optional[np.ndarray],
+    verts: npt.NDArray[np.floating[Any]],
+    evecs: Optional[npt.NDArray[np.floating[Any]]],
     mesh_volume: float,
     surface_area: float,
 ) -> dict[str, float]:
@@ -659,7 +671,7 @@ def _get_bounding_box_features(
 
 def _get_mvee_features(
     hull: Optional[ConvexHull],
-    verts: np.ndarray,
+    verts: npt.NDArray[np.floating[Any]],
     mesh_volume: float,
     surface_area: float,
 ) -> dict[str, float]:

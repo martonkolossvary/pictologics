@@ -43,6 +43,7 @@ from typing import Any, Optional
 import nibabel as nib
 import numpy as np
 import pydicom
+from numpy import typing as npt
 from numpy.typing import DTypeLike
 
 
@@ -56,20 +57,20 @@ class Image:
     DICOM and NIfTI.
 
     Attributes:
-        array (np.ndarray): The 3D image data with shape (x, y, z).
+        array (npt.NDArray[np.floating[Any]]): The 3D image data with shape (x, y, z).
         spacing (tuple[float, float, float]): Voxel spacing in millimeters (mm)
             along the (x, y, z) axes.
         origin (tuple[float, float, float]): World coordinates of the image origin
             (center of the first voxel) in millimeters (mm).
-        direction (Optional[np.ndarray]): 3x3 direction cosine matrix defining the
+        direction (Optional[npt.NDArray[np.floating[Any]]]): 3x3 direction cosine matrix defining the
             orientation of the image axes in world space. Defaults to identity matrix.
         modality (str): The imaging modality (e.g., 'CT', 'MR', 'PT'). Defaults to 'Unknown'.
     """
 
-    array: np.ndarray
+    array: npt.NDArray[np.floating[Any]]
     spacing: tuple[float, float, float]
     origin: tuple[float, float, float]
-    direction: Optional[np.ndarray] = None
+    direction: Optional[npt.NDArray[np.floating[Any]]] = None
     modality: str = "Unknown"
 
 
@@ -701,7 +702,7 @@ def load_and_merge_images(
                 f"Failed to load first image '{image_paths[0]}': {e}"
             ) from e
 
-        merged_array = consensus_image.array.copy()
+        merged_array = consensus_image.array.astype(np.float64)
 
         # Apply relabeling for the first image
         if relabel_masks:
@@ -773,7 +774,9 @@ def load_and_merge_images(
 
     # Apply binarization if requested
     if binarize is not None:
-        mask_out: np.ndarray = np.zeros_like(merged_array, dtype=np.uint8)
+        mask_out: npt.NDArray[np.floating[Any]] = np.zeros_like(
+            merged_array, dtype=np.uint8
+        )
         if isinstance(binarize, bool) and binarize is True:
             mask_out[merged_array > 0] = 1
         elif isinstance(binarize, int) and not isinstance(binarize, bool):
@@ -788,7 +791,7 @@ def load_and_merge_images(
             mask_out = merged_array
 
         if binarize is not False:
-            merged_array = mask_out
+            merged_array = mask_out.astype(np.float64)
 
     return Image(
         array=merged_array,
@@ -799,7 +802,9 @@ def load_and_merge_images(
     )
 
 
-def _ensure_3d(array: np.ndarray, dataset_index: int = 0) -> np.ndarray:
+def _ensure_3d(
+    array: npt.NDArray[np.floating[Any]], dataset_index: int = 0
+) -> npt.NDArray[np.floating[Any]]:
     """
     Ensure the input array is strictly 3D (x, y, z).
 
@@ -809,11 +814,11 @@ def _ensure_3d(array: np.ndarray, dataset_index: int = 0) -> np.ndarray:
     - **4D (x, y, z, t)**: The volume at `dataset_index` is extracted.
 
     Args:
-        array (np.ndarray): The input numpy array of arbitrary dimensions.
+        array (npt.NDArray[np.floating[Any]]): The input numpy array of arbitrary dimensions.
         dataset_index (int): The index of the volume to extract if the input is 4D.
 
     Returns:
-        np.ndarray: A 3D numpy array.
+        npt.NDArray[np.floating[Any]]: A 3D numpy array.
 
     Raises:
         ValueError: If the array has an unsupported number of dimensions (not 2, 3, or 4)

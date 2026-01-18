@@ -350,18 +350,87 @@ class TestIntensityFeatures(unittest.TestCase):
             _max_mean_at_max_intensity,
             _mean_abs_dev,
             _robust_mean_abs_dev,
+            _sum_sq_centered,
         )
 
-        # Empty arrays
+        # Test _sum_sq_centered
+        values = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        mean_val = 3.0
+        # Expected: (1-3)^2 + (2-3)^2 + (3-3)^2 + (4-3)^2 + (5-3)^2 = 4+1+0+1+4 = 10
+        result = _sum_sq_centered(values, mean_val)
+        self.assertAlmostEqual(result, 10.0)
+
+        # Empty array should return 0.0
+        self.assertEqual(_sum_sq_centered(np.array([]), 0.0), 0.0)
+
+        # Single value
+        self.assertAlmostEqual(_sum_sq_centered(np.array([5.0]), 5.0), 0.0)
+        self.assertAlmostEqual(_sum_sq_centered(np.array([5.0]), 3.0), 4.0)
+
+        # Empty arrays for other helpers
+
+        # Test _central_moments_2_3_4
+        # Empty array
         empty = np.array([])
         self.assertEqual(_central_moments_2_3_4(empty, 0.0), (0.0, 0.0, 0.0))
+
+        # Symmetric distribution: skewness (m3) should be 0
+        symmetric = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        m2, m3, m4 = _central_moments_2_3_4(symmetric, 3.0)
+        self.assertAlmostEqual(m2, 2.0)  # variance = sum((x-3)^2)/5 = 10/5 = 2
+        self.assertAlmostEqual(m3, 0.0)  # symmetric -> 0 skewness
+        self.assertGreater(m4, 0.0)  # kurtosis component > 0
+
+        # Single value: all moments should be 0
+        single = np.array([5.0])
+        m2, m3, m4 = _central_moments_2_3_4(single, 5.0)
+        self.assertEqual(m2, 0.0)
+        self.assertEqual(m3, 0.0)
+        self.assertEqual(m4, 0.0)
+
+        # Constant array: all moments should be 0
+        constant = np.array([3.0, 3.0, 3.0])
+        m2, m3, m4 = _central_moments_2_3_4(constant, 3.0)
+        self.assertEqual(m2, 0.0)
+        self.assertEqual(m3, 0.0)
+        self.assertEqual(m4, 0.0)
+
+        # Other helpers - empty arrays
         self.assertEqual(_mean_abs_dev(empty, 0.0), 0.0)
+
+        # Test _mean_abs_dev more thoroughly
+        # Basic case: MAD from mean
+        test_vals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        # MAD from mean (3.0): (2+1+0+1+2)/5 = 6/5 = 1.2
+        self.assertAlmostEqual(_mean_abs_dev(test_vals, 3.0), 1.2)
+
+        # Single value at center -> 0
+        self.assertEqual(_mean_abs_dev(np.array([5.0]), 5.0), 0.0)
+
+        # Single value off center
+        self.assertAlmostEqual(_mean_abs_dev(np.array([5.0]), 3.0), 2.0)
+
+        # Test _robust_mean_abs_dev
         self.assertEqual(_robust_mean_abs_dev(empty, 0.0, 1.0), 0.0)
 
         # Robust MAD with count=0 (no values in range)
         values = np.array([10.0])
         # Range 0-5 -> count=0
         self.assertEqual(_robust_mean_abs_dev(values, 0.0, 5.0), 0.0)
+
+        # Values inside range - basic case
+        # Values: 1, 2, 3, 4, 5. Range [1, 5]. All values in range.
+        # Mean = 3.0, MAD = (2+1+0+1+2)/5 = 1.2
+        robust_vals = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        self.assertAlmostEqual(_robust_mean_abs_dev(robust_vals, 1.0, 5.0), 1.2)
+
+        # Partial filtering: [1, 2, 3, 4, 5, 100]. Range [1, 5] excludes 100.
+        # Mean of [1,2,3,4,5] = 3.0, MAD = 1.2
+        robust_vals_outlier = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 100.0])
+        self.assertAlmostEqual(_robust_mean_abs_dev(robust_vals_outlier, 1.0, 5.0), 1.2)
+
+        # Single value in range
+        self.assertEqual(_robust_mean_abs_dev(np.array([3.0]), 1.0, 5.0), 0.0)
 
         # Local peaks edge case: same max intensity, higher local mean
         # data: 2 voxels. Both val 10. mean1=5, mean2=8.

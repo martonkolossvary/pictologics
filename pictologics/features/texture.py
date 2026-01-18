@@ -57,6 +57,7 @@ Example:
     Example:
         ```python
         import numpy as np
+from numpy import typing as npt
         from pictologics.features.texture import calculate_all_texture_matrices, calculate_glcm_features
 
         # Create dummy data
@@ -80,16 +81,21 @@ import numba
 import numpy as np
 from numba import jit, prange
 from numba.np.ufunc.parallel import get_thread_id
+from numpy import typing as npt
 from scipy.ndimage import distance_transform_cdt
 
 from ._utils import compute_nonzero_bbox
 
 
 def _maybe_crop_to_bbox(
-    data: np.ndarray,
-    mask: np.ndarray,
-    distance_mask: Optional[np.ndarray] = None,
-) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
+    distance_mask: Optional[npt.NDArray[np.floating[Any]]] = None,
+) -> tuple[
+    npt.NDArray[np.floating[Any]],
+    npt.NDArray[np.floating[Any]],
+    Optional[npt.NDArray[np.floating[Any]]],
+]:
     """Crop data/masks to a tight bounding box around the ROI.
 
     Cropping is a major performance win for sparse ROIs because the texture kernels are
@@ -131,10 +137,10 @@ class _ZoneBufferPool:
 
     def __init__(self) -> None:
         self._max_zones = 0
-        self._res_gl: Optional[np.ndarray] = None
-        self._res_size: Optional[np.ndarray] = None
-        self._res_dist: Optional[np.ndarray] = None
-        self._stack: Optional[np.ndarray] = None
+        self._res_gl: Optional[npt.NDArray[np.floating[Any]]] = None
+        self._res_size: Optional[npt.NDArray[np.floating[Any]]] = None
+        self._res_dist: Optional[npt.NDArray[np.floating[Any]]] = None
+        self._stack: Optional[npt.NDArray[np.floating[Any]]] = None
 
     @classmethod
     def get_instance(cls) -> "_ZoneBufferPool":
@@ -143,9 +149,12 @@ class _ZoneBufferPool:
             cls._instance = cls()
         return cls._instance
 
-    def get_buffers(
-        self, max_zones: int
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def get_buffers(self, max_zones: int) -> tuple[
+        npt.NDArray[np.floating[Any]],
+        npt.NDArray[np.floating[Any]],
+        npt.NDArray[np.floating[Any]],
+        npt.NDArray[np.floating[Any]],
+    ]:
         """
         Get pre-allocated buffers, resizing if necessary.
 
@@ -210,18 +219,24 @@ DIRECTIONS_13_WITH_ID = tuple(enumerate(DIRECTIONS_13_TUPLE))
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True, error_model="numpy")  # type: ignore
 def _calculate_local_features_numba(
-    data_int: np.ndarray,
-    mask: np.ndarray,
+    data_int: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
     calc_glcm: bool,
     calc_glrlm: bool,
     calc_ngtdm: bool,
     calc_ngldm: bool,
-    offsets_26: np.ndarray,
-    directions_13: np.ndarray,
+    offsets_26: npt.NDArray[np.floating[Any]],
+    directions_13: npt.NDArray[np.floating[Any]],
     ngldm_alpha: int,
     n_threads: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    npt.NDArray[np.floating[Any]],
+    npt.NDArray[np.floating[Any]],
+    npt.NDArray[np.floating[Any]],
+    npt.NDArray[np.floating[Any]],
+    npt.NDArray[np.floating[Any]],
+]:
     """
     Calculate GLCM, GLRLM, NGTDM, and NGLDM in a single pass.
     Optimized with parallel execution, thread-local storage, and interior loop optimization.
@@ -449,20 +464,20 @@ def _process_voxel(
     x: int,
     y: int,
     z: int,
-    data_int: np.ndarray,
-    mask: np.ndarray,
+    data_int: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
     calc_glcm: bool,
     calc_glrlm: bool,
     calc_ngtdm: bool,
     calc_ngldm: bool,
-    glcm_local: np.ndarray,
-    glrlm_local: np.ndarray,
-    ngtdm_s_local: np.ndarray,
-    ngtdm_n_local: np.ndarray,
-    ngldm_local: np.ndarray,
-    offsets_26: np.ndarray,
-    directions_13: np.ndarray,
+    glcm_local: npt.NDArray[np.floating[Any]],
+    glrlm_local: npt.NDArray[np.floating[Any]],
+    ngtdm_s_local: npt.NDArray[np.floating[Any]],
+    ngtdm_n_local: npt.NDArray[np.floating[Any]],
+    ngldm_local: npt.NDArray[np.floating[Any]],
+    offsets_26: npt.NDArray[np.floating[Any]],
+    directions_13: npt.NDArray[np.floating[Any]],
     tid: int,
     depth: int,
     height: int,
@@ -471,6 +486,7 @@ def _process_voxel(
     is_safe: bool,
     ngldm_alpha: int = 0,
 ) -> None:
+    """Process single voxel for GLCM/GLRLM/NGTDM/NGLDM; inlined for performance."""
     if mask[z, y, x] == 0:
         return
 
@@ -615,53 +631,54 @@ def _process_voxel(
 
 
 def calculate_all_texture_matrices(
-    data: np.ndarray,
-    mask: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
-    distance_mask: Optional[np.ndarray] = None,
+    distance_mask: Optional[npt.NDArray[np.floating[Any]]] = None,
     ngldm_alpha: int = 0,
 ) -> dict[str, Any]:
     """
-    Calculate all texture matrices (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM) in an optimized single pass.
+        Calculate all texture matrices (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM) in an optimized single pass.
 
-    This function serves as the computational backbone for texture analysis. It computes the raw
-    matrices required to extract specific texture features. By aggregating these calculations,
-    it minimizes the number of passes over the image data, significantly improving performance.
+        This function serves as the computational backbone for texture analysis. It computes the raw
+        matrices required to extract specific texture features. By aggregating these calculations,
+        it minimizes the number of passes over the image data, significantly improving performance.
 
-    Args:
-        data (np.ndarray): The 3D image array containing discretised grey levels.
-            Values should be integers in the range [1, n_bins].
-        mask (np.ndarray): The 3D binary mask array defining the Region of Interest (ROI).
-            Must have the same shape as `data`. Non-zero values indicate the ROI.
-        n_bins (int): The number of grey levels used for discretization (e.g., 16, 32, 64).
-            This determines the size of the resulting matrices.
-        distance_mask (Optional[np.ndarray]): Optional mask used to calculate the distance map for GLDZM.
-            If None, `mask` is used. This allows calculating distances based on the morphological mask
-            while analyzing intensities from the intensity mask (e.g., after outlier filtering).
-        ngldm_alpha (int): The coarseness parameter α for NGLDM calculation. Two grey levels are
-            considered dependent if their absolute difference is ≤ α. Default is 0 (exact match),
-            which is the IBSI standard. Use α=1 for tolerance of ±1 grey level difference.
+        Args:
+            data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
+                Values should be integers in the range [1, n_bins].
+            mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the Region of Interest (ROI).
+                Must have the same shape as `data`. Non-zero values indicate the ROI.
+            n_bins (int): The number of grey levels used for discretization (e.g., 16, 32, 64).
+                This determines the size of the resulting matrices.
+            distance_mask (Optional[npt.NDArray[np.floating[Any]]]): Optional mask used to calculate the distance map for GLDZM.
+                If None, `mask` is used. This allows calculating distances based on the morphological mask
+                while analyzing intensities from the intensity mask (e.g., after outlier filtering).
+            ngldm_alpha (int): The coarseness parameter α for NGLDM calculation. Two grey levels are
+                considered dependent if their absolute difference is ≤ α. Default is 0 (exact match),
+                which is the IBSI standard. Use α=1 for tolerance of ±1 grey level difference.
 
-    Returns:
-        dict[str, Any]: A dictionary containing the calculated texture matrices:
-            - 'glcm' (np.ndarray): Grey Level Co-occurrence Matrix. Shape: (n_dirs, n_bins, n_bins).
-            - 'glrlm' (np.ndarray): Grey Level Run Length Matrix. Shape: (n_dirs, n_bins, max_run_length).
-            - 'ngtdm_s' (np.ndarray): NGTDM Sum of absolute differences. Shape: (n_bins,).
-            - 'ngtdm_n' (np.ndarray): NGTDM Number of valid voxels. Shape: (n_bins,).
-            - 'ngldm' (np.ndarray): Neighbouring Grey Level Dependence Matrix. Shape: (n_bins, n_dependence).
-            - 'glszm' (np.ndarray): Grey Level Size Zone Matrix. Shape: (n_bins, max_zone_size).
-            - 'gldzm' (np.ndarray): Grey Level Distance Zone Matrix. Shape: (n_bins, max_distance).
+        Returns:
+            dict[str, Any]: A dictionary containing the calculated texture matrices:
+                - 'glcm' (npt.NDArray[np.floating[Any]]): Grey Level Co-occurrence Matrix. Shape: (n_dirs, n_bins, n_bins).
+                - 'glrlm' (npt.NDArray[np.floating[Any]]): Grey Level Run Length Matrix. Shape: (n_dirs, n_bins, max_run_length).
+                - 'ngtdm_s' (npt.NDArray[np.floating[Any]]): NGTDM Sum of absolute differences. Shape: (n_bins,).
+                - 'ngtdm_n' (npt.NDArray[np.floating[Any]]): NGTDM Number of valid voxels. Shape: (n_bins,).
+                - 'ngldm' (npt.NDArray[np.floating[Any]]): Neighbouring Grey Level Dependence Matrix. Shape: (n_bins, n_dependence).
+                - 'glszm' (npt.NDArray[np.floating[Any]]): Grey Level Size Zone Matrix. Shape: (n_bins, max_zone_size).
+                - 'gldzm' (npt.NDArray[np.floating[Any]]): Grey Level Distance Zone Matrix. Shape: (n_bins, max_distance).
 
-    Example:
-    Example:
-        ```python
-        import numpy as np
-        data = np.random.randint(1, 33, (50, 50, 50))
-        mask = np.ones((50, 50, 50))
-        matrices = calculate_all_texture_matrices(data, mask, n_bins=32)
-        print(matrices['glcm'].shape)
-        # (13, 32, 32)
-        ```
+        Example:
+        Example:
+            ```python
+            import numpy as np
+    from numpy import typing as npt
+            data = np.random.randint(1, 33, (50, 50, 50))
+            mask = np.ones((50, 50, 50))
+            matrices = calculate_all_texture_matrices(data, mask, n_bins=32)
+            print(matrices['glcm'].shape)
+            # (13, 32, 32)
+            ```
     """
     # Fast exit for empty ROI
     if not bool(np.any(mask != 0)):
@@ -745,72 +762,73 @@ def calculate_all_texture_matrices(
 
 
 def calculate_glcm_features(
-    data: np.ndarray,
-    mask: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
-    glcm_matrix: Optional[np.ndarray] = None,
+    glcm_matrix: Optional[npt.NDArray[np.floating[Any]]] = None,
 ) -> dict[str, float]:
     r"""
-    Calculate Grey Level Co-occurrence Matrix (GLCM) features.
+        Calculate Grey Level Co-occurrence Matrix (GLCM) features.
 
-    The GLCM describes the second-order statistical distribution of grey levels in the ROI.
-    It counts how often pairs of grey levels occur at a specific distance and direction.
-    This implementation computes features based on the 3D merged GLCM (averaged over all 13 directions),
-    making the features rotationally invariant.
+        The GLCM describes the second-order statistical distribution of grey levels in the ROI.
+        It counts how often pairs of grey levels occur at a specific distance and direction.
+        This implementation computes features based on the 3D merged GLCM (averaged over all 13 directions),
+        making the features rotationally invariant.
 
-    **IBSI Reference**: Section 3.6 (Grey Level Co-occurrence Based Features).
+        **IBSI Reference**: Section 3.6 (Grey Level Co-occurrence Based Features).
 
-    **Mathematical Definition**:
-    Let $P(i,j)$ be the co-occurrence matrix, where $i$ and $j$ are grey levels.
-    The matrix is normalized such that $\sum_{i,j} P(i,j) = 1$.
+        **Mathematical Definition**:
+        Let $P(i,j)$ be the co-occurrence matrix, where $i$ and $j$ are grey levels.
+        The matrix is normalized such that $\sum_{i,j} P(i,j) = 1$.
 
-    **Calculated Features**:
-    *   Joint Maximum (GYBY)
-    *   Joint Average (60VM)
-    *   Joint Variance (UR99)
-    *   Joint Entropy (TU9B)
-    *   Difference Average (TF7R)
-    *   Difference Variance (D3YU)
-    *   Difference Entropy (NTRS)
-    *   Sum Average (ZGXS)
-    *   Sum Variance (OEEB)
-    *   Sum Entropy (P6QZ)
-    *   Angular Second Moment (8ZQL)
-    *   Contrast (ACUI)
-    *   Dissimilarity (8S9J)
-    *   Inverse Difference (IB1Z)
-    *   Normalised Inverse Difference (NDRX)
-    *   Inverse Difference Moment (WF0Z)
-    *   Normalised Inverse Difference Moment (1QCO)
-    *   Inverse Variance (E8JP)
-    *   Correlation (NI2N)
-    *   Autocorrelation (QWB0)
-    *   Cluster Tendency (DG8W)
-    *   Cluster Shade (7NFM)
-    *   Cluster Prominence (AE86)
-    *   Information Correlation 1 (R8DG)
-    *   Information Correlation 2 (JN9H)
+        **Calculated Features**:
+        *   Joint Maximum (GYBY)
+        *   Joint Average (60VM)
+        *   Joint Variance (UR99)
+        *   Joint Entropy (TU9B)
+        *   Difference Average (TF7R)
+        *   Difference Variance (D3YU)
+        *   Difference Entropy (NTRS)
+        *   Sum Average (ZGXS)
+        *   Sum Variance (OEEB)
+        *   Sum Entropy (P6QZ)
+        *   Angular Second Moment (8ZQL)
+        *   Contrast (ACUI)
+        *   Dissimilarity (8S9J)
+        *   Inverse Difference (IB1Z)
+        *   Normalised Inverse Difference (NDRX)
+        *   Inverse Difference Moment (WF0Z)
+        *   Normalised Inverse Difference Moment (1QCO)
+        *   Inverse Variance (E8JP)
+        *   Correlation (NI2N)
+        *   Autocorrelation (QWB0)
+        *   Cluster Tendency (DG8W)
+        *   Cluster Shade (7NFM)
+        *   Cluster Prominence (AE86)
+        *   Information Correlation 1 (R8DG)
+        *   Information Correlation 2 (JN9H)
 
-    Args:
-        data (np.ndarray): The 3D image array containing discretised grey levels.
-        mask (np.ndarray): The 3D binary mask array defining the ROI.
-        n_bins (int): The number of grey levels.
-        glcm_matrix (Optional[np.ndarray]): Pre-calculated GLCM matrix. If provided, `data` and `mask`
-            are ignored for matrix calculation, but `data` is still used for `Ng` estimation if needed.
-            If None, the matrix is calculated from scratch.
+        Args:
+            data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
+            mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
+            n_bins (int): The number of grey levels.
+            glcm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLCM matrix. If provided, `data` and `mask`
+                are ignored for matrix calculation, but `data` is still used for `Ng` estimation if needed.
+                If None, the matrix is calculated from scratch.
 
-    Returns:
-        dict[str, float]: A dictionary of calculated GLCM features, keyed by their name and IBSI code.
-            Example keys: 'joint_maximum_GYBY', 'contrast_ACUI', 'correlation_NI2N'.
+        Returns:
+            dict[str, float]: A dictionary of calculated GLCM features, keyed by their name and IBSI code.
+                Example keys: 'joint_maximum_GYBY', 'contrast_ACUI', 'correlation_NI2N'.
 
-    Example:
-        ```python
-        import numpy as np
-        # ... assuming data and mask defined ...
-        features = calculate_glcm_features(data, mask, n_bins=32)
-        print(features['contrast_ACUI'])
-        ```
-        12.5
+        Example:
+            ```python
+            import numpy as np
+    from numpy import typing as npt
+            # ... assuming data and mask defined ...
+            features = calculate_glcm_features(data, mask, n_bins=32)
+            print(features['contrast_ACUI'])
+            ```
+            12.5
     """
     if glcm_matrix is None:
         data_c, mask_c, _ = _maybe_crop_to_bbox(data, mask, None)
@@ -1001,10 +1019,10 @@ def calculate_glcm_features(
 
 
 def calculate_glrlm_features(
-    data: np.ndarray,
-    mask: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
-    glrlm_matrix: Optional[np.ndarray] = None,
+    glrlm_matrix: Optional[npt.NDArray[np.floating[Any]]] = None,
 ) -> dict[str, float]:
     """
     Calculate Grey Level Run Length Matrix (GLRLM) features.
@@ -1014,10 +1032,10 @@ def calculate_glrlm_features(
     This implementation computes features based on the 3D merged GLRLM (averaged over all 13 directions).
 
     Args:
-        data (np.ndarray): The 3D image array containing discretised grey levels.
-        mask (np.ndarray): The 3D binary mask array defining the ROI.
+        data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
+        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
         n_bins (int): The number of grey levels.
-        glrlm_matrix (Optional[np.ndarray]): Pre-calculated GLRLM matrix.
+        glrlm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLRLM matrix.
 
     Returns:
         dict[str, float]: A dictionary of calculated GLRLM features.
@@ -1134,17 +1152,17 @@ def calculate_glrlm_features(
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _calculate_zone_features_numba(
-    data: np.ndarray,
-    mask: np.ndarray,
-    dist_map: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
+    dist_map: npt.NDArray[np.floating[Any]],
     n_bins: int,
-    res_gl: np.ndarray,
-    res_size: np.ndarray,
-    res_dist: np.ndarray,
-    stack: np.ndarray,
+    res_gl: npt.NDArray[np.floating[Any]],
+    res_size: npt.NDArray[np.floating[Any]],
+    res_dist: npt.NDArray[np.floating[Any]],
+    stack: npt.NDArray[np.floating[Any]],
     calc_glszm: bool = True,
     calc_gldzm: bool = True,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
     """
     Calculate GLSZM and GLDZM in a single pass using an optimized 1D flattened approach.
 
@@ -1303,17 +1321,17 @@ def _calculate_zone_features_numba(
             if d > 0:
                 gldzm[gl - 1, d - 1] += 1
 
-    return glszm, gldzm
+    return glszm, gldzm  # type: ignore[return-value]
 
 
 def calculate_zone_features(
-    data: np.ndarray,
-    mask: np.ndarray,
-    dist_map: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
+    dist_map: npt.NDArray[np.floating[Any]],
     n_bins: int,
     calc_glszm: bool = True,
     calc_gldzm: bool = True,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
     """
     Wrapper for _calculate_zone_features_numba with buffer pooling.
 
@@ -1342,7 +1360,7 @@ def calculate_zone_features(
     res_gl, res_size, res_dist, stack = pool.get_buffers(max_zones)
 
     return cast(
-        tuple[np.ndarray, np.ndarray],
+        tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]],
         _calculate_zone_features_numba(
             data,
             mask,
@@ -1359,10 +1377,10 @@ def calculate_zone_features(
 
 
 def calculate_glszm_features(
-    data: np.ndarray,
-    mask: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
-    glszm_matrix: Optional[np.ndarray] = None,
+    glszm_matrix: Optional[npt.NDArray[np.floating[Any]]] = None,
 ) -> dict[str, float]:
     """
     Calculate Grey Level Size Zone Matrix (GLSZM) features.
@@ -1372,10 +1390,10 @@ def calculate_glszm_features(
     with the same grey level. This matrix is rotationally invariant by definition.
 
     Args:
-        data (np.ndarray): The 3D image array containing discretised grey levels.
-        mask (np.ndarray): The 3D binary mask array defining the ROI.
+        data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
+        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
         n_bins (int): The number of grey levels.
-        glszm_matrix (Optional[np.ndarray]): Pre-calculated GLSZM matrix.
+        glszm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLSZM matrix.
 
     Returns:
         dict[str, float]: A dictionary of calculated GLSZM features.
@@ -1392,7 +1410,7 @@ def calculate_glszm_features(
         dummy_dist = np.zeros_like(data_c, dtype=np.int32)
 
         glszm, _ = calculate_zone_features(
-            data_c, mask_u8, dummy_dist, n_bins, calc_glszm=True, calc_gldzm=False
+            data_c, mask_u8, dummy_dist, n_bins, calc_glszm=True, calc_gldzm=False  # type: ignore[arg-type]
         )
     else:
         glszm = glszm_matrix
@@ -1473,11 +1491,11 @@ def calculate_glszm_features(
 
 
 def calculate_gldzm_features(
-    data: np.ndarray,
-    mask: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
-    gldzm_matrix: Optional[np.ndarray] = None,
-    distance_mask: Optional[np.ndarray] = None,
+    gldzm_matrix: Optional[npt.NDArray[np.floating[Any]]] = None,
+    distance_mask: Optional[npt.NDArray[np.floating[Any]]] = None,
 ) -> dict[str, float]:
     """
     Calculate Grey Level Distance Zone Matrix (GLDZM) features.
@@ -1487,11 +1505,11 @@ def calculate_gldzm_features(
     This captures information about the spatial distribution of textures relative to the boundary.
 
     Args:
-        data (np.ndarray): The 3D image array containing discretised grey levels.
-        mask (np.ndarray): The 3D binary mask array defining the ROI.
+        data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
+        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
         n_bins (int): The number of grey levels.
-        gldzm_matrix (Optional[np.ndarray]): Pre-calculated GLDZM matrix.
-        distance_mask (Optional[np.ndarray]): Optional mask used to calculate the distance map.
+        gldzm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLDZM matrix.
+        distance_mask (Optional[npt.NDArray[np.floating[Any]]]): Optional mask used to calculate the distance map.
             If None, `mask` is used. This allows calculating distances based on the morphological mask
             while analyzing intensities from the intensity mask (e.g., after outlier filtering).
 
@@ -1512,7 +1530,7 @@ def calculate_gldzm_features(
         )
         dist_map = dist_map_padded[1:-1, 1:-1, 1:-1]
 
-        _, gldzm = calculate_zone_features(
+        _, gldzm = calculate_zone_features(  # type: ignore[arg-type]
             data,
             mask,
             dist_map,
@@ -1609,10 +1627,12 @@ def calculate_gldzm_features(
 
 
 def calculate_ngtdm_features(
-    data: np.ndarray,
-    mask: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
-    ngtdm_matrices: Optional[tuple[np.ndarray, np.ndarray]] = None,
+    ngtdm_matrices: Optional[
+        tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]
+    ] = None,
 ) -> dict[str, float]:
     """
     Calculate Neighbourhood Grey Tone Difference Matrix (NGTDM) features.
@@ -1621,10 +1641,10 @@ def calculate_ngtdm_features(
     of its neighbours. It captures the coarseness and contrast of the texture.
 
     Args:
-        data (np.ndarray): The 3D image array containing discretised grey levels.
-        mask (np.ndarray): The 3D binary mask array defining the ROI.
+        data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
+        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
         n_bins (int): The number of grey levels.
-        ngtdm_matrices (Optional[tuple[np.ndarray, np.ndarray]]): Pre-calculated NGTDM matrices
+        ngtdm_matrices (Optional[tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]]): Pre-calculated NGTDM matrices
             (sum of absolute differences `s`, and count `n`).
 
     Returns:
@@ -1748,10 +1768,10 @@ def calculate_ngtdm_features(
 
 
 def calculate_ngldm_features(
-    data: np.ndarray,
-    mask: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
-    ngldm_matrix: Optional[np.ndarray] = None,
+    ngldm_matrix: Optional[npt.NDArray[np.floating[Any]]] = None,
     ngldm_alpha: int = 0,
 ) -> dict[str, float]:
     """
@@ -1761,10 +1781,10 @@ def calculate_ngldm_features(
     A "dependence" is defined as a connected voxel having a similar grey level (within a tolerance α).
 
     Args:
-        data (np.ndarray): The 3D image array containing discretised grey levels.
-        mask (np.ndarray): The 3D binary mask array defining the ROI.
+        data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
+        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
         n_bins (int): The number of grey levels.
-        ngldm_matrix (Optional[np.ndarray]): Pre-calculated NGLDM matrix.
+        ngldm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated NGLDM matrix.
         ngldm_alpha (int): The coarseness parameter α. Two grey levels are considered dependent
             if their absolute difference is ≤ α. Default is 0 (exact match, IBSI standard).
 
@@ -1886,10 +1906,10 @@ def calculate_ngldm_features(
 
 
 def calculate_all_texture_features(
-    disc_array: np.ndarray,
-    mask_array: np.ndarray,
+    disc_array: npt.NDArray[np.floating[Any]],
+    mask_array: npt.NDArray[np.floating[Any]],
     n_bins: int,
-    distance_mask_array: Optional[np.ndarray] = None,
+    distance_mask_array: Optional[npt.NDArray[np.floating[Any]]] = None,
     ngldm_alpha: int = 0,
 ) -> dict[str, float]:
     """

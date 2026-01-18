@@ -21,7 +21,7 @@ See also the [NOTICE](NOTICE.md) file for attribution and third-party library in
 
 *   **🚀 High Performance**: Uses `numba` for Just In Time (JIT) compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](benchmarks.md) page for details).
 *   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantom:
-    *   **IBSI 1**: Feature extraction ([compliance report](ibsi_compliance.md))
+    *   **IBSI 1**: Feature extraction ([compliance report](ibsi1_compliance.md))
     *   **IBSI 2**: Image filters ([filter compliance](ibsi2_compliance.md))
 *   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, DICOM, DICOM-SEG, DICOM-SR).
 *   **✨ User-Friendly**: Pure Python implementation with a simple installation process and an intuitive API, ensuring a smooth experience from setup to analysis.

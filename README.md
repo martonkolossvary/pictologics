@@ -21,7 +21,7 @@ Documentation (User Guide, API, Benchmarks): https://martonkolossvary.github.io/
 ## Why Pictologics?
 
 *   **🚀 High Performance**: Uses `numba` for JIT compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page for details).
-*   **✅ IBSI Compliant**: Implements standard algorithms verified against IBSI 1 (feature extraction), IBSI 2 Phase 1 (filters), Phase 2 (filtered features), and Phase 3 (multi-modality reproducibility). See [IBSI Compliance](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/) documentation.
+*   **✅ IBSI Compliant**: Implements standard algorithms verified against IBSI 1 (feature extraction) and IBSI 2 Phase 1 (filters). See [IBSI 1](ibsi1_compliance.md) and [IBSI 2](ibsi2_compliance.md) documentation.
 *   **🔧 Flexible**: Configurable pipeline for reproducible research. Provides utilities for DICOM parsing and organization and common image processing tasks.
 *   **👁️ Visualization**: Built-in utilities for visual quality control of mask overlays and segmentations.
 *   **✨ Easy to Use**: Simple installation and a straightforward pipeline make it easy to get started quickly.
@@ -91,7 +91,7 @@ Comparisons between **Pictologics** and **PyRadiomics** (single-thread parity).
 - **Hardware**: Apple M4 Pro, 14 cores, 48 GB
 - **OS**: macOS 26.2 (arm64)
 - **Python**: 3.12.10
-- **Core deps**: pictologics 0.2.0, numpy 2.3.5, scipy 1.16.3, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
+- **Core deps**: pictologics 0.2.0, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
 - **PyRadiomics stack (parity runs)**: pyradiomics 3.1.1.dev111+g8ed579383, SimpleITK 2.5.3
 - **BLAS/LAPACK**: Apple Accelerate (from `numpy.show_config()`)
 
@@ -126,11 +126,7 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 ## Quality & Compliance
 
-**IBSI Compliance**:
-- **IBSI 1**: Full feature extraction compliance ([Report](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/))
-- **IBSI 2 Phase 1**: Filter response map validation ([Report](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/))
-- **IBSI 2 Phase 2**: Filtered feature extraction ([Report](https://martonkolossvary.github.io/pictologics/ibsi2_phase2_compliance/))
-- **IBSI 2 Phase 3**: Multi-modality reproducibility (97% match) ([Report](https://martonkolossvary.github.io/pictologics/ibsi2_phase3_compliance/))
+**IBSI Compliance**: Full compliance (see [Report](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/)).
 
 ### Code Health
 

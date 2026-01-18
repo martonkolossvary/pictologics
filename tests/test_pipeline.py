@@ -210,24 +210,6 @@ def test_step_resample_success(
     )
 
 
-def test_step_resample_missing_new_spacing(
-    pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
-) -> None:
-    # Should fail because 'spacing' (legacy) is NOT supported, must use 'new_spacing'
-    pipeline.add_config(
-        "bad_res", [{"step": "resample", "params": {"spacing": (1, 1, 1)}}]
-    )
-
-    # Standard exceptions are caught and logged in run() (unless it's EmptyROIMaskError)
-    pipeline.run(mock_image, mock_mask, config_names=["bad_res"])
-
-    # Verify error in log
-    assert len(pipeline._log) > 0
-    log = pipeline._log[-1]
-    assert "error" in log
-    assert "Resample step requires 'new_spacing'" in log["error"]
-
-
 @patch("pictologics.pipeline.resegment_mask")
 def test_step_resegment(
     mock_reseg: MagicMock,
@@ -303,6 +285,65 @@ def test_step_keep_largest(
 
     # Called for morph_mask and intensity_mask
     assert mock_klc.call_count == 2
+
+
+def test_step_binarize_mask(
+    pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
+) -> None:
+    """Test binarize_mask preprocessing step with various parameter modes."""
+    # Create a mask with varying values
+    varied_mask = Image(
+        array=np.array([[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]]] * 10).swapaxes(0, 2),
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="mask",
+    )
+
+    # 1. Test mask_values as tuple (range): keep values 3-7
+    pipeline.add_config(
+        "bin_range",
+        [{"step": "binarize_mask", "params": {"mask_values": (3, 7)}}],
+    )
+    res = pipeline.run(mock_image, varied_mask, config_names=["bin_range"])
+    assert "bin_range" in res
+
+    # 2. Test mask_values as list: keep only values 2, 5
+    pipeline.add_config(
+        "bin_list",
+        [{"step": "binarize_mask", "params": {"mask_values": [2, 5]}}],
+    )
+    res = pipeline.run(mock_image, varied_mask, config_names=["bin_list"])
+    assert "bin_list" in res
+
+    # 3. Test mask_values as int: keep only value 5
+    pipeline.add_config(
+        "bin_int",
+        [{"step": "binarize_mask", "params": {"mask_values": 5}}],
+    )
+    res = pipeline.run(mock_image, varied_mask, config_names=["bin_int"])
+    assert "bin_int" in res
+
+    # 4. Test threshold mode (default behavior)
+    pipeline.add_config(
+        "bin_thresh",
+        [{"step": "binarize_mask", "params": {"threshold": 4.5}}],
+    )
+    res = pipeline.run(mock_image, varied_mask, config_names=["bin_thresh"])
+    assert "bin_thresh" in res
+
+    # 5. Test with apply_to="morph" only
+    pipeline.add_config(
+        "bin_morph",
+        [
+            {
+                "step": "binarize_mask",
+                "params": {"mask_values": (1, 8), "apply_to": "morph"},
+            }
+        ],
+    )
+    res = pipeline.run(mock_image, varied_mask, config_names=["bin_morph"])
+    assert "bin_morph" in res
 
 
 @patch("pictologics.pipeline.discretise_image")
@@ -514,23 +555,6 @@ def test_extract_ivh_params(
     # If not provided and not discretised -> pass nothing, assume function defaults?
 
     mock_ivh.reset_mock()
-    pipeline.add_config(
-        "ivh_legacy_ignore",
-        [
-            {
-                "step": "extract_features",
-                "params": {
-                    "families": ["ivh"],
-                    "ivh_bin_width": 999.0,  # Removed param
-                },
-            }
-        ],
-    )
-    pipeline.run(mock_image, mock_mask, config_names=["ivh_legacy_ignore"])
-    # Should NOT see bin_width=999.0
-    # It might see nothing passed.
-    call_kwargs = mock_ivh.call_args.kwargs
-    assert "bin_width" not in call_kwargs or call_kwargs["bin_width"] != 999.0
 
 
 def test_extract_ivh_full_params(
@@ -1054,70 +1078,6 @@ def test_texture_matrix_params_explicit(
         assert kwargs.get("ngldm_alpha") == 7
 
 
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
-@patch("pictologics.pipeline.calculate_glcm_features")
-@patch("pictologics.pipeline.discretise_image")
-def test_texture_legacy_alpha(
-    mock_disc: MagicMock,
-    mock_glcm: MagicMock,
-    mock_matrices: MagicMock,
-    pipeline: RadiomicsPipeline,
-    mock_image: Image,
-    mock_mask: Image,
-) -> None:
-    # Support legacy 'ngldm_alpha' in top-level params
-    pipeline.add_config(
-        "tex_legacy",
-        [
-            {
-                "step": "extract_features",
-                "params": {"families": ["texture"], "ngldm_alpha": 5},
-            }
-        ],
-    )
-
-    state = MagicMock()
-    state.is_discretised = True  # Cheat: Pre-discretised
-    # But run creates its own state.
-    # So we need a discretise step.
-    pipeline.add_config(
-        "tex_legacy_alpha",
-        [
-            {"step": "discretise", "params": {"n_bins": 10}},
-            {
-                "step": "extract_features",
-                "params": {"families": ["texture"], "ngldm_alpha": 5},
-            },
-        ],
-    )
-
-    mock_disc.return_value = mock_image
-    mock_matrices.return_value = {
-        "glcm": 1,
-        "glrlm": 1,
-        "glszm": 1,
-        "gldzm": 1,
-        "ngtdm_s": 1,
-        "ngtdm_n": 1,
-        "ngldm": 1,
-    }
-    mock_glcm.return_value = {}
-
-    with patch("pictologics.pipeline.calculate_glrlm_features", return_value={}), patch(
-        "pictologics.pipeline.calculate_glszm_features", return_value={}
-    ), patch("pictologics.pipeline.calculate_gldzm_features", return_value={}), patch(
-        "pictologics.pipeline.calculate_ngtdm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_ngldm_features", return_value={}
-    ):
-
-        pipeline.run(mock_image, mock_mask, config_names=["tex_legacy_alpha"])
-
-        # Check if 'ngldm_alpha' passed to calculate_all_texture_matrices
-        args, kwargs = mock_matrices.call_args
-        assert kwargs.get("ngldm_alpha") == 5
-
-
 # --- Filter Step Tests ---
 
 
@@ -1411,3 +1371,44 @@ def test_step_filter_boundary_options(
         pipeline.run(mock_image, mock_mask, config_names=[config_name])
         call_kwargs = mock_filter.call_args.kwargs
         assert call_kwargs.get("boundary") == expected, f"Failed for {boundary_name}"
+
+
+def test_step_resample_missing_param(
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test resample step error when new_spacing is missing."""
+    pipeline.add_config(
+        "resample_no_spacing",
+        [
+            {"step": "resample", "params": {"interpolation": "linear"}}
+        ],  # Missing new_spacing
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["resample_no_spacing"])
+    log = pipeline._log[-1]
+    assert "error" in log
+    assert "Resample step requires 'new_spacing' parameter" in log["error"]
+
+
+def test_step_binarize_missing_threshold(
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test binarize_mask step error when threshold is missing and no mask_values provided."""
+    pipeline.add_config(
+        "binarize_no_thresh",
+        [
+            {"step": "binarize_mask", "params": {"threshold": None}}
+        ],  # Explicit None without mask_values
+    )
+
+    pipeline.run(mock_image, mock_mask, config_names=["binarize_no_thresh"])
+    log = pipeline._log[-1]
+    assert "error" in log
+    assert (
+        "binarize_mask requires 'threshold' unless mask_values is provided"
+        in log["error"]
+    )

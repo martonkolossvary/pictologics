@@ -23,17 +23,19 @@ spatial feature calculations.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 from numba import jit, prange
+from numpy import typing as npt
 
 if TYPE_CHECKING:
     from ..loader import Image
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
-def _sum_sq_centered(values: np.ndarray, mean_val: float) -> float:
+def _sum_sq_centered(values: npt.NDArray[np.floating[Any]], mean_val: float) -> float:
+    """Compute sum of squared deviations from mean (for Moran's I denominator)."""
     total = 0.0
     for i in range(values.size):
         d = float(values[i]) - mean_val
@@ -43,8 +45,9 @@ def _sum_sq_centered(values: np.ndarray, mean_val: float) -> float:
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _central_moments_2_3_4(
-    values: np.ndarray, mean_val: float
+    values: npt.NDArray[np.floating[Any]], mean_val: float
 ) -> tuple[float, float, float]:
+    """Compute 2nd, 3rd, and 4th central moments in a single pass (for skewness/kurtosis)."""
     n = values.size
     if n == 0:
         return 0.0, 0.0, 0.0
@@ -64,7 +67,8 @@ def _central_moments_2_3_4(
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
-def _mean_abs_dev(values: np.ndarray, center: float) -> float:
+def _mean_abs_dev(values: npt.NDArray[np.floating[Any]], center: float) -> float:
+    """Compute mean absolute deviation from a center value (for MAD features)."""
     n = values.size
     if n == 0:
         return 0.0
@@ -75,8 +79,8 @@ def _mean_abs_dev(values: np.ndarray, center: float) -> float:
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
-def _robust_mean_abs_dev(values: np.ndarray, lower: float, upper: float) -> float:
-    # Two-pass calculation without allocating a filtered array.
+def _robust_mean_abs_dev(values: npt.NDArray[np.floating[Any]], lower: float, upper: float) -> float:
+    """Compute robust MAD using only values in [lower, upper] range (two-pass, no allocation)."""
     n = values.size
     if n == 0:
         return 0.0
@@ -104,10 +108,10 @@ def _robust_mean_abs_dev(values: np.ndarray, lower: float, upper: float) -> floa
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _calculate_spatial_features_numba(
-    x_idx: np.ndarray,
-    y_idx: np.ndarray,
-    z_idx: np.ndarray,
-    intensities: np.ndarray,
+    x_idx: npt.NDArray[np.floating[Any]],
+    y_idx: npt.NDArray[np.floating[Any]],
+    z_idx: npt.NDArray[np.floating[Any]],
+    intensities: npt.NDArray[np.floating[Any]],
     mean_int: float,
     sx: float,
     sy: float,
@@ -194,13 +198,11 @@ def _calculate_spatial_features_numba(
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _calculate_local_mean_numba(
-    data: np.ndarray,
-    mask_indices: np.ndarray,
-    offsets: np.ndarray,
-) -> np.ndarray:
-    """
-    Calculate local mean intensity for voxels in the mask using parallel execution.
-    """
+    data: npt.NDArray[np.floating[Any]],
+    mask_indices: npt.NDArray[np.floating[Any]],
+    offsets: npt.NDArray[np.floating[Any]],
+) -> npt.NDArray[np.floating[Any]]:
+    """Calculate local mean intensity in sphere neighborhood for each ROI voxel (parallel)."""
     n_voxels = mask_indices.shape[0]
     means = np.zeros(n_voxels, dtype=np.float64)
 
@@ -233,11 +235,11 @@ def _calculate_local_mean_numba(
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _calculate_local_peaks_numba(
-    data: np.ndarray,
-    mask_indices: np.ndarray,
-    roi_means: np.ndarray,
+    data: npt.NDArray[np.floating[Any]],
+    mask_indices: npt.NDArray[np.floating[Any]],
+    roi_means: npt.NDArray[np.floating[Any]],
 ) -> tuple[float, float]:
-    """Compute global/local intensity peaks without allocating ROI intensity arrays."""
+    """Compute global/local intensity peaks from pre-computed local means (IBSI 4.5)."""
     global_peak = -1.0e308
     max_intensity = -1.0e308
     local_peak = -1.0e308
@@ -264,8 +266,9 @@ def _calculate_local_peaks_numba(
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _max_mean_at_max_intensity(
-    roi_data: np.ndarray, roi_means: np.ndarray, max_val: float
+    roi_data: npt.NDArray[np.floating[Any]], roi_means: npt.NDArray[np.floating[Any]], max_val: float
 ) -> float:
+    """Find maximum local mean among voxels with maximum intensity (for local peak)."""
     best = -1.0e308
     for i in range(roi_data.size):
         if float(roi_data[i]) == max_val:
@@ -278,7 +281,8 @@ def _max_mean_at_max_intensity(
 @lru_cache(maxsize=32)
 def _sphere_offsets_for_radius(
     spacing: tuple[float, float, float], radius_mm: float
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
+    """Generate voxel offsets for a sphere of given radius (cached for reuse)."""
     sx, sy, sz = spacing
     rx = int(np.ceil(radius_mm / sx))
     ry = int(np.ceil(radius_mm / sy))
@@ -298,9 +302,25 @@ def _sphere_offsets_for_radius(
     return np.ascontiguousarray(np.array(offsets, dtype=np.int32))
 
 
-def calculate_intensity_features(values: np.ndarray) -> dict[str, float]:
+def calculate_intensity_features(values: npt.NDArray[np.floating[Any]]) -> dict[str, float]:
     """
-    Calculate intensity-based features (First Order Statistics) as defined in IBSI.
+    Calculate intensity-based features (First Order Statistics) as defined in IBSI 4.1.
+
+    Computes 18 statistical features from the intensity values within the ROI:
+    mean, variance, skewness, kurtosis, median, min/max, percentiles (10th, 90th),
+    interquartile range, range, MAD variants, coefficient of variation, energy, RMS.
+
+    Args:
+        values: 1D array of intensity values from the ROI (after mask application).
+
+    Returns:
+        Dictionary mapping feature names (with IBSI codes) to computed values.
+        Empty dict if input is empty.
+
+    Example:
+        >>> roi_values = apply_mask(image, mask)
+        >>> features = calculate_intensity_features(roi_values)
+        >>> print(features["mean_intensity_Q4LE"])
     """
     if len(values) == 0:
         return {}
@@ -390,9 +410,21 @@ def calculate_intensity_features(values: np.ndarray) -> dict[str, float]:
 
 
 def calculate_intensity_histogram_features(
-    discretised_values: np.ndarray,
+    discretised_values: npt.NDArray[np.floating[Any]],
 ) -> dict[str, float]:
-    """Calculate intensity histogram features as defined in IBSI 4.2."""
+    """
+    Calculate intensity histogram features as defined in IBSI 4.2.
+
+    Computes features from the discretised intensity histogram including
+    mean, variance, skewness, kurtosis, mode, entropy, uniformity, and gradient features.
+
+    Args:
+        discretised_values: 1D array of discretised intensity values (after binning).
+
+    Returns:
+        Dictionary mapping feature names (with IBSI codes) to computed values.
+        Empty dict if input is empty.
+    """
     if len(discretised_values) == 0:
         return {}
 
@@ -502,7 +534,7 @@ def calculate_intensity_histogram_features(
 
 
 def calculate_ivh_features(
-    discretised_values: np.ndarray,
+    discretised_values: npt.NDArray[np.floating[Any]],
     bin_width: Optional[float] = None,
     min_val: Optional[float] = None,
     max_val: Optional[float] = None,
@@ -510,9 +542,22 @@ def calculate_ivh_features(
     target_range_max: Optional[float] = None,
 ) -> dict[str, float]:
     """
-    Calculate Intensity-Volume Histogram (IVH) features.
+    Calculate Intensity-Volume Histogram (IVH) features as defined in IBSI 4.3.
 
-    Includes Volume Fraction difference and Area Under the IVH Curve (AUC).
+    Computes volume fractions at intensity thresholds, intensity values at volume
+    fractions, and Area Under the IVH Curve (AUC).
+
+    Args:
+        discretised_values: 1D array of discretised intensity values.
+        bin_width: Optional bin width used in discretisation (for physical units).
+        min_val: Optional minimum value used in discretisation.
+        max_val: Optional maximum value used in discretisation.
+        target_range_min: Optional target range minimum for fraction calculations.
+        target_range_max: Optional target range maximum for fraction calculations.
+
+    Returns:
+        Dictionary mapping feature names (with IBSI codes) to computed values.
+        Empty dict if input is empty.
     """
     if len(discretised_values) == 0:
         return {}
@@ -734,6 +779,18 @@ def calculate_spatial_intensity_features(
 ) -> dict[str, float]:
     """
     Calculate spatial intensity features: Moran's I and Geary's C (IBSI 4.4).
+
+    These features measure spatial autocorrelation of intensity values within the ROI.
+    Computationally intensive (O(N²) where N = number of ROI voxels).
+
+    Args:
+        image: Image object containing intensity data.
+        mask: Image object containing the ROI mask.
+        enabled: If False, returns empty dict immediately (for performance).
+
+    Returns:
+        Dictionary with 'morans_i_index_N365' and 'gearys_c_measure_NPT7'.
+        Returns NaN values if ROI has fewer than 2 voxels or constant intensity.
     """
     if not enabled:
         return {}
@@ -800,6 +857,17 @@ def calculate_local_intensity_features(
 ) -> dict[str, float]:
     """
     Calculate local intensity features: Local and Global Intensity Peak (IBSI 4.5).
+
+    Computes intensity peaks using a 1 cm³ spherical neighborhood (radius ~6.2mm).
+    Global peak is the maximum local mean, local peak is the local mean at max intensity.
+
+    Args:
+        image: Image object containing intensity data.
+        mask: Image object containing the ROI mask.
+        enabled: If False, returns empty dict immediately (for performance).
+
+    Returns:
+        Dictionary with 'global_intensity_peak_0F91' and 'local_intensity_peak_VJGA'.
     """
     if not enabled:
         return {}

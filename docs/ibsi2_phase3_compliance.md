@@ -3,25 +3,42 @@
 > [!NOTE]
 > Phase 3 validates reproducibility across a 51-patient multi-modality dataset.
 > Comparison is made against 9 participating teams' submissions.
+> Results are shown for both exact matching (1% of value) and range-based tolerances (1%, 5%, 10% of feature range).
 
 ## Summary
 
 - **Patients Processed**: 153
 - **Teams Compared**: 9
 
-## Team Comparison Results
+## Team Comparison Results (Exact Matching)
 
 | Team | Overlap % | Matches | Total | Mismatches |
 |:-----|----------:|--------:|------:|-----------:|
-| CERR | ❌ 76.6% | 12652 | 16524 | 3872 |
-| Cardiff University | ❌ 79.8% | 19787 | 24786 | 4999 |
-| King's College London | ❌ 78.0% | 18618 | 23868 | 5250 |
-| NCT Dresden | ❌ 0.0% | 0 | 0 | 0 |
-| Qurit SERA | ❌ 65.4% | 16190 | 24751 | 8561 |
+| CERR | ❌ 76.5% | 12647 | 16524 | 3877 |
+| Cardiff University | ❌ 79.8% | 19782 | 24786 | 5004 |
+| King's College London | ❌ 78.0% | 18614 | 23868 | 5254 |
+| NCT Dresden | ⚠️ 94.6% | 23446 | 24786 | 1340 |
+| Qurit SERA | ❌ 65.4% | 16191 | 24751 | 8560 |
 | UCSF | ❌ 22.0% | 5453 | 24786 | 19333 |
-| USZ | ✅ 97.0% | 16023 | 16524 | 501 |
-| UdeS | ❌ 73.3% | 18158 | 24786 | 6628 |
-| Veneto Institute of Oncology | ❌ 72.0% | 17842 | 24786 | 6944 |
+| USZ | ✅ 96.9% | 16018 | 16524 | 506 |
+| UdeS | ❌ 73.2% | 18154 | 24786 | 6632 |
+| Veneto Institute of Oncology | ❌ 72.0% | 17837 | 24786 | 6949 |
+
+## Tolerance Breakdown (% of Feature Range)
+
+Shows how many comparisons match within different tolerances based on the range of each feature across all teams.
+
+| Team | Within 1% | Within 5% | Within 10% | Total |
+|:-----|----------:|----------:|-----------:|------:|
+| CERR | 16408 (99.3%) | 16492 (99.8%) | 16503 (99.9%) | 16524 |
+| Cardiff University | 24532 (99.0%) | 24696 (99.6%) | 24746 (99.8%) | 24786 |
+| King's College London | 23744 (99.5%) | 23847 (99.9%) | 23858 (100.0%) | 23868 |
+| NCT Dresden | 24674 (99.5%) | 24740 (99.8%) | 24769 (99.9%) | 24786 |
+| Qurit SERA | 23073 (93.2%) | 24130 (97.5%) | 24393 (98.6%) | 24751 |
+| UCSF | 14858 (59.9%) | 18988 (76.6%) | 20874 (84.2%) | 24786 |
+| USZ | 16499 (99.8%) | 16516 (100.0%) | 16520 (100.0%) | 16524 |
+| UdeS | 22200 (89.6%) | 23457 (94.6%) | 24180 (97.6%) | 24786 |
+| Veneto Institute of Oncology | 22571 (91.1%) | 24016 (96.9%) | 24468 (98.7%) | 24786 |
 
 ## Mismatch Details
 
@@ -39,7 +56,7 @@
 | stat_p90 | 6 | 0.02398 | 0.02571 | 0.001732 |
 | stat_max | 6 | 0.06868 | 0.07037 | 0.001692 |
 | stat_iqr | 6 | 0.02486 | 0.02628 | 0.001425 |
-| ... | *3862 more* | | | |
+| ... | *3867 more* | | | |
 
 ### Cardiff University
 
@@ -55,7 +72,7 @@
 | stat_kurt | 9 | -0.08945 | -0.3674 | 0.2779 |
 | stat_median | 8 | 0.05959 | 0.1135 | 0.05393 |
 | stat_median | 9 | 0.6782 | 0.7415 | 0.0633 |
-| ... | *4989 more* | | | |
+| ... | *4994 more* | | | |
 
 ### King's College London
 
@@ -71,11 +88,23 @@
 | stat_var | 6 | 0.0003726 | 0.0003626 | 9.972e-06 |
 | stat_skew | 1 | 0.7007 | 0.7259 | 0.02524 |
 | stat_skew | 2 | 0.6514 | 0.6781 | 0.02673 |
-| ... | *5240 more* | | | |
+| ... | *5244 more* | | | |
 
 ### NCT Dresden
 
-No mismatches! ✅
+| Feature | Filter ID | Our Value | Team Value | Error |
+|:--------|----------:|----------:|-----------:|------:|
+| stat_mean | 6 | 5.055e-06 | 5.121e-06 | 6.565e-08 |
+| stat_cov | 6 | 4617 | 4558 | 59.11 |
+| stat_median | 6 | -7.188e-05 | -7.593e-05 | 4.049e-06 |
+| stat_min | 5 | 0.03145 | 0.03218 | 0.0007243 |
+| stat_qcod | 6 | -3851 | -3751 | 99.91 |
+| stat_qcod | 6 | 1.748e+04 | 1.63e+04 | 1181 |
+| stat_median | 6 | -0.0002505 | -0.0002649 | 1.441e-05 |
+| stat_min | 5 | 0.02037 | 0.01903 | 0.001341 |
+| stat_mean | 6 | -8.969e-06 | -8.843e-06 | 1.256e-07 |
+| stat_cov | 6 | -956.7 | -970.2 | 13.56 |
+| ... | *1330 more* | | | |
 
 ### Qurit SERA
 
@@ -91,7 +120,7 @@ No mismatches! ✅
 | stat_min | 7 | -0.302 | -0.1523 | 0.1497 |
 | stat_p10 | 7 | 0.3523 | 0.1143 | 0.238 |
 | stat_p90 | 7 | 1.776 | 0.6689 | 1.107 |
-| ... | *8551 more* | | | |
+| ... | *8550 more* | | | |
 
 ### UCSF
 
@@ -113,17 +142,17 @@ No mismatches! ✅
 
 | Feature | Filter ID | Our Value | Team Value | Error |
 |:--------|----------:|----------:|-----------:|------:|
-| stat_qcod | 6 | 1.748e+04 | 2.543e+04 | 7949 |
+| stat_qcod | 6 | 1.748e+04 | 2.543e+04 | 7950 |
 | stat_mean | 6 | -8.969e-06 | -8.843e-06 | 1.256e-07 |
 | stat_cov | 6 | -956.7 | -970.2 | 13.56 |
-| stat_qcod | 6 | -343.5 | -349.5 | 5.961 |
+| stat_qcod | 6 | -343.5 | -349.5 | 5.965 |
+| stat_min | 5 | 0.008531 | 0.008372 | 0.0001588 |
 | stat_mean | 6 | -5.799e-06 | -7.58e-06 | 1.781e-06 |
 | stat_var | 2 | 7.652 | 7.488 | 0.1646 |
 | stat_var | 3 | 0.5777 | 0.5702 | 0.007527 |
 | stat_var | 4 | 0.4721 | 0.4327 | 0.03938 |
 | stat_var | 6 | 0.0002697 | 0.000262 | 7.682e-06 |
-| stat_skew | 4 | 1.714 | 1.623 | 0.09095 |
-| ... | *491 more* | | | |
+| ... | *496 more* | | | |
 
 ### UdeS
 
@@ -139,7 +168,7 @@ No mismatches! ✅
 | stat_kurt | 9 | -0.08945 | 0 | 0.08945 |
 | stat_median | 8 | 0.05959 | 0 | 0.05959 |
 | stat_median | 9 | 0.6782 | 0 | 0.6782 |
-| ... | *6618 more* | | | |
+| ... | *6622 more* | | | |
 
 ### Veneto Institute of Oncology
 
@@ -155,4 +184,4 @@ No mismatches! ✅
 | stat_kurt | 9 | -0.08945 | -0.8198 | 0.7304 |
 | stat_median | 8 | 0.05959 | 0.6583 | 0.5987 |
 | stat_median | 9 | 0.6782 | 1.533 | 0.8548 |
-| ... | *6934 more* | | | |
+| ... | *6939 more* | | | |

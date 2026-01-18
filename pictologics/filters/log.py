@@ -1,21 +1,22 @@
 # pictologics/filters/log.py
 """Laplacian of Gaussian filter implementation (IBSI code: L6PA)."""
 
-from typing import Tuple, Union
+from typing import Any, Tuple, Union
 
 import numpy as np
+from numpy import typing as npt
 from scipy.ndimage import gaussian_laplace
 
 from .base import BoundaryCondition, ensure_float32, get_scipy_mode
 
 
 def laplacian_of_gaussian(
-    image: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
     sigma_mm: float,
     spacing_mm: Union[float, Tuple[float, float, float]] = 1.0,
     truncate: float = 4.0,
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.ZERO,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply 3D Laplacian of Gaussian filter (IBSI code: L6PA).
 

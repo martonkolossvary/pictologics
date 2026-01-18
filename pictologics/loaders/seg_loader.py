@@ -12,10 +12,11 @@ Uses highdicom for robust SEG parsing and extraction.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pydicom
+from numpy import typing as npt
 
 if TYPE_CHECKING:
     from pictologics.loader import Image
@@ -33,10 +34,10 @@ def load_seg(
     the standard pictologics Image format. The resulting Image has the
     same structure as images returned by load_image():
 
-    - array: np.ndarray with shape (X, Y, Z)
+    - array: npt.NDArray[np.floating[Any]] with shape (X, Y, Z)
     - spacing: tuple[float, float, float] in mm
     - origin: tuple[float, float, float] in mm
-    - direction: Optional[np.ndarray] - 3x3 direction cosines
+    - direction: Optional[npt.NDArray[np.floating[Any]]] - 3x3 direction cosines
     - modality: str - set to "SEG"
 
     Args:
@@ -194,7 +195,7 @@ def load_seg(
 
 def _extract_seg_geometry(
     seg: pydicom.Dataset,
-) -> tuple[tuple[float, float, float], tuple[float, float, float], np.ndarray | None]:
+) -> tuple[tuple[float, float, float], tuple[float, float, float], npt.NDArray[np.floating[Any]] | None]:
     """Extract spatial geometry from a DICOM SEG object.
 
     Attempts to extract spacing, origin, and direction from the SEG's
@@ -293,10 +294,10 @@ def _extract_seg_geometry(
 
 def _extract_combined_segments(
     seg: pydicom.Dataset,
-    pixel_array: np.ndarray,
+    pixel_array: npt.NDArray[np.floating[Any]],
     target_segments: list[int],
     n_frames: int,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """Extract and combine multiple segments into a single label array.
 
     Args:
@@ -380,10 +381,10 @@ def _extract_combined_segments(
 
 def _extract_single_segment(
     seg: pydicom.Dataset,
-    pixel_array: np.ndarray,
+    pixel_array: npt.NDArray[np.floating[Any]],
     segment_number: int,
     n_frames: int,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """Extract a single segment as a binary mask.
 
     Args:

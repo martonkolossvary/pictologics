@@ -1,19 +1,20 @@
 # pictologics/filters/mean.py
 """Mean filter implementation (IBSI code: S60F)."""
 
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
+from numpy import typing as npt
 from scipy.ndimage import uniform_filter
 
 from .base import BoundaryCondition, ensure_float32, get_scipy_mode
 
 
 def mean_filter(
-    image: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
     support: int = 15,
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.ZERO,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply 3D mean filter (IBSI code: S60F).
 

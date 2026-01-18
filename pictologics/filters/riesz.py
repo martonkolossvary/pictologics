@@ -2,17 +2,18 @@
 """Riesz transform implementation (IBSI code: AYRS)."""
 
 from math import factorial, sqrt
-from typing import Tuple, Union
+from typing import Any, Tuple, Union
 
 import numpy as np
+from numpy import typing as npt
 
 from .base import ensure_float32
 
 
 def riesz_transform(
-    image: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
     order: Tuple[int, ...],
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Riesz transform (IBSI code: AYRS).
 
@@ -45,12 +46,29 @@ def riesz_transform(
     if L == 0:
         raise ValueError("At least one order component must be > 0")
 
-    # Create frequency grid in [-π, π]
-    freqs = [np.fft.fftfreq(s) * 2 * np.pi for s in image.shape]
-    nu = np.meshgrid(*freqs, indexing="ij")
+    shape = image.shape
+    ndim = len(shape)
 
-    # Compute ||ν||
-    nu_norm = np.sqrt(sum(n**2 for n in nu))
+    # Use rfftn (Real FFT) for efficiency: output shape is (N1, N2, ..., N d//2 + 1)
+    # This halves the memory usage and computation time for real inputs.
+
+    # Generate frequency coordinates appropriately for rfftn
+    # Last dimension uses rfftfreq, others use fftfreq
+    freqs = []
+    for i, s in enumerate(shape):
+        if i == ndim - 1:
+            # Last dimension for rfftn is non-negative frequencies only
+            freqs.append(np.fft.rfftfreq(s) * 2 * np.pi)
+        else:
+            freqs.append(np.fft.fftfreq(s) * 2 * np.pi)
+
+    # Create grid using broadcasting (lazy evaluation) to avoid huge meshgrid matching input size
+    # meshgrid with sparse=True returns coordinate vectors that broadcast
+    nu_vectors = np.meshgrid(*freqs, indexing="ij", sparse=True)
+
+    # Compute ||ν||^2 via broadcasting
+    nu_sq_norm = np.asarray(sum(n**2 for n in nu_vectors), dtype=np.float64)
+    nu_norm = np.sqrt(nu_sq_norm)
 
     # Avoid division by zero at DC
     nu_norm_safe = np.where(nu_norm > 0, nu_norm, 1.0)
@@ -58,11 +76,11 @@ def riesz_transform(
     # Compute normalization factor
     norm_factor = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
 
-    # Compute numerator
-    numerator = np.ones(image.shape, dtype=np.float64)
+    # Compute numerator via broadcasting
+    numerator = np.ones(nu_norm.shape, dtype=np.float64)
     for i, ord_val in enumerate(order):
         if ord_val > 0:
-            numerator *= nu[i] ** ord_val
+            numerator *= nu_vectors[i] ** ord_val
 
     # Riesz transfer function
     phase = np.exp(-1j * np.pi * L / 2)
@@ -70,20 +88,27 @@ def riesz_transform(
     transfer = phase * norm_factor * numerator / (nu_norm_safe**L)
     transfer = np.where(nu_norm > 0, transfer, 0)  # Set DC to 0
 
-    # Apply in frequency domain
-    F = np.fft.fftn(image)
-    response = np.fft.ifftn(F * transfer)
+    # Apply in frequency domain using Real FFT
+    F = np.fft.rfftn(image)
 
-    return np.real(response).astype(np.float32)
+    # Verify shapes match (should match due to rfftfreq logic)
+    # F has shape (N1, N2, N3//2 + 1)
+    # transfer should have same shape or broadcastable
+
+    # Explicitly specify axes to avoid NumPy 2.0 DeprecationWarning
+    axes = tuple(range(ndim))
+    response = np.fft.irfftn(F * transfer, s=shape, axes=axes)
+
+    return response.astype(np.float32)
 
 
 def riesz_log(
-    image: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
     sigma_mm: float,
     spacing_mm: Union[float, Tuple[float, float, float]] = 1.0,
     order: Tuple[int, ...] = (1, 0, 0),
     truncate: float = 4.0,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Riesz transform to LoG-filtered image.
 
@@ -118,10 +143,10 @@ def riesz_log(
 
 
 def riesz_simoncelli(
-    image: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
     level: int = 1,
     order: Tuple[int, ...] = (1, 0, 0),
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Riesz transform to Simoncelli wavelet-filtered image.
 

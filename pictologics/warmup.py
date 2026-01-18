@@ -43,6 +43,7 @@ def warmup_jit() -> None:
             _warmup_texture()
             _warmup_intensity()
             _warmup_morphology()
+            _warmup_filters()
             logger.info("Pictologics JIT warmup complete.")
         except Exception as e:
             # We don't want warmup failure to crash the program import
@@ -202,3 +203,29 @@ def _warmup_morphology() -> None:
         np.concatenate([verts, [[1.0, 1.0, 0.0], [1.0, 0.0, 1.0]]], axis=0)
     )
     morphology._mvee_khachiyan_numba(mvee_points, tol=0.1)
+
+
+def _warmup_filters() -> None:
+    """Warmup filter and preprocessing operations."""
+    # Import here to avoid circular dependencies
+    from scipy.ndimage import affine_transform
+    from scipy.signal import fftconvolve
+
+    # 1. Warmup affine_transform (used in resampling - the main bottleneck!)
+    # Small 3D array
+    dummy_img = np.ones((5, 5, 5), dtype=np.float32)
+    matrix = np.array([1.1, 1.1, 1.1])  # Slight scaling
+    offset = np.array([0.0, 0.0, 0.0])
+    _ = affine_transform(
+        dummy_img, matrix=matrix, offset=offset, output_shape=(6, 6, 6), order=1
+    )
+
+    # 2. Warmup FFT convolution (used in Gabor, Laws, etc.)
+    dummy_2d = np.ones((8, 8), dtype=np.float32)
+    kernel_2d = np.ones((3, 3), dtype=np.complex64)
+    _ = fftconvolve(dummy_2d, kernel_2d, mode="same")
+
+    # 3. Warmup 3D convolution
+    dummy_3d = np.ones((8, 8, 8), dtype=np.float32)
+    kernel_3d = np.ones((3, 3, 3), dtype=np.float32)
+    _ = fftconvolve(dummy_3d, kernel_3d, mode="same")

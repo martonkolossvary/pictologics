@@ -1,24 +1,29 @@
 # pictologics/filters/wavelets.py
 """Wavelet transform implementations (separable and non-separable)."""
 
-from typing import List, Tuple, Union
+from typing import Any, List, Tuple, Union
 
 import numpy as np
 import pywt
+from numpy import typing as npt
 from scipy.ndimage import convolve1d
 
 from .base import BoundaryCondition, ensure_float32, get_scipy_mode
 
+# Threshold for enabling parallel processing (voxels)
+_PARALLEL_THRESHOLD = 2_000_000  # ~128³
+
 
 def wavelet_transform(
-    image: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
     wavelet: str = "db2",
     level: int = 1,
     decomposition: str = "LHL",
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.ZERO,
     rotation_invariant: bool = False,
     pooling: str = "average",
-) -> np.ndarray:
+    use_parallel: Union[bool, None] = None,
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply 3D separable wavelet transform (undecimated/stationary).
 
@@ -38,6 +43,8 @@ def wavelet_transform(
         boundary: Boundary condition for padding
         rotation_invariant: If True, average over 24 rotations
         pooling: Pooling method for rotation invariance
+        use_parallel: If True, use parallel processing for rotation_invariant mode.
+            If None (default), auto-enables for images > ~128³ voxels.
 
     Returns:
         Response map for the specified decomposition
@@ -48,6 +55,8 @@ def wavelet_transform(
         ...     image, wavelet="db2", level=1, decomposition="LHL"
         ... )
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     # Convert to float32
     image = ensure_float32(image)
 
@@ -61,10 +70,18 @@ def wavelet_transform(
     lo = np.array(w.dec_lo, dtype=np.float32)  # Low-pass decomposition filter
     hi = np.array(w.dec_hi, dtype=np.float32)  # High-pass decomposition filter
 
+    # Auto-detect parallel mode based on image size
+    if use_parallel is None:
+        use_parallel = image.size > _PARALLEL_THRESHOLD
+
     if rotation_invariant:
-        # Apply to all 24 right-angle rotations and pool
-        responses = []
-        for perm, flips in _get_rotation_perms():
+        rotations = _get_rotation_perms()
+
+        def apply_rotated_wavelet(
+            rotation: Tuple[Tuple[int, int, int], Tuple[bool, bool, bool]],
+        ) -> npt.NDArray[np.floating[Any]]:
+            """Apply wavelet transform with rotated image."""
+            perm, flips = rotation
             # Permute and flip image
             rotated = np.transpose(image, perm)
             for axis, flip in enumerate(flips):
@@ -81,32 +98,99 @@ def wavelet_transform(
                 if flip:
                     response = np.flip(response, axis=axis)
             inv_perm = tuple(np.argsort(perm))
-            response = np.transpose(response, inv_perm)
+            return np.transpose(response, inv_perm)
 
-            responses.append(response)
+        if use_parallel:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Pool
-        stacked = np.stack(responses, axis=0)
-        if pooling == "average":
-            return np.mean(stacked, axis=0)  # type: ignore[no-any-return]
-        elif pooling == "max":
-            return np.max(stacked, axis=0)  # type: ignore[no-any-return]
-        elif pooling == "min":
-            return np.min(stacked, axis=0)  # type: ignore[no-any-return]
+            with ThreadPoolExecutor() as executor:
+                # Submit all rotation tasks
+                future_to_rot = {
+                    executor.submit(apply_rotated_wavelet, rot): rot
+                    for rot in rotations
+                }
+
+                # Pool responses incrementally
+                result: npt.NDArray[np.floating[Any]] | None = None
+                for _, future in enumerate(as_completed(future_to_rot)):
+                    response = future.result()
+
+                    if result is None:
+                        # Initialize accumulator with first result
+                        result = (
+                            response.astype(np.float64)
+                            if pooling == "average"
+                            else response.copy()
+                        )
+                    else:
+                        if result is None:  # pragma: no cover
+                            raise RuntimeError("Result should not be None")
+
+                        # Fix mypy narrowing issue
+                        # Assert was sufficient
+                        res = result
+
+                        if pooling == "max":
+                            np.maximum(res, response, out=res)
+                        elif pooling == "average":
+                            res += response
+                        elif pooling == "min":
+                            np.minimum(res, response, out=res)
+                        else:
+                            raise ValueError(
+                                f"Unknown pooling: {pooling}"
+                            )  # pragma: no cover
+
+                    # Explicitly delete response
+                    del response
         else:
-            raise ValueError(f"Unknown pooling: {pooling}")
+            # Sequential processing for small images
+            result = None
+            for i, rotation in enumerate(rotations):
+                response = apply_rotated_wavelet(rotation)
+
+                if i == 0:
+                    result = (
+                        response.astype(np.float64)
+                        if pooling == "average"
+                        else response.copy()
+                    )
+                else:
+                    if result is None:  # pragma: no cover
+                        raise RuntimeError("Result should not be None")
+
+                    # Fix mypy narrowing
+                    # We can't import cast here easily repeatedly if we want to be clean,
+                    # but we can rely on the assert with a variable assignment for mypy
+                    res_seq = result
+
+                    if pooling == "max":
+                        np.maximum(res_seq, response, out=res_seq)
+                    elif pooling == "average":
+                        res_seq += response
+                    elif pooling == "min":
+                        np.minimum(res_seq, response, out=res_seq)
+                    else:
+                        raise ValueError(
+                            f"Unknown pooling: {pooling}"
+                        )  # pragma: no cover
+
+        # Finalize average pooling
+        if pooling == "average" and result is not None:
+            result /= len(rotations)
+        return result.astype(np.float32)  # type: ignore[union-attr]
     else:
         return _apply_undecimated_wavelet_3d(image, lo, hi, level, decomposition, mode)
 
 
 def _apply_undecimated_wavelet_3d(
-    image: np.ndarray,
-    lo: np.ndarray,
-    hi: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
+    lo: npt.NDArray[np.floating[Any]],
+    hi: npt.NDArray[np.floating[Any]],
     level: int,
     decomposition: str,
     mode: str,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply undecimated 3D wavelet decomposition using à trous algorithm.
 
@@ -145,7 +229,9 @@ def _apply_undecimated_wavelet_3d(
     )  # pragma: no cover
 
 
-def _atrous_upsample(kernel: np.ndarray, level: int) -> np.ndarray:
+def _atrous_upsample(
+    kernel: npt.NDArray[np.floating[Any]], level: int
+) -> npt.NDArray[np.floating[Any]]:
     """
     Upsample filter using à trous algorithm (insert zeros).
 
@@ -168,10 +254,10 @@ def _get_rotation_perms() -> List[Tuple[Tuple[int, int, int], Tuple[bool, bool, 
 
 
 def simoncelli_wavelet(
-    image: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
     level: int = 1,
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.PERIODIC,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Simoncelli non-separable wavelet (IBSI code: PRT7).
 
@@ -199,6 +285,7 @@ def simoncelli_wavelet(
     image = ensure_float32(image)
 
     shape = image.shape
+    ndim = len(shape)
 
     # IBSI level N corresponds to j = N-1
     # Level 1 = j=0 → max_freq = 1.0 (normalized Nyquist)
@@ -216,9 +303,21 @@ def simoncelli_wavelet(
         # Normalize to [-1, 1] relative to center
         grids.append((dim_grid - center[i]) / center[i])
 
-    # Compute Euclidean distance in the centered frequency domain
-    mesh = np.meshgrid(*grids, indexing="ij")
-    dist = np.sqrt(sum(g**2 for g in mesh))
+    # Optimize: Use rfftn (Real FFT) logic
+    # The output of rfftn has shape (N1, N2, ..., N d//2 + 1)
+    # We must construct the frequency grid to match this specific shape
+
+    # Adjust the last dimension grid for rfftn
+    # rfftn frequencies correspond to the first N//2 + 1 elements
+    grids[-1] = grids[-1][: shape[-1] // 2 + 1]
+
+    # Compute Euclidean distance via broadcasting (lazy evaluation)
+    # meshgrid with sparse=True returns coordinate vectors that broadcast
+    mesh_vectors = np.meshgrid(*grids, indexing="ij", sparse=True)
+
+    # Compute dist^2 via broadcasting
+    dist_sq = np.asarray(sum(g**2 for g in mesh_vectors), dtype=np.float64)
+    dist = np.sqrt(dist_sq)
 
     # Avoid log(0) and divide by zero
     val = 2.0 * dist / max_freq
@@ -231,12 +330,89 @@ def simoncelli_wavelet(
     mask = (dist >= max_freq / 4.0) & (dist <= max_freq)
     g_sim = np.where(mask, g_sim, 0.0)
 
-    # Since the mask is defined on a centered grid, we must shift it
-    # to the DFT corner-based layout before multiplying with FFT of image
-    g_sim_shifted = np.fft.ifftshift(g_sim)
+    # Note: For rfftn we don't need standard ifftshift because
+    # the concept of "centered" frequency domain is different for half-spectrum.
+    # However, Simoncelli definition is inherently centered.
+    #
+    # The previous implementation built a centered spatial grid, calculated distance,
+    # applied mask, and then ifftshifted to corner-based layout.
+    #
+    # With rfftn, the layout is:
+    # Axis 0..d-2: Standard corner-based (0..N/2, -N/2..-1)
+    # Axis d-1:    0..N/2 (non-negative only)
+    #
+    # The grid we built above is purely spatial/geometric [-1, 1].
+    # But `simoncelli_wavelet` acts in frequency domain. The `grids` variables
+    # actually represent normalized frequencies if we interpret `image` essentially
+    # as being mapped to this domain.
+    #
+    # Issue: The `g_sim` we built is centered at (0,0,0) in our [-1,1] logic.
+    # For full FFT, `ifftshift` moves (0,0,0) to corner.
+    # For rfftn, we need to be careful.
+    #
+    # Actually, the original code used `ifftshift` on a grid defined from `arange(s)`.
+    # Let's look closely at original `grids`:
+    # `dim_grid = np.arange(s)` -> `(dim_grid - center)/center` -> [-1, 1]
+    # This creates a spatial coordinate system centered at N/2.
+    #
+    # IBSI says Simoncelli is defined in frequency domain.
+    # "frequency vector ν ... where |ν| is the distance from the origin (DC component)"
+    #
+    # The implementation constructs a grid that looks like spatial coordinates,
+    # then shift it. This implies the grid IS the frequency grid.
+    #
+    # To use `rfftn`, we need the grid to match `rfftfreq` layout.
+    # `fftfreq(N)` returns [0, 1, ..., N/2-1, -N/2, ..., -1] / N.
+    # This corresponds to interval [0, 0.5] U [-0.5, 0).
+    #
+    # Our `grids` logic produces [-1, 1]. IBSI uses "normalized frequency" where Nyquist=1.0?
+    # Original code: `max_freq = 1.0 / (2**j)`
+    #
+    # Let's align with `rfftfreq`:
+    # Revert to "geometric" frequency grid [-1, 1] to match IBSI reference behavior.
+    # The reference implementation used (arange(N) - center) / center, which
+    # creates a grid that is slightly asymmetric/offset regarding DC for even N.
+    # This asymmetry requires using full FFT (fftn) instead of Real FFT (rfftn),
+    # as irfftn enforces conjugate symmetry which this grid violates.
 
-    # Apply filter in frequency domain
+    grids = []
+    for i, s in enumerate(shape):
+        dim_grid = np.arange(s)
+        # Normalize to [-1, 1] relative to center
+        grid_norm = (dim_grid - center[i]) / center[i]
+
+        # Shift to move the "center" (DC-like area) to array start/corner
+        grid_shifted = np.fft.ifftshift(grid_norm)
+        grids.append(grid_shifted)
+
+    # Use broadcasting for full 3D grid
+    mesh_vectors = np.meshgrid(*grids, indexing="ij", sparse=True)
+    dist_sq = np.asarray(sum(g**2 for g in mesh_vectors), dtype=np.float64)
+    dist = np.sqrt(dist_sq)
+
+    # Calculate transfer function (same as before)
+    val = 2.0 * dist / max_freq
+    log_arg = np.where(val > 0, val, 1.0)
+
+    with np.errstate(all="ignore"):
+        g_sim = np.cos(np.pi / 2.0 * np.log2(log_arg))
+
+    # Apply band-pass mask
+    mask = (dist >= max_freq / 4.0) & (dist <= max_freq)
+    g_sim = np.where(mask, g_sim, 0.0)
+
+    # No ifftshift needed because fftfreq/rfftfreq are already in corner layout!
+    # (The previous implementation used spatial arange(N) which is monotonically increasing -1..1,
+    # hence needed ifftshift to wrap 0 to corner. fftfreq generates wrapped layout directly).
+
+    # Apply filter in frequency domain using full FFT
     F = np.fft.fftn(image)
-    response = np.real(np.fft.ifftn(F * g_sim_shifted))
 
-    return response.astype(np.float32)
+    # Explicitly specify axes to avoid NumPy 2.0 DeprecationWarning
+    axes = tuple(range(ndim))
+    response = np.fft.ifftn(F * g_sim, s=shape, axes=axes)
+
+    # Return magnitude (though theoretically real, minor complex errors exist)
+    # IBSI reference suggests modulus? No, "The filter response is... convolution".
+    # Wavelet response is usually real.
+    return np.real(response).astype(np.float32)

@@ -71,6 +71,8 @@ The pipeline automatically uses the correct image for each feature family. After
 
 ```python
 pipeline.add_config("my_config", [
+    # Step 0: Binarize mask before resampling
+    {"step": "binarize_mask", "params": {"threshold": 0.5}},
     # Step 1: Resample to 0.5mm isotropic
     {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5)}},
     

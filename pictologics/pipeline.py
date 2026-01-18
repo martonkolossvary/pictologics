@@ -26,6 +26,7 @@ from typing import Any, Optional, cast
 
 import numpy as np
 import pandas as pd
+from numpy import typing as npt
 
 from .features.intensity import (
     calculate_intensity_features,
@@ -100,6 +101,7 @@ class RadiomicsPipeline:
     """
 
     def __init__(self) -> None:
+        """Initialize pipeline with empty config registry and load predefined configs."""
         self._configs: dict[str, list[dict[str, Any]]] = {}
         self._log: list[dict[str, Any]] = []
         self._load_predefined_configs()
@@ -212,9 +214,11 @@ class RadiomicsPipeline:
             steps: List of steps. Each step is a dict with 'step' (name) and 'params' (dict).
                    Supported steps:
                    - 'resample': params: new_spacing (required), interpolation (optional)
-                   - 'resegment': params: range_min, range_max
-                   - 'filter_outliers': params: sigma
-                   - 'keep_largest_component': params: None
+                                     - 'resegment': params: range_min, range_max
+                                     - 'filter_outliers': params: sigma
+                                     - 'binarize_mask': params: threshold (float, default 0.5),
+                                         mask_values (int | list[int] | tuple[int, int]), apply_to ('morph'|'intensity'|'both')
+                                     - 'keep_largest_component': params: None
                    - 'round_intensities': params: None
                    - 'discretise': params: method, n_bins/bin_width, etc.
                    - 'extract_features': params: families (list), etc.
@@ -469,6 +473,43 @@ class RadiomicsPipeline:
 
             self._ensure_nonempty_roi(state, context="keep_largest_component")
 
+        elif step_name == "binarize_mask":
+            apply_to = params.get("apply_to", "both")
+            threshold = params.get("threshold", 0.5)
+            mask_values = params.get("mask_values")
+
+            def _binarize(image: Image) -> Image:
+                if mask_values is not None:
+                    if isinstance(mask_values, tuple) and len(mask_values) == 2:
+                        lo, hi = mask_values
+                        mask_arr = (image.array >= lo) & (image.array <= hi)
+                    else:
+                        values = mask_values
+                        if isinstance(values, int):
+                            values = [values]
+                        mask_arr = np.isin(image.array, values)
+                else:
+                    if threshold is None:
+                        raise ValueError(
+                            "binarize_mask requires 'threshold' unless mask_values is provided"
+                        )
+                    mask_arr = image.array >= float(threshold)
+
+                return Image(
+                    array=mask_arr.astype(np.uint8),
+                    spacing=image.spacing,
+                    origin=image.origin,
+                    direction=image.direction,
+                    modality=image.modality,
+                )
+
+            if apply_to in ("morph", "both"):
+                state.morph_mask = _binarize(state.morph_mask)
+            if apply_to in ("intensity", "both"):
+                state.intensity_mask = _binarize(state.intensity_mask)
+
+            self._ensure_nonempty_roi(state, context="binarize_mask")
+
         elif step_name == "discretise":
             self._ensure_nonempty_roi(state, context="discretise")
             method = params.get("method", "FBN")
@@ -528,7 +569,7 @@ class RadiomicsPipeline:
             }
 
             # Apply filter based on type
-            filtered_array: np.ndarray
+            filtered_array: npt.NDArray[np.floating[Any]]
 
             if filter_type == "mean":
                 filter_params["boundary"] = boundary
@@ -786,8 +827,6 @@ class RadiomicsPipeline:
             matrix_kwargs: dict[str, Any] = {}
             if "ngldm_alpha" in texture_matrix_params:
                 matrix_kwargs["ngldm_alpha"] = texture_matrix_params.get("ngldm_alpha")
-            if "ngldm_alpha" not in matrix_kwargs and "ngldm_alpha" in params:
-                matrix_kwargs["ngldm_alpha"] = params.get("ngldm_alpha")
             matrix_kwargs = {k: v for k, v in matrix_kwargs.items() if v is not None}
 
             texture_matrices = calculate_all_texture_matrices(

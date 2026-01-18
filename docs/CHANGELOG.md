@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.0] - 2026-01-18
+
+### Added
+- **IBSI 2 Convolutional Filters**: Complete filter module (`pictologics/filters/`) with:
+  - Mean filter (3D)
+  - Laplacian of Gaussian (LoG)
+  - Laws texture energy filters (3D rotation-invariant)
+  - Gabor filters (2D per-slice)
+  - Wavelet decomposition (Haar, Daubechies, Coiflet, Symlet families)
+  - Simoncelli steerable pyramid
+- **IBSI 2 Phase 1 Compliance**: Filter response map validation against digital phantoms
+- **IBSI 2 Phase 2 Compliance**: Feature extraction from filtered images validated
+- **IBSI 2 Phase 3 Compliance**: Multi-modality reproducibility validation (97% match with USZ team across 51 patients × 3 modalities)
+- **Filter Pipeline Integration**: New `filter` step in `RadiomicsPipeline` for seamless filtered feature extraction
+- **Phase 3 Validator**: `verify_ibsi2_phase3.py` with 8-core parallel processing
+- **Mask Binarization Pipeline Step**: New `binarize_mask` preprocessing step with configurable `threshold`, `mask_values` (int/list/range tuple), and `apply_to` targeting.
+- **Documentation**: New IBSI compliance pages (Phase 1, 2, 3) with detailed comparison tables
+
+### Changed
+- Updated `mkdocs.yml` with IBSI 2 Phase 1, 2, 3 navigation
+- Expanded pipeline documentation with filter usage examples
+
+### Fixed
+- **IBSI 1 Compliance (Morphology)**: Restored passing values for Compactness 2 (`BQWJ`) and Asphericity (`25C7`) in Configs C/D/E by binarizing masks before resampling.
+
+---
+
 ## [0.2.0] - 2026-01-06
 
 ### Added
@@ -33,5 +60,6 @@
 
 ---
 
+[0.3.0]: https://github.com/martonkolossvary/pictologics/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/martonkolossvary/pictologics/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/martonkolossvary/pictologics/releases/tag/v0.1.0

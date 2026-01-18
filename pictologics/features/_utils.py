@@ -11,9 +11,10 @@ Note: The underscore prefix (_utils) indicates this is a private module.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
+from numpy import typing as npt
 
 
 @dataclass
@@ -24,7 +25,7 @@ class BBoxInfo:
     origin_offset: tuple[int, int, int]  # (z, y, x) offset from original origin
 
 
-def compute_nonzero_bbox(mask: np.ndarray) -> Optional[tuple[slice, slice, slice]]:
+def compute_nonzero_bbox(mask: npt.NDArray[np.floating[Any]]) -> Optional[tuple[slice, slice, slice]]:
     """Compute the tight bounding box of non-zero voxels in a 3D mask.
 
     Args:
@@ -54,9 +55,9 @@ def compute_nonzero_bbox(mask: np.ndarray) -> Optional[tuple[slice, slice, slice
 
 
 def crop_arrays_to_bbox(
-    *arrays: np.ndarray,
-    mask: np.ndarray,
-) -> tuple[tuple[np.ndarray, ...], Optional[BBoxInfo]]:
+    *arrays: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
+) -> tuple[tuple[npt.NDArray[np.floating[Any]], ...], Optional[BBoxInfo]]:
     """Crop multiple arrays to the bounding box of the mask.
 
     Args:

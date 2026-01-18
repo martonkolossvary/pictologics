@@ -2,16 +2,22 @@
 """Gabor filter implementation (IBSI code: Q88H)."""
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union, cast
 
 import numpy as np
+from numpy import typing as npt
 from scipy.signal import fftconvolve
 
 from .base import BoundaryCondition, ensure_float32, get_scipy_mode
 
+# Threshold for enabling parallel processing (voxels)
+# Lower than other filters because Gabor has high per-slice cost
+# (16 orientations × FFT convolution) making parallelism beneficial even for small images
+_PARALLEL_THRESHOLD = 100_000  # ~46³
+
 
 def gabor_filter(
-    image: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
     sigma_mm: float,
     lambda_mm: float,
     gamma: float = 1.0,
@@ -22,7 +28,8 @@ def gabor_filter(
     delta_theta: Optional[float] = None,
     pooling: str = "average",
     average_over_planes: bool = False,
-) -> np.ndarray:
+    use_parallel: Union[bool, None] = None,
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply 2D Gabor filter to 3D image (IBSI code: Q88H).
 
@@ -41,6 +48,8 @@ def gabor_filter(
         delta_theta: Orientation step for rotation invariance (XTGK)
         pooling: Pooling method ("average", "max", "min")
         average_over_planes: If True, average 2D responses over 3 orthogonal planes
+        use_parallel: If True, process slices in parallel. If None (default),
+            auto-enables for images > ~80³ voxels.
 
     Returns:
         Response map (modulus of complex response)
@@ -56,6 +65,7 @@ def gabor_filter(
     Note:
         - Returns modulus |h| = |g ⊗ f| for feature extraction
         - 2D filter applied slice-by-slice, then optionally over planes
+        - Uses single complex FFT convolution for ~2x speedup
     """
     # Convert to float32
     image = ensure_float32(image)
@@ -78,6 +88,10 @@ def gabor_filter(
     if pooling not in valid_poolings:
         raise ValueError(f"Unknown pooling: {pooling}. Must be one of {valid_poolings}")
 
+    # Auto-detect parallel mode based on image size
+    if use_parallel is None:
+        use_parallel = image.size > _PARALLEL_THRESHOLD
+
     if rotation_invariant and delta_theta is not None:
         # Generate orientations from 0 to 2π
         n_orientations = int(np.ceil(2 * np.pi / delta_theta))
@@ -86,8 +100,8 @@ def gabor_filter(
         thetas = [theta]
 
     if average_over_planes:
-        # Apply to all 3 orthogonal planes and average
-        responses = []
+        # Apply to all 3 orthogonal planes and average with in-place aggregation
+        result: npt.NDArray[np.floating[Any]] | None = None
         for plane_axis in range(3):
             plane_response = _apply_gabor_to_plane(
                 image,
@@ -98,9 +112,18 @@ def gabor_filter(
                 plane_axis,
                 mode,
                 pooling,
+                use_parallel,
             )
-            responses.append(plane_response)
-        return np.mean(np.stack(responses, axis=0), axis=0)  # type: ignore[no-any-return]
+            if result is None:
+                result = plane_response.astype(np.float64)
+            else:
+                result += plane_response
+
+        # Mypy doesn't know result is not None here (loop runs 3 times guaranteed)
+        if result is None:  # pragma: no cover
+            raise RuntimeError("Result should not be None after plane loop")
+
+        return (result / 3.0).astype(np.float32)  # type: ignore[union-attr]
     else:
         # Apply only to axial plane (axis 2 = k3 slices)
         return _apply_gabor_to_plane(
@@ -112,11 +135,12 @@ def gabor_filter(
             plane_axis=2,
             mode=mode,
             pooling=pooling,
+            use_parallel=use_parallel,
         )
 
 
 def _apply_gabor_to_plane(
-    image: np.ndarray,
+    image: npt.NDArray[np.floating[Any]],
     sigma_voxels: float,
     lambda_voxels: float,
     gamma: float,
@@ -124,95 +148,104 @@ def _apply_gabor_to_plane(
     plane_axis: int,
     mode: str,
     pooling: str,
-) -> np.ndarray:
-    """Apply Gabor filter to slices along a given axis (parallel processing)."""
-    result = np.zeros_like(image)
+    use_parallel: bool = True,
+) -> npt.NDArray[np.floating[Any]]:
+    """Apply Gabor filter to slices along a given axis.
 
+    Args:
+        use_parallel: If True, process slices in parallel using ThreadPoolExecutor.
+            For small images, sequential may be faster due to thread overhead.
+    """
     # Pre-compute all kernels for efficiency
     kernels = [
         _create_gabor_kernel_2d(sigma_voxels, lambda_voxels, gamma, theta)
         for theta in thetas
     ]
 
-    def process_slice(slice_2d: np.ndarray) -> np.ndarray:
-        """Process a single 2D slice with all orientations."""
-        orientation_responses = [_fft_convolve_2d(slice_2d, k, mode) for k in kernels]
+    def process_slice(slice_2d: npt.NDArray[np.floating[Any]]) -> npt.NDArray[np.floating[Any]]:
+        """Process a single 2D slice with all orientations using in-place pooling."""
+        # Optimization: Pre-pad and pre-cast the slice once, as all kernels have the same size.
+        # This avoids redundant padding and casting inside the loop.
 
-        if len(orientation_responses) > 1:
-            stacked = np.stack(orientation_responses, axis=0)
-            if pooling == "average":
-                return np.mean(stacked, axis=0)  # type: ignore[no-any-return]
-            elif pooling == "max":
-                return np.max(stacked, axis=0)  # type: ignore[no-any-return]
-            else:  # pooling == "min"
-                return np.min(stacked, axis=0)  # type: ignore[no-any-return]
-        return orientation_responses[0]
+        # Get padding parameters from the first kernel (all have same size)
+        kernel_shape = kernels[0].shape
+        pad_h = kernel_shape[0] // 2
+        pad_w = kernel_shape[1] // 2
 
-    # Extract all slices
-    n_slices = image.shape[plane_axis]
-    slices_list: list[np.ndarray] = []
-    for i in range(n_slices):
-        idx: list[slice | int] = [slice(None)] * 3
-        idx[plane_axis] = i
-        slices_list.append(image[tuple(idx)])
+        # Map scipy.ndimage mode to numpy.pad mode
+        pad_mode_map = {
+            "constant": "constant",
+            "reflect": "symmetric",
+            "mirror": "reflect",
+            "nearest": "edge",
+            "wrap": "wrap",
+        }
+        pad_mode_literal = pad_mode_map.get(mode, "constant")
 
-    # Process slices in parallel
-    with ThreadPoolExecutor() as executor:
-        processed = list(executor.map(process_slice, slices_list))
+        # Pad and cast to complex64 once
+        padded = np.pad(slice_2d, ((pad_h, pad_h), (pad_w, pad_w)), mode=pad_mode_literal)  # type: ignore[call-overload]
+        padded_complex = padded.astype(np.complex64)
 
-    # Reassemble result
-    for i, res in enumerate(processed):
-        idx2: list[slice | int] = [slice(None)] * 3
-        idx2[plane_axis] = i
-        result[tuple(idx2)] = res
+        # Helper to convolve pre-padded image
+        def convolve_prepadded(k: npt.NDArray[np.floating[Any]]) -> npt.NDArray[np.floating[Any]]:
+            # fftconvolve mode="same" on padded image
+            response = fftconvolve(padded_complex, k, mode="same")
+            # Crop back to original size
+            h, w = slice_2d.shape
+            cropped = response[pad_h : pad_h + h, pad_w : pad_w + w]
+            # Explicit cast to avoid MyPy 'no-any-return'
+            return cast(npt.NDArray[np.floating[Any]], np.abs(cropped))
 
-    return result
+        if len(kernels) == 1:
+            return convolve_prepadded(kernels[0])
 
+        # In-place pooling to avoid allocating n_orientations x slice memory
+        result_slice: npt.NDArray[np.floating[Any]] | None = None
+        for k in kernels:
+            response = convolve_prepadded(k)
+            if result_slice is None:
+                result_slice = (
+                    response.astype(np.float64)
+                    if pooling == "average"
+                    else response.copy()
+                )
+            else:
+                if pooling == "max":
+                    np.maximum(result_slice, response, out=result_slice)
+                elif pooling == "average":
+                    result_slice += response
+                else:  # pooling == "min"
+                    np.minimum(result_slice, response, out=result_slice)
 
-def _fft_convolve_2d(image: np.ndarray, kernel: np.ndarray, mode: str) -> np.ndarray:
-    """
-    FFT-based 2D convolution with boundary handling matching scipy.ndimage.convolve.
+        # Mypy check
+        if result_slice is None:  # pragma: no cover
+            raise RuntimeError("Result slice should not be None")
 
-    Args:
-        image: 2D input array
-        kernel: 2D complex Gabor kernel
-        mode: Boundary mode ('constant', 'reflect', 'mirror', 'nearest', 'wrap')
+        if pooling == "average":
+            result_slice /= len(kernels)
+        return result_slice.astype(np.float32)
 
-    Returns:
-        Modulus of convolution response
-    """
-    # Pad image to handle boundaries (matching scipy.ndimage behavior)
-    pad_h = kernel.shape[0] // 2
-    pad_w = kernel.shape[1] // 2
+    # Use moveaxis for efficient slice access (contiguous memory)
+    # This moves plane_axis to position 0 for efficient iteration
+    image_reordered = np.moveaxis(image, plane_axis, 0)
+    n_slices = image_reordered.shape[0]
 
-    # Map scipy.ndimage mode names to numpy.pad mode names
-    # scipy.ndimage 'reflect' includes edge (d c b a | a b c d)
-    # numpy.pad 'reflect' excludes edge (d c b | a b c d)
-    # So: scipy 'reflect' -> numpy 'symmetric'
-    #     scipy 'mirror' -> numpy 'reflect'
-    pad_mode_map = {
-        "constant": "constant",
-        "reflect": "symmetric",  # scipy includes edge, numpy 'symmetric' includes edge
-        "mirror": "reflect",  # scipy excludes edge, numpy 'reflect' excludes edge
-        "nearest": "edge",
-        "wrap": "wrap",
-    }
+    if use_parallel:
+        # Parallel processing for large images
+        with ThreadPoolExecutor() as executor:
+            # image_reordered[i] is a view, no copy needed
+            processed = list(
+                executor.map(
+                    process_slice, [image_reordered[i] for i in range(n_slices)]
+                )
+            )
+    else:
+        # Sequential processing for small images
+        processed = [process_slice(image_reordered[i]) for i in range(n_slices)]
 
-    # Pad the image
-    pad_mode_literal = pad_mode_map.get(mode, "constant")
-    padded = np.pad(image, ((pad_h, pad_h), (pad_w, pad_w)), mode=pad_mode_literal)  # type: ignore[call-overload]
-
-    # FFT convolution on padded image
-    response_real = fftconvolve(padded, np.real(kernel), mode="same")
-    response_imag = fftconvolve(padded, np.imag(kernel), mode="same")
-
-    # Crop back to original size
-    h, w = image.shape
-    response_real = response_real[pad_h : pad_h + h, pad_w : pad_w + w]
-    response_imag = response_imag[pad_h : pad_h + h, pad_w : pad_w + w]
-
-    # Compute modulus
-    return np.sqrt(response_real**2 + response_imag**2)  # type: ignore[no-any-return]
+    # Stack and move axis back to original position
+    result_reordered = np.stack(processed, axis=0)
+    return np.moveaxis(result_reordered, 0, plane_axis)
 
 
 def _create_gabor_kernel_2d(
@@ -220,7 +253,7 @@ def _create_gabor_kernel_2d(
     wavelength: float,
     gamma: float,
     theta: float,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Create a 2D Gabor kernel.
     """

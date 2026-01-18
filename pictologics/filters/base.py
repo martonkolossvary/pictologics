@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any, Dict
 
 import numpy as np
+from numpy import typing as npt
 
 
 class BoundaryCondition(Enum):
@@ -25,22 +26,24 @@ class BoundaryCondition(Enum):
 class FilterResult:
     """Container for filter response maps and metadata."""
 
-    response_map: np.ndarray
+    response_map: npt.NDArray[np.floating[Any]]
     filter_name: str
     filter_params: Dict[str, Any]
 
     @property
     def shape(self) -> tuple[int, ...]:
         """Shape of the response map."""
-        return self.response_map.shape
+        return self.response_map.shape  # type: ignore[no-any-return]
 
     @property
-    def dtype(self) -> np.dtype:
+    def dtype(self) -> np.dtype[Any]:
         """Data type of the response map."""
-        return self.response_map.dtype
+        return self.response_map.dtype  # type: ignore[no-any-return]
 
 
-def ensure_float32(image: np.ndarray) -> np.ndarray:
+def ensure_float32(
+    image: npt.NDArray[np.floating[Any]],
+) -> npt.NDArray[np.floating[Any]]:
     """
     Ensure image is at least 32-bit floating point precision.
 

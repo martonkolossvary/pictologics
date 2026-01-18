@@ -52,9 +52,10 @@ Common presets:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import numpy as np
+from numpy import typing as npt
 from PIL import Image as PILImage
 
 from pictologics.loader import Image
@@ -139,10 +140,10 @@ DEFAULT_WINDOW_WIDTH = 600.0
 
 
 def _apply_window_level(
-    arr: np.ndarray,
+    arr: npt.NDArray[np.floating[Any]],
     center: float,
     width: float,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply window/level normalization to an image array.
 
@@ -166,10 +167,10 @@ def _apply_window_level(
 
 
 def _normalize_image(
-    image_array: np.ndarray,
+    image_array: npt.NDArray[np.floating[Any]],
     window_center: Optional[float] = None,
     window_width: Optional[float] = None,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Normalize image array to 0-255 uint8.
 
@@ -207,14 +208,14 @@ def _get_colormap_colors(colormap: str) -> list[tuple[int, int, int]]:
 
 
 def _create_display_rgba(
-    image_slice: Optional[np.ndarray],
-    mask_slice: Optional[np.ndarray],
+    image_slice: Optional[npt.NDArray[np.floating[Any]]],
+    mask_slice: Optional[npt.NDArray[np.floating[Any]]],
     alpha: float = 0.25,
     colormap: str = "tab20",
     window_center: Optional[float] = None,
     window_width: Optional[float] = None,
     mask_as_colormap: bool = True,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Create an RGBA image for display.
 
@@ -263,7 +264,7 @@ def _create_display_rgba(
         rgba[..., 1] = gray
         rgba[..., 2] = gray
         rgba[..., 3] = 255
-        return rgba
+        return rgba  # type: ignore[return-value]
 
     # --- Mode 2: Mask only ---
     if image_slice is None:
@@ -285,7 +286,7 @@ def _create_display_rgba(
                 rgba[..., 0][label_mask] = color[0]
                 rgba[..., 1][label_mask] = color[1]
                 rgba[..., 2][label_mask] = color[2]
-            return rgba
+            return rgba  # type: ignore[return-value]
         else:
             # Grayscale mask
             gray = _normalize_image(mask_slice, window_center, window_width)
@@ -294,7 +295,7 @@ def _create_display_rgba(
             rgba[..., 1] = gray
             rgba[..., 2] = gray
             rgba[..., 3] = 255
-            return rgba
+            return rgba  # type: ignore[return-value]
 
     # --- Mode 3: Overlay (image + mask) ---
     gray = _normalize_image(image_slice, window_center, window_width)
@@ -326,7 +327,7 @@ def _create_display_rgba(
                 255,
             ).astype(np.uint8)
 
-    return rgba
+    return rgba  # type: ignore[return-value]
 
 
 def _parse_slice_selection(
@@ -385,7 +386,7 @@ def _parse_slice_selection(
 def _get_reference_array(
     image: Optional[Image],
     mask: Optional[Image],
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """Get the reference array for shape/slicing operations."""
     if image is not None:
         return image.array
@@ -658,7 +659,11 @@ def visualize_slices(
     plt.subplots_adjust(bottom=0.15)
 
     # Get slice data
-    def get_slice(idx: int) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def get_slice(
+        idx: int,
+    ) -> tuple[
+        Optional[npt.NDArray[np.floating[Any]]], Optional[npt.NDArray[np.floating[Any]]]
+    ]:
         img_slice = None
         mask_slice = None
 

@@ -16,9 +16,10 @@ Key Features:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
+from numpy import typing as npt
 from scipy.ndimage import affine_transform, label
 
 from .loader import Image
@@ -135,15 +136,15 @@ def resample_image(
 
 
 def discretise_image(
-    image: Image | np.ndarray,
+    image: Image | npt.NDArray[np.floating[Any]],
     method: str,
-    roi_mask: Image | np.ndarray | None = None,
+    roi_mask: Image | npt.NDArray[np.floating[Any]] | None = None,
     n_bins: Optional[int] = None,
     bin_width: Optional[float] = None,
     min_val: Optional[float] = None,
     max_val: Optional[float] = None,
     cutoffs: Optional[list[float]] = None,
-) -> Image | np.ndarray:
+) -> Image | npt.NDArray[np.floating[Any]]:
     """
     Discretise image intensities.
 
@@ -281,10 +282,10 @@ def discretise_image(
 
 
 def apply_mask(
-    image: Image | np.ndarray,
-    mask: Image | np.ndarray,
+    image: Image | npt.NDArray[np.floating[Any]],
+    mask: Image | npt.NDArray[np.floating[Any]],
     mask_values: int | list[int] | None = 1,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     """
     Apply mask to image and return flattened array of voxel values.
 
