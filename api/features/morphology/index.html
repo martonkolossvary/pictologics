@@ -313,17 +313,18 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../../../ibsi_compliance/" class="md-tabs__link">
-        
-  
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../../../ibsi1_compliance/" class="md-tabs__link">
+          
+  
   
   IBSI Compliance
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -569,6 +570,34 @@
     
   
     Data Loading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../user_guide/image_filtering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Image Filtering
   
 
     
@@ -849,6 +878,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../filters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../results/" class="md-nav__link">
         
   
@@ -923,10 +980,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_7" checked>
         
           
-          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_3_7" id="__nav_3_7_label" tabindex="">
             
   
   
@@ -944,8 +1001,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_3_6">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1201,9 +1258,25 @@
   
   
   
-    <li class="md-nav__item">
-      <a href="../../../ibsi_compliance/" class="md-nav__link">
+    
+    
+    
+    
+      
+      
         
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
   
   
   <span class="md-ellipsis">
@@ -1217,7 +1290,135 @@
   
   
 
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    IBSI Compliance
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../ibsi1_compliance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI 1 (Features)
+  
+
+    
+  </span>
+  
+  
+
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../ibsi2_compliance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI 2 Phase 1 (Filters)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../ibsi2_phase2_compliance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI 2 Phase 2 (Filtered Features)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../ibsi2_phase3_compliance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI 2 Phase 3 (Reproducibility)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -1476,6 +1677,24 @@ Initiative (IBSI) compliant algorithms.</p>
 <p>Uses <code>numba</code> for optimizing the Khachiyan algorithm for MVEE calculation.</p>
 
 
+<details class="example" open>
+  <summary>Example</summary>
+  <p>Calculate morphology features from a mask:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.loader</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.features.morphology</span><span class="w"> </span><span class="kn">import</span> <span class="n">calculate_morphology_features</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Create dummy mask</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">mask_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">mask_arr</span><span class="p">[</span><span class="mi">10</span><span class="p">:</span><span class="mi">40</span><span class="p">,</span> <span class="mi">10</span><span class="p">:</span><span class="mi">40</span><span class="p">,</span> <span class="mi">10</span><span class="p">:</span><span class="mi">40</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">Image</span><span class="p">(</span><span class="n">mask_arr</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span> <span class="n">origin</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">))</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># Calculate features</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">features</span> <span class="o">=</span> <span class="n">calculate_morphology_features</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="nb">print</span><span class="p">(</span><span class="n">features</span><span class="p">[</span><span class="s2">&quot;volume_voxel_counting_YEKZ&quot;</span><span class="p">])</span>
+</code></pre></div>
+</details>
+
 
 
 
@@ -1615,36 +1834,7 @@ Includes both voxel-based and mesh-based features (IBSI compliant).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>pictologics/features/morphology.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-750">750</a></span>
-<span class="normal"><a href="#__codelineno-0-751">751</a></span>
-<span class="normal"><a href="#__codelineno-0-752">752</a></span>
-<span class="normal"><a href="#__codelineno-0-753">753</a></span>
-<span class="normal"><a href="#__codelineno-0-754">754</a></span>
-<span class="normal"><a href="#__codelineno-0-755">755</a></span>
-<span class="normal"><a href="#__codelineno-0-756">756</a></span>
-<span class="normal"><a href="#__codelineno-0-757">757</a></span>
-<span class="normal"><a href="#__codelineno-0-758">758</a></span>
-<span class="normal"><a href="#__codelineno-0-759">759</a></span>
-<span class="normal"><a href="#__codelineno-0-760">760</a></span>
-<span class="normal"><a href="#__codelineno-0-761">761</a></span>
-<span class="normal"><a href="#__codelineno-0-762">762</a></span>
-<span class="normal"><a href="#__codelineno-0-763">763</a></span>
-<span class="normal"><a href="#__codelineno-0-764">764</a></span>
-<span class="normal"><a href="#__codelineno-0-765">765</a></span>
-<span class="normal"><a href="#__codelineno-0-766">766</a></span>
-<span class="normal"><a href="#__codelineno-0-767">767</a></span>
-<span class="normal"><a href="#__codelineno-0-768">768</a></span>
-<span class="normal"><a href="#__codelineno-0-769">769</a></span>
-<span class="normal"><a href="#__codelineno-0-770">770</a></span>
-<span class="normal"><a href="#__codelineno-0-771">771</a></span>
-<span class="normal"><a href="#__codelineno-0-772">772</a></span>
-<span class="normal"><a href="#__codelineno-0-773">773</a></span>
-<span class="normal"><a href="#__codelineno-0-774">774</a></span>
-<span class="normal"><a href="#__codelineno-0-775">775</a></span>
-<span class="normal"><a href="#__codelineno-0-776">776</a></span>
-<span class="normal"><a href="#__codelineno-0-777">777</a></span>
-<span class="normal"><a href="#__codelineno-0-778">778</a></span>
-<span class="normal"><a href="#__codelineno-0-779">779</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-779">779</a></span>
 <span class="normal"><a href="#__codelineno-0-780">780</a></span>
 <span class="normal"><a href="#__codelineno-0-781">781</a></span>
 <span class="normal"><a href="#__codelineno-0-782">782</a></span>
@@ -1673,65 +1863,94 @@ Includes both voxel-based and mesh-based features (IBSI compliant).</p>
 <span class="normal"><a href="#__codelineno-0-805">805</a></span>
 <span class="normal"><a href="#__codelineno-0-806">806</a></span>
 <span class="normal"><a href="#__codelineno-0-807">807</a></span>
-<span class="normal"><a href="#__codelineno-0-808">808</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-750" name="__codelineno-0-750"></a><span class="k">def</span><span class="w"> </span><span class="nf">calculate_morphology_features</span><span class="p">(</span>
-<a id="__codelineno-0-751" name="__codelineno-0-751"></a>    <span class="n">mask</span><span class="p">:</span> <span class="n">Image</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Image</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">intensity_mask</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Image</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-752" name="__codelineno-0-752"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
-<a id="__codelineno-0-753" name="__codelineno-0-753"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-754" name="__codelineno-0-754"></a><span class="sd">    Calculate morphological features from the ROI mask.</span>
-<a id="__codelineno-0-755" name="__codelineno-0-755"></a><span class="sd">    Includes both voxel-based and mesh-based features (IBSI compliant).</span>
-<a id="__codelineno-0-756" name="__codelineno-0-756"></a>
-<a id="__codelineno-0-757" name="__codelineno-0-757"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-758" name="__codelineno-0-758"></a><span class="sd">        mask: Image object containing the binary mask (Morphological Mask).</span>
-<a id="__codelineno-0-759" name="__codelineno-0-759"></a><span class="sd">        image: Optional Image object containing intensity data (required for some features).</span>
-<a id="__codelineno-0-760" name="__codelineno-0-760"></a><span class="sd">        intensity_mask: Optional Image object containing the intensity mask (e.g. after outlier filtering).</span>
-<a id="__codelineno-0-761" name="__codelineno-0-761"></a><span class="sd">                        If provided, used for intensity-weighted features (99N0, KLMA).</span>
-<a id="__codelineno-0-762" name="__codelineno-0-762"></a><span class="sd">                        If None, defaults to `mask`.</span>
-<a id="__codelineno-0-763" name="__codelineno-0-763"></a>
-<a id="__codelineno-0-764" name="__codelineno-0-764"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-765" name="__codelineno-0-765"></a><span class="sd">        Dictionary of calculated features.</span>
-<a id="__codelineno-0-766" name="__codelineno-0-766"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-767" name="__codelineno-0-767"></a>    <span class="n">features</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-<a id="__codelineno-0-768" name="__codelineno-0-768"></a>    <span class="n">i_mask</span> <span class="o">=</span> <span class="n">intensity_mask</span> <span class="k">if</span> <span class="n">intensity_mask</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">mask</span>
-<a id="__codelineno-0-769" name="__codelineno-0-769"></a>
-<a id="__codelineno-0-770" name="__codelineno-0-770"></a>    <span class="c1"># 1. Voxel Based Features</span>
-<a id="__codelineno-0-771" name="__codelineno-0-771"></a>    <span class="n">voxel_volume</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">mask</span><span class="o">.</span><span class="n">spacing</span><span class="p">)</span>
-<a id="__codelineno-0-772" name="__codelineno-0-772"></a>    <span class="n">n_voxels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">mask</span><span class="o">.</span><span class="n">array</span><span class="p">)</span>
-<a id="__codelineno-0-773" name="__codelineno-0-773"></a>    <span class="n">features</span><span class="p">[</span><span class="s2">&quot;volume_voxel_counting_YEKZ&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">n_voxels</span> <span class="o">*</span> <span class="n">voxel_volume</span><span class="p">)</span>
-<a id="__codelineno-0-774" name="__codelineno-0-774"></a>
-<a id="__codelineno-0-775" name="__codelineno-0-775"></a>    <span class="c1"># 2. Mesh Based Features</span>
-<a id="__codelineno-0-776" name="__codelineno-0-776"></a>    <span class="n">mesh_feats</span><span class="p">,</span> <span class="n">verts</span><span class="p">,</span> <span class="n">faces</span> <span class="o">=</span> <span class="n">_get_mesh_features</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span>
-<a id="__codelineno-0-777" name="__codelineno-0-777"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">mesh_feats</span><span class="p">)</span>
-<a id="__codelineno-0-778" name="__codelineno-0-778"></a>
-<a id="__codelineno-0-779" name="__codelineno-0-779"></a>    <span class="k">if</span> <span class="n">verts</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">faces</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-780" name="__codelineno-0-780"></a>        <span class="k">return</span> <span class="n">features</span>
-<a id="__codelineno-0-781" name="__codelineno-0-781"></a>
-<a id="__codelineno-0-782" name="__codelineno-0-782"></a>    <span class="n">mesh_volume</span> <span class="o">=</span> <span class="n">features</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;volume_RNU0&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
-<a id="__codelineno-0-783" name="__codelineno-0-783"></a>    <span class="n">surface_area</span> <span class="o">=</span> <span class="n">features</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;surface_area_C0JK&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
-<a id="__codelineno-0-784" name="__codelineno-0-784"></a>
-<a id="__codelineno-0-785" name="__codelineno-0-785"></a>    <span class="c1"># 3. Shape Features</span>
-<a id="__codelineno-0-786" name="__codelineno-0-786"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_get_shape_features</span><span class="p">(</span><span class="n">surface_area</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">))</span>
-<a id="__codelineno-0-787" name="__codelineno-0-787"></a>
-<a id="__codelineno-0-788" name="__codelineno-0-788"></a>    <span class="c1"># 4. PCA Based Features</span>
-<a id="__codelineno-0-789" name="__codelineno-0-789"></a>    <span class="n">pca_feats</span><span class="p">,</span> <span class="n">evals</span><span class="p">,</span> <span class="n">evecs</span> <span class="o">=</span> <span class="n">_get_pca_features</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">,</span> <span class="n">surface_area</span><span class="p">)</span>
-<a id="__codelineno-0-790" name="__codelineno-0-790"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">pca_feats</span><span class="p">)</span>
-<a id="__codelineno-0-791" name="__codelineno-0-791"></a>
-<a id="__codelineno-0-792" name="__codelineno-0-792"></a>    <span class="c1"># 5. Convex Hull Features</span>
-<a id="__codelineno-0-793" name="__codelineno-0-793"></a>    <span class="n">hull_feats</span><span class="p">,</span> <span class="n">hull</span> <span class="o">=</span> <span class="n">_get_convex_hull_features</span><span class="p">(</span><span class="n">verts</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">,</span> <span class="n">surface_area</span><span class="p">)</span>
-<a id="__codelineno-0-794" name="__codelineno-0-794"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">hull_feats</span><span class="p">)</span>
-<a id="__codelineno-0-795" name="__codelineno-0-795"></a>
-<a id="__codelineno-0-796" name="__codelineno-0-796"></a>    <span class="c1"># 6. Bounding Box Features</span>
-<a id="__codelineno-0-797" name="__codelineno-0-797"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_get_bounding_box_features</span><span class="p">(</span><span class="n">verts</span><span class="p">,</span> <span class="n">evecs</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">,</span> <span class="n">surface_area</span><span class="p">))</span>
+<span class="normal"><a href="#__codelineno-0-808">808</a></span>
+<span class="normal"><a href="#__codelineno-0-809">809</a></span>
+<span class="normal"><a href="#__codelineno-0-810">810</a></span>
+<span class="normal"><a href="#__codelineno-0-811">811</a></span>
+<span class="normal"><a href="#__codelineno-0-812">812</a></span>
+<span class="normal"><a href="#__codelineno-0-813">813</a></span>
+<span class="normal"><a href="#__codelineno-0-814">814</a></span>
+<span class="normal"><a href="#__codelineno-0-815">815</a></span>
+<span class="normal"><a href="#__codelineno-0-816">816</a></span>
+<span class="normal"><a href="#__codelineno-0-817">817</a></span>
+<span class="normal"><a href="#__codelineno-0-818">818</a></span>
+<span class="normal"><a href="#__codelineno-0-819">819</a></span>
+<span class="normal"><a href="#__codelineno-0-820">820</a></span>
+<span class="normal"><a href="#__codelineno-0-821">821</a></span>
+<span class="normal"><a href="#__codelineno-0-822">822</a></span>
+<span class="normal"><a href="#__codelineno-0-823">823</a></span>
+<span class="normal"><a href="#__codelineno-0-824">824</a></span>
+<span class="normal"><a href="#__codelineno-0-825">825</a></span>
+<span class="normal"><a href="#__codelineno-0-826">826</a></span>
+<span class="normal"><a href="#__codelineno-0-827">827</a></span>
+<span class="normal"><a href="#__codelineno-0-828">828</a></span>
+<span class="normal"><a href="#__codelineno-0-829">829</a></span>
+<span class="normal"><a href="#__codelineno-0-830">830</a></span>
+<span class="normal"><a href="#__codelineno-0-831">831</a></span>
+<span class="normal"><a href="#__codelineno-0-832">832</a></span>
+<span class="normal"><a href="#__codelineno-0-833">833</a></span>
+<span class="normal"><a href="#__codelineno-0-834">834</a></span>
+<span class="normal"><a href="#__codelineno-0-835">835</a></span>
+<span class="normal"><a href="#__codelineno-0-836">836</a></span>
+<span class="normal"><a href="#__codelineno-0-837">837</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-779" name="__codelineno-0-779"></a><span class="k">def</span><span class="w"> </span><span class="nf">calculate_morphology_features</span><span class="p">(</span>
+<a id="__codelineno-0-780" name="__codelineno-0-780"></a>    <span class="n">mask</span><span class="p">:</span> <span class="n">Image</span><span class="p">,</span> <span class="n">image</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Image</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">intensity_mask</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Image</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-781" name="__codelineno-0-781"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<a id="__codelineno-0-782" name="__codelineno-0-782"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-783" name="__codelineno-0-783"></a><span class="sd">    Calculate morphological features from the ROI mask.</span>
+<a id="__codelineno-0-784" name="__codelineno-0-784"></a><span class="sd">    Includes both voxel-based and mesh-based features (IBSI compliant).</span>
+<a id="__codelineno-0-785" name="__codelineno-0-785"></a>
+<a id="__codelineno-0-786" name="__codelineno-0-786"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-787" name="__codelineno-0-787"></a><span class="sd">        mask: Image object containing the binary mask (Morphological Mask).</span>
+<a id="__codelineno-0-788" name="__codelineno-0-788"></a><span class="sd">        image: Optional Image object containing intensity data (required for some features).</span>
+<a id="__codelineno-0-789" name="__codelineno-0-789"></a><span class="sd">        intensity_mask: Optional Image object containing the intensity mask (e.g. after outlier filtering).</span>
+<a id="__codelineno-0-790" name="__codelineno-0-790"></a><span class="sd">                        If provided, used for intensity-weighted features (99N0, KLMA).</span>
+<a id="__codelineno-0-791" name="__codelineno-0-791"></a><span class="sd">                        If None, defaults to `mask`.</span>
+<a id="__codelineno-0-792" name="__codelineno-0-792"></a>
+<a id="__codelineno-0-793" name="__codelineno-0-793"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-794" name="__codelineno-0-794"></a><span class="sd">        Dictionary of calculated features.</span>
+<a id="__codelineno-0-795" name="__codelineno-0-795"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-796" name="__codelineno-0-796"></a>    <span class="n">features</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-797" name="__codelineno-0-797"></a>    <span class="n">i_mask</span> <span class="o">=</span> <span class="n">intensity_mask</span> <span class="k">if</span> <span class="n">intensity_mask</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">mask</span>
 <a id="__codelineno-0-798" name="__codelineno-0-798"></a>
-<a id="__codelineno-0-799" name="__codelineno-0-799"></a>    <span class="c1"># 7. MVEE Features</span>
-<a id="__codelineno-0-800" name="__codelineno-0-800"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_get_mvee_features</span><span class="p">(</span><span class="n">hull</span><span class="p">,</span> <span class="n">verts</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">,</span> <span class="n">surface_area</span><span class="p">))</span>
-<a id="__codelineno-0-801" name="__codelineno-0-801"></a>
-<a id="__codelineno-0-802" name="__codelineno-0-802"></a>    <span class="c1"># 8. Intensity Based Features</span>
-<a id="__codelineno-0-803" name="__codelineno-0-803"></a>    <span class="k">if</span> <span class="n">image</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-804" name="__codelineno-0-804"></a>        <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
-<a id="__codelineno-0-805" name="__codelineno-0-805"></a>            <span class="n">_get_intensity_morphology_features</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="n">i_mask</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">)</span>
-<a id="__codelineno-0-806" name="__codelineno-0-806"></a>        <span class="p">)</span>
+<a id="__codelineno-0-799" name="__codelineno-0-799"></a>    <span class="c1"># 1. Voxel Based Features</span>
+<a id="__codelineno-0-800" name="__codelineno-0-800"></a>    <span class="n">voxel_volume</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">prod</span><span class="p">(</span><span class="n">mask</span><span class="o">.</span><span class="n">spacing</span><span class="p">)</span>
+<a id="__codelineno-0-801" name="__codelineno-0-801"></a>    <span class="n">n_voxels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">mask</span><span class="o">.</span><span class="n">array</span><span class="p">)</span>
+<a id="__codelineno-0-802" name="__codelineno-0-802"></a>    <span class="n">features</span><span class="p">[</span><span class="s2">&quot;volume_voxel_counting_YEKZ&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">n_voxels</span> <span class="o">*</span> <span class="n">voxel_volume</span><span class="p">)</span>
+<a id="__codelineno-0-803" name="__codelineno-0-803"></a>
+<a id="__codelineno-0-804" name="__codelineno-0-804"></a>    <span class="c1"># 2. Mesh Based Features</span>
+<a id="__codelineno-0-805" name="__codelineno-0-805"></a>    <span class="n">mesh_feats</span><span class="p">,</span> <span class="n">verts</span><span class="p">,</span> <span class="n">faces</span> <span class="o">=</span> <span class="n">_get_mesh_features</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span>
+<a id="__codelineno-0-806" name="__codelineno-0-806"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">mesh_feats</span><span class="p">)</span>
 <a id="__codelineno-0-807" name="__codelineno-0-807"></a>
-<a id="__codelineno-0-808" name="__codelineno-0-808"></a>    <span class="k">return</span> <span class="n">features</span>
+<a id="__codelineno-0-808" name="__codelineno-0-808"></a>    <span class="k">if</span> <span class="n">verts</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">faces</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-809" name="__codelineno-0-809"></a>        <span class="k">return</span> <span class="n">features</span>
+<a id="__codelineno-0-810" name="__codelineno-0-810"></a>
+<a id="__codelineno-0-811" name="__codelineno-0-811"></a>    <span class="n">mesh_volume</span> <span class="o">=</span> <span class="n">features</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;volume_RNU0&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+<a id="__codelineno-0-812" name="__codelineno-0-812"></a>    <span class="n">surface_area</span> <span class="o">=</span> <span class="n">features</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;surface_area_C0JK&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+<a id="__codelineno-0-813" name="__codelineno-0-813"></a>
+<a id="__codelineno-0-814" name="__codelineno-0-814"></a>    <span class="c1"># 3. Shape Features</span>
+<a id="__codelineno-0-815" name="__codelineno-0-815"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_get_shape_features</span><span class="p">(</span><span class="n">surface_area</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">))</span>
+<a id="__codelineno-0-816" name="__codelineno-0-816"></a>
+<a id="__codelineno-0-817" name="__codelineno-0-817"></a>    <span class="c1"># 4. PCA Based Features</span>
+<a id="__codelineno-0-818" name="__codelineno-0-818"></a>    <span class="n">pca_feats</span><span class="p">,</span> <span class="n">evals</span><span class="p">,</span> <span class="n">evecs</span> <span class="o">=</span> <span class="n">_get_pca_features</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">,</span> <span class="n">surface_area</span><span class="p">)</span>
+<a id="__codelineno-0-819" name="__codelineno-0-819"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">pca_feats</span><span class="p">)</span>
+<a id="__codelineno-0-820" name="__codelineno-0-820"></a>
+<a id="__codelineno-0-821" name="__codelineno-0-821"></a>    <span class="c1"># 5. Convex Hull Features</span>
+<a id="__codelineno-0-822" name="__codelineno-0-822"></a>    <span class="n">hull_feats</span><span class="p">,</span> <span class="n">hull</span> <span class="o">=</span> <span class="n">_get_convex_hull_features</span><span class="p">(</span><span class="n">verts</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">,</span> <span class="n">surface_area</span><span class="p">)</span>
+<a id="__codelineno-0-823" name="__codelineno-0-823"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">hull_feats</span><span class="p">)</span>
+<a id="__codelineno-0-824" name="__codelineno-0-824"></a>
+<a id="__codelineno-0-825" name="__codelineno-0-825"></a>    <span class="c1"># 6. Bounding Box Features</span>
+<a id="__codelineno-0-826" name="__codelineno-0-826"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_get_bounding_box_features</span><span class="p">(</span><span class="n">verts</span><span class="p">,</span> <span class="n">evecs</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">,</span> <span class="n">surface_area</span><span class="p">))</span>
+<a id="__codelineno-0-827" name="__codelineno-0-827"></a>
+<a id="__codelineno-0-828" name="__codelineno-0-828"></a>    <span class="c1"># 7. MVEE Features</span>
+<a id="__codelineno-0-829" name="__codelineno-0-829"></a>    <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_get_mvee_features</span><span class="p">(</span><span class="n">hull</span><span class="p">,</span> <span class="n">verts</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">,</span> <span class="n">surface_area</span><span class="p">))</span>
+<a id="__codelineno-0-830" name="__codelineno-0-830"></a>
+<a id="__codelineno-0-831" name="__codelineno-0-831"></a>    <span class="c1"># 8. Intensity Based Features</span>
+<a id="__codelineno-0-832" name="__codelineno-0-832"></a>    <span class="k">if</span> <span class="n">image</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-833" name="__codelineno-0-833"></a>        <span class="n">features</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+<a id="__codelineno-0-834" name="__codelineno-0-834"></a>            <span class="n">_get_intensity_morphology_features</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="n">i_mask</span><span class="p">,</span> <span class="n">mesh_volume</span><span class="p">)</span>
+<a id="__codelineno-0-835" name="__codelineno-0-835"></a>        <span class="p">)</span>
+<a id="__codelineno-0-836" name="__codelineno-0-836"></a>
+<a id="__codelineno-0-837" name="__codelineno-0-837"></a>    <span class="k">return</span> <span class="n">features</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

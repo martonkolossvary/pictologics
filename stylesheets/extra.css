@@ -246,27 +246,100 @@ input,
 }
 
 /* Admonitions */
+/* Common Structure */
 .md-typeset .admonition {
-  border: 1px solid var(--cyber-green);
+  border: 1px solid;
+  border-radius: 0;
+}
+
+/* Dark Mode Admonitions (Cyberpunk) */
+[data-md-color-scheme="slate"] .md-typeset .admonition {
+  border-color: var(--cyber-green);
   background-color: rgba(0, 20, 0, 0.3);
   box-shadow: inset 0 0 10px var(--cyber-dim-green);
 }
 
-.md-typeset .admonition.warning {
+[data-md-color-scheme="slate"] .md-typeset .admonition.warning {
   border-color: var(--cyber-amber);
   background-color: rgba(20, 10, 0, 0.3);
 }
 
+[data-md-color-scheme="slate"] .md-typeset .admonition.important {
+  border-color: #ff0055;
+  background-color: rgba(20, 0, 5, 0.3);
+  box-shadow: inset 0 0 10px #330011;
+}
+
+/* Light Mode Admonitions (Clean) */
+[data-md-color-scheme="default"] .md-typeset .admonition {
+  border-color: #00c832;
+  /* Match primary green */
+  background-color: rgba(255, 255, 255, 1);
+  box-shadow: none;
+}
+
+[data-md-color-scheme="default"] .md-typeset .admonition.warning {
+  border-color: #ffb300;
+  background-color: white;
+  /* Clean white body */
+}
+
+[data-md-color-scheme="default"] .md-typeset .admonition.important {
+  border-color: #d50000;
+  background-color: white;
+  /* Clean white body */
+}
+
+/* Admonition Titles */
 .md-typeset .admonition__title {
   background-color: transparent;
-  border-bottom: 1px solid var(--cyber-green);
-  color: var(--cyber-green);
+  border-bottom: 1px solid;
   font-family: "Orbitron", sans-serif;
 }
 
-.md-typeset .admonition.warning .admonition__title {
+[data-md-color-scheme="slate"] .md-typeset .admonition__title {
+  border-color: var(--cyber-green);
+  color: var(--cyber-green);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .admonition.warning .admonition__title {
   border-color: var(--cyber-amber);
   color: var(--cyber-amber);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .admonition.important .admonition__title {
+  border-color: #ff0055;
+  color: #ff0055;
+}
+
+[data-md-color-scheme="default"] .md-typeset .admonition__title {
+  border-color: #e0e0e0;
+  background-color: rgba(0, 200, 50, 0.1);
+  color: #00796b;
+}
+
+/* Specific Light Mode Colors for Titles */
+[data-md-color-scheme="default"] .md-typeset .admonition.note .admonition__title {
+  background-color: #e3f2fd;
+  /* Light blue header */
+  border-bottom-color: #2196f3;
+  color: #0d47a1;
+}
+
+[data-md-color-scheme="default"] .md-typeset .admonition.note {
+  border-color: #2196f3;
+}
+
+[data-md-color-scheme="default"] .md-typeset .admonition.warning .admonition__title {
+  background-color: #fff8e1;
+  border-bottom-color: #ffb300;
+  color: #bf360c;
+}
+
+[data-md-color-scheme="default"] .md-typeset .admonition.important .admonition__title {
+  background-color: #ffebee;
+  border-bottom-color: #d50000;
+  color: #b71c1c;
 }
 
 /* Buttons */
@@ -339,4 +412,16 @@ input,
 
 [data-md-color-scheme="default"] .md-footer {
   border-top: 1px solid #e0e0e0;
+}
+
+/* Fix mkdocstrings API signatures - prevent uppercase transform */
+.md-typeset .doc-heading,
+.md-typeset .doc-heading code,
+.md-typeset .doc-heading span,
+.md-typeset .doc-signature {
+  text-transform: none !important;
+  font-family: "Share Tech Mono", "Roboto Mono", monospace !important;
+  letter-spacing: normal !important;
+  text-shadow: none !important;
+  font-weight: normal !important;
 }

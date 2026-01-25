@@ -313,17 +313,18 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../../ibsi_compliance/" class="md-tabs__link">
-        
-  
-  
     
+    
+      <li class="md-tabs__item">
+        <a href="../../ibsi1_compliance/" class="md-tabs__link">
+          
+  
   
   IBSI Compliance
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -741,6 +742,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../image_filtering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Image Filtering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../feature_calculations/" class="md-nav__link">
         
   
@@ -996,6 +1025,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/filters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/results/" class="md-nav__link">
         
   
@@ -1065,10 +1122,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_7" >
         
           
-          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_7" id="__nav_3_7_label" tabindex="0">
             
   
   
@@ -1086,8 +1143,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_6">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_7">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1229,9 +1286,25 @@
   
   
   
-    <li class="md-nav__item">
-      <a href="../../ibsi_compliance/" class="md-nav__link">
+    
+    
+    
+    
+      
+      
         
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
   
   
   <span class="md-ellipsis">
@@ -1245,7 +1318,135 @@
   
   
 
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    IBSI Compliance
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ibsi1_compliance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI 1 (Features)
+  
+
+    
+  </span>
+  
+  
+
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ibsi2_compliance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI 2 Phase 1 (Filters)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ibsi2_phase2_compliance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI 2 Phase 2 (Filtered Features)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ibsi2_phase3_compliance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBSI 2 Phase 3 (Reproducibility)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -1534,7 +1735,10 @@ next PyPI release), you can install directly from the GitHub repository.</p>
 </code></pre></div>
 <h2 id="eager-compilation-warmup">Eager Compilation (Warmup)</h2>
 <p>Pictologics uses Numba for Just-In-Time (JIT) compilation to accelerate feature extraction. To ensure fast runtime performance, Pictologics performs an <strong>automatic warmup mechanism</strong> during import. This compiles the core functions immediately when <code>import pictologics</code> is executed.</p>
-<p><strong>Note:</strong> This may cause the <code>import pictologics</code> statement to take a few seconds (typically 2-10s depending on your CPU) to complete. This is expected behavior and guarantees that subsequent function calls are executed at full speed without initial compilation lag.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This may cause the <code>import pictologics</code> statement to take a few seconds (typically 2-10s depending on your CPU) to complete. This is expected behavior and guarantees that subsequent function calls are executed at full speed without initial compilation lag.</p>
+</div>
 <h3 id="disabling-warmup">Disabling Warmup</h3>
 <p>If you need fast import times (e.g., for CLI tools checking versions or lightweight scripts) and are willing to pay the compilation cost at the first function call, you can disable this behavior by setting the environment variable:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PICTOLOGICS_DISABLE_WARMUP</span><span class="o">=</span><span class="m">1</span>
