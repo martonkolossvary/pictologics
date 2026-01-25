@@ -22,8 +22,8 @@ Documentation (User Guide, API, Benchmarks): https://martonkolossvary.github.io/
 
 *   **🚀 High Performance**: Uses `numba` for Just In Time (JIT) compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page for details).
 *   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantoms, and clinical datasets:
-    *   **IBSI 1**: Feature extraction ([compliance report](ibsi1_compliance.md))
-    *   **IBSI 2**: Image filters ([Phase 1](ibsi2_compliance.md)), filtered features ([Phase 2](ibsi2_phase2.md)), reproducibility ([Phase 3](ibsi2_phase3.md))
+    *   **IBSI 1**: Feature extraction ([compliance report](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/))
+    *   **IBSI 2**: Image filters ([Phase 1](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/)), filtered features ([Phase 2](https://martonkolossvary.github.io/pictologics/ibsi2_phase2/)), reproducibility ([Phase 3](https://martonkolossvary.github.io/pictologics/ibsi2_phase3/))
 *   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, DICOM, DICOM-SEG, DICOM-SR).
 *   **✨ User-Friendly**: Pure Python implementation with a simple installation process and user-friendly pipeline module supporting easy feature extraction and analysis, ensuring a smooth experience from setup to analysis.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
