@@ -204,6 +204,10 @@ Applies an image filter (convolutional filter) to the image. Supports IBSI 2 sta
     *   `"wavelet"`: Separable wavelets (Haar, Daubechies, Coiflet)
     *   `"simoncelli"`: Non-separable Simoncelli wavelet
     *   `"riesz"`: Riesz transform
+    
+    !!! tip "See Filter Details"
+        For detailed explanations and visual examples of each filter, see the [Image Filtering](image_filtering.md) guide.
+
 *   `boundary`: Boundary condition. Options: `"mirror"` (default), `"nearest"`, `"zero"`, `"periodic"`.
 *   Additional filter-specific parameters (see table below).
 
@@ -228,7 +232,7 @@ Applies an image filter (convolutional filter) to the image. Supports IBSI 2 sta
 #### 8. `extract_features`
 Calculates the radiomic features based on the current state of the image and mask.
 
-!!! important "Feature Calculation Inputs"
+!!! note "Feature Calculation Inputs"
      The pipeline automatically selects the appropriate image state for each feature family:
     
     *   **Intensity, Morphology, Spatial Intensity, Local Intensity**: Calculated on the **Raw Image** (non-discretised, floating-point values).
@@ -237,7 +241,7 @@ Calculates the radiomic features based on the current state of the image and mas
 
 *   `families`: List of feature families to extract. Options:
     *   `"intensity"`: First-order statistics (Mean, Skewness, etc.).
-        *   By default, this also includes **spatial intensity** and **local intensity**.
+        *   By default, this also includes spatial intensity and local intensity.
         *   Disable these expensive computations via `include_spatial_intensity=False` and/or
             `include_local_intensity=False` in the step `params`.
     *   `"spatial_intensity"`: Compute only spatial intensity (Moran's I / Geary's C).

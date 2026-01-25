@@ -247,7 +247,7 @@ with ProcessPoolExecutor(max_workers=4) as executor:
 print(f"Processed {len(results)} cases")
 ```
 
-!!! tip "Performance Notes"
+!!! note "Performance Notes"
     - Use `ProcessPoolExecutor` (not `ThreadPoolExecutor`) to avoid Python's GIL
     - Set `max_workers` to the number of CPU cores (4-8 is typically optimal)
     - Each worker loads one image at a time, so memory usage scales with `max_workers`

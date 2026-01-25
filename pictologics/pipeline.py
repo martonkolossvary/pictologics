@@ -222,8 +222,10 @@ class RadiomicsPipeline:
                    - 'round_intensities': params: None
                    - 'discretise': params: method, n_bins/bin_width, etc.
                    - 'extract_features': params: families (list), etc.
-                     Note: Texture features require a prior 'discretise' step.
-                     IVH features are configured via 'ivh_params' dict.
+
+        Note:
+            - Texture features require a prior 'discretise' step.
+            - IVH features are configured via 'ivh_params' dict.
         """
         if not isinstance(steps, list):
             raise ValueError("Configuration must be a list of steps")
@@ -260,6 +262,27 @@ class RadiomicsPipeline:
 
         Returns:
             Dictionary mapping config names to pandas Series of features.
+
+        Example:
+            Run standard pipeline components:
+
+            ```python
+            from pictologics.pipeline import RadiomicsPipeline
+
+            # Initialize
+            pipeline = RadiomicsPipeline()
+
+            # Run on image and mask
+            results = pipeline.run(
+                image="data/image.nii.gz",
+                mask="data/mask.nii.gz",
+                subject_id="subject_001",
+                config_names=["standard_fbn_32"]
+            )
+
+            # Access results
+            print(results["standard_fbn_32"].head())
+            ```
         """
         # 1. Load Data
         if isinstance(image, str):

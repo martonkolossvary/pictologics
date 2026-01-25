@@ -15,8 +15,13 @@ Filters:
     - Riesz transform (AYRS)
 
 Example:
-    >>> from pictologics.filters import laplacian_of_gaussian
-    >>> response = laplacian_of_gaussian(image, sigma_mm=5.0, spacing_mm=2.0)
+    Apply Laplacian of Gaussian filter:
+
+    ```python
+    from pictologics.filters import laplacian_of_gaussian
+
+    response = laplacian_of_gaussian(image, sigma_mm=5.0, spacing_mm=2.0)
+    ```
 """
 
 from .base import BoundaryCondition, FilterResult

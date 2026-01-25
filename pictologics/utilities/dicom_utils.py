@@ -71,10 +71,22 @@ def split_dicom_phases(
         List of lists, where each inner list contains metadata dicts
         for one phase. Single-phase series return [[all_metadata]].
 
-    Examples:
-        >>> metadata = [{'file_path': Path('slice1.dcm'), 'CardiacPhase': 0}, ...]
-        >>> phases = split_dicom_phases(metadata)
-        >>> print(f"Found {len(phases)} phases")
+    Example:
+        Split DICOM metadata into separate phases:
+
+        ```python
+        from pictologics.utilities.dicom_utils import split_dicom_phases
+        from pathlib import Path
+
+        # Assume metadata list already collected
+        metadata = [
+            {'file_path': Path('slice1.dcm'), 'CardiacPhase': 0},
+            {'file_path': Path('slice2.dcm'), 'CardiacPhase': 10},
+            # ... more files
+        ]
+        phases = split_dicom_phases(metadata)
+        print(f"Found {len(phases)} phases")
+        ```
     """
     if len(file_metadata) < 2:
         return [file_metadata]
@@ -163,33 +175,28 @@ def get_dicom_phases(
         FileNotFoundError: If the path does not exist.
         ValueError: If no DICOM files are found.
 
-    Examples:
+    Example:
         Discover phases before loading:
 
-        >>> from pictologics.utilities import get_dicom_phases
-        >>> from pictologics import load_image
-        >>>
-        >>> phases = get_dicom_phases("cardiac_ct/")
-        >>> print(f"Found {len(phases)} phases:")
-        >>> for phase in phases:
-        ...     print(f"  Phase {phase.index}: {phase.num_slices} slices - {phase.label}")
-        Found 10 phases:
-          Phase 0: 64 slices - Phase 0%
-          Phase 1: 64 slices - Phase 10%
-          ...
+        ```python
+        from pictologics.utilities import get_dicom_phases
+        from pictologics import load_image
 
-        Load a specific phase:
+        # Discover phases in a cardiac CT directory
+        phases = get_dicom_phases("cardiac_ct/")
+        print(f"Found {len(phases)} phases:")
+        for phase in phases:
+            print(f"  Phase {phase.index}: {phase.num_slices} slices - {phase.label}")
 
-        >>> # Load the 5th phase (40%)
-        >>> img = load_image("cardiac_ct/", dataset_index=4)
+        # Load the 5th phase (40%)
+        img = load_image("cardiac_ct/", dataset_index=4)
 
-        Check if series is multi-phase:
-
-        >>> phases = get_dicom_phases("ct_scan/")
-        >>> if len(phases) > 1:
-        ...     print("Multi-phase series detected!")
-        ... else:
-        ...     print("Single-phase series")
+        # Check if series is multi-phase
+        if len(phases) > 1:
+            print("Multi-phase series detected!")
+        else:
+            print("Single-phase series")
+        ```
 
     See Also:
         - :func:`load_image`: Main image loading function with ``dataset_index`` support.

@@ -46,7 +46,8 @@ pip install -e .
 
 Pictologics uses Numba for Just-In-Time (JIT) compilation to accelerate feature extraction. To ensure fast runtime performance, Pictologics performs an **automatic warmup mechanism** during import. This compiles the core functions immediately when `import pictologics` is executed.
 
-**Note:** This may cause the `import pictologics` statement to take a few seconds (typically 2-10s depending on your CPU) to complete. This is expected behavior and guarantees that subsequent function calls are executed at full speed without initial compilation lag.
+!!! note
+    This may cause the `import pictologics` statement to take a few seconds (typically 2-10s depending on your CPU) to complete. This is expected behavior and guarantees that subsequent function calls are executed at full speed without initial compilation lag.
 
 ### Disabling Warmup
 

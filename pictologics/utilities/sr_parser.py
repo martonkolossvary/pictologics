@@ -94,21 +94,23 @@ class SRDocument:
         content_datetime: When the SR was created.
         metadata: Additional document-level attributes.
 
-    Examples:
+    Example:
         Load and parse an SR document:
 
-        >>> sr = SRDocument.from_file("measurements.dcm")
-        >>> print(f"Template: {sr.template_id}")
-        >>> print(f"Groups: {len(sr.measurement_groups)}")
+        ```python
+        from pictologics.utilities.sr_parser import SRDocument
 
-        Export measurements to DataFrame:
+        sr = SRDocument.from_file("measurements.dcm")
+        print(f"Template: {sr.template_id}")
+        print(f"Groups: {len(sr.measurement_groups)}")
 
-        >>> df = sr.get_measurements_df()
-        >>> print(df[["measurement_name", "value", "unit"]])
+        # Export measurements to DataFrame
+        df = sr.get_measurements_df()
+        print(df[["measurement_name", "value", "unit"]])
 
-        Export to CSV:
-
-        >>> sr.export_csv("measurements.csv")
+        # Export to CSV
+        sr.export_csv("measurements.csv")
+        ```
     """
 
     file_path: Path
@@ -395,22 +397,26 @@ class SRDocument:
         Returns:
             SRBatch containing all parsed documents and processing log.
 
-        Examples:
+        Example:
             Process all SR files in a folder:
 
-            >>> batch = SRDocument.from_folders(["sr_data/"])
-            >>> print(f"Found {len(batch.documents)} SR files")
-            >>> df = batch.get_combined_measurements_df()
+            ```python
+            from pictologics.utilities.sr_parser import SRDocument
 
-            Export each SR to individual files:
+            # Process folder
+            batch = SRDocument.from_folders(["sr_data/"])
+            print(f"Found {len(batch.documents)} SR files")
+            df = batch.get_combined_measurements_df()
 
-            >>> batch = SRDocument.from_folders(
-            ...     ["sr_data/"],
-            ...     output_dir="sr_exports/",
-            ...     export_csv=True,
-            ...     export_json=True
-            ... )
-            >>> batch.export_log("sr_exports/processing_log.csv")
+            # Process with exports
+            batch = SRDocument.from_folders(
+                ["sr_data/"],
+                output_dir="sr_exports/",
+                export_csv=True,
+                export_json=True
+            )
+            batch.export_log("sr_exports/processing_log.csv")
+            ```
         """
         import os
         from concurrent.futures import ProcessPoolExecutor
@@ -504,11 +510,15 @@ class SRBatch:
         processing_log: Log entries for each processed file (success/error).
         output_dir: Directory where individual exports were written.
 
-    Examples:
-        >>> batch = SRDocument.from_folders(["sr_data/"], output_dir="exports/")
-        >>> print(f"Processed {len(batch.documents)} SR files")
-        >>> df = batch.get_combined_measurements_df()
-        >>> batch.export_log("exports/processing_log.csv")
+    Example:
+        ```python
+        from pictologics.utilities.sr_parser import SRDocument
+
+        batch = SRDocument.from_folders(["sr_data/"], output_dir="exports/")
+        print(f"Processed {len(batch.documents)} SR files")
+        df = batch.get_combined_measurements_df()
+        batch.export_log("exports/processing_log.csv")
+        ```
     """
 
     documents: list[SRDocument] = field(default_factory=list)

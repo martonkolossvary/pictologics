@@ -12,7 +12,6 @@ from .base import BoundaryCondition, ensure_float32, get_scipy_mode
 
 # Threshold for enabling parallel processing (voxels)
 # Lower than other filters because Gabor has high per-slice cost
-# (16 orientations × FFT convolution) making parallelism beneficial even for small images
 _PARALLEL_THRESHOLD = 100_000  # ~46³
 
 
@@ -55,12 +54,26 @@ def gabor_filter(
         Response map (modulus of complex response)
 
     Example:
-        >>> # Gabor with rotation invariance over orthogonal planes
-        >>> response = gabor_filter(
-        ...     image, sigma_mm=10.0, lambda_mm=4.0, gamma=0.5,
-        ...     rotation_invariant=True, delta_theta=np.pi/4,
-        ...     average_over_planes=True
-        ... )
+        Apply Gabor filter with rotation invariance over orthogonal planes:
+
+        ```python
+        import numpy as np
+        from pictologics.filters import gabor_filter
+
+        # Create dummy 3D image
+        image = np.random.rand(50, 50, 50)
+
+        # Apply filter
+        response = gabor_filter(
+            image,
+            sigma_mm=10.0,
+            lambda_mm=4.0,
+            gamma=0.5,
+            rotation_invariant=True,
+            delta_theta=np.pi/4,
+            average_over_planes=True
+        )
+        ```
 
     Note:
         - Returns modulus |h| = |g ⊗ f| for feature extraction
@@ -119,7 +132,6 @@ def gabor_filter(
             else:
                 result += plane_response
 
-        # Mypy doesn't know result is not None here (loop runs 3 times guaranteed)
         if result is None:  # pragma: no cover
             raise RuntimeError("Result should not be None after plane loop")
 
@@ -162,7 +174,9 @@ def _apply_gabor_to_plane(
         for theta in thetas
     ]
 
-    def process_slice(slice_2d: npt.NDArray[np.floating[Any]]) -> npt.NDArray[np.floating[Any]]:
+    def process_slice(
+        slice_2d: npt.NDArray[np.floating[Any]],
+    ) -> npt.NDArray[np.floating[Any]]:
         """Process a single 2D slice with all orientations using in-place pooling."""
         # Optimization: Pre-pad and pre-cast the slice once, as all kernels have the same size.
         # This avoids redundant padding and casting inside the loop.
@@ -187,7 +201,9 @@ def _apply_gabor_to_plane(
         padded_complex = padded.astype(np.complex64)
 
         # Helper to convolve pre-padded image
-        def convolve_prepadded(k: npt.NDArray[np.floating[Any]]) -> npt.NDArray[np.floating[Any]]:
+        def convolve_prepadded(
+            k: npt.NDArray[np.floating[Any]],
+        ) -> npt.NDArray[np.floating[Any]]:
             # fftconvolve mode="same" on padded image
             response = fftconvolve(padded_complex, k, mode="same")
             # Crop back to original size

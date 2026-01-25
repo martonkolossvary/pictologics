@@ -70,6 +70,7 @@ nav:
   - User Guide:
     - Installation: user_guide/installation.md
     - Data Loading: user_guide/data_loading.md
+    - Image Filtering: user_guide/image_filtering.md
     - Feature Calculations: user_guide/feature_calculations.md
     - Pipeline Usage: user_guide/pipeline.md
     - Utilities: user_guide/utilities.md

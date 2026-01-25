@@ -31,6 +31,10 @@ response = laplacian_of_gaussian(image.array, sigma_mm=1.5, spacing_mm=image.spa
 
 ::: pictologics.filters.BoundaryCondition
 
+::: pictologics.filters.FilterResult
+
+::: pictologics.filters.LAWS_KERNELS
+
 ## Filter Functions
 
 ::: pictologics.filters.mean_filter

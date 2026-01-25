@@ -79,7 +79,9 @@ def _mean_abs_dev(values: npt.NDArray[np.floating[Any]], center: float) -> float
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
-def _robust_mean_abs_dev(values: npt.NDArray[np.floating[Any]], lower: float, upper: float) -> float:
+def _robust_mean_abs_dev(
+    values: npt.NDArray[np.floating[Any]], lower: float, upper: float
+) -> float:
     """Compute robust MAD using only values in [lower, upper] range (two-pass, no allocation)."""
     n = values.size
     if n == 0:
@@ -266,7 +268,9 @@ def _calculate_local_peaks_numba(
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _max_mean_at_max_intensity(
-    roi_data: npt.NDArray[np.floating[Any]], roi_means: npt.NDArray[np.floating[Any]], max_val: float
+    roi_data: npt.NDArray[np.floating[Any]],
+    roi_means: npt.NDArray[np.floating[Any]],
+    max_val: float,
 ) -> float:
     """Find maximum local mean among voxels with maximum intensity (for local peak)."""
     best = -1.0e308
@@ -302,7 +306,9 @@ def _sphere_offsets_for_radius(
     return np.ascontiguousarray(np.array(offsets, dtype=np.int32))
 
 
-def calculate_intensity_features(values: npt.NDArray[np.floating[Any]]) -> dict[str, float]:
+def calculate_intensity_features(
+    values: npt.NDArray[np.floating[Any]],
+) -> dict[str, float]:
     """
     Calculate intensity-based features (First Order Statistics) as defined in IBSI 4.1.
 
@@ -318,9 +324,19 @@ def calculate_intensity_features(values: npt.NDArray[np.floating[Any]]) -> dict[
         Empty dict if input is empty.
 
     Example:
-        >>> roi_values = apply_mask(image, mask)
-        >>> features = calculate_intensity_features(roi_values)
-        >>> print(features["mean_intensity_Q4LE"])
+        Calculate features from an ROI:
+
+        ```python
+        from pictologics.features.intensity import calculate_intensity_features
+        from pictologics.preprocessing import apply_mask
+
+        # Get values within ROI
+        roi_values = apply_mask(image, mask)
+
+        # Calculate features
+        features = calculate_intensity_features(roi_values)
+        print(features["mean_intensity_Q4LE"])
+        ```
     """
     if len(values) == 0:
         return {}

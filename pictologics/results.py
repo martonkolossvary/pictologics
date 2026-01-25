@@ -43,6 +43,21 @@ def format_results(
 
     Returns:
         Formatted data in the specified output_type.
+
+    Example:
+        Format results as a single pandas DataFrame row (wide format):
+
+        ```python
+        from pictologics.results import format_results
+
+        # Assume 'results' is output from pipeline.run()
+        df = format_results(
+            results,
+            fmt="wide",
+            meta={"custom_id": 123},
+            output_type="pandas"
+        )
+        ```
     """
     if meta is None:
         meta = {}
@@ -148,6 +163,15 @@ def save_results(
               - JSON string or List[JSON strings]
         path: Output file path.
         file_format: "csv" or "json". If None, inferred from file extension.
+
+    Example:
+        Save formatted results to JSON:
+
+        ```python
+        from pictologics.results import save_results
+
+        save_results(formatted_data, "output/features.json")
+        ```
     """
     path = Path(path)
     if file_format is None:

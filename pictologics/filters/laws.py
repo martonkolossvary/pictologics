@@ -10,8 +10,8 @@ from scipy.ndimage import uniform_filter
 
 from .base import BoundaryCondition, ensure_float32, get_scipy_mode
 
-# Normalized Laws kernels (IBSI 2 Table 6.x)
-LAWS_KERNELS: Dict[str, npt.NDArray[np.floating[Any]]] = {
+# Normalized Laws kernels (IBSI 2 Table 6)
+_LAWS_KERNELS: Dict[str, npt.NDArray[np.floating[Any]]] = {
     # Level (low-pass, averaging)
     "L3": np.array([1, 2, 1]) / math.sqrt(6),  # B5BZ
     "L5": np.array([1, 4, 6, 4, 1]) / math.sqrt(70),  # 6HRH
@@ -26,6 +26,9 @@ LAWS_KERNELS: Dict[str, npt.NDArray[np.floating[Any]]] = {
     # Ripple (zero-mean)
     "R5": np.array([1, -4, 6, -4, 1]) / math.sqrt(70),  # 3A1W
 }
+
+LAWS_KERNELS = _LAWS_KERNELS
+"""Dictionary of normalized Laws kernels (IBSI 2 Table 6)."""
 
 
 # Threshold for enabling parallel processing (voxels)
@@ -140,12 +143,25 @@ def laws_filter(
         Response map (or energy image if compute_energy=True)
 
     Example:
-        >>> # E5L5S5 with rotation invariance and energy
-        >>> response = laws_filter(
-        ...     image, "E5L5S5",
-        ...     rotation_invariant=True, pooling="max",
-        ...     compute_energy=True, energy_distance=7
-        ... )
+        Apply Laws E5L5S5 kernel with rotation invariance and texture energy:
+
+        ```python
+        import numpy as np
+        from pictologics.filters import laws_filter
+
+        # Create dummy 3D image
+        image = np.random.rand(50, 50, 50)
+
+        # Apply filter
+        response = laws_filter(
+            image,
+            "E5L5S5",
+            rotation_invariant=True,
+            pooling="max",
+            compute_energy=True,
+            energy_distance=7
+        )
+        ```
 
     Note:
         - Kernels are normalized (deviate from Laws' original unnormalized)
@@ -228,13 +244,9 @@ def laws_filter(
                             else response.copy()
                         )
                     else:
-                        # At this point, result is guaranteed to be not None because
-                        # the loop iterates at least once and the first iteration sets it.
                         if result is None:  # pragma: no cover
                             raise RuntimeError("Result should not be None")
 
-                        # Fix mypy narrowing issue
-                        # Assert was enough
                         res = result
 
                         if pooling == "max":
@@ -266,7 +278,6 @@ def laws_filter(
                     if result is None:  # pragma: no cover
                         raise RuntimeError("Result should not be None")
 
-                    # Fix mypy narrowing
                     res = result
 
                     if pooling == "max":

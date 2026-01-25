@@ -20,3 +20,4 @@ This product uses the following third-party libraries:
 - tqdm (MIT/MPL 2.0) - https://tqdm.github.io/
 - Matplotlib (PSF-based) - https://matplotlib.org/
 - Pillow (MIT-CMU) - https://github.com/python-pillow/Pillow
+- PyWavelets (MIT) - https://pywavelets.readthedocs.io/

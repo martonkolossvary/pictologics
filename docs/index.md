@@ -13,30 +13,30 @@
 
 ![Pictologics Icon](assets/logo.png){ align=right width=200 }
 
-**Pictologics** is a pure python, IBSI-compliant library for radiomic feature extraction from medical images.
+**Pictologics** is a pure python, IBSI 1 and 2 compliant library for radiomic feature extraction from medical images.
 
 See also the [NOTICE](NOTICE.md) file for attribution and third-party library information.
 
 ## Why Pictologics?
 
 *   **🚀 High Performance**: Uses `numba` for Just In Time (JIT) compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](benchmarks.md) page for details).
-*   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantom:
+*   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantoms, and clinical datasets:
     *   **IBSI 1**: Feature extraction ([compliance report](ibsi1_compliance.md))
     *   **IBSI 2**: Image filters ([filter compliance](ibsi2_compliance.md))
 *   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, DICOM, DICOM-SEG, DICOM-SR).
-*   **✨ User-Friendly**: Pure Python implementation with a simple installation process and an intuitive API, ensuring a smooth experience from setup to analysis.
+*   **✨ User-Friendly**: Pure Python implementation with a simple installation process and user-friendly pipeline module supporting easy feature extraction and analysis, ensuring a smooth experience from setup to analysis.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
 
 
 ## Key Features
 
 *   **Loaders**: Support for NIfTI and DICOM image, segmentation (DICOM-SEG), and report (DICOM-SR) formats.
-*   **Preprocessing**: Resampling, resegmentation, outlier filtering, and discretisation.
+*   **Preprocessing**: Resampling, resegmentation, outlier filtering, discretisation and others.
 *   **Features**:
     *   **Morphology**: Volume, Surface Area, Compactness, etc.
     *   **Intensity**: Mean, Median, Skewness, Kurtosis, etc.
     *   **Texture**: GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM.
-*   **Filters**: IBSI 2-compliant convolutional filters including Mean, LoG, Laws, Gabor, Wavelets, and Simoncelli.
+*   **Filters**: IBSI 2-compliant convolutional filters including Mean, LoG, Laws, Gabor, Wavelets, Simoncelli and others.
 *   **Utilities**: Built-in DICOM database parsing, organization and viewing tools.
 
 ## Getting Started

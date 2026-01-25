@@ -33,7 +33,18 @@ def mean_filter(
         ValueError: If support is not an odd positive integer
 
     Example:
-        >>> response = mean_filter(image, support=15, boundary="zero")
+        Apply Mean filter with 15-voxel support:
+
+        ```python
+        import numpy as np
+        from pictologics.filters import mean_filter
+
+        # Create dummy 3D image
+        image = np.random.rand(50, 50, 50)
+
+        # Apply filter
+        response = mean_filter(image, support=15, boundary="zero")
+        ```
 
     Note:
         Support M is defined in voxel units as per IBSI specification.

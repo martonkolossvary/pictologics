@@ -19,6 +19,24 @@ Key Features:
 Optimization:
 -------------
 Uses `numba` for optimizing the Khachiyan algorithm for MVEE calculation.
+
+Example:
+    Calculate morphology features from a mask:
+
+    ```python
+    import numpy as np
+    from pictologics.loader import Image
+    from pictologics.features.morphology import calculate_morphology_features
+
+    # Create dummy mask
+    mask_arr = np.zeros((50, 50, 50), dtype=np.uint8)
+    mask_arr[10:40, 10:40, 10:40] = 1
+    mask = Image(mask_arr, spacing=(1.0, 1.0, 1.0), origin=(0,0,0))
+
+    # Calculate features
+    features = calculate_morphology_features(mask)
+    print(features["volume_voxel_counting_YEKZ"])
+    ```
 """
 
 from __future__ import annotations
@@ -724,7 +742,6 @@ def _get_intensity_morphology_features(
         features["integrated_intensity_99N0"] = mesh_volume * mean_intensity
 
         # Center of Mass Shift
-        # CoM_geom (from morph mask)
         n_m, s0_m, s1_m, s2_m, _, _, _, _, _, _ = _accumulate_moments_from_mask_numba(
             mask.array
         )

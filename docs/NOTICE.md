@@ -7,18 +7,19 @@ This product includes software developed by Márton Kolossváry.
 
 This product contains code derived from the Image Biomarker Standardisation Initiative (IBSI)
 reference implementations and guidelines.
-https://theibsi.github.io/
+<https://theibsi.github.io/>
 
 This product uses the following third-party libraries:
 
-- NumPy (BSD 3-Clause) - https://numpy.org/
-- SciPy (BSD 3-Clause) - https://scipy.org/
-- Numba (BSD 2-Clause) - https://numba.pydata.org/
-- NiBabel (MIT) - https://nipy.org/nibabel/
-- PyDICOM (MIT) - https://pydicom.github.io/
-- highdicom (MIT) - https://github.com/ImagingDataCommons/highdicom
-- pandas (BSD 3-Clause) - https://pandas.pydata.org/
-- PyMCubes (BSD 3-Clause) - https://github.com/pmneila/PyMCubes
-- tqdm (MIT/MPL 2.0) - https://tqdm.github.io/
-- Matplotlib (PSF-based) - https://matplotlib.org/
-- Pillow (MIT-CMU) - https://github.com/python-pillow/Pillow
+- NumPy (BSD 3-Clause) - <https://numpy.org/>
+- SciPy (BSD 3-Clause) - <https://scipy.org/>
+- Numba (BSD 2-Clause) - <https://numba.pydata.org/>
+- NiBabel (MIT) - <https://nipy.org/nibabel/>
+- PyDICOM (MIT) - <https://pydicom.github.io/>
+- highdicom (MIT) - <https://github.com/ImagingDataCommons/highdicom>
+- pandas (BSD 3-Clause) - <https://pandas.pydata.org/>
+- PyMCubes (BSD 3-Clause) - <https://github.com/pmneila/PyMCubes>
+- tqdm (MIT/MPL 2.0) - <https://tqdm.github.io/>
+- Matplotlib (PSF-based) - <https://matplotlib.org/>
+- Pillow (MIT-CMU) - <https://github.com/python-pillow/Pillow>
+- PyWavelets (MIT) - <https://pywavelets.readthedocs.io/>

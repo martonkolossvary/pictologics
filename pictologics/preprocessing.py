@@ -57,6 +57,20 @@ def resample_image(
 
     Returns:
         Resampled Image object.
+
+    Example:
+        Resample image to isotropic 1mm spacing using linear interpolation:
+
+        ```python
+        from pictologics.preprocessing import resample_image
+
+        # Resample to 1x1x1 mm
+        resampled_img = resample_image(
+            image,
+            new_spacing=(1.0, 1.0, 1.0),
+            interpolation="linear"
+        )
+        ```
     """
     if any(s <= 0 for s in new_spacing):
         raise ValueError(f"New spacing must be positive, got {new_spacing}")
@@ -166,6 +180,20 @@ def discretise_image(
     Returns:
         Discretised Image object or numpy array (depending on input).
         Values are 1-based indices.
+
+    Example:
+        Discretise image into 32 fixed bins (FBN):
+
+        ```python
+        from pictologics.preprocessing import discretise_image
+
+        # FBN with 32 bins
+        disc_image = discretise_image(
+            image,
+            method="FBN",
+            n_bins=32
+        )
+        ```
     """
     # Handle input type
     if isinstance(image, Image):
@@ -382,6 +410,21 @@ def resegment_mask(
 
     Returns:
         Updated Image object (mask) with re-segmentation applied.
+
+    Example:
+        Resegment mask to keep only values between -1000 and 400 (e.g. HU range):
+
+        ```python
+        from pictologics.preprocessing import resegment_mask
+
+        # Keep voxels in range [-1000, 400]
+        new_mask = resegment_mask(
+            image,
+            mask,
+            range_min=-1000,
+            range_max=400
+        )
+        ```
     """
     if image.array.shape != mask.array.shape:
         raise ValueError("Image and mask must have the same shape for re-segmentation.")
@@ -421,6 +464,20 @@ def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
 
     Returns:
         New Image object (mask) with outliers removed.
+
+    Example:
+        Remove outliers beyond 3 standard deviations from the mean:
+
+        ```python
+        from pictologics.preprocessing import filter_outliers
+
+        # Remove outliers > 3 sigma
+        clean_mask = filter_outliers(
+            image,
+            mask,
+            sigma=3.0
+        )
+        ```
     """
     # Extract values within the mask
     values = apply_mask(image, mask)

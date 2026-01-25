@@ -347,7 +347,7 @@ def load_image(
         ValueError: If the path does not exist, the file format is not supported,
             or the file is corrupt/unreadable.
 
-    Examples:
+    Example:
         **Loading a NIfTI file:**
         ```python
         from pictologics.loader import load_image
@@ -543,10 +543,10 @@ def load_and_merge_images(
             transformation for DICOM files to convert stored pixel values to real-world
             values (e.g., Hounsfield Units for CT). Set to False if you need raw stored values.
 
-    **Note on Filtering:**
-    The `binarize` parameter is intended for **mask filtering** (e.g., selecting specific ROI labels).
-    To filter image intensity values (e.g., HU ranges), use the preprocessing steps in the
-    radiomics pipeline configuration instead.
+    Note:
+        The `binarize` parameter is intended for **mask filtering** (e.g., selecting specific ROI labels).
+        To filter image intensity values (e.g., HU ranges), use the preprocessing steps in the
+        radiomics pipeline configuration instead.
 
     Returns:
         Image: A new `Image` object containing the merged data.
@@ -556,7 +556,7 @@ def load_and_merge_images(
             if `reposition_to_reference=True` but `reference_image` is not provided,
             or if the images (or reference) have mismatched geometries.
 
-    Examples:
+    Example:
         **Merging cropped segmentation masks:**
         ```python
         main_img = load_image("ct_scan/", recursive=True)

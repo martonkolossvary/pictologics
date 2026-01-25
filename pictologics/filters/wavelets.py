@@ -50,10 +50,23 @@ def wavelet_transform(
         Response map for the specified decomposition
 
     Example:
-        >>> # Daubechies 2, first level, LHL coefficients
-        >>> response = wavelet_transform(
-        ...     image, wavelet="db2", level=1, decomposition="LHL"
-        ... )
+        Apply Daubechies 2 wavelet transform at level 1, returning LHL coefficients:
+
+        ```python
+        import numpy as np
+        from pictologics.filters import wavelet_transform
+
+        # Create dummy 3D image
+        image = np.random.rand(50, 50, 50)
+
+        # Apply transform
+        response = wavelet_transform(
+            image,
+            wavelet="db2",
+            level=1,
+            decomposition="LHL"
+        )
+        ```
     """
     from concurrent.futures import ThreadPoolExecutor
 
@@ -159,9 +172,6 @@ def wavelet_transform(
                     if result is None:  # pragma: no cover
                         raise RuntimeError("Result should not be None")
 
-                    # Fix mypy narrowing
-                    # We can't import cast here easily repeatedly if we want to be clean,
-                    # but we can rely on the assert with a variable assignment for mypy
                     res_seq = result
 
                     if pooling == "max":
@@ -222,8 +232,6 @@ def _apply_undecimated_wavelet_3d(
                 result = convolve1d(result, filters[char], axis=axis, mode=mode)
             return result
 
-    # This should never be reached (loop always returns on final level)
-    # but is needed for type checker
     raise RuntimeError(
         "Unexpected end of wavelet decomposition loop"
     )  # pragma: no cover
@@ -278,8 +286,18 @@ def simoncelli_wavelet(
         Band-pass response map (B map) for the specified level
 
     Example:
-        >>> # First level Simoncelli wavelet (highest frequency)
-        >>> response = simoncelli_wavelet(image, level=1)
+        Apply first-level Simoncelli wavelet (highest frequency band):
+
+        ```python
+        import numpy as np
+        from pictologics.filters import simoncelli_wavelet
+
+        # Create dummy 3D image
+        image = np.random.rand(50, 50, 50)
+
+        # Apply wavelet
+        response = simoncelli_wavelet(image, level=1)
+        ```
     """
     # Convert to float32
     image = ensure_float32(image)
@@ -330,51 +348,6 @@ def simoncelli_wavelet(
     mask = (dist >= max_freq / 4.0) & (dist <= max_freq)
     g_sim = np.where(mask, g_sim, 0.0)
 
-    # Note: For rfftn we don't need standard ifftshift because
-    # the concept of "centered" frequency domain is different for half-spectrum.
-    # However, Simoncelli definition is inherently centered.
-    #
-    # The previous implementation built a centered spatial grid, calculated distance,
-    # applied mask, and then ifftshifted to corner-based layout.
-    #
-    # With rfftn, the layout is:
-    # Axis 0..d-2: Standard corner-based (0..N/2, -N/2..-1)
-    # Axis d-1:    0..N/2 (non-negative only)
-    #
-    # The grid we built above is purely spatial/geometric [-1, 1].
-    # But `simoncelli_wavelet` acts in frequency domain. The `grids` variables
-    # actually represent normalized frequencies if we interpret `image` essentially
-    # as being mapped to this domain.
-    #
-    # Issue: The `g_sim` we built is centered at (0,0,0) in our [-1,1] logic.
-    # For full FFT, `ifftshift` moves (0,0,0) to corner.
-    # For rfftn, we need to be careful.
-    #
-    # Actually, the original code used `ifftshift` on a grid defined from `arange(s)`.
-    # Let's look closely at original `grids`:
-    # `dim_grid = np.arange(s)` -> `(dim_grid - center)/center` -> [-1, 1]
-    # This creates a spatial coordinate system centered at N/2.
-    #
-    # IBSI says Simoncelli is defined in frequency domain.
-    # "frequency vector ν ... where |ν| is the distance from the origin (DC component)"
-    #
-    # The implementation constructs a grid that looks like spatial coordinates,
-    # then shift it. This implies the grid IS the frequency grid.
-    #
-    # To use `rfftn`, we need the grid to match `rfftfreq` layout.
-    # `fftfreq(N)` returns [0, 1, ..., N/2-1, -N/2, ..., -1] / N.
-    # This corresponds to interval [0, 0.5] U [-0.5, 0).
-    #
-    # Our `grids` logic produces [-1, 1]. IBSI uses "normalized frequency" where Nyquist=1.0?
-    # Original code: `max_freq = 1.0 / (2**j)`
-    #
-    # Let's align with `rfftfreq`:
-    # Revert to "geometric" frequency grid [-1, 1] to match IBSI reference behavior.
-    # The reference implementation used (arange(N) - center) / center, which
-    # creates a grid that is slightly asymmetric/offset regarding DC for even N.
-    # This asymmetry requires using full FFT (fftn) instead of Real FFT (rfftn),
-    # as irfftn enforces conjugate symmetry which this grid violates.
-
     grids = []
     for i, s in enumerate(shape):
         dim_grid = np.arange(s)
@@ -401,10 +374,6 @@ def simoncelli_wavelet(
     mask = (dist >= max_freq / 4.0) & (dist <= max_freq)
     g_sim = np.where(mask, g_sim, 0.0)
 
-    # No ifftshift needed because fftfreq/rfftfreq are already in corner layout!
-    # (The previous implementation used spatial arange(N) which is monotonically increasing -1..1,
-    # hence needed ifftshift to wrap 0 to corner. fftfreq generates wrapped layout directly).
-
     # Apply filter in frequency domain using full FFT
     F = np.fft.fftn(image)
 
@@ -412,7 +381,4 @@ def simoncelli_wavelet(
     axes = tuple(range(ndim))
     response = np.fft.ifftn(F * g_sim, s=shape, axes=axes)
 
-    # Return magnitude (though theoretically real, minor complex errors exist)
-    # IBSI reference suggests modulus? No, "The filter response is... convolution".
-    # Wavelet response is usually real.
     return np.real(response).astype(np.float32)

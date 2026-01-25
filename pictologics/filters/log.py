@@ -33,10 +33,23 @@ def laplacian_of_gaussian(
         Response map with same dimensions as input
 
     Example:
-        >>> # Phantoms have 2mm spacing
-        >>> response = laplacian_of_gaussian(
-        ...     image, sigma_mm=5.0, spacing_mm=2.0, truncate=4.0
-        ... )
+        Apply LoG filter with 5.0mm sigma on an image with 2.0mm spacing:
+
+        ```python
+        import numpy as np
+        from pictologics.filters import laplacian_of_gaussian
+
+        # Create dummy 3D image
+        image = np.random.rand(50, 50, 50)
+
+        # Apply filter
+        response = laplacian_of_gaussian(
+            image,
+            sigma_mm=5.0,
+            spacing_mm=(2.0, 2.0, 2.0),
+            truncate=4.0
+        )
+        ```
 
     Note:
         - σ is converted from mm to voxels: σ_voxels = σ_mm / spacing_mm

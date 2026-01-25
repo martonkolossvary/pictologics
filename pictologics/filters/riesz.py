@@ -30,8 +30,18 @@ def riesz_transform(
         Riesz-transformed image (real part)
 
     Example:
-        >>> # First-order Riesz along k1 axis
-        >>> response = riesz_transform(image, order=(1, 0, 0))
+        Compute first-order Riesz transform along the k1 axis:
+
+        ```python
+        import numpy as np
+        from pictologics.filters import riesz_transform
+
+        # Create dummy 3D image
+        image = np.random.rand(50, 50, 50)
+
+        # Apply transform (gradient-like along axis 0)
+        response = riesz_transform(image, order=(1, 0, 0))
+        ```
 
     Note:
         - First-order Riesz components form the image gradient
@@ -48,9 +58,6 @@ def riesz_transform(
 
     shape = image.shape
     ndim = len(shape)
-
-    # Use rfftn (Real FFT) for efficiency: output shape is (N1, N2, ..., N d//2 + 1)
-    # This halves the memory usage and computation time for real inputs.
 
     # Generate frequency coordinates appropriately for rfftn
     # Last dimension uses rfftfreq, others use fftfreq
@@ -126,10 +133,23 @@ def riesz_log(
         Riesz-transformed LoG response
 
     Example:
-        >>> # First-order Riesz of LoG at 5mm scale
-        >>> response = riesz_log(
-        ...     image, sigma_mm=5.0, spacing_mm=2.0, order=(1, 0, 0)
-        ... )
+        Compute first-order Riesz transform of LoG-filtered image at 5mm scale:
+
+        ```python
+        import numpy as np
+        from pictologics.filters import riesz_log
+
+        # Create dummy 3D image
+        image = np.random.rand(50, 50, 50)
+
+        # Apply filter
+        response = riesz_log(
+            image,
+            sigma_mm=5.0,
+            spacing_mm=(2.0, 2.0, 2.0),
+            order=(1, 0, 0)
+        )
+        ```
     """
     from .log import laplacian_of_gaussian
 
@@ -162,10 +182,22 @@ def riesz_simoncelli(
         Riesz-transformed Simoncelli response
 
     Example:
-        >>> # Second-order Riesz (Hessian-like) of Simoncelli level 2
-        >>> response = riesz_simoncelli(
-        ...     image, level=2, order=(2, 0, 0)
-        ... )
+        Compute second-order Riesz transform (Hessian-like) of Simoncelli level 2:
+
+        ```python
+        import numpy as np
+        from pictologics.filters import riesz_simoncelli
+
+        # Create dummy 3D image
+        image = np.random.rand(50, 50, 50)
+
+        # Apply filter
+        response = riesz_simoncelli(
+            image,
+            level=2,
+            order=(2, 0, 0)
+        )
+        ```
     """
     from .wavelets import simoncelli_wavelet
 
@@ -188,8 +220,14 @@ def get_riesz_orders(max_order: int, ndim: int = 3) -> Tuple[Tuple[int, ...], ..
         Tuple of all valid order tuples
 
     Example:
-        >>> get_riesz_orders(2, ndim=3)
-        ((2, 0, 0), (1, 1, 0), (1, 0, 1), (0, 2, 0), (0, 1, 1), (0, 0, 2))
+        Generate all second-order Riesz combinations for 3D:
+
+        ```python
+        from pictologics.filters import get_riesz_orders
+
+        orders = get_riesz_orders(max_order=2, ndim=3)
+        # Returns: ((2, 0, 0), (1, 1, 0), (1, 0, 1), (0, 2, 0), ...)
+        ```
     """
     from itertools import combinations_with_replacement
 

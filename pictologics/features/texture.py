@@ -54,11 +54,14 @@ Then, specific feature calculation functions (e.g., `calculate_glcm_features`) c
 using these matrices.
 
 Example:
-    Example:
+        Calculate texture features:
+
         ```python
         import numpy as np
-from numpy import typing as npt
-        from pictologics.features.texture import calculate_all_texture_matrices, calculate_glcm_features
+        from pictologics.features.texture import (
+            calculate_all_texture_matrices,
+            calculate_glcm_features
+        )
 
         # Create dummy data
         data = np.random.randint(1, 33, (50, 50, 50))
@@ -68,7 +71,12 @@ from numpy import typing as npt
         matrices = calculate_all_texture_matrices(data, mask, n_bins=32)
 
         # Extract features
-        glcm_feats = calculate_glcm_features(data, mask, n_bins=32, glcm_matrix=matrices['glcm'])
+        glcm_feats = calculate_glcm_features(
+            data,
+            mask,
+            n_bins=32,
+            glcm_matrix=matrices['glcm']
+        )
         print(glcm_feats['contrast_ACUI'])
         ```
 """
@@ -286,7 +294,6 @@ def _calculate_local_features_numba(
         margin = 0  # Fallback to full checks if image is too small relative to margin
 
     # Pre-compute which z-slices have any ROI voxels (for slice-level skipping)
-    # This optimizes cases with disjoint ROIs or sparse masks
     z_has_voxels = np.zeros(depth, dtype=np.uint8)
     for z in range(depth):
         for y in range(height):
@@ -638,47 +645,52 @@ def calculate_all_texture_matrices(
     ngldm_alpha: int = 0,
 ) -> dict[str, Any]:
     """
-        Calculate all texture matrices (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM) in an optimized single pass.
+    Calculate all texture matrices (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM) in an optimized single pass.
 
-        This function serves as the computational backbone for texture analysis. It computes the raw
-        matrices required to extract specific texture features. By aggregating these calculations,
-        it minimizes the number of passes over the image data, significantly improving performance.
+    This function serves as the computational backbone for texture analysis. It computes the raw
+    matrices required to extract specific texture features. By aggregating these calculations,
+    it minimizes the number of passes over the image data, significantly improving performance.
 
-        Args:
-            data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
-                Values should be integers in the range [1, n_bins].
-            mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the Region of Interest (ROI).
-                Must have the same shape as `data`. Non-zero values indicate the ROI.
-            n_bins (int): The number of grey levels used for discretization (e.g., 16, 32, 64).
-                This determines the size of the resulting matrices.
-            distance_mask (Optional[npt.NDArray[np.floating[Any]]]): Optional mask used to calculate the distance map for GLDZM.
-                If None, `mask` is used. This allows calculating distances based on the morphological mask
-                while analyzing intensities from the intensity mask (e.g., after outlier filtering).
-            ngldm_alpha (int): The coarseness parameter α for NGLDM calculation. Two grey levels are
-                considered dependent if their absolute difference is ≤ α. Default is 0 (exact match),
-                which is the IBSI standard. Use α=1 for tolerance of ±1 grey level difference.
+    Args:
+        data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
+            Values should be integers in the range [1, n_bins].
+        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the Region of Interest (ROI).
+            Must have the same shape as `data`. Non-zero values indicate the ROI.
+        n_bins (int): The number of grey levels used for discretization (e.g., 16, 32, 64).
+            This determines the size of the resulting matrices.
+        distance_mask (Optional[npt.NDArray[np.floating[Any]]]): Optional mask used to calculate the distance map for GLDZM.
+            If None, `mask` is used. This allows calculating distances based on the morphological mask
+            while analyzing intensities from the intensity mask (e.g., after outlier filtering).
+        ngldm_alpha (int): The coarseness parameter α for NGLDM calculation. Two grey levels are
+            considered dependent if their absolute difference is ≤ α. Default is 0 (exact match),
+            which is the IBSI standard. Use α=1 for tolerance of ±1 grey level difference.
 
-        Returns:
-            dict[str, Any]: A dictionary containing the calculated texture matrices:
-                - 'glcm' (npt.NDArray[np.floating[Any]]): Grey Level Co-occurrence Matrix. Shape: (n_dirs, n_bins, n_bins).
-                - 'glrlm' (npt.NDArray[np.floating[Any]]): Grey Level Run Length Matrix. Shape: (n_dirs, n_bins, max_run_length).
-                - 'ngtdm_s' (npt.NDArray[np.floating[Any]]): NGTDM Sum of absolute differences. Shape: (n_bins,).
-                - 'ngtdm_n' (npt.NDArray[np.floating[Any]]): NGTDM Number of valid voxels. Shape: (n_bins,).
-                - 'ngldm' (npt.NDArray[np.floating[Any]]): Neighbouring Grey Level Dependence Matrix. Shape: (n_bins, n_dependence).
-                - 'glszm' (npt.NDArray[np.floating[Any]]): Grey Level Size Zone Matrix. Shape: (n_bins, max_zone_size).
-                - 'gldzm' (npt.NDArray[np.floating[Any]]): Grey Level Distance Zone Matrix. Shape: (n_bins, max_distance).
+    Returns:
+        dict[str, Any]: A dictionary containing the calculated texture matrices:
+            - 'glcm' (npt.NDArray[np.floating[Any]]): Grey Level Co-occurrence Matrix. Shape: (n_dirs, n_bins, n_bins).
+            - 'glrlm' (npt.NDArray[np.floating[Any]]): Grey Level Run Length Matrix. Shape: (n_dirs, n_bins, max_run_length).
+            - 'ngtdm_s' (npt.NDArray[np.floating[Any]]): NGTDM Sum of absolute differences. Shape: (n_bins,).
+            - 'ngtdm_n' (npt.NDArray[np.floating[Any]]): NGTDM Number of valid voxels. Shape: (n_bins,).
+            - 'ngldm' (npt.NDArray[np.floating[Any]]): Neighbouring Grey Level Dependence Matrix. Shape: (n_bins, n_dependence).
+            - 'glszm' (npt.NDArray[np.floating[Any]]): Grey Level Size Zone Matrix. Shape: (n_bins, max_zone_size).
+            - 'gldzm' (npt.NDArray[np.floating[Any]]): Grey Level Distance Zone Matrix. Shape: (n_bins, max_distance).
 
-        Example:
-        Example:
-            ```python
-            import numpy as np
-    from numpy import typing as npt
-            data = np.random.randint(1, 33, (50, 50, 50))
-            mask = np.ones((50, 50, 50))
-            matrices = calculate_all_texture_matrices(data, mask, n_bins=32)
-            print(matrices['glcm'].shape)
-            # (13, 32, 32)
-            ```
+    Example:
+        Calculate all texture matrices:
+
+        ```python
+        import numpy as np
+        from pictologics.features.texture import calculate_all_texture_matrices
+
+        # Create dummy data
+        data = np.random.randint(1, 33, (50, 50, 50))
+        mask = np.ones((50, 50, 50))
+
+        # Calculate matrices
+        matrices = calculate_all_texture_matrices(data, mask, n_bins=32)
+        print(matrices['glcm'].shape)
+        # (13, 32, 32)
+        ```
     """
     # Fast exit for empty ROI
     if not bool(np.any(mask != 0)):
@@ -708,7 +720,6 @@ def calculate_all_texture_matrices(
     else:
         data_int = (data_c - 1).astype(np.int32)
 
-    # Determine n_threads for JIT call
     try:
         n_threads = int(numba.config.NUMBA_NUM_THREADS)
     except (ValueError, TypeError):

@@ -17,8 +17,8 @@ from pictologics import Image
 # - modality: str (e.g., "CT", "MR", "Unknown")
 ```
 
-> [!NOTE]
-> Pictologics uses **(X, Y, Z)** axis ordering to match ITK/SimpleITK conventions. This differs from raw DICOM (which uses Rows, Columns = Y, X) and matplotlib (which expects height, width = Y, X). All loaders handle these transformations automatically.
+!!! note
+    Pictologics uses **(X, Y, Z)** axis ordering to match ITK/SimpleITK conventions. This differs from raw DICOM (which uses Rows, Columns = Y, X) and matplotlib (which expects height, width = Y, X). All loaders handle these transformations automatically.
 
 ---
 
@@ -109,19 +109,19 @@ pipeline.add_config("ct_analysis", [
 
 This is the **IBSI-recommended approach** — filter invalid intensities before feature extraction rather than at load time.
 
-> [!TIP]
-> Check your data's minimum value to identify potential sentinels:
-> ```python
-> image = load_image("scan.dcm")
-> print(f"Min: {image.array.min()}, Max: {image.array.max()}")
-> # If min is -1024 or -2048, those are likely sentinels
-> ```
+!!! tip
+    Check your data's minimum value to identify potential sentinels:
+    ```python
+    image = load_image("scan.dcm")
+    print(f"Min: {image.array.min()}, Max: {image.array.max()}")
+    # If min is -1024 or -2048, those are likely sentinels
+    ```
 
 ---
 
 ## Multi-Phase DICOM Series
 
-Many clinical acquisitions contain multiple phases (e.g., cardiac CT with multiple timepoints, multi-echo MRI). Pictologics can detect and load specific phases from such datasets.
+Many clinical acquisitions contain multiple phases (e.g., cardiac CT with multiple timepoints). Pictologics can detect and load specific phases from datasets.
 
 ### Discovering Available Phases
 
@@ -135,16 +135,31 @@ phases = get_dicom_phases("path/to/cardiac_ct/")
 
 print(f"Found {len(phases)} phases:")
 for phase in phases:
-    print(f"  Phase {phase.index}: {phase.label} ({phase.num_slices} slices)")
+    print(f"--- Phase {phase.index} ---")
+    print(f"Label:       {phase.label}")
+    print(f"Split Tag:   {phase.split_tag}")
+    print(f"Split Value: {phase.split_value}")
+    print(f"Num Slices:  {phase.num_slices}")
+    # Show first file path as example
+    print(f"Example File: {phase.file_paths[0].name}")
 ```
 
 Example output:
-```
+```text
 Found 10 phases:
-  Phase 0: CardiacPhase=0% (64 slices)
-  Phase 1: CardiacPhase=10% (64 slices)
-  Phase 2: CardiacPhase=20% (64 slices)
-  ...
+--- Phase 0 ---
+Label:       Phase 0%
+Split Tag:   NominalPercentageOfCardiacPhase
+Split Value: 0
+Num Slices:  256
+Example File: IM-0001-0001.dcm
+--- Phase 1 ---
+Label:       Phase 10%
+Split Tag:   NominalPercentageOfCardiacPhase
+Split Value: 10
+Num Slices:  256
+Example File: IM-0001-0225.dcm
+...
 ```
 
 Each `DicomPhaseInfo` object contains:
@@ -392,8 +407,8 @@ combined = load_and_merge_images(
 | Mask outside reference bounds | Warning emitted, empty volume returned |
 | Partial overlap | Valid region is positioned, rest is clipped |
 
-> [!TIP]
-> **Label Order**: When using `relabel_masks=True`, labels are assigned based on the order of files in `image_paths`. Use `sorted()` for consistent ordering, or specify the exact order you want.
+!!! tip
+    **Label Order**: When using `relabel_masks=True`, labels are assigned based on the order of files in `image_paths`. Use `sorted()` for consistent ordering, or specify the exact order you want.
 
 ---
 
@@ -411,95 +426,91 @@ full_mask = create_full_mask(image)
 # Now use full_mask for whole-image analysis
 ```
 
-> [!TIP]
-> If you pass `mask=None` to `RadiomicsPipeline.run()`, it automatically creates a full mask internally.
+!!! tip
+    If you pass `mask=None` to `RadiomicsPipeline.run()`, it automatically creates a full mask internally.
 
 ---
 
 ## Complete Workflow Examples
 
-### Example 1: Standard NIfTI Workflow
+!!! example "Example 1: Standard NIfTI Workflow"
+    ```python
+    from pictologics import load_image, RadiomicsPipeline
 
-```python
-from pictologics import load_image, RadiomicsPipeline
+    # Load image and mask
+    image = load_image("patient_ct.nii.gz")
+    mask = load_image("tumor_segmentation.nii.gz")
 
-# Load image and mask
-image = load_image("patient_ct.nii.gz")
-mask = load_image("tumor_segmentation.nii.gz")
+    # Run radiomics pipeline
+    pipeline = RadiomicsPipeline()
+    results = pipeline.run(image, mask, config_names=["standard_fbn_32"])
+    ```
 
-# Run radiomics pipeline
-pipeline = RadiomicsPipeline()
-results = pipeline.run(image, mask, config_names=["standard_fbn_32"])
-```
+!!! example "Example 2: Multi-Phase DICOM Analysis"
+    ```python
+    from pictologics import load_image
+    from pictologics.utilities import get_dicom_phases
 
-### Example 2: Multi-Phase DICOM Analysis
+    # Discover available phases
+    phases = get_dicom_phases("cardiac_ct_folder/")
+    print(f"Found {len(phases)} cardiac phases")
 
-```python
-from pictologics import load_image
-from pictologics.utilities import get_dicom_phases
+    # Analyze each phase
+    for phase in phases:
+        image = load_image("cardiac_ct_folder/", dataset_index=phase.index)
+        print(f"Phase {phase.label}: shape = {image.array.shape}")
+        # ... run analysis on each phase
+    ```
 
-# Discover available phases
-phases = get_dicom_phases("cardiac_ct_folder/")
-print(f"Found {len(phases)} cardiac phases")
+!!! example "Example 3: DICOM SEG with Reference Alignment"
+    ```python
+    from pictologics import load_image, load_seg
+    from pictologics.loaders import get_segment_info
 
-# Analyze each phase
-for phase in phases:
-    image = load_image("cardiac_ct_folder/", dataset_index=phase.index)
-    print(f"Phase {phase.label}: shape = {image.array.shape}")
-    # ... run analysis on each phase
-```
+    # Load the CT series
+    ct = load_image("ct_series/")
 
-### Example 3: DICOM SEG with Reference Alignment
+    # Check available segments
+    segments = get_segment_info("segmentation.dcm")
+    print("Available segments:", [s['segment_label'] for s in segments])
 
-```python
-from pictologics import load_image, load_seg
-from pictologics.loaders import get_segment_info
+    # Load only the liver segment, aligned to CT
+    liver = load_seg(
+        "segmentation.dcm",
+        segment_numbers=[1],
+        reference_image=ct
+    )
 
-# Load the CT series
-ct = load_image("ct_series/")
+    # Verify alignment
+    assert liver.array.shape == ct.array.shape
+    ```
 
-# Check available segments
-segments = get_segment_info("segmentation.dcm")
-print("Available segments:", [s['segment_label'] for s in segments])
+!!! example "Example 4: Merging Cropped Multi-Organ Masks"
+    ```python
+    from pictologics import load_image, load_and_merge_images
 
-# Load only the liver segment, aligned to CT
-liver = load_seg(
-    "segmentation.dcm",
-    segment_numbers=[1],
-    reference_image=ct
-)
+    # Reference CT
+    ct = load_image("full_body_ct/")
 
-# Verify alignment
-assert liver.array.shape == ct.array.shape
-```
+    # List of cropped organ masks
+    organ_masks = [
+        "liver_cropped.nii.gz",
+        "spleen_cropped.nii.gz",
+        "left_kidney_cropped.nii.gz",
+        "right_kidney_cropped.nii.gz"
+    ]
 
-### Example 4: Merging Cropped Multi-Organ Masks
+    # Merge all into reference space with unique labels
+    combined = load_and_merge_images(
+        organ_masks,
+        reference_image=ct,
+        reposition_to_reference=True,
+        relabel_masks=True
+    )
 
-```python
-from pictologics import load_image, load_and_merge_images
-
-# Reference CT
-ct = load_image("full_body_ct/")
-
-# List of cropped organ masks
-organ_masks = [
-    "liver_cropped.nii.gz",
-    "spleen_cropped.nii.gz",
-    "left_kidney_cropped.nii.gz",
-    "right_kidney_cropped.nii.gz"
-]
-
-# Merge all into reference space with unique labels
-combined = load_and_merge_images(
-    organ_masks,
-    reference_image=ct,
-    reposition_to_reference=True,
-    relabel_masks=True
-)
-
-# Result: combined.array contains:
-# 0 = background, 1 = liver, 2 = spleen, 3 = left kidney, 4 = right kidney
-```
+    # Result: combined.array contains:
+    # 0 = background, 1 = liver, 2 = spleen, 3 = left kidney, 4 = right kidney
+    ```
 
 ---
 

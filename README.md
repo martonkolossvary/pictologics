@@ -20,11 +20,12 @@ Documentation (User Guide, API, Benchmarks): https://martonkolossvary.github.io/
 
 ## Why Pictologics?
 
-*   **🚀 High Performance**: Uses `numba` for JIT compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page for details).
-*   **✅ IBSI Compliant**: Implements standard algorithms verified against IBSI 1 (feature extraction) and IBSI 2 Phase 1 (filters). See [IBSI 1](ibsi1_compliance.md) and [IBSI 2](ibsi2_compliance.md) documentation.
-*   **🔧 Flexible**: Configurable pipeline for reproducible research. Provides utilities for DICOM parsing and organization and common image processing tasks.
-*   **👁️ Visualization**: Built-in utilities for visual quality control of mask overlays and segmentations.
-*   **✨ Easy to Use**: Simple installation and a straightforward pipeline make it easy to get started quickly.
+*   **🚀 High Performance**: Uses `numba` for Just In Time (JIT) compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page for details).
+*   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantoms, and clinical datasets:
+    *   **IBSI 1**: Feature extraction ([compliance report](ibsi1_compliance.md))
+    *   **IBSI 2**: Image filters ([Phase 1](ibsi2_compliance.md)), filtered features ([Phase 2](ibsi2_phase2.md)), reproducibility ([Phase 3](ibsi2_phase3.md))
+*   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, DICOM, DICOM-SEG, DICOM-SR).
+*   **✨ User-Friendly**: Pure Python implementation with a simple installation process and user-friendly pipeline module supporting easy feature extraction and analysis, ensuring a smooth experience from setup to analysis.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
 
 ## Installation
@@ -91,7 +92,7 @@ Comparisons between **Pictologics** and **PyRadiomics** (single-thread parity).
 - **Hardware**: Apple M4 Pro, 14 cores, 48 GB
 - **OS**: macOS 26.2 (arm64)
 - **Python**: 3.12.10
-- **Core deps**: pictologics 0.2.0, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
+- **Core deps**: pictologics 0.3.0, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
 - **PyRadiomics stack (parity runs)**: pyradiomics 3.1.1.dev111+g8ed579383, SimpleITK 2.5.3
 - **BLAS/LAPACK**: Apple Accelerate (from `numpy.show_config()`)
 
@@ -121,12 +122,20 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 
 
+### Filters
+
+| Execution Time (Log-Log) | Speedup |
+|:---:|:---:|
+| [![Filters time](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/filters_execution_time_log.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/filters_execution_time_log.png) | [![Filters speedup](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/filters_speedup_factor.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/filters_speedup_factor.png) |
+
+
+
 
 
 
 ## Quality & Compliance
 
-**IBSI Compliance**: Full compliance (see [Report](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/)).
+**IBSI Compliance**: [IBSI 1 Features](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/) | [IBSI 2 Phase 1 Filters](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/) | [Phase 2 Features](https://martonkolossvary.github.io/pictologics/ibsi2_phase2/) | [Phase 3 Reproducibility](https://martonkolossvary.github.io/pictologics/ibsi2_phase3/)
 
 ### Code Health
 

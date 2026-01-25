@@ -457,6 +457,8 @@ def save_slices(
             when both are provided.
 
     Example:
+        Save image slices with and without mask overlay:
+
         ```python
         from pictologics import load_image
         from pictologics.utilities import save_slices
@@ -614,6 +616,8 @@ def visualize_slices(
             when both are provided.
 
     Example:
+        Visualise slices interactively:
+
         ```python
         from pictologics import load_image
         from pictologics.utilities import visualize_slices

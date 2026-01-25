@@ -29,118 +29,114 @@ You want to:
 
 ### Important notes
 
-- **Maskless pipeline runs**: `RadiomicsPipeline.run(...)` accepts `mask=None`, `mask=""`, or an omitted mask argument.
-  In that case, Pictologics generates a full (all-ones) ROI mask internally (whole-image ROI).
-- **Empty ROI is an error**: If your preprocessing removes all voxels (e.g., a too-tight HU range), the pipeline raises
-  a clear error instead of silently returning empty outputs.
-- **Morphology on whole-image ROI**: Shape features will describe the shape of the ROI mask.
-  With a maskless run, that ROI starts as the full image volume, then becomes whatever remains after resegmentation
-  and connected-component filtering. This is valid computationally, but make sure it matches your scientific intent.
-- **Sentinel value filtering**: The `resegment` step with `range_min=-100` also filters out common DICOM sentinel
-  values (e.g., -1024, -2048) that represent missing/invalid data. This is the IBSI-recommended approach for
-  handling NA values in medical imaging data.
+!!! note
+    - **Maskless pipeline runs**: `RadiomicsPipeline.run(...)` accepts `mask=None`, `mask=""`, or an omitted mask argument.
+      In that case, Pictologics generates a full (all-ones) ROI mask internally (whole-image ROI).
+    - **Empty ROI is an error**: If your preprocessing removes all voxels (e.g., a too-tight HU range), the pipeline raises
+      a clear error instead of silently returning empty outputs.
+    - **Morphology on whole-image ROI**: Shape features will describe the shape of the ROI mask.
+      With a maskless run, that ROI starts as the full image volume, then becomes whatever remains after resegmentation
+      and connected-component filtering. This is valid computationally, but make sure it matches your scientific intent.
+    - **Sentinel value filtering**: The `resegment` step with `range_min=-100` also filters out common DICOM sentinel
+      values (e.g., -1024, -2048) that represent missing/invalid data. This is the IBSI-recommended approach for
+      handling NA values in medical imaging data.
 
 ### Full example script
 
-```python
-from pathlib import Path
+!!! example "Full example script"
+    ```python
+    from pathlib import Path
 
-from pictologics import RadiomicsPipeline
-from pictologics.results import format_results, save_results
+    from pictologics import RadiomicsPipeline
+    from pictologics.results import format_results, save_results
 
-def strip_nii_suffix(name):
-    """Remove .nii or .nii.gz suffix from filename."""
-    if name.endswith(".nii.gz"):
-        return name[: -len(".nii.gz")]
-    if name.endswith(".nii"):
-        return name[: -len(".nii")]
-    return name
 
-def main():
-    # Configure paths
-    input_dir = Path("path/to/nifti_folder")
-    output_csv = Path("results.csv")
-    log_dir = Path("logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
+    def main():
+        # Configure paths
+        input_dir = Path("path/to/nifti_folder")
+        output_csv = Path("results.csv")
+        log_dir = Path("logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Define common preprocessing steps
-    base_steps = [
-        # Resample to 0.5mm isotropic. Round intensities to integers (useful for HU).
-        {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5), "round_intensities": True}},
-        # Exclude voxels outside standard HU range
-        {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
-        # Keep only the largest connected component of the ROI mask
-        {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-    ]
+        # Define common preprocessing steps
+        base_steps = [
+            # Resample to 0.5mm isotropic. Round intensities to integers (useful for HU).
+            {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5), "round_intensities": True}},
+            # Exclude voxels outside standard HU range
+            {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
+            # Keep only the largest connected component of the ROI mask
+            {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
+        ]
 
-    # Shared feature extraction configuration
-    extract_all = {
-        "step": "extract_features",
-        "params": {
-            "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-            "include_spatial_intensity": False,
-            "include_local_intensity": False,
-        },
-    }
+        # Shared feature extraction configuration
+        extract_all = {
+            "step": "extract_features",
+            "params": {
+                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
+                "include_spatial_intensity": False,
+                "include_local_intensity": False,
+            },
+        }
 
-    # Initialize the pipeline
-    pipeline = RadiomicsPipeline()
+        # Initialize the pipeline
+        pipeline = RadiomicsPipeline()
 
-    # Add 4 configurations (2 FBN, 2 FBS)
-    for n_bins in (8, 16):
-        pipeline.add_config(
-            f"case1_fbn_{n_bins}",
-            base_steps + [
-                {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
-                extract_all,
-            ],
-        )
+        # Add 4 configurations (2 FBN, 2 FBS)
+        for n_bins in (8, 16):
+            pipeline.add_config(
+                f"case1_fbn_{n_bins}",
+                base_steps + [
+                    {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
+                    extract_all,
+                ],
+            )
 
-    for bin_width in (8, 16):
-        pipeline.add_config(
-            f"case1_fbs_{bin_width}",
-            base_steps + [
-                {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
-                extract_all,
-            ],
-        )
+        for bin_width in (8, 16):
+            pipeline.add_config(
+                f"case1_fbs_{bin_width}",
+                base_steps + [
+                    {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
+                    extract_all,
+                ],
+            )
 
-    # Prepare for batch processing
-    rows = []
-    nifti_paths = sorted(input_dir.glob("*.nii*"))
-    if not nifti_paths:
-        raise ValueError(f"No NIfTI files found in: {input_dir}")
+        # Prepare for batch processing
+        rows = []
+        nifti_paths = sorted(input_dir.glob("*.nii*"))
+        if not nifti_paths:
+            raise ValueError(f"No NIfTI files found in: {input_dir}")
 
-    # Process each NIfTI file
-    for path in nifti_paths:
-        subject_id = strip_nii_suffix(path.name)
-        pipeline.clear_log()
+        # Process each NIfTI file
+        for path in nifti_paths:
+            # Simple suffix stripping using Python 3.9+ removesuffix
+            subject_id = path.name.removesuffix(".nii.gz").removesuffix(".nii")
+            pipeline.clear_log()
 
-        # Run pipeline (mask omitted -> whole-image ROI)
-        results = pipeline.run(
-            image=str(path),
-            subject_id=subject_id,
-            config_names=["case1_fbn_8", "case1_fbn_16", "case1_fbs_8", "case1_fbs_16"],
-        )
+            # Run pipeline (mask omitted -> whole-image ROI)
+            results = pipeline.run(
+                image=str(path),
+                subject_id=subject_id,
+                config_names=["case1_fbn_8", "case1_fbn_16", "case1_fbs_8", "case1_fbs_16"],
+            )
 
-        # Format results as flat dictionary and add metadata
-        row = format_results(
-            results,
-            fmt="wide",
-            meta={"subject_id": subject_id, "file": str(path)}
-        )
-        rows.append(row)
+            # Format results as flat dictionary and add metadata
+            row = format_results(
+                results,
+                fmt="wide",
+                meta={"subject_id": subject_id, "file": str(path)}
+            )
+            rows.append(row)
 
-        # Save per-case logs
-        pipeline.save_log(str(log_dir / f"{subject_id}.json"))
+            # Save per-case logs
+            pipeline.save_log(str(log_dir / f"{subject_id}.json"))
 
-    # Consolidated export of all results
-    save_results(rows, output_csv)
-    print(f"Wrote {len(rows)} rows to {output_csv}")
+        # Consolidated export of all results
+        save_results(rows, output_csv)
+        print(f"Wrote {len(rows)} rows to {output_csv}")
 
-if __name__ == "__main__":
-    main()
-```
+    if __name__ == "__main__":
+        main()
+    ```
 
 ### Output format
 
@@ -177,130 +173,132 @@ You want to:
 
 ### Notes
 
-- **Progress bar dependency**: This example uses `tqdm`.
-    - If you are running this outside the library repo, install it with `pip install tqdm`.
-    - If you are adding it to your Poetry-managed project, use `poetry add tqdm`.
-- **Segmentation DICOM at arbitrary depth**: The helper `_find_dicom_series_root(...)` looks for the subfolder with
-    the most `.dcm` files and uses that as the series root.
-- **Multiple masks in one SEG**: If your segmentation DICOM encodes multiple labels (e.g., values 1..N), the
-    `_binarize_segmentation_mask(...)` step turns it into a single ROI by keeping all voxels where the value is `> 0`.
-- **Multi-phase DICOM series**: If your image series contains multiple phases (e.g., cardiac CT with 10%, 20%... phases),
-    use `get_dicom_phases()` to discover available phases and `dataset_index` to select one:
-    ```python
-    from pictologics.utilities import get_dicom_phases
-    
-    phases = get_dicom_phases(str(image_root))
-    print(f"Found {len(phases)} phases")
-    # Load a specific phase (default is 0)
-    image = load_image(str(image_root), recursive=True, dataset_index=0)
-    ```
+!!! note
+    - **Progress bar dependency**: This example uses `tqdm`.
+        - If you are running this outside the library repo, install it with `pip install tqdm`.
+        - If you are adding it to your Poetry-managed project, use `poetry add tqdm`.
+    - **Segmentation DICOM at arbitrary depth**: The helper `_find_dicom_series_root(...)` looks for the subfolder with
+        the most `.dcm` files and uses that as the series root.
+    - **Multiple masks in one SEG**: If your segmentation DICOM encodes multiple labels (e.g., values 1..N), the
+        `_binarize_segmentation_mask(...)` step turns it into a single ROI by keeping all voxels where the value is `> 0`.
+    - **Multi-phase DICOM series**: If your image series contains multiple phases (e.g., cardiac CT with 10%, 20%... phases),
+        use `get_dicom_phases()` to discover available phases and `dataset_index` to select one:
+        ```python
+        from pictologics.utilities import get_dicom_phases
+        
+        phases = get_dicom_phases(str(image_root))
+        print(f"Found {len(phases)} phases")
+        # Load a specific phase (default is 0)
+        image = load_image(str(image_root), recursive=True, dataset_index=0)
+        ```
 
 ### Full example script
 
-```python
-from pathlib import Path
-import numpy as np
-from pictologics import Image, RadiomicsPipeline, load_image, load_and_merge_images
-from pictologics.results import format_results, save_results
+!!! example "Full example script"
+    ```python
+    from pathlib import Path
+    import numpy as np
+    from pictologics import Image, RadiomicsPipeline, load_image, load_and_merge_images
+    from pictologics.results import format_results, save_results
 
 
-def main():
-    # Configure paths
-    cases_dir = Path("path/to/cases_root")
-    output_csv = Path("dicom_results_long.csv")
-    log_dir = Path("dicom_logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
+    def main():
+        # Configure paths
+        cases_dir = Path("path/to/cases_root")
+        output_csv = Path("dicom_results_long.csv")
+        log_dir = Path("dicom_logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Find all case directories
-    case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
-    if not case_dirs:
-        raise ValueError(f"No case folders found in: {cases_dir}")
+        # Find all case directories
+        case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
+        if not case_dirs:
+            raise ValueError(f"No case folders found in: {cases_dir}")
 
-    # Shared feature extraction settings
-    extract_all = {
-        "step": "extract_features",
-        "params": {
-            "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-            "include_spatial_intensity": False,
-            "include_local_intensity": False,
-        },
-    }
-
-    # Initialize the pipeline
-    pipeline = RadiomicsPipeline()
-
-    # Configuration A: Fixed Bin Size
-    pipeline.add_config(
-        "case2_fbs_256",
-        [
-            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-            {"step": "discretise", "params": {"method": "FBS", "bin_width": 256.0}},
-            extract_all,
-        ],
-    )
-
-    # Configuration B: Fixed Bin Number
-    pipeline.add_config(
-        "case2_fbn_64",
-        [
-            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
-            extract_all,
-        ],
-    )
-
-    # Use tqdm for a progress bar
-    from tqdm import tqdm
-
-    rows = []
-    for case_dir in tqdm(case_dirs, desc="Radiomics (DICOM cases)", unit="case"):
-        subject_id = case_dir.name
-        image_root = case_dir / "Image"
-        seg_root = case_dir / "Segmentation"
-
-        # load_image with recursive=True finds the best series folder automatically
-        image = load_image(str(image_root), recursive=True)
-        
-        # Load the segmentation using load_and_merge_images with binarize=True
-        # recursive=True ensures we find the DICOM series inside the Segmentation folder
-        mask = load_and_merge_images(
-            [str(seg_root)], 
-            binarize=True, 
-            recursive=True
-        )
-
-        pipeline.clear_log()
-
-        # Execute extraction for both configurations
-        results = pipeline.run(
-            image=image,
-            mask=mask,
-            subject_id=subject_id,
-            config_names=["case2_fbs_256", "case2_fbn_64"],
-        )
-
-        # Format results and store
-        row = format_results(
-            results,
-            fmt="long",  # Tidy format: [subject_id, config, feature_name, value]
-            meta={
-                "subject_id": subject_id,
-                "image_root": str(image_root),
-                "seg_root": str(seg_root),
+        # Shared feature extraction settings
+        extract_all = {
+            "step": "extract_features",
+            "params": {
+                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
+                "include_spatial_intensity": False,
+                "include_local_intensity": False,
             },
+        }
+
+        # Initialize the pipeline
+        pipeline = RadiomicsPipeline()
+
+        # Configuration A: Fixed Bin Size
+        pipeline.add_config(
+            "case2_fbs_256",
+            [
+                {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+                {"step": "discretise", "params": {"method": "FBS", "bin_width": 256.0}},
+                extract_all,
+            ],
         )
-        rows.append(row)
 
-        # Save per-case logs
-        pipeline.save_log(str(log_dir / f"{subject_id}.json"))
+        # Configuration B: Fixed Bin Number
+        pipeline.add_config(
+            "case2_fbn_64",
+            [
+                {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
+                extract_all,
+            ],
+        )
 
-    # Final export
-    save_results(rows, output_csv)
-    print(f"Wrote {len(rows)} rows to {output_csv}")
+        # Use tqdm for a progress bar
+        from tqdm import tqdm
 
-if __name__ == "__main__":
-    main()
-```
+        rows = []
+        for case_dir in tqdm(case_dirs, desc="Radiomics (DICOM cases)", unit="case"):
+            subject_id = case_dir.name
+            image_root = case_dir / "Image"
+            seg_root = case_dir / "Segmentation"
+
+            # load_image with recursive=True finds the best series folder automatically
+            image = load_image(str(image_root), recursive=True)
+            
+            # Load the segmentation using load_and_merge_images with binarize=True
+            # recursive=True ensures we find the DICOM series inside the Segmentation folder
+            mask = load_and_merge_images(
+                [str(seg_root)], 
+                binarize=True, 
+                recursive=True
+            )
+
+            pipeline.clear_log()
+
+            # Execute extraction for both configurations
+            results = pipeline.run(
+                image=image,
+                mask=mask,
+                subject_id=subject_id,
+                config_names=["case2_fbs_256", "case2_fbn_64"],
+            )
+
+            # Format results and store
+            row = format_results(
+                results,
+                fmt="long",  # Tidy format: [subject_id, config, feature_name, value]
+                meta={
+                    "subject_id": subject_id,
+                    "image_root": str(image_root),
+                    "seg_root": str(seg_root),
+                },
+            )
+            rows.append(row)
+
+            # Save per-case logs
+            pipeline.save_log(str(log_dir / f"{subject_id}.json"))
+
+        # Final export
+        save_results(rows, output_csv)
+        print(f"Wrote {len(rows)} rows to {output_csv}")
+
+    if __name__ == "__main__":
+        main()
+    ```
 
 ---
 
@@ -336,133 +334,121 @@ You want to:
 
 ### Full example script
 
-```python
-from pathlib import Path
+!!! example "Full example script"
+    ```python
+    from pathlib import Path
 
-import numpy as np
+    import numpy as np
 
-from pictologics import Image, RadiomicsPipeline, load_and_merge_images, load_image
-from pictologics.results import format_results, save_results
-
-
-
+    from pictologics import Image, RadiomicsPipeline, load_and_merge_images, load_image
+    from pictologics.results import format_results, save_results
 
 
-def strip_suffixes(name):
-    """Strip .nii/.nii.gz and trailing _IMG to get a stable case id."""
-    if name.endswith(".nii.gz"):
-        name = name[: -len(".nii.gz")]
-    elif name.endswith(".nii"):
-        name = name[: -len(".nii")]
-    if name.endswith("_IMG"):
-        name = name[: -len("_IMG")]
-    return name
+    def main():
+        # Configure paths
+        input_dir = Path("path/to/nifti_folder")
+        output_file = Path("case3_results_long.json")
+        log_dir = Path("case3_logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
 
+        # Use tqdm for a progress bar
+        from tqdm import tqdm
 
-def main():
-    # Configure paths
-    input_dir = Path("path/to/nifti_folder")
-    output_file = Path("case3_results_long.json")
-    log_dir = Path("case3_logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
+        # Identify all images (files ending in _IMG)
+        image_paths = sorted(input_dir.glob("*_IMG.nii*"))
+        if not image_paths:
+            raise ValueError(f"No *_IMG NIfTI files found in: {input_dir}")
 
-    # Use tqdm for a progress bar
-    from tqdm import tqdm
+        # Initialize the pipeline
+        pipeline = RadiomicsPipeline()
 
-    # Identify all images (files ending in _IMG)
-    image_paths = sorted(input_dir.glob("*_IMG.nii*"))
-    if not image_paths:
-        raise ValueError(f"No *_IMG NIfTI files found in: {input_dir}")
-
-    # Initialize the pipeline
-    pipeline = RadiomicsPipeline()
-
-    # Shared feature extraction settings
-    extract_all = {
-        "step": "extract_features",
-        "params": {
-            "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-            "include_spatial_intensity": False,
-            "include_local_intensity": False,
-        },
-    }
-
-    # Add 6 target configurations (no preprocessing requested)
-    for n_bins in (8, 16, 32):
-        pipeline.add_config(
-            f"case3_fbn_{n_bins}",
-            [
-                {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
-                extract_all,
-            ],
-        )
-
-    for bin_width in (8.0, 16.0, 32.0):
-        pipeline.add_config(
-            f"case3_fbs_{int(bin_width)}",
-            [
-                {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
-                extract_all,
-            ],
-        )
-
-    target_configs = [
-        "case3_fbn_8", "case3_fbn_16", "case3_fbn_32",
-        "case3_fbs_8", "case3_fbs_16", "case3_fbs_32",
-    ]
-
-    # Process each image and its associated masks
-    rows = []
-    for img_path in tqdm(image_paths, desc="Radiomics (NIfTI images)", unit="image"):
-        subject_id = strip_suffixes(img_path.name)
-
-        # Find all corresponding masks (e.g., CASE001_MASK1.nii.gz, etc.)
-        mask_paths = sorted(input_dir.glob(f"{subject_id}_MASK*.nii*"))
-        if not mask_paths:
-            raise ValueError(f"No masks found for {subject_id}")
-
-        image = load_image(str(img_path))
-
-        # Merge multiple masks into one and ensure binary semantics
-        mask = load_and_merge_images(
-            [str(p) for p in mask_paths],
-            reference_image=image,
-            binarize=True
-        )
-
-        pipeline.clear_log()
-
-        # Run extraction for all target configurations
-        results = pipeline.run(
-            image=image,
-            mask=mask,
-            subject_id=subject_id,
-            config_names=target_configs,
-        )
-
-        # Format results and store metadata
-        row = format_results(
-            results,
-            fmt="long",
-            meta={
-                "subject_id": subject_id,
-                "image": str(img_path),
-                "masks": ";".join(str(p) for p in mask_paths),
+        # Shared feature extraction settings
+        extract_all = {
+            "step": "extract_features",
+            "params": {
+                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
+                "include_spatial_intensity": False,
+                "include_local_intensity": False,
             },
-        )
-        rows.append(row)
+        }
 
-        # Save per-case logs
-        pipeline.save_log(str(log_dir / f"{subject_id}.json"))
+        # Add 6 target configurations (no preprocessing requested)
+        for n_bins in (8, 16, 32):
+            pipeline.add_config(
+                f"case3_fbn_{n_bins}",
+                [
+                    {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
+                    extract_all,
+                ],
+            )
 
-    # Consolidated export (save_results handles list of DataFrames for long format automatically)
-    save_results(rows, output_file)
-    print(f"Wrote {len(rows)} cases to {output_file}")
+        for bin_width in (8.0, 16.0, 32.0):
+            pipeline.add_config(
+                f"case3_fbs_{int(bin_width)}",
+                [
+                    {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
+                    extract_all,
+                ],
+            )
+
+        target_configs = [
+            "case3_fbn_8", "case3_fbn_16", "case3_fbn_32",
+            "case3_fbs_8", "case3_fbs_16", "case3_fbs_32",
+        ]
+
+        # Process each image and its associated masks
+        rows = []
+        for img_path in tqdm(image_paths, desc="Radiomics (NIfTI images)", unit="image"):
+            # Strip extensions and _IMG suffix to get case ID
+            subject_id = img_path.name.removesuffix(".nii.gz").removesuffix(".nii").removesuffix("_IMG")
+
+            # Find all corresponding masks (e.g., CASE001_MASK1.nii.gz, etc.)
+            mask_paths = sorted(input_dir.glob(f"{subject_id}_MASK*.nii*"))
+            if not mask_paths:
+                raise ValueError(f"No masks found for {subject_id}")
+
+            image = load_image(str(img_path))
+
+            # Merge multiple masks into one and ensure binary semantics
+            mask = load_and_merge_images(
+                [str(p) for p in mask_paths],
+                reference_image=image,
+                binarize=True
+            )
+
+            pipeline.clear_log()
+
+            # Run extraction for all target configurations
+            results = pipeline.run(
+                image=image,
+                mask=mask,
+                subject_id=subject_id,
+                config_names=target_configs,
+            )
+
+            # Format results and store metadata
+            row = format_results(
+                results,
+                fmt="long",
+                meta={
+                    "subject_id": subject_id,
+                    "image": str(img_path),
+                    "masks": ";".join(str(p) for p in mask_paths),
+                },
+            )
+            rows.append(row)
+
+            # Save per-case logs
+            pipeline.save_log(str(log_dir / f"{subject_id}.json"))
+
+        # Consolidated export (save_results handles list of DataFrames for long format automatically)
+        save_results(rows, output_file)
+        print(f"Wrote {len(rows)} cases to {output_file}")
 
 
-if __name__ == "__main__":
-    main()
-```
+    if __name__ == "__main__":
+        main()
+    ```
 
 ---
 
@@ -490,166 +476,168 @@ You want to:
 
 ### Notes
 
-- **Progress bar dependency**: This example uses `tqdm`.
-    - If you are running this outside the library repo, install it with `pip install tqdm`.
-    - If you are adding it to your Poetry-managed project, use `poetry add tqdm`.
-- **Multiprocessing requirement**: On Windows/macOS, keep the parallel execution inside
-  `if __name__ == "__main__":` (as shown) to avoid process-spawn issues.
-- **JIT warmup in parallel workers**: Pictologics performs a Numba JIT warmup at package import.
-    With `ProcessPoolExecutor`, each worker is a separate Python process, so warmup happens **once per worker process**
-    (on its first import of `pictologics`) and then stays warm for all cases that worker processes.
-    It is **not** re-run for every case unless you explicitly call `warmup_jit()` inside your per-case function.
-    You can disable auto-warmup via `PICTOLOGICS_DISABLE_WARMUP=1` if you prefer to skip the upfront cost.
-- **Preprocessing parameters are dataset-dependent**: The `resegment` range here uses the CT HU example
-  `[-100, 3000]`. Adjust or remove it for non-CT data.
+!!! note
+    - **Progress bar dependency**: This example uses `tqdm`.
+        - If you are running this outside the library repo, install it with `pip install tqdm`.
+        - If you are adding it to your Poetry-managed project, use `poetry add tqdm`.
+    - **Multiprocessing requirement**: On Windows/macOS, keep the parallel execution inside
+      `if __name__ == "__main__":` (as shown) to avoid process-spawn issues.
+    - **JIT warmup in parallel workers**: Pictologics performs a Numba JIT warmup at package import.
+        With `ProcessPoolExecutor`, each worker is a separate Python process, so warmup happens **once per worker process**
+        (on its first import of `pictologics`) and then stays warm for all cases that worker processes.
+        It is **not** re-run for every case unless you explicitly call `warmup_jit()` inside your per-case function.
+        You can disable auto-warmup via `PICTOLOGICS_DISABLE_WARMUP=1` if you prefer to skip the upfront cost.
+    - **Preprocessing parameters are dataset-dependent**: The `resegment` range here uses the CT HU example
+      `[-100, 3000]`. Adjust or remove it for non-CT data.
 
 ### Full example script
 
-```python
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from pathlib import Path
-import numpy as np
-from pictologics import Image, RadiomicsPipeline, load_image, load_and_merge_images
-from pictologics.results import format_results, save_results
+!!! example "Full example script"
+    ```python
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from pathlib import Path
+    import numpy as np
+    from pictologics import Image, RadiomicsPipeline, load_image, load_and_merge_images
+    from pictologics.results import format_results, save_results
 
 
-def collect_segmentation_series_roots(seg_root):
-    """Collect all segmentation series subfolders."""
-    if not seg_root.exists():
-        raise ValueError(f"Folder does not exist: {seg_root}")
+    def collect_segmentation_series_roots(seg_root):
+        """Collect all segmentation series subfolders."""
+        if not seg_root.exists():
+            raise ValueError(f"Folder does not exist: {seg_root}")
 
-    subdirs = sorted([p for p in seg_root.iterdir() if p.is_dir()])
-    if not subdirs:
-        return [seg_root]
+        subdirs = sorted([p for p in seg_root.iterdir() if p.is_dir()])
+        if not subdirs:
+            return [seg_root]
 
-    return subdirs
+        return subdirs
 
-def build_case4_pipeline():
-    """Define the pipeline with preprocessing and all feature families."""
-    pipeline = RadiomicsPipeline()
+    def build_case4_pipeline():
+        """Define the pipeline with preprocessing and all feature families."""
+        pipeline = RadiomicsPipeline()
 
-    # Define standard CT preprocessing
-    preprocess_steps = [
-        {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-        {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
-        {"step": "filter_outliers", "params": {"sigma": 3.0}},
-        {"step": "round_intensities"},
-        {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-    ]
+        # Define standard CT preprocessing
+        preprocess_steps = [
+            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+            {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
+            {"step": "filter_outliers", "params": {"sigma": 3.0}},
+            {"step": "round_intensities"},
+            {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
+        ]
 
-    extract_all = {
-        "step": "extract_features",
-        "params": {
-            "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-            "include_spatial_intensity": False,
-            "include_local_intensity": False,
-        },
-    }
-
-    # Add discretisation variants
-    for n_bins in (8, 16, 32):
-        pipeline.add_config(
-            f"case4_fbn_{n_bins}",
-            preprocess_steps + [{"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}}, extract_all],
-        )
-
-    for bin_width in (8.0, 16.0, 32.0):
-        pipeline.add_config(
-            f"case4_fbs_{int(bin_width)}",
-            preprocess_steps + [{"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}}, extract_all],
-        )
-
-    config_names = [f"case4_fbn_{b}" for b in (8, 16, 32)] + [f"case4_fbs_{b}" for b in (8, 16, 32)]
-    return pipeline, config_names
-
-def process_case(case_dir, log_dir):
-    """Worker function for single case processing."""
-    case_path = Path(case_dir)
-    subject_id = case_path.name
-    image_root = case_path / "Image"
-    seg_root = case_path / "Segmentation"
-
-    # Load image recursively
-    image = load_image(str(image_root), recursive=True)
-
-    # Load and merge all found segmentations
-    seg_roots = collect_segmentation_series_roots(seg_root)
-    
-    # load_and_merge_images handles multiple paths, geometry checking, and binarization
-    try:
-        mask = load_and_merge_images(
-            [str(p) for p in seg_roots], 
-            reference_image=image, 
-            binarize=True, 
-            recursive=True
-        )
-    except ValueError as e:
-         raise ValueError(f"Failed to load/merge masks for {subject_id}: {e}")
-
-    # Setup and run pipeline
-    pipeline, config_names = build_case4_pipeline()
-    pipeline.clear_log()
-    results = pipeline.run(image=image, mask=mask, subject_id=subject_id, config_names=config_names)
-
-    # Save results and log
-    Path(log_dir).mkdir(parents=True, exist_ok=True)
-    pipeline.save_log(str(Path(log_dir) / f"{subject_id}.json"))
-
-    return format_results(
-        results,
-        fmt="wide",
-        meta={
-            "subject_id": subject_id,
-            "image_root": str(image_root),
-            "seg_roots": ";".join(str(p) for p in seg_roots),
-        },
-    )
-
-def main():
-    # Configure paths
-    cases_dir = Path("path/to/cases_root")
-    output_file = Path("case4_parallel_results.json")
-    log_dir = Path("case4_logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    # Start parallel processing
-    n_jobs = 4
-    case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
-    if not case_dirs:
-        raise ValueError(f"No case folders found in: {cases_dir}")
-
-    from tqdm import tqdm
-    rows = []
-    errors = []
-
-    # Map each case to the worker function
-    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-        futures = {
-            executor.submit(process_case, str(case_dir), str(log_dir)): case_dir
-            for case_dir in case_dirs
+        extract_all = {
+            "step": "extract_features",
+            "params": {
+                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
+                "include_spatial_intensity": False,
+                "include_local_intensity": False,
+            },
         }
 
-        with tqdm(total=len(futures), desc="Radiomics (parallel cases)", unit="case") as pbar:
-            for fut in as_completed(futures):
-                case_dir = futures[fut]
-                try:
-                    rows.append(fut.result())
-                except Exception as e:
-                    errors.append((str(case_dir), repr(e)))
-                finally:
-                    pbar.update(1)
+        # Add discretisation variants
+        for n_bins in (8, 16, 32):
+            pipeline.add_config(
+                f"case4_fbn_{n_bins}",
+                preprocess_steps + [{"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}}, extract_all],
+            )
 
-    if errors:
-        msg = "\n".join(f"- {case}: {err}" for case, err in errors)
-        raise RuntimeError(f"One or more cases failed:\n{msg}")
+        for bin_width in (8.0, 16.0, 32.0):
+            pipeline.add_config(
+                f"case4_fbs_{int(bin_width)}",
+                preprocess_steps + [{"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}}, extract_all],
+            )
 
-    # Final data export
-    save_results(rows, output_file)
-    print(f"Wrote {len(rows)} cases to {output_file}")
+        config_names = [f"case4_fbn_{b}" for b in (8, 16, 32)] + [f"case4_fbs_{b}" for b in (8, 16, 32)]
+        return pipeline, config_names
 
-if __name__ == "__main__":
-    main()
-```
+    def process_case(case_dir, log_dir):
+        """Worker function for single case processing."""
+        case_path = Path(case_dir)
+        subject_id = case_path.name
+        image_root = case_path / "Image"
+        seg_root = case_path / "Segmentation"
+
+        # Load image recursively
+        image = load_image(str(image_root), recursive=True)
+
+        # Load and merge all found segmentations
+        seg_roots = collect_segmentation_series_roots(seg_root)
+        
+        # load_and_merge_images handles multiple paths, geometry checking, and binarization
+        try:
+            mask = load_and_merge_images(
+                [str(p) for p in seg_roots], 
+                reference_image=image, 
+                binarize=True, 
+                recursive=True
+            )
+        except ValueError as e:
+             raise ValueError(f"Failed to load/merge masks for {subject_id}: {e}")
+
+        # Setup and run pipeline
+        pipeline, config_names = build_case4_pipeline()
+        pipeline.clear_log()
+        results = pipeline.run(image=image, mask=mask, subject_id=subject_id, config_names=config_names)
+
+        # Save results and log
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+        pipeline.save_log(str(Path(log_dir) / f"{subject_id}.json"))
+
+        return format_results(
+            results,
+            fmt="wide",
+            meta={
+                "subject_id": subject_id,
+                "image_root": str(image_root),
+                "seg_roots": ";".join(str(p) for p in seg_roots),
+            },
+        )
+
+    def main():
+        # Configure paths
+        cases_dir = Path("path/to/cases_root")
+        output_file = Path("case4_parallel_results.json")
+        log_dir = Path("case4_logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Start parallel processing
+        n_jobs = 4
+        case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
+        if not case_dirs:
+            raise ValueError(f"No case folders found in: {cases_dir}")
+
+        from tqdm import tqdm
+        rows = []
+        errors = []
+
+        # Map each case to the worker function
+        with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+            futures = {
+                executor.submit(process_case, str(case_dir), str(log_dir)): case_dir
+                for case_dir in case_dirs
+            }
+
+            with tqdm(total=len(futures), desc="Radiomics (parallel cases)", unit="case") as pbar:
+                for fut in as_completed(futures):
+                    case_dir = futures[fut]
+                    try:
+                        rows.append(fut.result())
+                    except Exception as e:
+                        errors.append((str(case_dir), repr(e)))
+                    finally:
+                        pbar.update(1)
+
+        if errors:
+            msg = "\n".join(f"- {case}: {err}" for case, err in errors)
+            raise RuntimeError(f"One or more cases failed:\n{msg}")
+
+        # Final data export
+        save_results(rows, output_file)
+        print(f"Wrote {len(rows)} cases to {output_file}")
+
+    if __name__ == "__main__":
+        main()
+    ```
 
 ---
 
@@ -671,109 +659,111 @@ You want to:
 
 ### Notes
 
-- **`get_segment_info()`** returns metadata about each segment (number, label, algorithm).
-- **`load_seg()` with `combine_segments=False`** returns a dict mapping segment numbers to `Image` objects.
-- **Alignment**: Use `reference_image` to ensure the SEG mask matches the CT geometry.
+!!! note
+    - **`get_segment_info()`** returns metadata about each segment (number, label, algorithm).
+    - **`load_seg()` with `combine_segments=False`** returns a dict mapping segment numbers to `Image` objects.
+    - **Alignment**: Use `reference_image` to ensure the SEG mask matches the CT geometry.
 
 ### Full example script
 
-```python
-from pathlib import Path
-from pictologics import load_image, load_seg, RadiomicsPipeline
-from pictologics.loaders import get_segment_info
-from pictologics.results import format_results, save_results
+!!! example "Full example script"
+    ```python
+    from pathlib import Path
+    from pictologics import load_image, load_seg, RadiomicsPipeline
+    from pictologics.loaders import get_segment_info
+    from pictologics.results import format_results, save_results
 
 
-def main():
-    # Configure paths
-    cases_dir = Path("path/to/cases_root")
-    output_csv = Path("case5_per_segment_results.csv")
-    log_dir = Path("case5_logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
+    def main():
+        # Configure paths
+        cases_dir = Path("path/to/cases_root")
+        output_csv = Path("case5_per_segment_results.csv")
+        log_dir = Path("case5_logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Find all case directories
-    case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
-    if not case_dirs:
-        raise ValueError(f"No case folders found in: {cases_dir}")
+        # Find all case directories
+        case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
+        if not case_dirs:
+            raise ValueError(f"No case folders found in: {cases_dir}")
 
-    # Initialize pipeline with standard config
-    pipeline = RadiomicsPipeline()
-    pipeline.add_config(
-        "case5_fbn_32",
-        [
-            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-            {
-                "step": "extract_features",
-                "params": {
-                    "families": ["intensity", "morphology", "texture", "histogram"],
-                    "include_spatial_intensity": False,
-                    "include_local_intensity": False,
+        # Initialize pipeline with standard config
+        pipeline = RadiomicsPipeline()
+        pipeline.add_config(
+            "case5_fbn_32",
+            [
+                {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+                {
+                    "step": "extract_features",
+                    "params": {
+                        "families": ["intensity", "morphology", "texture", "histogram"],
+                        "include_spatial_intensity": False,
+                        "include_local_intensity": False,
+                    },
                 },
-            },
-        ],
-    )
-
-    from tqdm import tqdm
-    rows = []
-
-    for case_dir in tqdm(case_dirs, desc="Radiomics (per-segment)", unit="case"):
-        subject_id = case_dir.name
-        image_root = case_dir / "Image"
-        seg_file = case_dir / "segmentation.dcm"
-
-        # Load the reference image
-        image = load_image(str(image_root), recursive=True)
-
-        # Inspect available segments
-        segments = get_segment_info(str(seg_file))
-        print(f"\n{subject_id}: Found {len(segments)} segments")
-        for seg in segments:
-            print(f"  Segment {seg['segment_number']}: {seg['segment_label']}")
-
-        # Load each segment separately, aligned to image geometry
-        segment_masks = load_seg(
-            str(seg_file),
-            combine_segments=False,  # Returns dict {seg_num: Image}
-            reference_image=image
+            ],
         )
 
-        # Process each segment
-        for seg_num, mask in segment_masks.items():
-            # Find segment label from metadata
-            seg_info = next(s for s in segments if s["segment_number"] == seg_num)
-            seg_label = seg_info["segment_label"]
+        from tqdm import tqdm
+        rows = []
 
-            pipeline.clear_log()
-            results = pipeline.run(
-                image=image,
-                mask=mask,
-                subject_id=f"{subject_id}_{seg_label}",
-                config_names=["case5_fbn_32"],
+        for case_dir in tqdm(case_dirs, desc="Radiomics (per-segment)", unit="case"):
+            subject_id = case_dir.name
+            image_root = case_dir / "Image"
+            seg_file = case_dir / "segmentation.dcm"
+
+            # Load the reference image
+            image = load_image(str(image_root), recursive=True)
+
+            # Inspect available segments
+            segments = get_segment_info(str(seg_file))
+            print(f"\n{subject_id}: Found {len(segments)} segments")
+            for seg in segments:
+                print(f"  Segment {seg['segment_number']}: {seg['segment_label']}")
+
+            # Load each segment separately, aligned to image geometry
+            segment_masks = load_seg(
+                str(seg_file),
+                combine_segments=False,  # Returns dict {seg_num: Image}
+                reference_image=image
             )
 
-            row = format_results(
-                results,
-                fmt="wide",
-                meta={
-                    "subject_id": subject_id,
-                    "segment_number": seg_num,
-                    "segment_label": seg_label,
-                },
-            )
-            rows.append(row)
+            # Process each segment
+            for seg_num, mask in segment_masks.items():
+                # Find segment label from metadata
+                seg_info = next(s for s in segments if s["segment_number"] == seg_num)
+                seg_label = seg_info["segment_label"]
 
-            # Save per-segment log
-            pipeline.save_log(str(log_dir / f"{subject_id}_{seg_label}.json"))
+                pipeline.clear_log()
+                results = pipeline.run(
+                    image=image,
+                    mask=mask,
+                    subject_id=f"{subject_id}_{seg_label}",
+                    config_names=["case5_fbn_32"],
+                )
 
-    # Export all results
-    save_results(rows, output_csv)
-    print(f"\nWrote {len(rows)} rows to {output_csv}")
+                row = format_results(
+                    results,
+                    fmt="wide",
+                    meta={
+                        "subject_id": subject_id,
+                        "segment_number": seg_num,
+                        "segment_label": seg_label,
+                    },
+                )
+                rows.append(row)
+
+                # Save per-segment log
+                pipeline.save_log(str(log_dir / f"{subject_id}_{seg_label}.json"))
+
+        # Export all results
+        save_results(rows, output_csv)
+        print(f"\nWrote {len(rows)} rows to {output_csv}")
 
 
-if __name__ == "__main__":
-    main()
-```
+    if __name__ == "__main__":
+        main()
+    ```
 
 ### Output format
 
@@ -810,135 +800,139 @@ You want to:
 
 ### Full example script
 
-```python
-from pathlib import Path
-from pictologics import RadiomicsPipeline
-from pictologics.results import format_results, save_results
-
-
-def main():
-    # Configure paths
-    image_path = Path("path/to/image.nii.gz")
-    mask_path = Path("path/to/mask.nii.gz")
-    output_csv = Path("filtered_radiomics.csv")
-
-    # Initialize pipeline
-    pipeline = RadiomicsPipeline()
-
-    # IBSI 2 Phase 2 preprocessing (Config B)
-    preprocess_steps = [
-        {"step": "resample", "params": {
-            "new_spacing": (1.0, 1.0, 1.0), 
-            "interpolation": "cubic"
-        }},
-        {"step": "round_intensities", "params": {}},
-        {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    ]
-
-    # Feature extraction (intensity only for filtered images)
-    extract_intensity = {
-        "step": "extract_features",
-        "params": {"families": ["intensity"]},
-    }
-
-    # --- Configuration 1: LoG at multiple scales ---
-    for sigma in [1.5, 3.0, 5.0]:
-        pipeline.add_config(
-            f"log_sigma_{sigma}",
-            preprocess_steps + [
-                {"step": "filter", "params": {
-                    "type": "log",
-                    "sigma_mm": sigma,
-                    "truncate": 4.0,
-                }},
-                extract_intensity,
-            ],
-        )
-
-    # --- Configuration 2: Gabor filter ---
-    pipeline.add_config(
-        "gabor_5mm",
-        preprocess_steps + [
-            {"step": "filter", "params": {
-                "type": "gabor",
-                "sigma_mm": 5.0,
-                "lambda_mm": 2.0,
-                "gamma": 1.5,
-                "rotation_invariant": True,
-                "pooling": "average",
+!!! example "Full example script"
+    ```python
+    from pathlib import Path
+    from pictologics import RadiomicsPipeline
+    from pictologics.results import format_results, save_results
+    
+    
+    def main():
+        # Configure paths
+        image_path = Path("path/to/image.nii.gz")
+        mask_path = Path("path/to/mask.nii.gz")
+        output_csv = Path("filtered_radiomics.csv")
+    
+        # Initialize pipeline
+        pipeline = RadiomicsPipeline()
+    
+        # IBSI 2 Phase 2 preprocessing (Config B)
+        preprocess_steps = [
+            {"step": "resample", "params": {
+                "new_spacing": (1.0, 1.0, 1.0), 
+                "interpolation": "cubic"
             }},
-            extract_intensity,
-        ],
-    )
-
-    # --- Configuration 3: Wavelet decomposition ---
-    for decomp in ["LLH", "HHL", "HHH"]:
+            {"step": "round_intensities", "params": {}},
+            {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+        ]
+    
+        # Feature extraction (intensity only for filtered images)
+        extract_intensity = {
+            "step": "extract_features",
+            "params": {"families": ["intensity"]},
+        }
+    
+        # Collect config names dynamically
+        filter_configs = []
+    
+        # --- Configuration 1: LoG at multiple scales ---
+        for sigma in [1.5, 3.0, 5.0]:
+            name = f"log_sigma_{sigma}"
+            pipeline.add_config(
+                name,
+                preprocess_steps + [
+                    {"step": "filter", "params": {
+                        "type": "log",
+                        "sigma_mm": sigma,
+                        "truncate": 4.0,
+                    }},
+                    extract_intensity,
+                ],
+            )
+            filter_configs.append(name)
+    
+        # --- Configuration 2: Gabor filter ---
+        name = "gabor_5mm"
         pipeline.add_config(
-            f"wavelet_{decomp}",
+            name,
             preprocess_steps + [
                 {"step": "filter", "params": {
-                    "type": "wavelet",
-                    "wavelet": "db3",
-                    "level": 1,
-                    "decomposition": decomp,
+                    "type": "gabor",
+                    "sigma_mm": 5.0,
+                    "lambda_mm": 2.0,
+                    "gamma": 1.5,
                     "rotation_invariant": True,
                     "pooling": "average",
                 }},
                 extract_intensity,
             ],
         )
-
-    # --- Configuration 4: Laws texture energy ---
-    pipeline.add_config(
-        "laws_L5E5E5",
-        preprocess_steps + [
-            {"step": "filter", "params": {
-                "type": "laws",
-                "kernel": "L5E5E5",
-                "rotation_invariant": True,
-                "pooling": "max",
-                "compute_energy": True,
-                "energy_distance": 7,
-            }},
-            extract_intensity,
-        ],
-    )
-
-    # Get all filter config names
-    filter_configs = [
-        "log_sigma_1.5", "log_sigma_3.0", "log_sigma_5.0",
-        "gabor_5mm",
-        "wavelet_LLH", "wavelet_HHL", "wavelet_HHH",
-        "laws_L5E5E5",
-    ]
-
-    # Run pipeline
-    results = pipeline.run(
-        image=str(image_path),
-        mask=str(mask_path),
-        subject_id="subject_001",
-        config_names=filter_configs,
-    )
-
-    # Format and save
-    row = format_results(
-        results,
-        fmt="wide",
-        meta={"subject_id": "subject_001"},
-    )
-    save_results([row], output_csv)
-    print(f"Saved filtered radiomics to {output_csv}")
-
-    # Display key features for each filter
-    print("\nMean values from each filter:")
-    for config in filter_configs:
-        mean_val = results[config].get("mean_intensity_Q4LE", "N/A")
-        print(f"  {config}: {mean_val:.4f}" if isinstance(mean_val, float) else f"  {config}: {mean_val}")
-
-
-if __name__ == "__main__":
-    main()
-```
+        filter_configs.append(name)
+    
+        # --- Configuration 3: Wavelet decomposition ---
+        for decomp in ["LLH", "HHL", "HHH"]:
+            name = f"wavelet_{decomp}"
+            pipeline.add_config(
+                name,
+                preprocess_steps + [
+                    {"step": "filter", "params": {
+                        "type": "wavelet",
+                        "wavelet": "db3",
+                        "level": 1,
+                        "decomposition": decomp,
+                        "rotation_invariant": True,
+                        "pooling": "average",
+                    }},
+                    extract_intensity,
+                ],
+            )
+            filter_configs.append(name)
+    
+        # --- Configuration 4: Laws texture energy ---
+        name = "laws_L5E5E5"
+        pipeline.add_config(
+            name,
+            preprocess_steps + [
+                {"step": "filter", "params": {
+                    "type": "laws",
+                    "kernel": "L5E5E5",
+                    "rotation_invariant": True,
+                    "pooling": "max",
+                    "compute_energy": True,
+                    "energy_distance": 7,
+                }},
+                extract_intensity,
+            ],
+        )
+        filter_configs.append(name)
+    
+        # Run pipeline
+        results = pipeline.run(
+            image=str(image_path),
+            mask=str(mask_path),
+            subject_id="subject_001",
+            config_names=filter_configs,
+        )
+    
+        # Format and save
+        row = format_results(
+            results,
+            fmt="wide",
+            meta={"subject_id": "subject_001"},
+        )
+        save_results([row], output_csv)
+        print(f"Saved filtered radiomics to {output_csv}")
+    
+        # Display key features for each filter
+        print("\nMean values from each filter:")
+        for config in filter_configs:
+            mean_val = results[config].get("mean_intensity_Q4LE", "N/A")
+            print(f"  {config}: {mean_val:.4f}" if isinstance(mean_val, float) else f"  {config}: {mean_val}")
+    
+    
+    if __name__ == "__main__":
+        main()
+    ```
 
 ### Output format
 

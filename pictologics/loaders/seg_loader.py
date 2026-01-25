@@ -75,31 +75,35 @@ def load_seg(
         ValueError: If the file is not a valid DICOM SEG object.
         FileNotFoundError: If the file does not exist.
 
-    Examples:
+    Example:
         Load a SEG file with all segments combined (label map):
 
-        >>> mask = load_seg("segmentation.dcm")
-        >>> print(mask.array.shape)  # (X, Y, Z)
-        >>> print(np.unique(mask.array))  # [0, 1, 2, ...]
+        ```python
+        from pictologics.loaders import load_seg
+        import numpy as np
+
+        mask = load_seg("segmentation.dcm")
+        print(mask.array.shape)  # (X, Y, Z)
+        print(np.unique(mask.array))  # [0, 1, 2, ...]
+        ```
 
         Load specific segments as separate binary masks:
 
-        >>> masks = load_seg("segmentation.dcm", segment_numbers=[1, 2],
-        ...                  combine_segments=False)
-        >>> for seg_num, mask in masks.items():
-        ...     print(f"Segment {seg_num}: {mask.array.sum()} voxels")
-
-        Extract radiomics from each coronary territory separately:
-
-        >>> masks = load_seg("cardiac_seg.dcm", combine_segments=False)
-        >>> for seg_num, mask in masks.items():
-        ...     features = pipeline.run(image=ct, mask=mask)
+        ```python
+        masks = load_seg("segmentation.dcm", segment_numbers=[1, 2], combine_segments=False)
+        for seg_num, mask in masks.items():
+            print(f"Segment {seg_num}: {mask.array.sum()} voxels")
+        ```
 
         Align mask to a reference CT image:
 
-        >>> ct = load_image("ct_scan/")
-        >>> mask = load_seg("segmentation.dcm", reference_image=ct)
-        >>> assert mask.array.shape == ct.array.shape
+        ```python
+        from pictologics import load_image
+
+        ct = load_image("ct_scan/")
+        mask = load_seg("segmentation.dcm", reference_image=ct)
+        assert mask.array.shape == ct.array.shape
+        ```
     """
     import highdicom as hd
 
@@ -195,7 +199,11 @@ def load_seg(
 
 def _extract_seg_geometry(
     seg: pydicom.Dataset,
-) -> tuple[tuple[float, float, float], tuple[float, float, float], npt.NDArray[np.floating[Any]] | None]:
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+    npt.NDArray[np.floating[Any]] | None,
+]:
     """Extract spatial geometry from a DICOM SEG object.
 
     Attempts to extract spacing, origin, and direction from the SEG's

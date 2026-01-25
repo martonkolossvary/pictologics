@@ -315,6 +315,20 @@ class DicomDatabase:
 
         Returns:
             DicomDatabase instance populated with all discovered DICOM files.
+
+        Example:
+            Build database from multiple folders:
+
+            ```python
+            from pictologics.utilities.dicom_database import DicomDatabase
+
+            db = DicomDatabase.from_folders(
+                paths=["data/patient1", "data/patient2"],
+                recursive=True,
+                num_workers=4
+            )
+            print(f"Found {len(db.patients)} patients")
+            ```
         """
         # Convert paths to Path objects
         path_objs = [Path(p) for p in paths]
@@ -628,6 +642,17 @@ class DicomDatabase:
 
         Returns:
             Dictionary mapping level names to created file paths.
+
+        Example:
+            Export database to CSV files:
+
+            ```python
+            files = db.export_csv(
+                base_path="output/dicom_db",
+                levels=["patients", "studies", "series"]
+            )
+            # Creates output/dicom_db_patients.csv, output/dicom_db_studies.csv, etc.
+            ```
         """
         if levels is None:
             levels = ["patients", "studies", "series", "instances"]
@@ -672,6 +697,13 @@ class DicomDatabase:
 
         Returns:
             Path to the created file.
+
+        Example:
+            Export full database hierarchy to JSON:
+
+            ```python
+            json_path = db.export_json("output/db.json")
+            ```
         """
         data: dict[str, list[Any]] = {"patients": []}
 

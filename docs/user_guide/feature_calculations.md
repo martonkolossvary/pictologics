@@ -173,65 +173,140 @@ pipeline = RadiomicsPipeline().add_config("my_custom_config", cfg)
 
 ## Method 2: Step-by-Step Manual Extraction
 
-If you want to understand the underlying process or need granular control over a specific function, you can call the feature extraction functions directly.
+If you want to understand the underlying process or need granular control over specific functions, you can call the feature extraction functions directly. This example mirrors a **complete** radiomics workflow, including all preprocessing steps, filtering, and feature families available in the pipeline.
 
-Create a new Python file (e.g., `extract.py`) and add the following code:
+### The "Hard" Way (Manual Extraction)
+
+This script performs 12 distinct steps to extract all feature families.
 
 ```python
 import numpy as np
 from pictologics import load_image
-from pictologics.preprocessing import discretise_image, resample_image
-from pictologics.features.intensity import calculate_intensity_features
+from pictologics.preprocessing import (
+    resample_image,
+    resegment_mask,
+    filter_outliers,
+    discretise_image,
+    apply_mask
+)
+from pictologics.features.intensity import (
+    calculate_intensity_features,
+    calculate_intensity_histogram_features,
+    calculate_ivh_features,
+    calculate_spatial_intensity_features,
+    calculate_local_intensity_features
+)
 from pictologics.features.morphology import calculate_morphology_features
 from pictologics.features.texture import calculate_all_texture_features
 
 # 1. Load Data
 # ---------------------------------------------------------
-print("Loading data...")
-image = load_image("path/to/image.nii.gz")
-mask = load_image("path/to/mask.nii.gz")
+print("1. Loading data...")
+image = load_image("image.nii.gz")
+mask = load_image("mask.nii.gz")
 
-# 2. Preprocessing (Optional but Recommended)
+# 2. Preprocessing & Standardization
 # ---------------------------------------------------------
-# Resample to isotropic 1x1x1 mm spacing for standardisation
-print("Resampling...")
-image = resample_image(image, new_spacing=(1.0, 1.0, 1.0))
+print("2. Resampling to 1x1x1 mm...")
+image = resample_image(image, new_spacing=(1.0, 1.0, 1.0), interpolation="linear")
 mask = resample_image(mask, new_spacing=(1.0, 1.0, 1.0), interpolation="nearest")
 
-# 3. Extract Morphology Features
-# ---------------------------------------------------------
-print("Calculating morphology...")
-morph_features = calculate_morphology_features(mask)
+print("3. Rounding intensities (for consistent binning)...")
+image.array = np.round(image.array)
 
-# 4. Extract Intensity Features
-# ---------------------------------------------------------
-print("Calculating intensity...")
-# Get voxels inside the mask
-masked_voxels = image.array[mask.array == 1]
-intensity_features = calculate_intensity_features(masked_voxels)
+print("4. Binarizing mask (thresholding)...")
+mask.array = (mask.array > 0.5).astype(np.uint8)
 
-# 5. Extract Texture Features
-# ---------------------------------------------------------
-print("Calculating texture...")
-# Texture requires discretisation (binning)
-# Fixed Bin Number (FBN) with 32 bins is a common choice
-disc_image = discretise_image(image, method="FBN", n_bins=32, roi_mask=mask)
+print("5. Resegmenting (range filtering)...")
+# Exclude values outside typical range (e.g. -1000 to 400 HU for lung)
+mask = resegment_mask(image, mask, range_min=-1000, range_max=400)
 
-texture_features = calculate_all_texture_features(
+print("6. Outlier filtering...")
+# Remove statistical outliers (mean +/- 3 sigma) from the mask
+mask = filter_outliers(image, mask, sigma=3.0)
+
+# 3. Discretisation
+# ---------------------------------------------------------
+print("7. Discretising image (FBN 32 bins)...")
+# Essential for Texture and Histogram features
+disc_image = discretise_image(
+    image, 
+    method="FBN", 
+    n_bins=32, 
+    roi_mask=mask
+)
+
+# 4. Feature Extraction (All Families)
+# ---------------------------------------------------------
+print("8. Calculating Morphology...")
+morph_feat = calculate_morphology_features(mask, image=image, intensity_mask=mask)
+
+print("9. Calculating Intensity (First Order)...")
+roi_values = apply_mask(image, mask)
+int_feat = calculate_intensity_features(roi_values)
+
+print("10. Calculating Histogram...")
+# Uses discretised values
+hist_feat = calculate_intensity_histogram_features(apply_mask(disc_image, mask))
+
+print("11. Calculating IVH (Intensity Volume Histogram)...")
+# Can use raw or discretised values (usually raw)
+ivh_feat = calculate_ivh_features(roi_values, bin_width=10.0)
+
+print("12. Calculating Texture (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM)...")
+tex_feat = calculate_all_texture_features(
     disc_array=disc_image.array,
     mask_array=mask.array,
     n_bins=32
 )
 
-# 6. Combine and Print Results
-# ---------------------------------------------------------
-all_features = {**morph_features, **intensity_features, **texture_features}
+print("13. Calculating Advanced Intensity...")
+# Very computationally intensive
+sp_feat = calculate_spatial_intensity_features(image, mask)
+loc_feat = calculate_local_intensity_features(image, mask)
 
-print("\n--- Extraction Complete ---")
-print(f"Total Features: {len(all_features)}")
-print(f"Volume (RNU0): {all_features.get('volume_RNU0', 'N/A')} mm^3")
-print(f"Mean Intensity (Q4LE): {all_features.get('mean_intensity_Q4LE', 'N/A')}")
-print(f"Contrast (ACUI): {all_features.get('contrast_ACUI', 'N/A')}")
+# 5. Combine Results
+# ---------------------------------------------------------
+all_features = {
+    **morph_feat, **int_feat, **hist_feat, 
+    **ivh_feat, **tex_feat, **sp_feat, **loc_feat
+}
+
+print(f"\n--- Extraction Complete: {len(all_features)} features calculated ---")
+```
+
+### The "Easy" Way (Pipeline Implementation)
+
+The `RadiomicsPipeline` accomplishes the exact same logical workflow in a fraction of the code, with automatic image routing (handling raw vs. discretised copies transparently).
+
+```python
+from pictologics import RadiomicsPipeline
+
+# Define the exact same workflow configuration
+config = [
+    # Preprocessing
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "round_intensities": True}},
+    {"step": "binarize_mask", "params": {"threshold": 0.5}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    {"step": "filter_outliers", "params": {"sigma": 3.0}},
+    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+    
+    # Feature Extraction (All families)
+    {"step": "extract_features", "params": {
+        "families": ["intensity", "morphology", "histogram", "ivh", "texture"],
+        # Enable advanced metrics
+        "include_spatial_intensity": True,
+        "include_local_intensity": True,
+        # Customize specific family parameters
+        "ivh_params": {"bin_width": 10.0}
+    }}
+]
+
+# Run it
+pipeline = RadiomicsPipeline().add_config("comprehensive", config)
+results = pipeline.run("image.nii.gz", "mask.nii.gz", config_names=["comprehensive"])
+
+print(f"--- Extraction Complete: {len(results['comprehensive'])} features calculated ---")
 ```
 
 
@@ -239,112 +314,10 @@ print(f"Contrast (ACUI): {all_features.get('contrast_ACUI', 'N/A')}")
 
 ## Image Filtering (IBSI 2)
 
-Pictologics includes IBSI 2-compliant image filters for creating response maps. Filters can be applied via the pipeline or called directly.
+Pictologics includes **IBSI 2-compliant image filters** (LoG, Wavelets, Gabor, etc.) for creating response maps.
 
-### Filter Types
+!!! info "See Image Filtering Guide"
+    Detailed documentation on available filters, parameters, and examples can be found in the [Image Filtering](image_filtering.md) guide.
 
-| Filter | Description | Key Parameters |
-|:-------|:------------|:---------------|
-| `mean` | Averaging filter | `support` (kernel size) |
-| `log` | Laplacian of Gaussian | `sigma_mm`, `truncate` |
-| `laws` | Laws' texture kernels | `kernel`, `rotation_invariant`, `compute_energy` |
-| `gabor` | Gabor filter bank | `sigma_mm`, `lambda_mm`, `gamma` |
-| `wavelet` | Separable wavelets | `wavelet` (db3, haar, coif1), `level`, `decomposition` |
-| `simoncelli` | Non-separable wavelet | `level` |
-| `riesz` | Riesz transform | `order`, `variant` |
+Filters are typically applied **after** resampling and **before** feature extraction. The pipeline handles this order automatically.
 
-### Using Filters in the Pipeline
-
-```python
-from pictologics import RadiomicsPipeline
-
-# Create pipeline with LoG filter
-pipeline = RadiomicsPipeline()
-
-cfg = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic"}},
-    {"step": "round_intensities", "params": {}},
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    {"step": "filter", "params": {
-        "type": "log",
-        "sigma_mm": 1.5,
-        "truncate": 4.0,
-    }},
-    {"step": "extract_features", "params": {"families": ["intensity"]}},
-]
-
-pipeline.add_config("log_filtered", cfg)
-results = pipeline.run("image.nii.gz", "mask.nii.gz", config_names=["log_filtered"])
-```
-
-### More Filter Examples
-
-```python
-# Laws filter with rotation invariance
-{"step": "filter", "params": {
-    "type": "laws",
-    "kernel": "L5E5E5",
-    "rotation_invariant": True,
-    "pooling": "max",
-    "compute_energy": True,
-}}
-
-# Gabor filter
-{"step": "filter", "params": {
-    "type": "gabor",
-    "sigma_mm": 5.0,
-    "lambda_mm": 2.0,
-    "gamma": 1.5,
-    "rotation_invariant": True,
-}}
-
-# Daubechies wavelet
-{"step": "filter", "params": {
-    "type": "wavelet",
-    "wavelet": "db3",
-    "level": 1,
-    "decomposition": "LLH",
-    "rotation_invariant": True,
-}}
-```
-
-### Direct Filter Usage
-
-For granular control, call filter functions directly:
-
-```python
-from pictologics import load_image
-from pictologics.preprocessing import resample_image, apply_mask
-from pictologics.filters import laplacian_of_gaussian, BoundaryCondition
-from pictologics.features.intensity import calculate_intensity_features
-
-# Load and preprocess
-image = load_image("image.nii.gz")
-mask = load_image("mask.nii.gz")
-image = resample_image(image, (1.0, 1.0, 1.0), interpolation="cubic")
-
-# Apply LoG filter
-response = laplacian_of_gaussian(
-    image.array,
-    sigma_mm=1.5,
-    spacing_mm=image.spacing,
-    truncate=4.0,
-    boundary=BoundaryCondition.MIRROR
-)
-
-# Extract features from filtered image
-roi_values = apply_mask(response, mask)
-features = calculate_intensity_features(roi_values)
-```
-
-!!! tip "IBSI 2 Compliance"
-    For IBSI 2 Phase 2 compliance, use `boundary="mirror"` (default) and apply filters after resampling to isotropic spacing.
-
-See the [Pipeline guide](pipeline.md) for the full filter parameter reference table.
-
----
-
-## Next Steps
-
-*   Read the [Pipeline guide](pipeline.md) for configuration patterns and advanced parameter pass-through.
-*   See the [Benchmarks](../benchmarks.md) to understand performance and compliance.
