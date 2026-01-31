@@ -16,7 +16,7 @@
         <link rel="prev" href="../feature_calculations/">
       
       
-        <link rel="next" href="../utilities/">
+        <link rel="next" href="../predefined_configurations/">
       
       
         
@@ -752,56 +752,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Predefined Configurations">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#common-characteristics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common Characteristics
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#available-configurations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Available Configurations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#running-standard-configurations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running Standard Configurations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#what-you-get-and-what-you-dont" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What you get (and what you don't)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1086,10 +1036,49 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#configuration-export-import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Export &amp; Import
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../predefined_configurations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Predefined Configurations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1903,56 +1892,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Predefined Configurations">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#common-characteristics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common Characteristics
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#available-configurations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Available Configurations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#running-standard-configurations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running Standard Configurations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#what-you-get-and-what-you-dont" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What you get (and what you don't)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -2237,6 +2176,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#configuration-export-import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Export &amp; Import
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2302,111 +2252,67 @@ If preprocessing removes all ROI voxels (e.g., too strict <code>resegment</code>
 error rather than returning empty/partial feature sets.</p>
 </div>
 <h2 id="predefined-configurations">Predefined Configurations</h2>
-<p>Pictologics includes a suite of <strong>Standard Configurations</strong> designed to cover the most common radiomics analysis scenarios. These configurations are compliant with general best practices (e.g., IBSI).</p>
-<h3 id="common-characteristics">Common Characteristics</h3>
-<p>All standard configurations share the following preprocessing steps:</p>
+<p>Pictologics includes <strong>6 standard configurations</strong> designed for common radiomics workflows. All standard configurations share:</p>
 <ul>
-<li><strong>Resampling</strong>: Images are resampled to <strong>0.5mm x 0.5mm x 0.5mm</strong> isotropic spacing using Linear interpolation (Nearest Neighbor for masks).</li>
-<li><strong>Feature Families</strong>: All feature families are extracted: <code>intensity</code>, <code>morphology</code>, <code>texture</code>, <code>histogram</code>, and <code>ivh</code>.</li>
+<li><strong>Resampling</strong>: 0.5mm × 0.5mm × 0.5mm isotropic spacing</li>
+<li><strong>Feature Families</strong>: intensity, morphology, texture, histogram, and IVH</li>
+<li><strong>Performance-optimized</strong>: Spatial/local intensity disabled by default</li>
 </ul>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p><strong>Performance-friendly default for standard configs</strong>
-The built-in <code>standard_*</code> configurations disable the two most time-intensive intensity extras by default:
-<code>include_spatial_intensity=False</code> and <code>include_local_intensity=False</code>.</p>
-<p>This does <strong>not</strong> change the general behavior of the <code>extract_features</code> step when you build your own
-custom configuration: if you request <code>"intensity"</code> in a custom config and do not specify these flags,
-spatial/local intensity will still be included (backward compatible).</p>
-</div>
-<div class="admonition warning">
-<p class="admonition-title">Warning</p>
-<p><strong>Spatial/local intensity features can be very time consuming.</strong>
-Spatial intensity (Moran's I / Geary's C) and local intensity peak features can dominate runtime for larger ROIs.
-For images larger than <strong>50×50×50</strong> voxels, this is generally <strong>not recommended</strong> unless you explicitly need them.</p>
-<ul>
-<li>Standard configs: disabled by default</li>
-<li>Custom configs: enabled by default (unless you set <code>include_spatial_intensity=False</code> / <code>include_local_intensity=False</code>)</li>
-</ul>
-</div>
-<h3 id="available-configurations">Available Configurations</h3>
 <table>
 <thead>
 <tr>
-<th style="text-align: left;">Configuration Name</th>
-<th style="text-align: left;">Discretisation Method</th>
+<th style="text-align: left;">Configuration</th>
+<th style="text-align: left;">Method</th>
 <th style="text-align: left;">Parameters</th>
-<th style="text-align: left;">Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td style="text-align: left;"><code>standard_fbn_8</code></td>
-<td style="text-align: left;">Fixed Bin Number (FBN)</td>
+<td style="text-align: left;">Fixed Bin Number</td>
 <td style="text-align: left;"><code>n_bins=8</code></td>
-<td style="text-align: left;">Coarse texture analysis.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>standard_fbn_16</code></td>
-<td style="text-align: left;">Fixed Bin Number (FBN)</td>
+<td style="text-align: left;">Fixed Bin Number</td>
 <td style="text-align: left;"><code>n_bins=16</code></td>
-<td style="text-align: left;">Medium texture analysis.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>standard_fbn_32</code></td>
-<td style="text-align: left;">Fixed Bin Number (FBN)</td>
+<td style="text-align: left;">Fixed Bin Number</td>
 <td style="text-align: left;"><code>n_bins=32</code></td>
-<td style="text-align: left;">Fine texture analysis (Common default).</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>standard_fbs_8</code></td>
-<td style="text-align: left;">Fixed Bin Size (FBS)</td>
+<td style="text-align: left;">Fixed Bin Size</td>
 <td style="text-align: left;"><code>bin_width=8.0</code></td>
-<td style="text-align: left;">For absolute intensity units (e.g., HU).</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>standard_fbs_16</code></td>
-<td style="text-align: left;">Fixed Bin Size (FBS)</td>
+<td style="text-align: left;">Fixed Bin Size</td>
 <td style="text-align: left;"><code>bin_width=16.0</code></td>
-<td style="text-align: left;">For absolute intensity units.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>standard_fbs_32</code></td>
-<td style="text-align: left;">Fixed Bin Size (FBS)</td>
+<td style="text-align: left;">Fixed Bin Size</td>
 <td style="text-align: left;"><code>bin_width=32.0</code></td>
-<td style="text-align: left;">For absolute intensity units.</td>
 </tr>
 </tbody>
 </table>
-<h3 id="running-standard-configurations">Running Standard Configurations</h3>
-<p>You can run specific configurations or use the special <code>"all_standard"</code> keyword to run all 6 at once.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Option A: Run specific configurations</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">mask</span><span class="o">=</span><span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">,</span> <span class="s2">&quot;standard_fbs_16&quot;</span><span class="p">]</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="p">)</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="c1"># Option B: Run ALL 6 standard configurations (Recommended for exploration)</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="n">all_results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="n">mask</span><span class="o">=</span><span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;all_standard&quot;</span><span class="p">]</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="p">)</span>
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="c1"># Accessing results</span>
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="nb">print</span><span class="p">(</span><span class="n">all_results</span><span class="p">[</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">])</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Run a single configuration</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># Run all 6 standard configurations</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">all_results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run_all_standard_configs</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">)</span>
 </code></pre></div>
-<h3 id="what-you-get-and-what-you-dont">What you get (and what you don't)</h3>
-<p>The standard configurations are meant to be a fast, reproducible baseline:</p>
-<ul>
-<li>You get full first-order intensity statistics (<code>"intensity"</code>), morphology, textures, histogram, and IVH.</li>
-<li>You do <strong>not</strong> get spatial/local intensity extras unless you build a custom configuration and enable them.</li>
-</ul>
-<p>If you need spatial/local intensity metrics for a specific study, use a custom configuration (examples below).</p>
+<div class="admonition tip">
+<p class="admonition-title">Learn More</p>
+<p>For detailed configuration specifications, FBN vs FBS guidance, export/import capabilities, and best practices, see the <strong><a href="../predefined_configurations/">Predefined Configurations</a></strong> guide.</p>
+</div>
 <hr />
 <h2 id="custom-configurations">Custom Configurations</h2>
 <p>For advanced users, the pipeline allows you to define custom sequences of steps. A configuration is a list of dictionaries, where each dictionary represents a step.</p>
@@ -2811,6 +2717,29 @@ but may not be scientifically meaningful for many radiomics studies.</p>
 <li>List of executed steps with their parameters</li>
 <li>Status of each step</li>
 </ul>
+<hr />
+<h2 id="configuration-export-import">Configuration Export &amp; Import</h2>
+<p>Pictologics supports exporting and importing pipeline configurations in <strong>YAML</strong> and <strong>JSON</strong> formats for reproducible research.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;my_study_config&quot;</span><span class="p">,</span> <span class="p">[</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">]}},</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="p">])</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="c1"># Export to YAML or JSON</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">save_configs</span><span class="p">(</span><span class="s2">&quot;my_configs.yaml&quot;</span><span class="p">)</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="c1"># Import from file</span>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="o">.</span><span class="n">load_configs</span><span class="p">(</span><span class="s2">&quot;my_configs.yaml&quot;</span><span class="p">)</span>
+</code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">Full Configuration Guide</p>
+<p>For complete documentation on configuration file formats, schema versioning, merging configurations, 
+validation, and the template system API, see the <strong><a href="../predefined_configurations/">Predefined Configurations</a></strong> guide.</p>
+</div>
 
 
 
