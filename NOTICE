@@ -21,3 +21,4 @@ This product uses the following third-party libraries:
 - Matplotlib (PSF-based) - https://matplotlib.org/
 - Pillow (MIT-CMU) - https://github.com/python-pillow/Pillow
 - PyWavelets (MIT) - https://pywavelets.readthedocs.io/
+- PyYAML (MIT) - https://github.com/yaml/pyyaml

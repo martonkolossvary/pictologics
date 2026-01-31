@@ -2,6 +2,11 @@
 
 This section provides practical, end-to-end examples for common Pictologics workflows. The goal is to show how to combine loading, preprocessing, feature extraction, and result export patterns into scripts you can reuse. Many of these common processing techniques are in development to make the batch processing of cases even more easy. Therefore check back often to see any of these processing steps being implemented into the core package.
 
+!!! tip "Share Your Configurations"
+    All custom configurations used in these examples can be exported to YAML/JSON files for reproducibility.
+    Use `pipeline.save_configs("my_configs.yaml")` to save your configurations and share them with collaborators.
+    See the **[Predefined Configurations](predefined_configurations.md)** guide for details.
+
 ---
 
 ## Case 1: Batch radiomics from a folder of NIfTI files (no masks)

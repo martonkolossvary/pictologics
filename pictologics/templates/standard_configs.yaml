@@ -1,0 +1,150 @@
+# Pictologics Standard Configuration Templates
+# =============================================
+#
+# These are the standard, IBSI-compliant pipeline configurations
+# for radiomics feature extraction. They provide reproducible
+# workflows for research.
+
+schema_version: "1.0"
+description: "Standard pipeline configurations for radiomics feature extraction"
+
+configs:
+  # -----------------------------
+  # Fixed Bin Number (FBN) Configs
+  # -----------------------------
+
+  standard_fbn_8:
+    description: "Standard FBN-8: 0.5mm isotropic resampling, 8 fixed bins"
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+          interpolation: linear
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 8
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  standard_fbn_16:
+    description: "Standard FBN-16: 0.5mm isotropic resampling, 16 fixed bins"
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+          interpolation: linear
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 16
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  standard_fbn_32:
+    description: "Standard FBN-32: 0.5mm isotropic resampling, 32 fixed bins"
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+          interpolation: linear
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  # -----------------------------
+  # Fixed Bin Size (FBS) Configs
+  # -----------------------------
+
+  standard_fbs_8:
+    description: "Standard FBS-8: 0.5mm isotropic resampling, 8.0 HU bin width"
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+          interpolation: linear
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 8.0
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  standard_fbs_16:
+    description: "Standard FBS-16: 0.5mm isotropic resampling, 16.0 HU bin width"
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+          interpolation: linear
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 16.0
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  standard_fbs_32:
+    description: "Standard FBS-32: 0.5mm isotropic resampling, 32.0 HU bin width"
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+          interpolation: linear
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 32.0
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false

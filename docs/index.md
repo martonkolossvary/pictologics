@@ -37,6 +37,7 @@ See also the [NOTICE](NOTICE.md) file for attribution and third-party library in
     *   **Intensity**: Mean, Median, Skewness, Kurtosis, etc.
     *   **Texture**: GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM.
 *   **Filters**: IBSI 2-compliant convolutional filters including Mean, LoG, Laws, Gabor, Wavelets, Simoncelli and others.
+*   **Configuration Management**: Export/import pipeline configurations in YAML/JSON. Share reproducible workflows, version control settings, and ensure consistent multi-site processing.
 *   **Utilities**: Built-in DICOM database parsing, organization and viewing tools.
 
 ## Getting Started

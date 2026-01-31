@@ -92,7 +92,7 @@ Comparisons between **Pictologics** and **PyRadiomics** (single-thread parity).
 - **Hardware**: Apple M4 Pro, 14 cores, 48 GB
 - **OS**: macOS 26.2 (arm64)
 - **Python**: 3.12.10
-- **Core deps**: pictologics 0.3.0, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
+- **Core deps**: pictologics 0.3.1, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
 - **PyRadiomics stack (parity runs)**: pyradiomics 3.1.1.dev111+g8ed579383, SimpleITK 2.5.3
 - **BLAS/LAPACK**: Apple Accelerate (from `numpy.show_config()`)
 
@@ -135,7 +135,7 @@ Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoi
 
 ## Quality & Compliance
 
-**IBSI Compliance**: [IBSI 1 Features](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/) | [IBSI 2 Phase 1 Filters](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/) | [Phase 2 Features](https://martonkolossvary.github.io/pictologics/ibsi2_phase2_compliance/) | [Phase 3 Reproducibility](https://martonkolossvary.github.io/pictologics/ibsi2_phase3_compliance/)
+**IBSI Compliance**: [IBSI 1 Features](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/) | [IBSI 2 Phase 1 Filters](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/) | [Phase 2 Features](https://martonkolossvary.github.io/pictologics/ibsi2_phase2/) | [Phase 3 Reproducibility](https://martonkolossvary.github.io/pictologics/ibsi2_phase3/)
 
 ### Code Health
 

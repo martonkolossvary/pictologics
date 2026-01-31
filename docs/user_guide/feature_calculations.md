@@ -30,6 +30,11 @@ Pictologics includes a set of **Standard Configurations** commonly used in radio
     
     If you need these metrics, see the customization examples below.
 
+!!! tip "Reproducible Research"
+    Save your configuration settings for reproducibility using `pipeline.save_configs("config.yaml")`.
+    See the **[Predefined Configurations](predefined_configurations.md)** guide for details on exporting,
+    sharing, and version-controlling your pipeline configurations.
+
 ```python
 from pictologics import RadiomicsPipeline, format_results, save_results
 

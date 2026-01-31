@@ -18,14 +18,18 @@ Key Features:
 
 from __future__ import annotations
 
+import copy
 import datetime
 import json
+import logging
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional, cast
 
 import numpy as np
 import pandas as pd
+import yaml
 from numpy import typing as npt
 
 from .features.intensity import (
@@ -67,6 +71,13 @@ from .preprocessing import (
     resegment_mask,
     round_intensities,
 )
+from .templates import get_standard_templates
+
+# Schema version for config serialization - increment when format changes
+CONFIG_SCHEMA_VERSION = "1.0"
+
+# Logger for validation warnings
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -108,102 +119,44 @@ class RadiomicsPipeline:
 
     def _load_predefined_configs(self) -> None:
         """
-        Load predefined, commonly used pipeline configurations.
+        Load predefined, commonly used pipeline configurations from templates.
         """
-        # Common resampling parameters
-        resample_05mm = {
-            "step": "resample",
-            "params": {"new_spacing": (0.5, 0.5, 0.5), "interpolation": "linear"},
-        }
+        try:
+            standard_configs = get_standard_templates()
+            for name, steps in standard_configs.items():
+                # Convert YAML lists to tuples where needed (e.g., new_spacing)
+                converted_steps = self._convert_yaml_steps(steps)
+                self._configs[name] = converted_steps
+        except Exception as e:
+            _logger.warning(f"Failed to load standard templates: {e}")
+            # Fallback to empty configs - user can add their own
+            pass
 
-        # Common feature extraction parameters (all families)
-        extract_all = {
-            "step": "extract_features",
-            "params": {
-                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-                # Performance-friendly defaults: spatial/local intensity extras can be
-                # extremely slow on larger ROIs. Users can enable explicitly in custom configs.
-                "include_spatial_intensity": False,
-                "include_local_intensity": False,
-            },
-        }
+    def _convert_yaml_steps(self, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Convert YAML-loaded steps to internal format.
 
-        # --- FBN Configurations ---
-
-        # Steps1: 0.5mm, FBN 8
-        self.add_config(
-            "standard_fbn_8",
-            [
-                resample_05mm,
-                {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
-                extract_all,
-            ],
-        )
-
-        # Steps2: 0.5mm, FBN 16
-        self.add_config(
-            "standard_fbn_16",
-            [
-                resample_05mm,
-                {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
-                extract_all,
-            ],
-        )
-
-        # Steps3: 0.5mm, FBN 32
-        self.add_config(
-            "standard_fbn_32",
-            [
-                resample_05mm,
-                {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-                extract_all,
-            ],
-        )
-
-        # --- FBS Configurations ---
-
-        # Steps4: 0.5mm, FBS 8.0
-        self.add_config(
-            "standard_fbs_8",
-            [
-                resample_05mm,
-                {"step": "discretise", "params": {"method": "FBS", "bin_width": 8.0}},
-                extract_all,
-            ],
-        )
-
-        # Steps5: 0.5mm, FBS 16.0
-        self.add_config(
-            "standard_fbs_16",
-            [
-                resample_05mm,
-                {"step": "discretise", "params": {"method": "FBS", "bin_width": 16.0}},
-                extract_all,
-            ],
-        )
-
-        # Steps6: 0.5mm, FBS 32.0
-        self.add_config(
-            "standard_fbs_32",
-            [
-                resample_05mm,
-                {"step": "discretise", "params": {"method": "FBS", "bin_width": 32.0}},
-                extract_all,
-            ],
-        )
+        YAML loads lists, but some parameters expect tuples (e.g., new_spacing).
+        """
+        converted = []
+        for step in steps:
+            new_step = {"step": step["step"]}
+            if "params" in step:
+                params = copy.deepcopy(step["params"])
+                # Convert new_spacing list to tuple
+                if "new_spacing" in params and isinstance(params["new_spacing"], list):
+                    params["new_spacing"] = tuple(params["new_spacing"])
+                new_step["params"] = params
+            converted.append(new_step)
+        return converted
 
     def get_all_standard_config_names(self) -> list[str]:
         """
         Returns the list of all standard configuration names.
+
+        Returns names from loaded templates that start with 'standard_'.
         """
-        return [
-            "standard_fbn_8",
-            "standard_fbn_16",
-            "standard_fbn_32",
-            "standard_fbs_8",
-            "standard_fbs_16",
-            "standard_fbs_32",
-        ]
+        return sorted([name for name in self._configs.keys() if name.startswith("standard_")])
 
     def add_config(self, name: str, steps: list[dict[str, Any]]) -> "RadiomicsPipeline":
         """
@@ -924,3 +877,404 @@ class RadiomicsPipeline:
 
         with open(output_path, "w") as f:
             json.dump(self._log, f, indent=4, default=str)
+
+    # -------------------------------------------------------------------------
+    # Configuration Serialization Methods
+    # -------------------------------------------------------------------------
+
+    def list_configs(self) -> list[str]:
+        """
+        List all registered configuration names.
+
+        Returns:
+            List of configuration names.
+        """
+        return list(self._configs.keys())
+
+    def get_config(self, name: str) -> list[dict[str, Any]]:
+        """
+        Get a copy of a configuration by name.
+
+        Args:
+            name: Configuration name.
+
+        Returns:
+            Deep copy of the configuration steps.
+
+        Raises:
+            KeyError: If configuration not found.
+        """
+        if name not in self._configs:
+            raise KeyError(f"Configuration '{name}' not found")
+        return copy.deepcopy(self._configs[name])
+
+    def remove_config(self, name: str) -> "RadiomicsPipeline":
+        """
+        Remove a configuration by name.
+
+        Args:
+            name: Configuration name to remove.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            KeyError: If configuration not found.
+        """
+        if name not in self._configs:
+            raise KeyError(f"Configuration '{name}' not found")
+        del self._configs[name]
+        return self
+
+    def to_dict(
+        self,
+        config_names: Optional[list[str]] = None,
+        include_metadata: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Export configurations to a dictionary.
+
+        Args:
+            config_names: Specific configs to export. If None, exports all.
+            include_metadata: Whether to include schema version and metadata.
+
+        Returns:
+            Dictionary with configs and optional metadata.
+        """
+        if config_names is None:
+            configs_to_export = self._configs
+        else:
+            configs_to_export = {
+                name: self._configs[name]
+                for name in config_names
+                if name in self._configs
+            }
+
+        # Convert tuples to lists for serialization
+        serializable_configs: dict[str, Any] = {}
+        for name, steps in configs_to_export.items():
+            serializable_configs[name] = {
+                "steps": self._make_serializable(steps)
+            }
+
+        if include_metadata:
+            return {
+                "schema_version": CONFIG_SCHEMA_VERSION,
+                "exported_at": datetime.datetime.now().isoformat(),
+                "configs": serializable_configs,
+            }
+        else:
+            return {"configs": serializable_configs}
+
+    def _make_serializable(self, obj: Any) -> Any:
+        """Convert tuples and other non-serializable types to serializable forms."""
+        if isinstance(obj, tuple):
+            return list(obj)
+        elif isinstance(obj, dict):
+            return {k: self._make_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._make_serializable(item) for item in obj]
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.integer, np.floating)):
+            return obj.item()
+        return obj
+
+    def to_json(
+        self,
+        config_names: Optional[list[str]] = None,
+        indent: int = 2,
+    ) -> str:
+        """
+        Export configurations to a JSON string.
+
+        Args:
+            config_names: Specific configs to export. If None, exports all.
+            indent: JSON indentation level.
+
+        Returns:
+            JSON string representation.
+        """
+        data = self.to_dict(config_names=config_names)
+        return json.dumps(data, indent=indent, default=str)
+
+    def to_yaml(
+        self,
+        config_names: Optional[list[str]] = None,
+    ) -> str:
+        """
+        Export configurations to a YAML string.
+
+        Args:
+            config_names: Specific configs to export. If None, exports all.
+
+        Returns:
+            YAML string representation.
+        """
+        data = self.to_dict(config_names=config_names)
+        result: str = yaml.dump(data, default_flow_style=False, sort_keys=False)
+        return result
+
+    def save_configs(
+        self,
+        output_path: str | Path,
+        config_names: Optional[list[str]] = None,
+    ) -> None:
+        """
+        Save configurations to a file (JSON or YAML based on extension).
+
+        Args:
+            output_path: Path to output file. Extension determines format.
+            config_names: Specific configs to export. If None, exports all.
+
+        Raises:
+            ValueError: If file extension is not .json, .yaml, or .yml.
+        """
+        path = Path(output_path)
+        suffix = path.suffix.lower()
+
+        if suffix == ".json":
+            content = self.to_json(config_names=config_names)
+        elif suffix in (".yaml", ".yml"):
+            content = self.to_yaml(config_names=config_names)
+        else:
+            raise ValueError(f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml")
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        validate: bool = False,
+    ) -> "RadiomicsPipeline":
+        """
+        Create a new pipeline instance from a configuration dictionary.
+
+        Args:
+            data: Configuration dictionary with 'configs' key.
+            validate: Whether to validate parameters (logs warnings for issues).
+
+        Returns:
+            New RadiomicsPipeline instance with loaded configs.
+        """
+        pipeline = cls()
+
+        # Handle schema version migration if needed
+        schema_version = data.get("schema_version", "1.0")
+        migrated_data = cls._migrate_config(data, schema_version)
+
+        configs = migrated_data.get("configs", {})
+        for name, config_data in configs.items():
+            if isinstance(config_data, dict) and "steps" in config_data:
+                steps = config_data["steps"]
+            elif isinstance(config_data, list):
+                steps = config_data
+            else:
+                _logger.warning(f"Invalid config format for '{name}', skipping")
+                continue
+
+            # Convert YAML lists to tuples where needed
+            converted_steps = pipeline._convert_yaml_steps(steps)
+
+            if validate:
+                cls._validate_config(name, converted_steps)
+
+            pipeline._configs[name] = converted_steps
+
+        return pipeline
+
+    @classmethod
+    def from_json(
+        cls,
+        json_string: str,
+        validate: bool = False,
+    ) -> "RadiomicsPipeline":
+        """
+        Create a new pipeline instance from a JSON string.
+
+        Args:
+            json_string: JSON configuration string.
+            validate: Whether to validate parameters.
+
+        Returns:
+            New RadiomicsPipeline instance.
+        """
+        data = json.loads(json_string)
+        return cls.from_dict(data, validate=validate)
+
+    @classmethod
+    def from_yaml(
+        cls,
+        yaml_string: str,
+        validate: bool = False,
+    ) -> "RadiomicsPipeline":
+        """
+        Create a new pipeline instance from a YAML string.
+
+        Args:
+            yaml_string: YAML configuration string.
+            validate: Whether to validate parameters.
+
+        Returns:
+            New RadiomicsPipeline instance.
+        """
+        data = yaml.safe_load(yaml_string)
+        return cls.from_dict(data, validate=validate)
+
+    @classmethod
+    def load_configs(
+        cls,
+        file_path: str | Path,
+        validate: bool = False,
+    ) -> "RadiomicsPipeline":
+        """
+        Load configurations from a file (JSON or YAML).
+
+        Args:
+            file_path: Path to configuration file.
+            validate: Whether to validate parameters.
+
+        Returns:
+            New RadiomicsPipeline instance.
+
+        Raises:
+            FileNotFoundError: If file doesn't exist.
+            ValueError: If file extension is unsupported.
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Configuration file not found: {path}")
+
+        suffix = path.suffix.lower()
+        content = path.read_text(encoding="utf-8")
+
+        if suffix == ".json":
+            return cls.from_json(content, validate=validate)
+        elif suffix in (".yaml", ".yml"):
+            return cls.from_yaml(content, validate=validate)
+        else:
+            raise ValueError(f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml")
+
+    def merge_configs(
+        self,
+        other: "RadiomicsPipeline",
+        overwrite: bool = False,
+    ) -> "RadiomicsPipeline":
+        """
+        Merge configurations from another pipeline instance.
+
+        Args:
+            other: Another RadiomicsPipeline to merge from.
+            overwrite: Whether to overwrite existing configs with same name.
+
+        Returns:
+            Self for method chaining.
+        """
+        for name, steps in other._configs.items():
+            if name in self._configs and not overwrite:
+                _logger.warning(f"Config '{name}' already exists, skipping (use overwrite=True)")
+                continue
+            self._configs[name] = copy.deepcopy(steps)
+        return self
+
+    # -------------------------------------------------------------------------
+    # Schema Migration
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _migrate_config(data: dict[str, Any], from_version: str) -> dict[str, Any]:
+        """
+        Migrate configuration from an older schema version to current.
+
+        Args:
+            data: Configuration data to migrate.
+            from_version: Source schema version.
+
+        Returns:
+            Migrated configuration data.
+        """
+        if from_version == CONFIG_SCHEMA_VERSION:
+            return data
+
+        # Future migrations would go here
+        # if from_version == "1.0" and CONFIG_SCHEMA_VERSION == "1.1":
+        #     # Apply 1.0 -> 1.1 migrations
+        #     pass
+
+        _logger.info(f"Migrated config from v{from_version} to v{CONFIG_SCHEMA_VERSION}")
+        return data
+
+    # -------------------------------------------------------------------------
+    # Validation
+    # -------------------------------------------------------------------------
+
+    # Known step types and their valid parameters
+    _VALID_STEPS: dict[str, set[str]] = {
+        "resample": {"new_spacing", "interpolation"},
+        "resegment": {"range_min", "range_max"},
+        "filter_outliers": {"sigma"},
+        "binarize_mask": {"threshold", "mask_values", "apply_to"},
+        "keep_largest_component": set(),
+        "round_intensities": set(),
+        "discretise": {"method", "n_bins", "bin_width", "min_value", "max_value"},
+        "filter": {
+            "filter_type", "sigma", "cutoff", "compute_response_map", "boundary_condition",
+            "orientation", "kernal_size", "output_type", "alpha", "order", "levels",
+            "wavelet_name", "rotation_invariant", "pool_method", "response_type",
+        },
+        "extract_features": {
+            "families", "include_spatial_intensity", "include_local_intensity",
+            "texture_matrix_params", "ivh_params",
+        },
+    }
+
+    @classmethod
+    def _validate_config(cls, name: str, steps: list[dict[str, Any]]) -> bool:
+        """
+        Validate a configuration, logging warnings for issues.
+
+        Args:
+            name: Configuration name (for logging).
+            steps: List of step dictionaries.
+
+        Returns:
+            True if valid, False if issues found (warnings are logged).
+        """
+        is_valid = True
+
+        if not isinstance(steps, list):
+            _logger.warning(f"Config '{name}': steps must be a list")
+            return False
+
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                _logger.warning(f"Config '{name}' step {i}: must be a dictionary")
+                is_valid = False
+                continue
+
+            step_type = step.get("step")
+            if not step_type:
+                _logger.warning(f"Config '{name}' step {i}: missing 'step' key")
+                is_valid = False
+                continue
+
+            if step_type not in cls._VALID_STEPS:
+                _logger.warning(f"Config '{name}' step {i}: unknown step type '{step_type}'")
+                is_valid = False
+                continue
+
+            # Check for unknown parameters
+            params = step.get("params", {})
+            if params:
+                valid_params = cls._VALID_STEPS[step_type]
+                for param_name in params.keys():
+                    if param_name not in valid_params:
+                        _logger.warning(
+                            f"Config '{name}' step {i} ({step_type}): "
+                            f"unknown parameter '{param_name}'"
+                        )
+
+        return is_valid
+

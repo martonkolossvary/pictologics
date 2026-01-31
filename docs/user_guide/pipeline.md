@@ -51,77 +51,35 @@ complex_config = [
 
 ## Predefined Configurations
 
-Pictologics includes a suite of **Standard Configurations** designed to cover the most common radiomics analysis scenarios. These configurations are compliant with general best practices (e.g., IBSI).
+Pictologics includes **6 standard configurations** designed for common radiomics workflows. All standard configurations share:
 
-### Common Characteristics
-All standard configurations share the following preprocessing steps:
+- **Resampling**: 0.5mm × 0.5mm × 0.5mm isotropic spacing
+- **Feature Families**: intensity, morphology, texture, histogram, and IVH
+- **Performance-optimized**: Spatial/local intensity disabled by default
 
-*   **Resampling**: Images are resampled to **0.5mm x 0.5mm x 0.5mm** isotropic spacing using Linear interpolation (Nearest Neighbor for masks).
-*   **Feature Families**: All feature families are extracted: `intensity`, `morphology`, `texture`, `histogram`, and `ivh`.
-
-!!! note
-    **Performance-friendly default for standard configs**
-    The built-in `standard_*` configurations disable the two most time-intensive intensity extras by default:
-    `include_spatial_intensity=False` and `include_local_intensity=False`.
-    
-    This does **not** change the general behavior of the `extract_features` step when you build your own
-    custom configuration: if you request `"intensity"` in a custom config and do not specify these flags,
-    spatial/local intensity will still be included (backward compatible).
-
-!!! warning
-    **Spatial/local intensity features can be very time consuming.**
-    Spatial intensity (Moran's I / Geary's C) and local intensity peak features can dominate runtime for larger ROIs.
-    For images larger than **50×50×50** voxels, this is generally **not recommended** unless you explicitly need them.
-    
-    - Standard configs: disabled by default
-    - Custom configs: enabled by default (unless you set `include_spatial_intensity=False` / `include_local_intensity=False`)
-
-### Available Configurations
-
-| Configuration Name | Discretisation Method | Parameters | Description |
-| :--- | :--- | :--- | :--- |
-| `standard_fbn_8` | Fixed Bin Number (FBN) | `n_bins=8` | Coarse texture analysis. |
-| `standard_fbn_16` | Fixed Bin Number (FBN) | `n_bins=16` | Medium texture analysis. |
-| `standard_fbn_32` | Fixed Bin Number (FBN) | `n_bins=32` | Fine texture analysis (Common default). |
-| `standard_fbs_8` | Fixed Bin Size (FBS) | `bin_width=8.0` | For absolute intensity units (e.g., HU). |
-| `standard_fbs_16` | Fixed Bin Size (FBS) | `bin_width=16.0` | For absolute intensity units. |
-| `standard_fbs_32` | Fixed Bin Size (FBS) | `bin_width=32.0` | For absolute intensity units. |
-
-### Running Standard Configurations
-
-You can run specific configurations or use the special `"all_standard"` keyword to run all 6 at once.
+| Configuration | Method | Parameters |
+| :--- | :--- | :--- |
+| `standard_fbn_8` | Fixed Bin Number | `n_bins=8` |
+| `standard_fbn_16` | Fixed Bin Number | `n_bins=16` |
+| `standard_fbn_32` | Fixed Bin Number | `n_bins=32` |
+| `standard_fbs_8` | Fixed Bin Size | `bin_width=8.0` |
+| `standard_fbs_16` | Fixed Bin Size | `bin_width=16.0` |
+| `standard_fbs_32` | Fixed Bin Size | `bin_width=32.0` |
 
 ```python
 from pictologics import RadiomicsPipeline
 
 pipeline = RadiomicsPipeline()
 
-# Option A: Run specific configurations
-results = pipeline.run(
-    image="path/to/image.nii.gz",
-    mask="path/to/mask.nii.gz",
-    config_names=["standard_fbn_32", "standard_fbs_16"]
-)
+# Run a single configuration
+results = pipeline.run("standard_fbn_32", image, mask)
 
-# Option B: Run ALL 6 standard configurations (Recommended for exploration)
-all_results = pipeline.run(
-    image="path/to/image.nii.gz",
-    mask="path/to/mask.nii.gz",
-    config_names=["all_standard"]
-)
-
-# Accessing results
-print(all_results["standard_fbn_32"])
+# Run all 6 standard configurations
+all_results = pipeline.run_all_standard_configs(image, mask)
 ```
 
-### What you get (and what you don't)
-
-The standard configurations are meant to be a fast, reproducible baseline:
-
-*   You get full first-order intensity statistics (`"intensity"`), morphology, textures, histogram, and IVH.
-*   You do **not** get spatial/local intensity extras unless you build a custom configuration and enable them.
-
-If you need spatial/local intensity metrics for a specific study, use a custom configuration (examples below).
+!!! tip "Learn More"
+    For detailed configuration specifications, FBN vs FBS guidance, export/import capabilities, and best practices, see the **[Predefined Configurations](predefined_configurations.md)** guide.
 
 ---
 
@@ -528,3 +486,29 @@ The log file contains:
 *   List of executed steps with their parameters
 *   Status of each step
 
+---
+
+## Configuration Export & Import
+
+Pictologics supports exporting and importing pipeline configurations in **YAML** and **JSON** formats for reproducible research.
+
+```python
+from pictologics import RadiomicsPipeline
+
+pipeline = RadiomicsPipeline()
+pipeline.add_config("my_study_config", [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture"]}},
+])
+
+# Export to YAML or JSON
+pipeline.save_configs("my_configs.yaml")
+
+# Import from file
+pipeline = RadiomicsPipeline.load_configs("my_configs.yaml")
+```
+
+!!! tip "Full Configuration Guide"
+    For complete documentation on configuration file formats, schema versioning, merging configurations, 
+    validation, and the template system API, see the **[Predefined Configurations](predefined_configurations.md)** guide.

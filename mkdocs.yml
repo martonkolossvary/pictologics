@@ -73,6 +73,7 @@ nav:
     - Image Filtering: user_guide/image_filtering.md
     - Feature Calculations: user_guide/feature_calculations.md
     - Pipeline Usage: user_guide/pipeline.md
+    - Predefined Configurations: user_guide/predefined_configurations.md
     - Utilities: user_guide/utilities.md
     - Case Examples: user_guide/case_examples.md
   - API Reference:

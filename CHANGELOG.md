@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.3.1] - 2026-01-31
+
+### Added
+- **Pipeline Configuration Serialization**: Full YAML/JSON export/import for `RadiomicsPipeline` configurations:
+    - `save_configs()` / `load_configs()`: File-based configuration persistence
+    - `to_yaml()` / `from_yaml()`: String-based YAML serialization
+    - `to_json()` / `from_json()`: String-based JSON serialization
+    - `to_dict()` / `from_dict()`: Dictionary conversion for programmatic use
+- **Configuration Management Methods**:
+    - `add_config()`: Register custom configurations
+    - `get_config()`: Retrieve configuration by name (deep copy)
+    - `remove_config()`: Delete configurations
+    - `list_configs()`: List all registered configuration names
+    - `merge_configs()`: Combine configurations from multiple pipelines
+- **Template System**: YAML-based configuration templates in `pictologics/templates/`:
+    - Standard configurations now loaded from `standard_configs.yaml`
+    - Template loading API: `list_template_files()`, `load_template_file()`, `get_standard_templates()`, `get_all_templates()`, `get_template_metadata()`
+- **Schema Versioning**: Configuration files include `schema_version` for forward compatibility and automatic migration
+- **Configuration Validation**: Opt-in validation via `validate=True` parameter logs warnings for unknown steps/parameters
+- **Documentation**: New "Predefined Configurations" user guide page with comprehensive examples including end-to-end multi-site study workflow
+
+### Changed
+- Standard configurations (`standard_fbn_*`, `standard_fbs_*`) now loaded from YAML templates instead of hardcoded dictionaries
+- Updated pipeline.md documentation with condensed configuration section and cross-references
+
+### Dependencies
+- Added `pyyaml>=6.0` as core dependency for YAML serialization
+
+---
+
 ## [0.3.0] - 2026-01-25
 
 ### Added
@@ -58,6 +88,7 @@
 
 ---
 
+[0.3.1]: https://github.com/martonkolossvary/pictologics/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/martonkolossvary/pictologics/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/martonkolossvary/pictologics/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/martonkolossvary/pictologics/releases/tag/v0.1.0
