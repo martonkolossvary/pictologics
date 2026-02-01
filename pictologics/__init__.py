@@ -2,8 +2,17 @@
 Pictologics: IBSI-compliant radiomic feature extraction from medical images.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
+from .deduplication import (
+    CURRENT_RULES_VERSION,
+    RULES_REGISTRY,
+    ConfigurationAnalyzer,
+    DeduplicationPlan,
+    DeduplicationRules,
+    PreprocessingSignature,
+    get_default_rules,
+)
 from .loader import (
     Image,
     create_full_mask,
@@ -20,6 +29,7 @@ from .warmup import warmup_jit
 warmup_jit()
 
 __all__ = [
+    # Core
     "load_image",
     "load_seg",
     "Image",
@@ -28,4 +38,12 @@ __all__ = [
     "RadiomicsPipeline",
     "format_results",
     "save_results",
+    # Deduplication
+    "ConfigurationAnalyzer",
+    "DeduplicationPlan",
+    "DeduplicationRules",
+    "PreprocessingSignature",
+    "CURRENT_RULES_VERSION",
+    "RULES_REGISTRY",
+    "get_default_rules",
 ]

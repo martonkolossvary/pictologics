@@ -25,10 +25,6 @@ from pictologics.features.intensity import (
 
 class TestIntensityFeatures(unittest.TestCase):
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        os.environ.pop("NUMBA_DISABLE_JIT", None)
-
     # ----------------------------------------------------------------------
     # 4.1 First Order Statistics
     # ----------------------------------------------------------------------

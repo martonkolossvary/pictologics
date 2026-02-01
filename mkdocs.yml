@@ -80,6 +80,7 @@ nav:
     - Loaders: api/loader.md
     - Preprocessing: api/preprocessing.md
     - Pipeline: api/pipeline.md
+    - Deduplication: api/deduplication.md
     - Filters: api/filters.md
     - Results: api/results.md
     - Utilities: api/utilities.md

@@ -1,9 +1,10 @@
 import unittest
+
 import numpy as np
+
 from pictologics.features._utils import (
-    compute_nonzero_bbox,
-    crop_arrays_to_bbox,
     BBoxInfo,
+    crop_arrays_to_bbox,
 )
 
 

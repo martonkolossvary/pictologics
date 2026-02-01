@@ -83,6 +83,144 @@ all_results = pipeline.run_all_standard_configs(image, mask)
 
 ---
 
+## Deduplication (Performance Optimization)
+
+When running multiple configurations that share preprocessing steps but differ only in discretization (e.g., running all 6 standard configurations), the pipeline can **automatically avoid redundant computation** by enabling deduplication.
+
+### How It Works
+
+!!! info "Enabled by Default"
+    Deduplication is **enabled by default** (`deduplicate=True`). You don't need to explicitly set it—just create a pipeline and run multiple configurations to benefit from automatic optimization.
+
+The deduplication system analyzes your configurations and identifies which feature families can be computed once and reused:
+
+1. **Preprocessing Signature**: Each configuration's preprocessing steps (resample, resegment, filter_outliers, etc.) are hashed into a unique signature.
+2. **Feature Family Dependencies**: The system knows which preprocessing steps affect which feature families:
+    - **Morphology**: Depends only on mask geometry operations (resample, binarize_mask, keep_largest_component). **Not affected by intensity operations or filters.**
+    - **Intensity** (including spatial/local): Depends on intensity preprocessing (resample, resegment, filter_outliers, filter). Different filters produce different intensity features.
+    - **Texture/Histogram/IVH**: Depends on all of the above **plus** discretization
+3. **Execution Plan**: When configs share preprocessing but differ only in discretization, families like morphology and intensity are computed once and reused.
+
+### Behavior: deduplicate=True vs False
+
+| Setting | Behavior | Results |
+| :--- | :--- | :--- |
+| `deduplicate=True` (default) | Features computed once per unique preprocessing signature, then **copied** to matching configs | All configs receive complete, identical feature values for reused families |
+| `deduplicate=False` | Features computed independently for every config | Same results, but slower execution |
+
+!!! note "Results Are Always Complete"
+    When deduplication copies features, they are **copied into the results dictionary**—never empty or missing. Every configuration returns a complete feature set, whether features were freshly computed or reused from cache.
+
+!!! tip "Copy Behavior"
+    Reused features are **deep copied** to each configuration's result dictionary. Modifying results from one configuration will NOT affect results from another.
+
+### Usage
+
+```python
+from pictologics import RadiomicsPipeline
+
+# Deduplication is enabled by default - no need to set it!
+pipeline = RadiomicsPipeline()  # deduplicate=True by default
+
+# Run all 6 standard configurations
+results = pipeline.run_all_standard_configs(image, mask)
+
+# Check deduplication statistics
+print(pipeline.deduplication_stats)
+# Example output:
+# {
+#     'reused_families': 24,  # Families reused from cache
+#     'computed_families': 12, # Families freshly computed
+#     'cache_hit_rate': 0.67   # 67% of families were reused
+# }
+
+# Verify: all configs have complete results (no missing features)
+for config_name, features in results.items():
+    print(f"{config_name}: {len(features)} features")
+```
+
+### Configuration Parameters
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `deduplicate` | `bool` | `True` | Enable/disable deduplication optimization |
+| `deduplication_rules` | `str` or `DeduplicationRules` | `"1.0.0"` | Rules version for reproducibility |
+
+### When to Use Deduplication
+
+!!! success "Recommended For"
+    - Running **multiple discretization strategies** (FBN 8/16/32 + FBS 8/16/32) on the same preprocessed image
+    - **Batch processing** where many configs share preprocessing steps
+    - **Sensitivity studies** varying only discretization parameters
+
+!!! warning "Not Recommended For"
+    - Single configuration runs (no benefit)
+    - Configurations with different preprocessing steps (nothing to deduplicate)
+    - Memory-constrained environments (cached results consume memory)
+
+### Example: 6 Configs with Shared Preprocessing
+
+```python
+from pictologics import RadiomicsPipeline
+
+# Define shared preprocessing
+base_steps = [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
+]
+
+extract_all = {
+    "step": "extract_features",
+    "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"]},
+}
+
+# Create pipeline (deduplication enabled by default)
+pipeline = RadiomicsPipeline()  # No need to set deduplicate=True
+
+# Add 6 configurations (only discretization differs)
+for n_bins in (8, 16, 32):
+    pipeline.add_config(
+        f"fbn_{n_bins}",
+        base_steps + [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
+            extract_all,
+        ],
+    )
+
+for bin_width in (8.0, 16.0, 32.0):
+    pipeline.add_config(
+        f"fbs_{int(bin_width)}",
+        base_steps + [
+            {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
+            extract_all,
+        ],
+    )
+
+# Run all configs - morphology/intensity computed once, texture 6 times
+results = pipeline.run(
+    image="path/to/image.nii.gz",
+    mask="path/to/mask.nii.gz",
+    config_names=["fbn_8", "fbn_16", "fbn_32", "fbs_8", "fbs_16", "fbs_32"],
+)
+
+# Inspect cache performance
+stats = pipeline.deduplication_stats
+print(f"Cache hit rate: {stats['cache_hit_rate']:.1%}")
+
+# Verify all configs have complete, identical morphology values
+ref_vol = results["fbn_8"]["volume_mesh_ml_HTUR"]
+for config in ["fbn_16", "fbn_32", "fbs_8", "fbs_16", "fbs_32"]:
+    assert results[config]["volume_mesh_ml_HTUR"] == ref_vol
+print("✓ Morphology features identical across all configurations")
+```
+
+In this example, `morphology` and `intensity` features are computed only once (for the first config) and reused for all 6 configurations, while `texture` and `histogram` are computed 6 times (once per discretization). This can provide significant speedups for large datasets.
+
+!!! tip "API Reference"
+    For detailed documentation of the deduplication classes (`ConfigurationAnalyzer`, `DeduplicationPlan`, `PreprocessingSignature`, `DeduplicationRules`), see the **[Deduplication API](../api/deduplication.md)** reference.
+
+---
+
 ## Custom Configurations
 
 For advanced users, the pipeline allows you to define custom sequences of steps. A configuration is a list of dictionaries, where each dictionary represents a step.
@@ -199,9 +337,9 @@ Calculates the radiomic features based on the current state of the image and mas
 
 *   `families`: List of feature families to extract. Options:
     *   `"intensity"`: First-order statistics (Mean, Skewness, etc.).
-        *   By default, this also includes spatial intensity and local intensity.
-        *   Disable these expensive computations via `include_spatial_intensity=False` and/or
-            `include_local_intensity=False` in the step `params`.
+        *   By default, spatial/local intensity features are **not** included.
+        *   Enable via `include_spatial_intensity=True` and/or `include_local_intensity=True`
+            in the step `params`.
     *   `"spatial_intensity"`: Compute only spatial intensity (Moran's I / Geary's C).
     *   `"local_intensity"`: Compute only local/global intensity peak features.
     *   `"morphology"`: Shape and size features (Volume, Sphericity, etc.).
@@ -215,8 +353,6 @@ Additional optional parameters (advanced usage):
     spatial/local intensity extras are included when `"intensity"` is requested.
 *   `ivh_params`: Dict forwarded to `calculate_ivh_features(...)`. Supported keys include:
     `bin_width`, `min_val`, `max_val`, `target_range_min`, `target_range_max`.
-    (There are also backward-compatible aliases: `ivh_bin_width`, `ivh_min_val`, `ivh_max_val`,
-    `ivh_target_range_min`, `ivh_target_range_max`.)
 *   `ivh_discretisation`: Dict specifying a **temporary discretisation** for IVH only. This allows
     using different binning for IVH vs texture features. Example: `{"method": "FBS", "bin_width": 2.5, "min_val": -1000}`.
 *   `ivh_use_continuous`: Boolean. If `True`, uses raw (non-discretised) intensity values for IVH calculation.

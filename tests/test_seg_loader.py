@@ -11,9 +11,7 @@ Tests cover all functionality including:
 """
 
 import os
-import tempfile
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 # Disable JIT warmup for tests to prevent NumPy reload warning and speed up collection
@@ -31,7 +29,6 @@ from pictologics.loaders.seg_loader import (
     get_segment_info,
     load_seg,
 )
-
 
 # ============================================================================
 # Fixtures and Helpers
@@ -53,7 +50,6 @@ def create_mock_seg_dataset(
 
     # Create pixel array with shape (frames, rows, cols)
     # For n_segments and n_slices, total frames = n_segments * n_slices
-    n_slices = n_frames // n_segments
     pixel_array = np.zeros((n_frames, rows, cols), dtype=np.uint8)
 
     # Fill with some test data - each segment gets different values
@@ -327,7 +323,7 @@ class TestLoadSeg:
             assert isinstance(result, dict)
             assert 1 in result
             assert 2 in result
-            for seg_num, img in result.items():
+            for _seg_num, img in result.items():
                 assert isinstance(img, Image)
                 assert img.modality == "SEG"
 

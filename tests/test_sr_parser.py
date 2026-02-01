@@ -12,7 +12,6 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 # Disable JIT warmup for tests
@@ -30,7 +29,6 @@ from pictologics.utilities.sr_parser import (
     _parse_content_sequence,
     is_dicom_sr,
 )
-
 
 # ============================================================================
 # Fixtures and Helpers
@@ -920,7 +918,7 @@ class TestSRDocumentFromFolders:
             mock_doc.measurement_groups = []
             mock_from_file.return_value = mock_doc
 
-            batch = SRDocument.from_folders(
+            SRDocument.from_folders(
                 [str(input_dir)],
                 output_dir=str(output_dir),
                 export_csv=True,

@@ -9,13 +9,11 @@ configurations for radiomics research.
 
 from __future__ import annotations
 
-import logging
+import warnings
 from importlib import resources
 from typing import Any
 
 import yaml
-
-logger = logging.getLogger(__name__)
 
 
 def _get_templates_path() -> resources.abc.Traversable:
@@ -76,7 +74,11 @@ def get_all_templates() -> dict[str, list[dict[str, Any]]]:
         try:
             file_data = load_template_file(filename)
             if not isinstance(file_data, dict):
-                logger.warning(f"Template file {filename} does not contain a dictionary")
+                warnings.warn(
+                    f"Template file {filename} does not contain a dictionary",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 continue
 
             configs = file_data.get("configs", {})
@@ -89,7 +91,11 @@ def get_all_templates() -> dict[str, list[dict[str, Any]]]:
                         all_configs[name] = config_data
 
         except Exception as e:
-            logger.warning(f"Failed to load template file {filename}: {e}")
+            warnings.warn(
+                f"Failed to load template file {filename}: {e}",
+                UserWarning,
+                stacklevel=2,
+            )
 
     return all_configs
 
@@ -115,10 +121,18 @@ def get_standard_templates() -> dict[str, list[dict[str, Any]]]:
         return result
 
     except FileNotFoundError:
-        logger.warning("standard_configs.yaml not found, returning empty dict")
+        warnings.warn(
+            "standard_configs.yaml not found, returning empty dict",
+            UserWarning,
+            stacklevel=2,
+        )
         return {}
     except Exception as e:
-        logger.warning(f"Failed to load standard templates: {e}")
+        warnings.warn(
+            f"Failed to load standard templates: {e}",
+            UserWarning,
+            stacklevel=2,
+        )
         return {}
 
 

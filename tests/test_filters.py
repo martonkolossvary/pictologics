@@ -4,12 +4,12 @@ import numpy as np
 import pytest
 
 from pictologics.filters import (
+    LAWS_KERNELS,
     BoundaryCondition,
     FilterResult,
     gabor_filter,
     laplacian_of_gaussian,
     laws_filter,
-    LAWS_KERNELS,
     mean_filter,
     riesz_log,
     riesz_simoncelli,
@@ -18,7 +18,6 @@ from pictologics.filters import (
     wavelet_transform,
 )
 from pictologics.filters.base import ensure_float32, get_scipy_mode
-
 
 # =============================================================================
 # Test Fixtures

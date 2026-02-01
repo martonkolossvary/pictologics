@@ -9,17 +9,17 @@ Tests cover all functionality including:
 - Interactive viewer (mocked)
 """
 
-import tempfile
 import os
+import tempfile
 from pathlib import Path
 
 # Disable JIT warmup for tests to prevent NumPy reload warning and speed up collection
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
-
-from unittest.mock import MagicMock, patch
 
 from pictologics.loader import Image
 from pictologics.utilities.visualization import (
@@ -400,7 +400,7 @@ class TestVisualizeSlices:
         """Test interactive viewer with overlay."""
         with patch("matplotlib.pyplot.subplots") as mock_subplots, patch(
             "matplotlib.pyplot.axes"
-        ) as mock_axes, patch("matplotlib.widgets.Slider") as mock_slider_class, patch(
+        ), patch("matplotlib.widgets.Slider") as mock_slider_class, patch(
             "matplotlib.pyplot.show"
         ) as mock_show, patch(
             "matplotlib.pyplot.subplots_adjust"

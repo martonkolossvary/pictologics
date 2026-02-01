@@ -1193,7 +1193,6 @@ class TestRepositioning(unittest.TestCase):
     @patch("pictologics.loader.load_image")
     def test_load_and_merge_reposition_to_reference(self, mock_load: MagicMock) -> None:
         """Test load_and_merge_images with reposition_to_reference=True."""
-        from pictologics.loader import _position_in_reference
 
         # Reference image
         reference = Image(

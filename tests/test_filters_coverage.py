@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from pictologics.filters.gabor import gabor_filter
 from pictologics.filters.laws import laws_filter
 from pictologics.filters.wavelets import wavelet_transform

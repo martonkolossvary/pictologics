@@ -21,7 +21,6 @@ from __future__ import annotations
 import copy
 import datetime
 import json
-import logging
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +31,12 @@ import pandas as pd
 import yaml
 from numpy import typing as npt
 
+from .deduplication import (
+    ConfigurationAnalyzer,
+    DeduplicationPlan,
+    DeduplicationRules,
+    get_default_rules,
+)
 from .features.intensity import (
     calculate_intensity_features,
     calculate_intensity_histogram_features,
@@ -76,8 +81,8 @@ from .templates import get_standard_templates
 # Schema version for config serialization - increment when format changes
 CONFIG_SCHEMA_VERSION = "1.0"
 
-# Logger for validation warnings
-_logger = logging.getLogger(__name__)
+# Valid schema versions (for backward compatibility)
+_VALID_SCHEMA_VERSIONS = {"1.0"}
 
 
 @dataclass
@@ -109,12 +114,41 @@ class RadiomicsPipeline:
     """
     A flexible, configurable pipeline for radiomic feature extraction.
     Allows defining multiple processing configurations (sequences of steps) to be run on data.
+
+    Args:
+        deduplicate: Whether to enable feature deduplication across configurations.
+            When True (default), features that would be identical due to shared
+            preprocessing are computed once and reused.
+        deduplication_rules: Specific DeduplicationRules to use, or a version
+            string to look up from the registry. If None, uses current default.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        deduplicate: bool = True,
+        deduplication_rules: DeduplicationRules | str | None = None,
+    ) -> None:
         """Initialize pipeline with empty config registry and load predefined configs."""
         self._configs: dict[str, list[dict[str, Any]]] = {}
         self._log: list[dict[str, Any]] = []
+
+        # Deduplication settings
+        self._deduplication_enabled = deduplicate
+
+        if deduplication_rules is None:
+            self._deduplication_rules = get_default_rules()
+        elif isinstance(deduplication_rules, str):
+            self._deduplication_rules = DeduplicationRules.get_version(deduplication_rules)
+        else:
+            self._deduplication_rules = deduplication_rules
+
+        self._last_deduplication_plan: DeduplicationPlan | None = None
+        self._configs_modified_since_plan: bool = False
+
+        # Deduplication statistics (reset on each run)
+        self._dedup_reused_count: int = 0
+        self._dedup_computed_count: int = 0
+
         self._load_predefined_configs()
 
     def _load_predefined_configs(self) -> None:
@@ -128,9 +162,12 @@ class RadiomicsPipeline:
                 converted_steps = self._convert_yaml_steps(steps)
                 self._configs[name] = converted_steps
         except Exception as e:
-            _logger.warning(f"Failed to load standard templates: {e}")
+            warnings.warn(
+                f"Failed to load standard templates: {e}",
+                UserWarning,
+                stacklevel=2,
+            )
             # Fallback to empty configs - user can add their own
-            pass
 
     def _convert_yaml_steps(self, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
@@ -157,6 +194,73 @@ class RadiomicsPipeline:
         Returns names from loaded templates that start with 'standard_'.
         """
         return sorted([name for name in self._configs.keys() if name.startswith("standard_")])
+
+    # -------------------------------------------------------------------------
+    # Deduplication Properties
+    # -------------------------------------------------------------------------
+
+    @property
+    def deduplication_enabled(self) -> bool:
+        """Whether feature deduplication is enabled."""
+        return self._deduplication_enabled
+
+    @deduplication_enabled.setter
+    def deduplication_enabled(self, value: bool) -> None:
+        """Enable or disable feature deduplication."""
+        self._deduplication_enabled = value
+
+    @property
+    def deduplication_rules(self) -> DeduplicationRules:
+        """Current deduplication rules."""
+        return self._deduplication_rules
+
+    @deduplication_rules.setter
+    def deduplication_rules(self, value: DeduplicationRules | str) -> None:
+        """Set deduplication rules (by version string or DeduplicationRules)."""
+        if isinstance(value, str):
+            self._deduplication_rules = DeduplicationRules.get_version(value)
+        else:
+            self._deduplication_rules = value
+        # Invalidate existing plan when rules change
+        self._configs_modified_since_plan = True
+
+    @property
+    def last_deduplication_plan(self) -> DeduplicationPlan | None:
+        """The last computed deduplication plan, if any."""
+        return self._last_deduplication_plan
+
+    @property
+    def deduplication_stats(self) -> dict[str, int | float]:
+        """
+        Statistics from the last pipeline run with deduplication enabled.
+
+        Returns a dictionary with:
+            - 'reused_families': Number of feature families reused from cache
+            - 'computed_families': Number of feature families freshly computed
+            - 'cache_hit_rate': Fraction of families reused (0.0 to 1.0)
+
+        Returns an empty dict if no features were extracted (with a warning),
+        or if deduplication was not enabled during the last run.
+
+        Note:
+            Statistics are valid because pipeline configurations run sequentially.
+            Parallelization occurs within Numba-accelerated functions, not across configs.
+        """
+        total = self._dedup_reused_count + self._dedup_computed_count
+        if total == 0:
+            warnings.warn(
+                "No features were extracted with deduplication enabled. "
+                "Ensure deduplication is enabled and run() has been called with multiple configs.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return {}
+
+        return {
+            "reused_families": self._dedup_reused_count,
+            "computed_families": self._dedup_computed_count,
+            "cache_hit_rate": self._dedup_reused_count / total,
+        }
 
     def add_config(self, name: str, steps: list[dict[str, Any]]) -> "RadiomicsPipeline":
         """
@@ -190,6 +294,7 @@ class RadiomicsPipeline:
                 raise ValueError("Each step must have a 'step' key")
 
         self._configs[name] = steps
+        self._configs_modified_since_plan = True
         return self
 
     def run(
@@ -272,6 +377,22 @@ class RadiomicsPipeline:
                 else:
                     raise ValueError(f"Configuration '{name}' not found.")
 
+        # Create or regenerate deduplication plan if enabled
+        dedup_plan: DeduplicationPlan | None = None
+        family_cache: dict[str, dict[str, Any]] = {}  # sig_hash -> family_features
+
+        # Reset deduplication statistics for this run
+        self._dedup_reused_count = 0
+        self._dedup_computed_count = 0
+
+        if self._deduplication_enabled and len(target_configs) > 1:
+            # Get configs for analysis
+            configs_to_analyze = {name: self._configs[name] for name in target_configs}
+            analyzer = ConfigurationAnalyzer(configs_to_analyze, self._deduplication_rules)
+            dedup_plan = analyzer.analyze()
+            self._last_deduplication_plan = dedup_plan
+            self._configs_modified_since_plan = False
+
         # Run each configuration
         for config_name in target_configs:
             steps = self._configs[config_name]
@@ -312,7 +433,13 @@ class RadiomicsPipeline:
 
                     # Execute Step
                     if step_name == "extract_features":
-                        features = self._extract_features(state, params)
+                        # Use deduplication if plan exists
+                        if dedup_plan is not None:
+                            features = self._extract_features_with_dedup(
+                                state, params, config_name, dedup_plan, family_cache
+                            )
+                        else:
+                            features = self._extract_features(state, params)
                         config_features.update(features)
                     else:
                         self._execute_preprocessing_step(state, step_name, params)
@@ -325,7 +452,6 @@ class RadiomicsPipeline:
             except Exception as e:
                 config_log["error"] = str(e)
                 config_log["failed_step"] = step_def
-                print(f"Error in config '{config_name}', step '{step_def}': {e}")
 
                 # For empty ROI, fail fast (do not silently return empty/partial features).
                 if isinstance(e, EmptyROIMaskError):
@@ -868,6 +994,289 @@ class RadiomicsPipeline:
 
         return results
 
+    def _extract_features_with_dedup(
+        self,
+        state: PipelineState,
+        params: dict[str, Any],
+        config_name: str,
+        plan: DeduplicationPlan,
+        family_cache: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """
+        Extract features using deduplication plan to avoid redundant computation.
+
+        For each feature family requested, checks if an identical signature has
+        already been computed. If so, reuses cached results. Otherwise computes
+        and caches for potential reuse by subsequent configurations.
+
+        Args:
+            state: Current pipeline state.
+            params: Feature extraction parameters.
+            config_name: Name of the current configuration.
+            plan: Deduplication plan mapping families to signatures.
+            family_cache: Cache of computed family features by signature hash.
+
+        Returns:
+            Dictionary of all extracted features.
+        """
+        results: dict[str, Any] = {}
+        families = params.get(
+            "families", ["intensity", "morphology", "texture", "histogram", "ivh"]
+        )
+
+        for family in families:
+            # Normalize family name for signature lookup
+            # texture_* families use the base "texture" signature
+            sig_family = "texture" if family.startswith("texture_") else family
+
+            # Get signature from plan using (config_name, family) tuple key
+            sig = plan.signatures.get((config_name, sig_family))
+
+            if sig and sig.hash in family_cache:
+                # Reuse cached results
+                cached = family_cache[sig.hash]
+                results.update(cached)
+                self._dedup_reused_count += 1
+            else:
+                # Compute this family
+                family_results = self._extract_single_family(state, family, params)
+                results.update(family_results)
+
+                # Cache if we have a signature
+                if sig:
+                    family_cache[sig.hash] = family_results
+                self._dedup_computed_count += 1
+
+        return results
+
+    def _extract_single_family(
+        self,
+        state: PipelineState,
+        family: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Extract features for a single family.
+
+        This is a refactored helper to enable per-family deduplication.
+        """
+        results: dict[str, Any] = {}
+
+        # Optional kwargs pass-through
+        spatial_intensity_params = params.get("spatial_intensity_params", {}) or {}
+        local_intensity_params = params.get("local_intensity_params", {}) or {}
+        ivh_params = params.get("ivh_params", {}) or {}
+        texture_matrix_params = params.get("texture_matrix_params", {}) or {}
+
+        if family == "morphology":
+            results.update(
+                calculate_morphology_features(
+                    state.morph_mask,
+                    state.raw_image,
+                    intensity_mask=state.intensity_mask,
+                )
+            )
+
+        elif family == "intensity":
+            masked_values = apply_mask(state.raw_image, state.intensity_mask)
+            results.update(calculate_intensity_features(masked_values))
+
+            include_spatial = bool(params.get("include_spatial_intensity", False))
+            include_local = bool(params.get("include_local_intensity", False))
+
+            if include_spatial:
+                results.update(
+                    calculate_spatial_intensity_features(
+                        state.raw_image,
+                        state.intensity_mask,
+                        **spatial_intensity_params,
+                    )
+                )
+            if include_local:
+                results.update(
+                    calculate_local_intensity_features(
+                        state.raw_image, state.intensity_mask, **local_intensity_params
+                    )
+                )
+
+        elif family == "spatial_intensity":
+            results.update(
+                calculate_spatial_intensity_features(
+                    state.raw_image, state.intensity_mask, **spatial_intensity_params
+                )
+            )
+
+        elif family == "local_intensity":
+            results.update(
+                calculate_local_intensity_features(
+                    state.raw_image, state.intensity_mask, **local_intensity_params
+                )
+            )
+
+        elif family == "histogram":
+            if not state.is_discretised:
+                warnings.warn(
+                    "Histogram features requested but image is not discretised. "
+                    "Features may be unreliable.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            masked_values = apply_mask(state.image, state.intensity_mask)
+            results.update(calculate_intensity_histogram_features(masked_values))
+
+        elif family == "ivh":
+            results.update(self._compute_ivh_features(state, params, ivh_params))
+
+        elif family == "texture" or family.startswith("texture_"):
+            results.update(
+                self._compute_texture_features(state, family, texture_matrix_params)
+            )
+
+        return results
+
+    def _compute_ivh_features(
+        self,
+        state: PipelineState,
+        params: dict[str, Any],
+        ivh_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Compute IVH features (helper for _extract_single_family)."""
+        ivh_use_continuous = params.get("ivh_use_continuous", False)
+        ivh_discretisation = params.get("ivh_discretisation", None)
+
+        ivh_disc_bin_width: Optional[float] = None
+        ivh_disc_min_val: Optional[float] = None
+
+        if ivh_use_continuous:
+            ivh_values = apply_mask(state.raw_image, state.intensity_mask)
+        elif ivh_discretisation:
+            ivh_disc_params = ivh_discretisation.copy()
+            ivh_method = ivh_disc_params.pop("method", "FBS")
+            ivh_disc_bin_width = ivh_disc_params.get("bin_width")
+            ivh_disc_min_val = ivh_disc_params.get("min_val")
+            temp_ivh_disc = discretise_image(
+                state.raw_image,
+                method=ivh_method,
+                roi_mask=state.intensity_mask,
+                **ivh_disc_params,
+            )
+            ivh_values = apply_mask(temp_ivh_disc, state.intensity_mask)
+        else:
+            ivh_values = apply_mask(state.image, state.intensity_mask)
+
+        ivh_kwargs: dict[str, Any] = {}
+        if ivh_disc_bin_width is not None:
+            ivh_kwargs["bin_width"] = ivh_disc_bin_width
+        if ivh_disc_min_val is not None:
+            ivh_kwargs["min_val"] = ivh_disc_min_val
+
+        for key in ["bin_width", "min_val", "max_val", "target_range_min", "target_range_max"]:
+            if key in ivh_params:
+                ivh_kwargs[key] = ivh_params[key]
+
+        if (
+            not ivh_use_continuous
+            and state.is_discretised
+            and ivh_kwargs.get("bin_width") is None
+            and not ivh_discretisation
+        ):
+            ivh_kwargs["bin_width"] = 1.0
+
+        ivh_kwargs = {k: v for k, v in ivh_kwargs.items() if v is not None}
+        return calculate_ivh_features(ivh_values, **ivh_kwargs)
+
+    def _compute_texture_features(
+        self,
+        state: PipelineState,
+        family: str,
+        texture_matrix_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Compute texture features (helper for _extract_single_family)."""
+        results: dict[str, Any] = {}
+
+        if not state.is_discretised:
+            raise ValueError(
+                "Texture features requested but image is not discretised. "
+                "You must include a 'discretise' step before extracting texture features."
+            )
+
+        disc_image = state.image
+        n_bins = state.n_bins if state.n_bins else 32
+
+        matrix_kwargs: dict[str, Any] = {}
+        if "ngldm_alpha" in texture_matrix_params:
+            matrix_kwargs["ngldm_alpha"] = texture_matrix_params["ngldm_alpha"]
+
+        texture_matrices = calculate_all_texture_matrices(
+            disc_image.array,
+            state.intensity_mask.array,
+            n_bins,
+            distance_mask=state.morph_mask.array,
+            **matrix_kwargs,
+        )
+
+        # If specific texture family requested, only compute that
+        if family == "texture" or family == "texture_glcm" or family == "glcm":
+            results.update(
+                calculate_glcm_features(
+                    disc_image.array,
+                    state.intensity_mask.array,
+                    n_bins,
+                    glcm_matrix=texture_matrices["glcm"],
+                )
+            )
+        if family == "texture" or family == "texture_glrlm" or family == "glrlm":
+            results.update(
+                calculate_glrlm_features(
+                    disc_image.array,
+                    state.intensity_mask.array,
+                    n_bins,
+                    glrlm_matrix=texture_matrices["glrlm"],
+                )
+            )
+        if family == "texture" or family == "texture_glszm" or family == "glszm":
+            results.update(
+                calculate_glszm_features(
+                    disc_image.array,
+                    state.intensity_mask.array,
+                    n_bins,
+                    glszm_matrix=texture_matrices["glszm"],
+                )
+            )
+        if family == "texture" or family == "texture_gldzm" or family == "gldzm":
+            results.update(
+                calculate_gldzm_features(
+                    disc_image.array,
+                    state.intensity_mask.array,
+                    n_bins,
+                    gldzm_matrix=texture_matrices["gldzm"],
+                    distance_mask=state.morph_mask.array,
+                )
+            )
+        if family == "texture" or family == "texture_ngtdm" or family == "ngtdm":
+            results.update(
+                calculate_ngtdm_features(
+                    disc_image.array,
+                    state.intensity_mask.array,
+                    n_bins,
+                    ngtdm_matrices=(
+                        texture_matrices["ngtdm_s"],
+                        texture_matrices["ngtdm_n"],
+                    ),
+                )
+            )
+        if family == "texture" or family == "texture_ngldm" or family == "ngldm":
+            results.update(
+                calculate_ngldm_features(
+                    disc_image.array,
+                    state.intensity_mask.array,
+                    n_bins,
+                    ngldm_matrix=texture_matrices["ngldm"],
+                )
+            )
+
+        return results
+
     def save_log(self, output_path: str) -> None:
         """
         Save the processing log to a JSON file.
@@ -924,12 +1333,14 @@ class RadiomicsPipeline:
         if name not in self._configs:
             raise KeyError(f"Configuration '{name}' not found")
         del self._configs[name]
+        self._configs_modified_since_plan = True
         return self
 
     def to_dict(
         self,
         config_names: Optional[list[str]] = None,
         include_metadata: bool = True,
+        include_deduplication: bool = True,
     ) -> dict[str, Any]:
         """
         Export configurations to a dictionary.
@@ -937,6 +1348,7 @@ class RadiomicsPipeline:
         Args:
             config_names: Specific configs to export. If None, exports all.
             include_metadata: Whether to include schema version and metadata.
+            include_deduplication: Whether to include deduplication settings.
 
         Returns:
             Dictionary with configs and optional metadata.
@@ -957,14 +1369,24 @@ class RadiomicsPipeline:
                 "steps": self._make_serializable(steps)
             }
 
+        result: dict[str, Any] = {}
+
         if include_metadata:
-            return {
-                "schema_version": CONFIG_SCHEMA_VERSION,
-                "exported_at": datetime.datetime.now().isoformat(),
-                "configs": serializable_configs,
+            result["schema_version"] = CONFIG_SCHEMA_VERSION
+            result["exported_at"] = datetime.datetime.now().isoformat()
+
+        result["configs"] = serializable_configs
+
+        if include_deduplication:
+            result["deduplication"] = {
+                "enabled": self._deduplication_enabled,
+                "rules_version": self._deduplication_rules.version,
             }
-        else:
-            return {"configs": serializable_configs}
+            # Include last plan if available and not stale
+            if self._last_deduplication_plan and not self._configs_modified_since_plan:
+                result["deduplication"]["last_plan"] = self._last_deduplication_plan.to_dict()
+
+        return result
 
     def _make_serializable(self, obj: Any) -> Any:
         """Convert tuples and other non-serializable types to serializable forms."""
@@ -1059,11 +1481,20 @@ class RadiomicsPipeline:
         Returns:
             New RadiomicsPipeline instance with loaded configs.
         """
-        pipeline = cls()
-
         # Handle schema version migration if needed
         schema_version = data.get("schema_version", "1.0")
         migrated_data = cls._migrate_config(data, schema_version)
+
+        # Extract deduplication settings if present
+        dedup_settings = migrated_data.get("deduplication", {})
+        deduplicate = dedup_settings.get("enabled", True)
+        dedup_rules_version = dedup_settings.get("rules_version", None)
+
+        # Create pipeline with deduplication settings
+        pipeline = cls(
+            deduplicate=deduplicate,
+            deduplication_rules=dedup_rules_version,
+        )
 
         configs = migrated_data.get("configs", {})
         for name, config_data in configs.items():
@@ -1072,7 +1503,11 @@ class RadiomicsPipeline:
             elif isinstance(config_data, list):
                 steps = config_data
             else:
-                _logger.warning(f"Invalid config format for '{name}', skipping")
+                warnings.warn(
+                    f"Invalid config format for '{name}', skipping",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 continue
 
             # Convert YAML lists to tuples where needed
@@ -1082,6 +1517,22 @@ class RadiomicsPipeline:
                 cls._validate_config(name, converted_steps)
 
             pipeline._configs[name] = converted_steps
+
+        # Mark configs as loaded (not modified) so dedup plan from serialized data is valid
+        pipeline._configs_modified_since_plan = False
+
+        # Restore last_plan if present and valid
+        if "last_plan" in dedup_settings:
+            try:
+                pipeline._last_deduplication_plan = DeduplicationPlan.from_dict(
+                    dedup_settings["last_plan"]
+                )
+            except Exception as e:
+                warnings.warn(
+                    f"Failed to restore deduplication plan: {e}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
         return pipeline
 
@@ -1174,7 +1625,11 @@ class RadiomicsPipeline:
         """
         for name, steps in other._configs.items():
             if name in self._configs and not overwrite:
-                _logger.warning(f"Config '{name}' already exists, skipping (use overwrite=True)")
+                warnings.warn(
+                    f"Config '{name}' already exists, skipping (use overwrite=True)",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 continue
             self._configs[name] = copy.deepcopy(steps)
         return self
@@ -1198,12 +1653,17 @@ class RadiomicsPipeline:
         if from_version == CONFIG_SCHEMA_VERSION:
             return data
 
-        # Future migrations would go here
-        # if from_version == "1.0" and CONFIG_SCHEMA_VERSION == "1.1":
-        #     # Apply 1.0 -> 1.1 migrations
-        #     pass
+        # Validate source version is known
+        if from_version not in _VALID_SCHEMA_VERSIONS:
+            warnings.warn(
+                f"Unknown schema version '{from_version}', proceeding cautiously",
+                UserWarning,
+                stacklevel=2,
+            )
 
-        _logger.info(f"Migrated config from v{from_version} to v{CONFIG_SCHEMA_VERSION}")
+        # Future migrations would go here
+        # Example: if from_version == "1.0" and target is "2.0": ...
+
         return data
 
     # -------------------------------------------------------------------------
@@ -1233,35 +1693,51 @@ class RadiomicsPipeline:
     @classmethod
     def _validate_config(cls, name: str, steps: list[dict[str, Any]]) -> bool:
         """
-        Validate a configuration, logging warnings for issues.
+        Validate a configuration, issuing warnings for issues.
 
         Args:
-            name: Configuration name (for logging).
+            name: Configuration name (for warning messages).
             steps: List of step dictionaries.
 
         Returns:
-            True if valid, False if issues found (warnings are logged).
+            True if valid, False if issues found (warnings are issued).
         """
         is_valid = True
 
         if not isinstance(steps, list):
-            _logger.warning(f"Config '{name}': steps must be a list")
+            warnings.warn(
+                f"Config '{name}': steps must be a list",
+                UserWarning,
+                stacklevel=2,
+            )
             return False
 
         for i, step in enumerate(steps):
             if not isinstance(step, dict):
-                _logger.warning(f"Config '{name}' step {i}: must be a dictionary")
+                warnings.warn(
+                    f"Config '{name}' step {i}: must be a dictionary",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 is_valid = False
                 continue
 
             step_type = step.get("step")
             if not step_type:
-                _logger.warning(f"Config '{name}' step {i}: missing 'step' key")
+                warnings.warn(
+                    f"Config '{name}' step {i}: missing 'step' key",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 is_valid = False
                 continue
 
             if step_type not in cls._VALID_STEPS:
-                _logger.warning(f"Config '{name}' step {i}: unknown step type '{step_type}'")
+                warnings.warn(
+                    f"Config '{name}' step {i}: unknown step type '{step_type}'",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 is_valid = False
                 continue
 
@@ -1271,9 +1747,11 @@ class RadiomicsPipeline:
                 valid_params = cls._VALID_STEPS[step_type]
                 for param_name in params.keys():
                     if param_name not in valid_params:
-                        _logger.warning(
+                        warnings.warn(
                             f"Config '{name}' step {i} ({step_type}): "
-                            f"unknown parameter '{param_name}'"
+                            f"unknown parameter '{param_name}'",
+                            UserWarning,
+                            stacklevel=2,
                         )
 
         return is_valid

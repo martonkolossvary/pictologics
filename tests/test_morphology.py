@@ -30,9 +30,6 @@ from pictologics.loader import Image
 
 
 class TestMorphologyFeatures(unittest.TestCase):
-    @classmethod
-    def tearDownClass(cls) -> None:
-        os.environ.pop("NUMBA_DISABLE_JIT", None)
 
     def _create_image(self, array, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0)):
         return Image(array, spacing, origin)

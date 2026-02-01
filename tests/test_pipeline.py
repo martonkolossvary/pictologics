@@ -1412,3 +1412,850 @@ def test_step_binarize_missing_threshold(
         "binarize_mask requires 'threshold' unless mask_values is provided"
         in log["error"]
     )
+
+
+# --- Deduplication Configuration Tests ---
+
+
+def test_pipeline_init_with_deduplication_rules_string() -> None:
+    """Test pipeline init with deduplication_rules as string version."""
+    from pictologics.deduplication import DeduplicationRules
+
+    pipeline = RadiomicsPipeline(deduplication_rules="1.0.0")
+    assert pipeline._deduplication_rules.version == "1.0.0"
+    assert isinstance(pipeline._deduplication_rules, DeduplicationRules)
+
+
+def test_pipeline_init_with_deduplication_rules_object() -> None:
+    """Test pipeline init with deduplication_rules as DeduplicationRules object."""
+    from pictologics.deduplication import DeduplicationRules
+
+    rules = DeduplicationRules.get_version("1.0.0")
+    pipeline = RadiomicsPipeline(deduplication_rules=rules)
+    assert pipeline._deduplication_rules is rules
+    assert pipeline._deduplication_rules.version == "1.0.0"
+
+
+def test_deduplication_rules_setter_with_string(pipeline: RadiomicsPipeline) -> None:
+    """Test deduplication_rules setter with string version."""
+    from pictologics.deduplication import DeduplicationRules
+
+    # Set via string
+    pipeline.deduplication_rules = "1.0.0"
+    assert pipeline._deduplication_rules.version == "1.0.0"
+    assert isinstance(pipeline._deduplication_rules, DeduplicationRules)
+    # Check that configs are marked as modified
+    assert pipeline._configs_modified_since_plan is True
+
+
+def test_deduplication_rules_setter_with_object(pipeline: RadiomicsPipeline) -> None:
+    """Test deduplication_rules setter with DeduplicationRules object."""
+    from pictologics.deduplication import DeduplicationRules
+
+    rules = DeduplicationRules.get_version("1.0.0")
+    pipeline.deduplication_rules = rules
+    assert pipeline._deduplication_rules is rules
+    assert pipeline._configs_modified_since_plan is True
+
+
+def test_last_deduplication_plan_property(pipeline: RadiomicsPipeline) -> None:
+    """Test last_deduplication_plan property."""
+    # Initially None
+    assert pipeline.last_deduplication_plan is None
+
+    # After computing a plan, it should be accessible
+    from pictologics.deduplication import ConfigurationAnalyzer
+
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}}
+    ])
+
+    analyzer = ConfigurationAnalyzer(pipeline._configs, pipeline._deduplication_rules)
+    plan = analyzer.analyze()
+    pipeline._last_deduplication_plan = plan
+    pipeline._configs_modified_since_plan = False
+
+    assert pipeline.last_deduplication_plan is plan
+
+
+# --- Individual Texture Family Tests (via Deduplication Path) ---
+
+
+@patch("pictologics.pipeline.discretise_image")
+@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline.calculate_glrlm_features")
+def test_extract_single_family_texture_glrlm(
+    mock_glrlm: MagicMock,
+    mock_matrices: MagicMock,
+    mock_disc: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test extracting only glrlm texture features via dedup path."""
+    # Dedup path requires multiple configs
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_disc.return_value = mock_image
+    mock_matrices.return_value = {
+        "glcm": np.zeros((32, 32, 13)),
+        "glrlm": np.zeros((32, 10, 13)),
+        "glszm": np.zeros((32, 10)),
+        "gldzm": np.zeros((32, 10)),
+        "ngtdm_s": np.zeros(32),
+        "ngtdm_n": np.zeros(32),
+        "ngldm": np.zeros((32, 10)),
+    }
+    mock_glrlm.return_value = {"glrlm_sre": 0.5}
+
+    # Add two configs to trigger deduplication path
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_glrlm"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_glrlm"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_glrlm.assert_called()
+    assert "glrlm_sre" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.discretise_image")
+@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline.calculate_glszm_features")
+def test_extract_single_family_texture_glszm(
+    mock_glszm: MagicMock,
+    mock_matrices: MagicMock,
+    mock_disc: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test extracting only glszm texture features via dedup path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_disc.return_value = mock_image
+    mock_matrices.return_value = {
+        "glcm": np.zeros((32, 32, 13)),
+        "glrlm": np.zeros((32, 10, 13)),
+        "glszm": np.zeros((32, 10)),
+        "gldzm": np.zeros((32, 10)),
+        "ngtdm_s": np.zeros(32),
+        "ngtdm_n": np.zeros(32),
+        "ngldm": np.zeros((32, 10)),
+    }
+    mock_glszm.return_value = {"glszm_lze": 0.7}
+
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_glszm"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_glszm"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_glszm.assert_called()
+    assert "glszm_lze" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.discretise_image")
+@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline.calculate_gldzm_features")
+def test_extract_single_family_texture_gldzm(
+    mock_gldzm: MagicMock,
+    mock_matrices: MagicMock,
+    mock_disc: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test extracting only gldzm texture features via dedup path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_disc.return_value = mock_image
+    mock_matrices.return_value = {
+        "glcm": np.zeros((32, 32, 13)),
+        "glrlm": np.zeros((32, 10, 13)),
+        "glszm": np.zeros((32, 10)),
+        "gldzm": np.zeros((32, 10)),
+        "ngtdm_s": np.zeros(32),
+        "ngtdm_n": np.zeros(32),
+        "ngldm": np.zeros((32, 10)),
+    }
+    mock_gldzm.return_value = {"gldzm_dze": 0.3}
+
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_gldzm"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_gldzm"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_gldzm.assert_called()
+    assert "gldzm_dze" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.discretise_image")
+@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline.calculate_ngtdm_features")
+def test_extract_single_family_texture_ngtdm(
+    mock_ngtdm: MagicMock,
+    mock_matrices: MagicMock,
+    mock_disc: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test extracting only ngtdm texture features via dedup path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_disc.return_value = mock_image
+    mock_matrices.return_value = {
+        "glcm": np.zeros((32, 32, 13)),
+        "glrlm": np.zeros((32, 10, 13)),
+        "glszm": np.zeros((32, 10)),
+        "gldzm": np.zeros((32, 10)),
+        "ngtdm_s": np.zeros(32),
+        "ngtdm_n": np.zeros(32),
+        "ngldm": np.zeros((32, 10)),
+    }
+    mock_ngtdm.return_value = {"ngtdm_coarseness": 0.8}
+
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_ngtdm"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_ngtdm"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_ngtdm.assert_called()
+    assert "ngtdm_coarseness" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.discretise_image")
+@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline.calculate_ngldm_features")
+def test_extract_single_family_texture_ngldm(
+    mock_ngldm: MagicMock,
+    mock_matrices: MagicMock,
+    mock_disc: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test extracting only ngldm texture features via dedup path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_disc.return_value = mock_image
+    mock_matrices.return_value = {
+        "glcm": np.zeros((32, 32, 13)),
+        "glrlm": np.zeros((32, 10, 13)),
+        "glszm": np.zeros((32, 10)),
+        "gldzm": np.zeros((32, 10)),
+        "ngtdm_s": np.zeros(32),
+        "ngtdm_n": np.zeros(32),
+        "ngldm": np.zeros((32, 10)),
+    }
+    mock_ngldm.return_value = {"ngldm_lde": 0.6}
+
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_ngldm"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_ngldm"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_ngldm.assert_called()
+    assert "ngldm_lde" in result["cfg1"]
+
+
+# --- Histogram and IVH via Dedup Path ---
+
+
+@patch("pictologics.pipeline.discretise_image")
+@patch("pictologics.pipeline.calculate_intensity_histogram_features")
+def test_extract_histogram_via_dedup_path(
+    mock_hist: MagicMock,
+    mock_disc: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test histogram features via deduplication path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_disc.return_value = mock_image
+    mock_hist.return_value = {"hist_mean": 0.5}
+
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["histogram"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["histogram"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_hist.assert_called()
+    assert "hist_mean" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.calculate_intensity_histogram_features")
+def test_extract_histogram_without_discretisation_warns(
+    mock_hist: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test histogram without discretisation issues a warning via dedup path."""
+    import warnings
+
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_hist.return_value = {"hist_mean": 0.5}
+
+    # No discretise step - should trigger warning
+    pipeline.add_config("cfg1", [
+        {"step": "extract_features", "params": {"families": ["histogram"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "extract_features", "params": {"families": ["histogram"]}}
+    ])
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+        # Check that the expected warning was raised
+        warning_messages = [str(warning.message) for warning in w]
+        assert any("not discretised" in msg for msg in warning_messages)
+
+
+@patch("pictologics.pipeline.calculate_ivh_features")
+def test_extract_ivh_via_dedup_path(
+    mock_ivh: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test IVH features via deduplication path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_ivh.return_value = {"ivh_v10": 0.5}
+
+    pipeline.add_config("cfg1", [
+        {"step": "extract_features", "params": {"families": ["ivh"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "extract_features", "params": {"families": ["ivh"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_ivh.assert_called()
+    assert "ivh_v10" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.calculate_ivh_features")
+def test_extract_ivh_via_dedup_path_with_discretisation(
+    mock_ivh: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test IVH features via dedup path with ivh_discretisation and verify min_val is passed."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_ivh.return_value = {"ivh_v10": 0.5}
+
+    # Test ivh_discretisation branch via dedup - include min_val to cover line 1155
+    with patch("pictologics.pipeline.discretise_image") as mock_disc:
+        mock_disc.return_value = mock_image
+        pipeline.add_config("cfg1", [
+            {"step": "extract_features", "params": {
+                "families": ["ivh"],
+                "ivh_discretisation": {"method": "FBS", "bin_width": 2.5, "min_val": -100.0}
+            }}
+        ])
+        pipeline.add_config("cfg2", [
+            {"step": "extract_features", "params": {
+                "families": ["ivh"],
+                "ivh_discretisation": {"method": "FBS", "bin_width": 2.5, "min_val": -100.0}
+            }}
+        ])
+        result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+        mock_disc.assert_called()
+        mock_ivh.assert_called()
+        # Verify min_val was passed to calculate_ivh_features
+        call_kwargs = mock_ivh.call_args.kwargs
+        assert call_kwargs.get("min_val") == -100.0
+        assert call_kwargs.get("bin_width") == 2.5
+        assert "ivh_v10" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.discretise_image")
+@patch("pictologics.pipeline.calculate_ivh_features")
+def test_extract_ivh_discretised_auto_bin_width(
+    mock_ivh: MagicMock,
+    mock_disc: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test IVH features with discretised image auto-sets bin_width=1.0."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_disc.return_value = mock_image
+    mock_ivh.return_value = {"ivh_v10": 0.5}
+
+    # Use discretise step but don't set explicit bin_width in ivh_params
+    # This should trigger the auto bin_width=1.0 for discretised images (line 1163)
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["ivh"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["ivh"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_ivh.assert_called()
+    # Verify bin_width=1.0 was passed automatically
+    call_kwargs = mock_ivh.call_args.kwargs
+    assert call_kwargs.get("bin_width") == 1.0
+    assert "ivh_v10" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.calculate_ivh_features")
+def test_extract_ivh_with_ivh_params_via_dedup(
+    mock_ivh: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test IVH via dedup with ivh_params containing max_val to cover line 1155."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_ivh.return_value = {"ivh_v10": 0.5}
+
+    # Pass ivh_params with max_val to ensure line 1155 is hit
+    pipeline.add_config("cfg1", [
+        {"step": "extract_features", "params": {
+            "families": ["ivh"],
+            "ivh_params": {"max_val": 500.0}
+        }}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "extract_features", "params": {
+            "families": ["ivh"],
+            "ivh_params": {"max_val": 500.0}
+        }}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_ivh.assert_called()
+    # Verify max_val was passed from ivh_params
+    call_kwargs = mock_ivh.call_args.kwargs
+    assert call_kwargs.get("max_val") == 500.0
+    assert "ivh_v10" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.calculate_ivh_features")
+def test_extract_ivh_via_dedup_path_continuous(
+    mock_ivh: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test IVH features via dedup path with ivh_use_continuous."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_ivh.return_value = {"ivh_v10": 0.5}
+
+    pipeline.add_config("cfg1", [
+        {"step": "extract_features", "params": {
+            "families": ["ivh"],
+            "ivh_use_continuous": True
+        }}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "extract_features", "params": {
+            "families": ["ivh"],
+            "ivh_use_continuous": True
+        }}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_ivh.assert_called()
+    assert "ivh_v10" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.calculate_morphology_features")
+def test_extract_morphology_via_dedup_path(
+    mock_morph: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test morphology features via deduplication path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_morph.return_value = {"morph_volume": 100.0}
+
+    pipeline.add_config("cfg1", [
+        {"step": "extract_features", "params": {"families": ["morphology"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "extract_features", "params": {"families": ["morphology"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_morph.assert_called()
+    assert "morph_volume" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.calculate_intensity_features")
+@patch("pictologics.pipeline.calculate_spatial_intensity_features")
+@patch("pictologics.pipeline.calculate_local_intensity_features")
+def test_extract_intensity_with_spatial_local_via_dedup(
+    mock_local: MagicMock,
+    mock_spatial: MagicMock,
+    mock_intensity: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test intensity features with spatial/local via deduplication path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_intensity.return_value = {"int_mean": 50.0}
+    mock_spatial.return_value = {"spatial_peak": 100.0}
+    mock_local.return_value = {"local_peak": 75.0}
+
+    pipeline.add_config("cfg1", [
+        {"step": "extract_features", "params": {
+            "families": ["intensity"],
+            "include_spatial_intensity": True,
+            "include_local_intensity": True,
+        }}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "extract_features", "params": {
+            "families": ["intensity"],
+            "include_spatial_intensity": True,
+            "include_local_intensity": True,
+        }}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_intensity.assert_called()
+    mock_spatial.assert_called()
+    mock_local.assert_called()
+    assert "int_mean" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.calculate_spatial_intensity_features")
+def test_extract_spatial_intensity_via_dedup(
+    mock_spatial: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test spatial_intensity family via deduplication path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_spatial.return_value = {"spatial_peak": 100.0}
+
+    pipeline.add_config("cfg1", [
+        {"step": "extract_features", "params": {"families": ["spatial_intensity"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "extract_features", "params": {"families": ["spatial_intensity"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_spatial.assert_called()
+    assert "spatial_peak" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.calculate_local_intensity_features")
+def test_extract_local_intensity_via_dedup(
+    mock_local: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test local_intensity family via deduplication path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_local.return_value = {"local_peak": 75.0}
+
+    pipeline.add_config("cfg1", [
+        {"step": "extract_features", "params": {"families": ["local_intensity"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "extract_features", "params": {"families": ["local_intensity"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_local.assert_called()
+    assert "local_peak" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.discretise_image")
+@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline.calculate_glcm_features")
+def test_extract_texture_glcm_via_dedup(
+    mock_glcm: MagicMock,
+    mock_matrices: MagicMock,
+    mock_disc: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test texture_glcm via deduplication path."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_disc.return_value = mock_image
+    mock_matrices.return_value = {
+        "glcm": np.zeros((32, 32, 13)),
+        "glrlm": np.zeros((32, 10, 13)),
+        "glszm": np.zeros((32, 10)),
+        "gldzm": np.zeros((32, 10)),
+        "ngtdm_s": np.zeros(32),
+        "ngtdm_n": np.zeros(32),
+        "ngldm": np.zeros((32, 10)),
+    }
+    mock_glcm.return_value = {"glcm_energy": 0.5}
+
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_glcm"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["texture_glcm"]}}
+    ])
+    result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_glcm.assert_called()
+    assert "glcm_energy" in result["cfg1"]
+
+
+@patch("pictologics.pipeline.discretise_image")
+@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline.calculate_ngldm_features")
+def test_extract_texture_with_ngldm_alpha(
+    mock_ngldm: MagicMock,
+    mock_matrices: MagicMock,
+    mock_disc: MagicMock,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test texture extraction with ngldm_alpha parameter via dedup."""
+    pipeline = RadiomicsPipeline(deduplicate=True)
+    mock_disc.return_value = mock_image
+    mock_matrices.return_value = {
+        "glcm": np.zeros((32, 32, 13)),
+        "glrlm": np.zeros((32, 10, 13)),
+        "glszm": np.zeros((32, 10)),
+        "gldzm": np.zeros((32, 10)),
+        "ngtdm_s": np.zeros(32),
+        "ngtdm_n": np.zeros(32),
+        "ngldm": np.zeros((32, 10)),
+    }
+    mock_ngldm.return_value = {"ngldm_lde": 0.6}
+
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {
+            "families": ["texture_ngldm"],
+            "texture_matrix_params": {"ngldm_alpha": 0.5}
+        }}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {
+            "families": ["texture_ngldm"],
+            "texture_matrix_params": {"ngldm_alpha": 0.5}
+        }}
+    ])
+    pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
+
+    mock_ngldm.assert_called()
+    # Verify ngldm_alpha was passed through
+    call_kwargs = mock_matrices.call_args.kwargs
+    assert call_kwargs.get("ngldm_alpha") == 0.5
+
+
+# --- IVH Feature Edge Cases ---
+
+
+@patch("pictologics.pipeline.calculate_ivh_features")
+def test_ivh_with_ivh_params_bin_width(
+    mock_ivh: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test IVH features with explicit bin_width in ivh_params."""
+    mock_ivh.return_value = {"ivh_v10": 0.5}
+
+    pipeline.add_config("ivh_params_test", [
+        {"step": "extract_features", "params": {
+            "families": ["ivh"],
+            "ivh_params": {"bin_width": 5.0, "min_val": 0.0, "max_val": 100.0}
+        }}
+    ])
+    pipeline.run(mock_image, mock_mask, config_names=["ivh_params_test"])
+
+    mock_ivh.assert_called()
+    call_kwargs = mock_ivh.call_args.kwargs
+    assert call_kwargs.get("bin_width") == 5.0
+    assert call_kwargs.get("min_val") == 0.0
+    assert call_kwargs.get("max_val") == 100.0
+
+
+@patch("pictologics.pipeline.calculate_ivh_features")
+def test_ivh_with_ivh_params_target_range(
+    mock_ivh: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test IVH features with target_range parameters."""
+    mock_ivh.return_value = {"ivh_v10": 0.5}
+
+    pipeline.add_config("ivh_target_range", [
+        {"step": "extract_features", "params": {
+            "families": ["ivh"],
+            "ivh_params": {"target_range_min": 10.0, "target_range_max": 90.0}
+        }}
+    ])
+    pipeline.run(mock_image, mock_mask, config_names=["ivh_target_range"])
+
+    mock_ivh.assert_called()
+    call_kwargs = mock_ivh.call_args.kwargs
+    assert call_kwargs.get("target_range_min") == 10.0
+    assert call_kwargs.get("target_range_max") == 90.0
+
+
+@patch("pictologics.pipeline.calculate_ivh_features")
+@patch("pictologics.pipeline.discretise_image")
+def test_ivh_discretisation_with_bin_width_in_params(
+    mock_discretise: MagicMock,
+    mock_ivh: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Test IVH features with ivh_discretisation that has bin_width."""
+    mock_discretise.return_value = mock_image  # Return same image
+    mock_ivh.return_value = {"ivh_v10": 0.5}
+
+    pipeline.add_config("ivh_disc_bw", [
+        {"step": "extract_features", "params": {
+            "families": ["ivh"],
+            "ivh_discretisation": {"method": "FBS", "bin_width": 2.5, "min_val": -50.0}
+        }}
+    ])
+    pipeline.run(mock_image, mock_mask, config_names=["ivh_disc_bw"])
+
+    mock_discretise.assert_called()
+    mock_ivh.assert_called()
+    # bin_width and min_val should be passed to IVH
+    call_kwargs = mock_ivh.call_args.kwargs
+    assert call_kwargs.get("bin_width") == 2.5
+    assert call_kwargs.get("min_val") == -50.0
+
+
+# --- Serialization with Deduplication Plan Tests ---
+
+
+def test_to_dict_with_deduplication_plan(pipeline: RadiomicsPipeline) -> None:
+    """Test to_dict includes deduplication plan when available."""
+    from pictologics.deduplication import ConfigurationAnalyzer
+
+    # Add configs and compute plan
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}}
+    ])
+    pipeline.add_config("cfg2", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}}
+    ])
+
+    # Compute and store plan
+    analyzer = ConfigurationAnalyzer(pipeline._configs, pipeline._deduplication_rules)
+    plan = analyzer.analyze()
+    pipeline._last_deduplication_plan = plan
+    pipeline._configs_modified_since_plan = False
+
+    # Export with deduplication info
+    data = pipeline.to_dict(
+        config_names=["cfg1", "cfg2"],
+        include_deduplication=True
+    )
+
+    assert "deduplication" in data
+    assert "last_plan" in data["deduplication"]
+    assert data["deduplication"]["enabled"] == pipeline._deduplication_enabled
+
+
+def test_to_dict_deduplication_plan_stale(pipeline: RadiomicsPipeline) -> None:
+    """Test to_dict excludes stale deduplication plan."""
+    from pictologics.deduplication import ConfigurationAnalyzer
+
+    # Add config and compute plan
+    pipeline.add_config("cfg1", [
+        {"step": "extract_features", "params": {"families": ["morphology"]}}
+    ])
+
+    analyzer = ConfigurationAnalyzer(pipeline._configs, pipeline._deduplication_rules)
+    plan = analyzer.analyze()
+    pipeline._last_deduplication_plan = plan
+    # Mark as stale
+    pipeline._configs_modified_since_plan = True
+
+    data = pipeline.to_dict(config_names=["cfg1"], include_deduplication=True)
+
+    assert "deduplication" in data
+    # Should not include stale plan
+    assert "last_plan" not in data["deduplication"]
+
+
+def test_from_dict_restores_deduplication_plan() -> None:
+    """Test from_dict restores deduplication plan."""
+    from pictologics.deduplication import ConfigurationAnalyzer
+
+    # Create pipeline and add configs
+    pipeline = RadiomicsPipeline()
+    pipeline.add_config("cfg1", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}}
+    ])
+
+    # Compute and store plan
+    analyzer = ConfigurationAnalyzer(pipeline._configs, pipeline._deduplication_rules)
+    plan = analyzer.analyze()
+    pipeline._last_deduplication_plan = plan
+    pipeline._configs_modified_since_plan = False
+
+    # Export and reimport
+    data = pipeline.to_dict(config_names=["cfg1"], include_deduplication=True)
+    restored = RadiomicsPipeline.from_dict(data)
+
+    # Plan should be restored
+    assert restored._last_deduplication_plan is not None
+    assert restored._configs_modified_since_plan is False
+
+
+def test_from_dict_handles_invalid_deduplication_plan() -> None:
+    """Test from_dict handles invalid deduplication plan gracefully."""
+    import warnings
+
+    data = {
+        "schema_version": "1.0",
+        "configs": {
+            "test": {"steps": [{"step": "extract_features", "params": {"families": ["morphology"]}}]}
+        },
+        "deduplication": {
+            "enabled": True,
+            "tolerance": 1e-9,
+            "rules_version": "1.0.0",
+            "last_plan": {"invalid": "plan_data"}  # Invalid format
+        }
+    }
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        pipeline = RadiomicsPipeline.from_dict(data)
+
+        # Should still work, just without restored plan
+        assert pipeline._last_deduplication_plan is None
+        assert len(w) >= 1
+        assert any("failed to restore deduplication plan" in str(warning.message).lower() for warning in w)

@@ -12,7 +12,6 @@ Behavior can be controlled via the environment variable:
 
 from __future__ import annotations
 
-import logging
 import os
 import warnings
 
@@ -22,8 +21,6 @@ import numpy as np
 # Private imports to access Numba kernels directly
 from .features import intensity, morphology, texture
 
-logger = logging.getLogger(__name__)
-
 
 def warmup_jit() -> None:
     """
@@ -31,10 +28,9 @@ def warmup_jit() -> None:
     with minimal dummy data.
     """
     if os.environ.get("PICTOLOGICS_DISABLE_WARMUP", "0") == "1":
-        logger.info("Pictologics warmup disabled via environment variable.")
         return
 
-    logger.info("Warming up Pictologics JIT functions... (this may take a moment)")
+    warmup_error: Exception | None = None
 
     # Suppress warnings during warmup (e.g. division by zero in dummy data)
     with warnings.catch_warnings():
@@ -44,10 +40,17 @@ def warmup_jit() -> None:
             _warmup_intensity()
             _warmup_morphology()
             _warmup_filters()
-            logger.info("Pictologics JIT warmup complete.")
         except Exception as e:
-            # We don't want warmup failure to crash the program import
-            logger.warning(f"Pictologics JIT warmup failed: {e}")
+            # Store the exception to warn about after exiting the context
+            warmup_error = e
+
+    # Warn about warmup failure outside the suppression context
+    if warmup_error is not None:
+        warnings.warn(
+            f"Pictologics JIT warmup failed: {warmup_error}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 def _warmup_texture() -> None:

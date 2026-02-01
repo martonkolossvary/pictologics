@@ -46,6 +46,17 @@ You want to:
       values (e.g., -1024, -2048) that represent missing/invalid data. This is the IBSI-recommended approach for
       handling NA values in medical imaging data.
 
+!!! tip "Performance Tip: Manual Feature Separation"
+    This example demonstrates **manual feature separation** for maximum efficiency:
+    
+    - **`case1_orig`**: Extracts morphology and intensity features (discretization-independent) — computed **once**
+    - **`case1_fbn_*` / `case1_fbs_*`**: Extract only texture, histogram, and IVH features (discretization-dependent)
+    
+    This approach avoids redundant computation entirely. The `orig` results contain morphology/intensity 
+    that apply to all discretization strategies, while each discretization config contains only the 
+    features that actually depend on it. See [Case 8](#case-8-manual-feature-separation-advanced) for 
+    a detailed explanation of this technique.
+
 ### Full example script
 
 !!! example "Full example script"
@@ -73,26 +84,42 @@ You want to:
             {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
         ]
 
-        # Shared feature extraction configuration
-        extract_all = {
+        # Shared feature extraction for discretization-independent features
+        extract_orig = {
             "step": "extract_features",
             "params": {
-                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
+                "families": ["morphology", "intensity"],  # Not affected by discretization
                 "include_spatial_intensity": False,
                 "include_local_intensity": False,
             },
         }
 
-        # Initialize the pipeline
+        # Shared feature extraction for discretization-dependent features
+        extract_discretized = {
+            "step": "extract_features",
+            "params": {
+                "families": ["texture", "histogram", "ivh"],  # Require discretization
+                "include_spatial_intensity": False,
+                "include_local_intensity": False,
+            },
+        }
+
+        # Initialize the pipeline (deduplication enabled by default)
         pipeline = RadiomicsPipeline()
 
-        # Add 4 configurations (2 FBN, 2 FBS)
+        # Add "orig" config for discretization-independent features (computed once)
+        pipeline.add_config(
+            "case1_orig",
+            base_steps + [extract_orig],
+        )
+
+        # Add discretization-dependent configs (texture/histogram/ivh only)
         for n_bins in (8, 16):
             pipeline.add_config(
                 f"case1_fbn_{n_bins}",
                 base_steps + [
                     {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
-                    extract_all,
+                    extract_discretized,
                 ],
             )
 
@@ -101,7 +128,7 @@ You want to:
                 f"case1_fbs_{bin_width}",
                 base_steps + [
                     {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
-                    extract_all,
+                    extract_discretized,
                 ],
             )
 
@@ -118,10 +145,11 @@ You want to:
             pipeline.clear_log()
 
             # Run pipeline (mask omitted -> whole-image ROI)
+            # "case1_orig" contains morphology/intensity, others contain texture/histogram/ivh
             results = pipeline.run(
                 image=str(path),
                 subject_id=subject_id,
-                config_names=["case1_fbn_8", "case1_fbn_16", "case1_fbs_8", "case1_fbs_16"],
+                config_names=["case1_orig", "case1_fbn_8", "case1_fbn_16", "case1_fbs_8", "case1_fbs_16"],
             )
 
             # Format results as flat dictionary and add metadata
@@ -337,6 +365,12 @@ You want to:
 
     You can also pass **`recursive=True`** (to search subfolders) or **`dataset_index=N`** (for 4D files) to control how each mask is loaded.
 
+!!! tip "Performance Tip: Deduplication"
+    This example runs 6 configurations where only discretisation differs. With **deduplication enabled 
+    by default**, morphology and intensity features are computed once and reused across all configurations, 
+    providing significant speedup. To disable this optimization, set `deduplicate=False`. 
+    See [Deduplication](pipeline.md#deduplication-performance-optimization) for details.
+
 ### Full example script
 
 !!! example "Full example script"
@@ -364,7 +398,9 @@ You want to:
         if not image_paths:
             raise ValueError(f"No *_IMG NIfTI files found in: {input_dir}")
 
-        # Initialize the pipeline
+        # Initialize the pipeline (deduplication is enabled by default)
+        # Since all 6 configs share identical preprocessing (only discretisation differs),
+        # morphology and intensity features are computed once and reused across all configs
         pipeline = RadiomicsPipeline()
 
         # Shared feature extraction settings
@@ -495,6 +531,15 @@ You want to:
     - **Preprocessing parameters are dataset-dependent**: The `resegment` range here uses the CT HU example
       `[-100, 3000]`. Adjust or remove it for non-CT data.
 
+!!! tip "Performance Tip: Deduplication"
+    This example demonstrates **manual feature separation** combined with parallel processing:
+    
+    - **`case4_orig`**: Extracts morphology and intensity features (discretization-independent) — computed **once per case**
+    - **`case4_fbn_*` / `case4_fbs_*`**: Extract only texture, histogram, and IVH features (discretization-dependent)
+    
+    This approach ensures discretization-independent features are never recomputed. See [Case 8](#case-8-manual-feature-separation-advanced) 
+    for a detailed explanation of this technique.
+
 ### Full example script
 
 !!! example "Full example script"
@@ -518,7 +563,7 @@ You want to:
         return subdirs
 
     def build_case4_pipeline():
-        """Define the pipeline with preprocessing and all feature families."""
+        """Define the pipeline with manual feature separation for efficiency."""
         pipeline = RadiomicsPipeline()
 
         # Define standard CT preprocessing
@@ -526,33 +571,47 @@ You want to:
             {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
             {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
             {"step": "filter_outliers", "params": {"sigma": 3.0}},
-            {"step": "round_intensities"},
+            {"step": "round_intensities", "params": {}},
             {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
         ]
 
-        extract_all = {
+        # Discretization-independent features (computed once)
+        extract_orig = {
             "step": "extract_features",
             "params": {
-                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
+                "families": ["morphology", "intensity"],
                 "include_spatial_intensity": False,
                 "include_local_intensity": False,
             },
         }
 
-        # Add discretisation variants
+        # Discretization-dependent features only
+        extract_discretized = {
+            "step": "extract_features",
+            "params": {
+                "families": ["texture", "histogram", "ivh"],
+                "include_spatial_intensity": False,
+                "include_local_intensity": False,
+            },
+        }
+
+        # Add "orig" config for discretization-independent features
+        pipeline.add_config("case4_orig", preprocess_steps + [extract_orig])
+
+        # Add discretisation variants (texture/histogram/ivh only)
         for n_bins in (8, 16, 32):
             pipeline.add_config(
                 f"case4_fbn_{n_bins}",
-                preprocess_steps + [{"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}}, extract_all],
+                preprocess_steps + [{"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}}, extract_discretized],
             )
 
         for bin_width in (8.0, 16.0, 32.0):
             pipeline.add_config(
                 f"case4_fbs_{int(bin_width)}",
-                preprocess_steps + [{"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}}, extract_all],
+                preprocess_steps + [{"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}}, extract_discretized],
             )
 
-        config_names = [f"case4_fbn_{b}" for b in (8, 16, 32)] + [f"case4_fbs_{b}" for b in (8, 16, 32)]
+        config_names = ["case4_orig"] + [f"case4_fbn_{b}" for b in (8, 16, 32)] + [f"case4_fbs_{b}" for b in (8, 16, 32)]
         return pipeline, config_names
 
     def process_case(case_dir, log_dir):
@@ -800,7 +859,8 @@ You want to:
 ### Key concepts
 
 - **Filter step before feature extraction**: Apply `filter` after preprocessing but before `extract_features`.
-- **Intensity features make sense**: For filtered images, first-order statistics (mean, variance, skewness) capture texture properties.
+- **Intensity features from filtered images**: First-order statistics (mean, variance, skewness) capture texture properties at different scales.
+- **Morphology is filter-independent**: Morphology features depend only on mask geometry, not intensity values. Compute morphology once from the original (unfiltered) image and reuse across all filter configurations.
 - **No discretisation for filtered images**: IBSI 2 Phase 2 recommends intensity features from continuous filtered values.
 
 ### Full example script
@@ -830,6 +890,16 @@ You want to:
             {"step": "round_intensities", "params": {}},
             {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
         ]
+
+        # --- Configuration: Morphology from original image (computed once) ---
+        # Morphology features depend on mask geometry, NOT intensity values,
+        # so they are identical regardless of which filter is applied.
+        pipeline.add_config(
+            "orig",
+            preprocess_steps + [
+                {"step": "extract_features", "params": {"families": ["morphology"]}},
+            ],
+        )
     
         # Feature extraction (intensity only for filtered images)
         extract_intensity = {
@@ -837,7 +907,7 @@ You want to:
             "params": {"families": ["intensity"]},
         }
     
-        # Collect config names dynamically
+        # Collect filter config names
         filter_configs = []
     
         # --- Configuration 1: LoG at multiple scales ---
@@ -911,12 +981,13 @@ You want to:
         )
         filter_configs.append(name)
     
-        # Run pipeline
+        # Run pipeline - include "orig" for morphology + all filter configs for intensity
+        all_configs = ["orig"] + filter_configs
         results = pipeline.run(
             image=str(image_path),
             mask=str(mask_path),
             subject_id="subject_001",
-            config_names=filter_configs,
+            config_names=all_configs,
         )
     
         # Format and save
@@ -966,3 +1037,443 @@ results = pipeline.run(image, mask, config_names=all_configs)
 ## Output Options
 
 For details on result formatting (`wide` vs `long`, `output_type` options) and export functions, see the [Feature Calculations - Working with Results](feature_calculations.md#working-with-results).
+
+---
+
+## Case 7: Multi-configuration batch with deduplication
+
+### Scenario
+
+You want to run a comprehensive radiomic analysis using multiple discretization strategies (e.g., FBN with 8/16/32 bins and FBS with 8/16/32 bin widths) while maximizing performance. All configurations share the same preprocessing steps.
+
+!!! info "Deduplication is Enabled by Default"
+    Starting with pictologics v0.3.2, deduplication is **enabled by default** (`deduplicate=True`). You don't need to explicitly enable it—just create a pipeline and run multiple configurations to benefit from automatic optimization.
+
+You want to:
+
+- Apply standard preprocessing (resample, resegment, filter outliers, keep largest component).
+- Run **6 discretization strategies** for comprehensive coverage.
+- **Optimize performance** by avoiding redundant computation of features that don't depend on discretization.
+- Track and report deduplication statistics to understand the performance benefit.
+
+### Key concepts
+
+The deduplication system understands which feature families depend on which preprocessing steps:
+
+| Feature Family | Depends On |
+| :--- | :--- |
+| **Morphology** | Resampling, mask operations (resegment, keep_largest_component, filter_outliers) |
+| **Intensity** | Resampling, intensity preprocessing (resegment, filter_outliers, round_intensities) |
+| **Texture / Histogram** | All of the above **plus** discretization |
+| **IVH** | Depends on IVH-specific settings (`ivh_use_continuous`, `ivh_discretisation`) |
+
+When configs share preprocessing but differ only in discretization:
+
+- **Morphology** and **intensity** features are computed **once** and reused.
+- **Texture**, **histogram**, and (typically) **IVH** are computed **per configuration**.
+
+### How Results Are Handled
+
+!!! note "Complete Results for All Configurations"
+    When deduplication reuses features, they are **copied** into the results dictionary—never empty or missing. Every configuration returns a complete feature set with identical values for reused families.
+
+| What happens | Details |
+| :--- | :--- |
+| **First config** | All feature families are computed and stored in cache |
+| **Subsequent configs** | Matching families are **copied** from cache; differing families are computed fresh |
+| **Final results** | Every config has **complete features**—no NaN values, no missing columns |
+
+This means when you concatenate results into a DataFrame for machine learning or statistical analysis, all rows are complete:
+
+```python
+import pandas as pd
+
+# Each config has complete results
+df = pd.DataFrame([results[cfg] for cfg in config_names])
+print(df.isna().sum().sum())  # 0 - no missing values!
+```
+
+This can reduce total computation time significantly—especially for morphology features which involve expensive surface area calculations.
+
+### Full example script
+
+!!! example "Full example script"
+    ```python
+    from pathlib import Path
+    import time
+    
+    from pictologics import RadiomicsPipeline
+    from pictologics.results import format_results, save_results
+    
+    
+    def main():
+        # Configure paths
+        image_path = Path("path/to/image.nii.gz")
+        mask_path = Path("path/to/mask.nii.gz")
+        output_csv = Path("case7_dedup_results.csv")
+    
+        # Define shared preprocessing steps
+        preprocess_steps = [
+            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+            {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
+            {"step": "filter_outliers", "params": {"sigma": 3.0}},
+            {"step": "round_intensities", "params": {}},
+            {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
+        ]
+    
+        # Shared feature extraction settings
+        extract_all = {
+            "step": "extract_features",
+            "params": {
+                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
+                "include_spatial_intensity": False,
+                "include_local_intensity": False,
+            },
+        }
+    
+        # ========================================
+        # Run WITH deduplication (enabled by default)
+        # ========================================
+        pipeline_dedup = RadiomicsPipeline()  # deduplicate=True is the default!
+    
+        # Add 6 configurations (only discretisation differs)
+        for n_bins in (8, 16, 32):
+            pipeline_dedup.add_config(
+                f"fbn_{n_bins}",
+                preprocess_steps + [
+                    {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
+                    extract_all,
+                ],
+            )
+    
+        for bin_width in (8.0, 16.0, 32.0):
+            pipeline_dedup.add_config(
+                f"fbs_{int(bin_width)}",
+                preprocess_steps + [
+                    {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
+                    extract_all,
+                ],
+            )
+    
+        config_names = ["fbn_8", "fbn_16", "fbn_32", "fbs_8", "fbs_16", "fbs_32"]
+    
+        # Run with deduplication
+        start = time.perf_counter()
+        results = pipeline_dedup.run(
+            image=str(image_path),
+            mask=str(mask_path),
+            subject_id="subject_001",
+            config_names=config_names,
+        )
+        elapsed_dedup = time.perf_counter() - start
+    
+        # ========================================
+        # Check deduplication statistics
+        # ========================================
+        stats = pipeline_dedup.deduplication_stats
+        print("\n=== Deduplication Statistics ===")
+        print(f"Reused feature families: {stats['reused_families']}")
+        print(f"Computed feature families: {stats['computed_families']}")
+        print(f"Cache hit rate: {stats['cache_hit_rate']:.1%}")
+        print(f"Time with deduplication: {elapsed_dedup:.2f}s")
+    
+        # ========================================
+        # Format and save results
+        # ========================================
+        row = format_results(
+            results,
+            fmt="wide",
+            meta={"subject_id": "subject_001"},
+        )
+        save_results([row], output_csv)
+        print(f"\nSaved results to {output_csv}")
+    
+        # Verify all configs have the same morphology features (computed once, reused)
+        ref_volume = results["fbn_8"].get("volume_mesh_ml_HTUR", None)
+        for config in config_names[1:]:
+            vol = results[config].get("volume_mesh_ml_HTUR", None)
+            assert vol == ref_volume, f"Volume mismatch for {config}"
+        print("✓ Morphology features identical across all configurations (as expected)")
+    
+    
+    if __name__ == "__main__":
+        main()
+    ```
+
+### Expected output
+
+When running 6 configurations with shared preprocessing:
+
+```
+=== Deduplication Statistics ===
+Reused feature families: 10
+Computed feature families: 20
+Cache hit rate: 33.3%
+Time with deduplication: 12.34s
+
+Saved results to case7_dedup_results.csv
+✓ Morphology features identical across all configurations (as expected)
+```
+
+The cache hit rate reflects that:
+
+- **Morphology** (1 family) is computed once, reused 5 times → 5 cache hits
+- **Intensity** (1 family) is computed once, reused 5 times → 5 cache hits
+- **Texture** (6 subfamilies × 6 configs = 36) computed fresh each time
+- **Histogram** (1 × 6 configs) computed fresh each time
+- **IVH** (1 × 6 configs) computed fresh each time
+
+The actual speedup depends on your data, but morphology calculations (especially surface area) are often the most expensive, so avoiding 5 redundant morphology computations can provide significant time savings.
+
+### Configuration options
+
+Deduplication is enabled by default, but you can disable or customize it:
+
+```python
+# Default behavior - deduplication enabled (no explicit setting needed)
+pipeline = RadiomicsPipeline()
+
+# Disable deduplication (features computed independently for each config)
+pipeline_no_dedup = RadiomicsPipeline(deduplicate=False)
+
+# Lock to a specific rules version for reproducibility
+pipeline_versioned = RadiomicsPipeline(deduplication_rules="1.0.0")
+
+# Access deduplication configuration
+print(f"Deduplication enabled: {pipeline.deduplication_enabled}")
+print(f"Rules version: {pipeline.deduplication_rules.version}")
+```
+
+### When to disable deduplication
+
+In most cases, you should leave deduplication enabled (the default). However, you might disable it if:
+
+| Scenario | Reason |
+| :--- | :--- |
+| **Debugging** | To verify that features are computed correctly for each config |
+| **Memory constraints** | Caching results consumes memory during the run |
+| **Single config** | No benefit when running only one configuration |
+
+### Serialization
+
+Deduplication settings are preserved when exporting/importing pipeline configurations:
+
+```python
+# Export includes deduplication settings
+pipeline.save_configs("my_pipeline.yaml")
+
+# Import preserves settings
+loaded = RadiomicsPipeline.load_configs("my_pipeline.yaml")
+print(f"Loaded deduplicate setting: {loaded.deduplicate}")
+```
+
+!!! tip "Learn More"
+    For detailed documentation of the deduplication system, including the underlying classes and how feature family dependencies are determined, see the [Deduplication](pipeline.md#deduplication-performance-optimization) section in the Pipeline guide and the [Deduplication API](../api/deduplication.md) reference.
+
+---
+
+## Case 8: Manual Feature Separation (Advanced)
+
+!!! info "Case 7 vs Case 8"
+    - **Case 7** uses **automatic deduplication** (enabled by default) where the pipeline internally optimizes computation and copies results to matching configs
+    - **Case 8** demonstrates **manual feature separation** where YOU explicitly control which features are computed in which configs
+    
+    For most users, automatic deduplication (Case 7) is simpler and sufficient. Manual separation gives you maximum control and transparency.
+
+### Scenario
+
+You want **complete control** over which features are computed for which configurations, avoiding any redundant computation. This is an alternative to automatic deduplication that gives you explicit control over your pipeline structure.
+
+This approach is ideal when:
+
+- You want clear separation between "baseline" features and "variant" features.
+- You're combining multiple filters with multiple discretization strategies.
+- You need to ensure morphology is computed exactly once across all configurations.
+
+### The Core Concept
+
+Different feature families have different dependencies:
+
+| Feature Family | Depends On | Independent Of |
+| :--- | :--- | :--- |
+| **Morphology** | Mask geometry (resample, binarize_mask, keep_largest_component) | Intensity values, filters, discretization |
+| **Intensity** | Intensity preprocessing (resample, resegment, filter_outliers, **filter**) | Discretization |
+| **Texture, Histogram, IVH** | All of the above + **discretization** | — |
+
+This means:
+
+1. **Morphology** can be computed once and reused across all configurations (including filtered ones).
+2. **Intensity** can be computed once per unique preprocessing+filter combination.
+3. **Texture/Histogram/IVH** must be computed for each discretization strategy.
+
+### Example 1: Standard Radiomics with Manual Separation
+
+```python
+from pictologics import RadiomicsPipeline
+
+# Common preprocessing
+preprocess = [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
+    {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
+]
+
+pipeline = RadiomicsPipeline()
+
+# Config 1: "orig" - morphology + intensity (computed ONCE)
+pipeline.add_config("orig", preprocess + [
+    {"step": "extract_features", "params": {
+        "families": ["morphology", "intensity"],
+    }},
+])
+
+# Configs 2-7: Discretization-dependent features only
+for n_bins in (8, 16, 32):
+    pipeline.add_config(f"fbn_{n_bins}", preprocess + [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
+        {"step": "extract_features", "params": {
+            "families": ["texture", "histogram", "ivh"],  # NO morphology/intensity
+        }},
+    ])
+
+for bin_width in (8.0, 16.0, 32.0):
+    pipeline.add_config(f"fbs_{int(bin_width)}", preprocess + [
+        {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
+        {"step": "extract_features", "params": {
+            "families": ["texture", "histogram", "ivh"],
+        }},
+    ])
+
+# Run all configs
+results = pipeline.run(
+    image="path/to/image.nii.gz",
+    mask="path/to/mask.nii.gz",
+    config_names=["orig", "fbn_8", "fbn_16", "fbn_32", "fbs_8", "fbs_16", "fbs_32"],
+)
+
+# Results structure:
+# - results["orig"] contains morphology + intensity (applies to all)
+# - results["fbn_8"] contains texture/histogram/ivh for FBN with 8 bins
+# - etc.
+```
+
+### Example 2: Filtered Radiomics with Manual Separation
+
+When combining filters, remember:
+
+- **Morphology** is filter-independent (computed from mask geometry)
+- **Intensity** is filter-dependent (computed from filtered response map)
+
+```python
+from pictologics import RadiomicsPipeline
+
+preprocess = [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+]
+
+pipeline = RadiomicsPipeline()
+
+# Config 1: Morphology from original image (computed ONCE, reused for all filters)
+pipeline.add_config("orig_morphology", preprocess + [
+    {"step": "extract_features", "params": {"families": ["morphology"]}},
+])
+
+# Config 2: Intensity from original (unfiltered) image
+pipeline.add_config("orig_intensity", preprocess + [
+    {"step": "extract_features", "params": {"families": ["intensity"]}},
+])
+
+# Configs 3+: Intensity from each filtered response map
+for sigma in [1.5, 3.0, 5.0]:
+    pipeline.add_config(f"log_{sigma}", preprocess + [
+        {"step": "filter", "params": {"type": "log", "sigma_mm": sigma}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}},
+    ])
+
+pipeline.add_config("gabor", preprocess + [
+    {"step": "filter", "params": {
+        "type": "gabor", "sigma_mm": 5.0, "lambda_mm": 2.0, "gamma": 1.0,
+        "rotation_invariant": True, "pooling": "average",
+    }},
+    {"step": "extract_features", "params": {"families": ["intensity"]}},
+])
+
+# Run all
+results = pipeline.run(
+    image="path/to/image.nii.gz",
+    mask="path/to/mask.nii.gz",
+)
+
+# Results structure:
+# - results["orig_morphology"] contains morphology (applies to ALL configs)
+# - results["orig_intensity"] contains intensity from original image
+# - results["log_1.5"] contains intensity from LoG σ=1.5 filtered image
+# - etc.
+```
+
+### Example 3: Combined Filters + Discretization
+
+The most complex scenario: multiple filters AND multiple discretization strategies.
+
+```python
+from pictologics import RadiomicsPipeline
+
+preprocess = [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
+]
+
+pipeline = RadiomicsPipeline()
+
+# === TIER 1: Morphology (computed ONCE) ===
+pipeline.add_config("orig_morphology", preprocess + [
+    {"step": "extract_features", "params": {"families": ["morphology"]}},
+])
+
+# === TIER 2: Intensity per filter ===
+# Original (unfiltered)
+pipeline.add_config("orig_intensity", preprocess + [
+    {"step": "extract_features", "params": {"families": ["intensity"]}},
+])
+
+# LoG filters
+for sigma in [1.5, 3.0]:
+    pipeline.add_config(f"log_{sigma}_intensity", preprocess + [
+        {"step": "filter", "params": {"type": "log", "sigma_mm": sigma}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}},
+    ])
+
+# === TIER 3: Texture per discretization (original image only) ===
+for n_bins in (16, 32):
+    pipeline.add_config(f"orig_fbn_{n_bins}", preprocess + [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
+        {"step": "extract_features", "params": {"families": ["texture", "histogram"]}},
+    ])
+
+# Note: Texture from filtered images would require discretization of the filtered
+# response map, which is less common but can be added similarly if needed.
+```
+
+### Comparison: Manual vs Automatic Deduplication
+
+| Aspect | Manual Separation | Automatic Deduplication |
+| :--- | :--- | :--- |
+| **Setup complexity** | More config definitions | Simpler (one config per variant) |
+| **Result structure** | Features split across configs | All features in each config |
+| **Memory usage** | Lower (no caching) | Higher (cached results) |
+| **Transparency** | Explicit control | Magic happens internally |
+| **Filter handling** | You control morphology placement | Morphology auto-shared |
+
+### When to Use Manual Separation
+
+!!! success "Recommended For"
+    - Complex filter + discretization combinations
+    - Maximum memory efficiency
+    - When you want explicit control over computation
+    - Research scenarios requiring clear provenance
+
+!!! warning "Consider Automatic Deduplication Instead"
+    - Simple discretization-only scenarios (automatic dedup handles this well)
+    - When you want all features in each result dictionary
+    - Rapid prototyping

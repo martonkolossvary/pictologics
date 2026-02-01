@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.2] - 2026-02-01
+
+### Added
+- **Feature Deduplication System**: Intelligent optimization for multi-configuration pipelines:
+    - Automatically detects when configurations share preprocessing steps but differ only in discretization
+    - Computes discretization-independent features (morphology, intensity) once and reuses across configurations
+    - `deduplication_stats` property provides reuse/compute statistics after each run
+    - Hash-based signature comparison using SHA256 for exact parameter matching
+    - Versioned rules system (`DeduplicationRules`) for reproducibility
+
+### Changed
+- **Deduplication enabled by default**: `RadiomicsPipeline(deduplicate=True)` is now the default behavior
+- **Documentation updated**: 
+    - Case examples simplified to reflect default deduplication behavior
+    - Benchmark page clarifies methodology (raw timing without caching) and notes additional speedups with deduplication
+
+
+---
+
 ## [0.3.1] - 2026-01-31
 
 ### Added

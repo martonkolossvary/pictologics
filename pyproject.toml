@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pictologics"
-version = "0.3.1"
+version = "0.3.2"
 description = "IBSI-compliant radiomic feature extraction package"
 authors = ["Márton Kolossváry <marton.kolossvary@gmail.com>"]
 readme = "README.md"
@@ -63,8 +63,10 @@ types-pyyaml = "^6.0.12.20250915"
 optional = true
 
 [tool.poetry.group.benchmark.dependencies]
-# pyradiomics only works with Python 3.8-3.11, install with: poetry install --with benchmark
-pyradiomics = "*"
+# Install from GitHub for Python 3.12+ support:
+#   poetry run pip install git+https://github.com/AIM-Harvard/pyradiomics.git SimpleITK
+# Official PyPI release (3.1.0) only supports Python 3.8-3.11
+pyradiomics = {git = "https://github.com/AIM-Harvard/pyradiomics.git", optional = true}
 SimpleITK = ">=2.0.0"
 
 [build-system]

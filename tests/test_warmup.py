@@ -31,9 +31,7 @@ class TestWarmup(unittest.TestCase):
             "pictologics.warmup._warmup_intensity"
         ) as mock_int, patch(
             "pictologics.warmup._warmup_morphology"
-        ) as mock_morph, self.assertLogs(
-            "pictologics.warmup", level="INFO"
-        ) as cm:
+        ) as mock_morph:
 
             from pictologics.warmup import warmup_jit
 
@@ -43,32 +41,32 @@ class TestWarmup(unittest.TestCase):
             mock_int.assert_called_once()
             mock_morph.assert_called_once()
 
-        self.assertTrue(any("warmup complete" in msg for msg in cm.output))
-
     def test_warmup_disabled(self) -> None:
         """Test that setting PICTOLOGICS_DISABLE_WARMUP stops execution."""
         os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
-        with self.assertLogs("pictologics.warmup", level="INFO") as cm:
-            from pictologics.warmup import warmup_jit
+        # Since INFO logs are removed, just verify no exception is raised
+        from pictologics.warmup import warmup_jit
 
-            warmup_jit()
-
-        self.assertTrue(any("disabled" in msg for msg in cm.output))
-        # Ensure it didn't say "complete"
-        self.assertFalse(any("warmup complete" in msg for msg in cm.output))
+        # Should complete without error when disabled
+        warmup_jit()
 
     @patch("pictologics.warmup._warmup_texture")
     def test_warmup_failure_survived(self, mock_texture: MagicMock) -> None:
         """Test that exception in warmup doesn't crash the program."""
         mock_texture.side_effect = RuntimeError("Something exploded")
 
-        with self.assertLogs("pictologics.warmup", level="WARNING") as cm:
+        # Warmup failure should emit a RuntimeWarning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             from pictologics.warmup import warmup_jit
 
             warmup_jit()
 
-        self.assertTrue(any("warmup failed" in msg for msg in cm.output))
+            # Verify warning was emitted
+            runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
+            self.assertTrue(len(runtime_warnings) >= 1)
+            self.assertTrue(any("warmup failed" in str(x.message).lower() for x in runtime_warnings))
 
     @patch("pictologics.warmup.numba.get_num_threads")
     def test_warmup_fallback_logic(self, mock_get_threads: MagicMock) -> None:
@@ -87,7 +85,10 @@ class TestWarmup(unittest.TestCase):
 
                 from pictologics.warmup import warmup_jit
 
-                warmup_jit()
+                # Suppress expected warmup failure warning (mocked texture causes failure)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    warmup_jit()
 
                 # Check if it tried to access the fallback config
                 _ = mock_config.NUMBA_NUM_THREADS
