@@ -63,10 +63,11 @@ types-pyyaml = "^6.0.12.20250915"
 optional = true
 
 [tool.poetry.group.benchmark.dependencies]
-# Install from GitHub for Python 3.12+ support:
+# PyRadiomics is NOT managed by Poetry due to:
+#   1. Official PyPI release (3.1.0) only supports Python 3.8-3.11
+#   2. Git dependencies cause SSL issues on some systems
+# Install manually when running benchmarks:
 #   poetry run pip install git+https://github.com/AIM-Harvard/pyradiomics.git SimpleITK
-# Official PyPI release (3.1.0) only supports Python 3.8-3.11
-pyradiomics = {git = "https://github.com/AIM-Harvard/pyradiomics.git", optional = true}
 SimpleITK = ">=2.0.0"
 
 [build-system]
