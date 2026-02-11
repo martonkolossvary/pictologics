@@ -13,10 +13,10 @@
       
       
       
-        <link rel="prev" href="../..">
+        <link rel="prev" href="../installation/">
       
       
-        <link rel="next" href="../quick_start/">
+        <link rel="next" href="../data_loading/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Installation - Pictologics</title>
+        <title>Quick Start - Pictologics</title>
       
     
     
@@ -88,7 +88,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#installation" class="md-skip">
+        <a href="#quick-start" class="md-skip">
           Skip to content
         </a>
       
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Installation
+              Quick Start
             
           </span>
         </div>
@@ -257,7 +257,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+        <a href="../installation/" class="md-tabs__link">
           
   
   
@@ -536,6 +536,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -555,7 +583,7 @@
   <span class="md-ellipsis">
     
   
-    Installation
+    Quick Start
   
 
     
@@ -573,7 +601,7 @@
   <span class="md-ellipsis">
     
   
-    Installation
+    Quick Start
   
 
     
@@ -599,10 +627,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#what-is-radiomics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Prerequisites
+        What Is Radiomics?
       
     </span>
   </a>
@@ -610,10 +638,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#installation-via-pip" class="md-nav__link">
+  <a href="#minimal-example" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Installation via Pip
+        Minimal Example
       
     </span>
   </a>
@@ -621,22 +649,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#installation-from-github" class="md-nav__link">
+  <a href="#two-input-modes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Installation from GitHub
+        Two Input Modes
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Installation from GitHub">
+    <nav class="md-nav" aria-label="Two Input Modes">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#latest-from-main" class="md-nav__link">
+  <a href="#mode-1-image-mask-traditional" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Latest from main
+        Mode 1: Image + Mask (Traditional)
       
     </span>
   </a>
@@ -644,21 +672,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#pinned-to-a-tag-or-commit" class="md-nav__link">
+  <a href="#mode-2-sentinel-values-single-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pinned to a tag or commit
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#editable-install-development" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Editable install (development)
+        Mode 2: Sentinel Values (Single-File)
       
     </span>
   </a>
@@ -671,30 +688,35 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#eager-compilation-warmup" class="md-nav__link">
+  <a href="#pipeline-steps-at-a-glance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Eager Compilation (Warmup)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Eager Compilation (Warmup)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#disabling-warmup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Disabling Warmup
+        Pipeline Steps at a Glance
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#using-predefined-configurations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using Predefined Configurations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
   
 </li>
       
@@ -702,34 +724,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../quick_start/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Quick Start
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1642,10 +1636,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#what-is-radiomics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Prerequisites
+        What Is Radiomics?
       
     </span>
   </a>
@@ -1653,10 +1647,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#installation-via-pip" class="md-nav__link">
+  <a href="#minimal-example" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Installation via Pip
+        Minimal Example
       
     </span>
   </a>
@@ -1664,22 +1658,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#installation-from-github" class="md-nav__link">
+  <a href="#two-input-modes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Installation from GitHub
+        Two Input Modes
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Installation from GitHub">
+    <nav class="md-nav" aria-label="Two Input Modes">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#latest-from-main" class="md-nav__link">
+  <a href="#mode-1-image-mask-traditional" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Latest from main
+        Mode 1: Image + Mask (Traditional)
       
     </span>
   </a>
@@ -1687,21 +1681,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#pinned-to-a-tag-or-commit" class="md-nav__link">
+  <a href="#mode-2-sentinel-values-single-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pinned to a tag or commit
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#editable-install-development" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Editable install (development)
+        Mode 2: Sentinel Values (Single-File)
       
     </span>
   </a>
@@ -1714,30 +1697,35 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#eager-compilation-warmup" class="md-nav__link">
+  <a href="#pipeline-steps-at-a-glance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Eager Compilation (Warmup)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Eager Compilation (Warmup)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#disabling-warmup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Disabling Warmup
+        Pipeline Steps at a Glance
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#using-predefined-configurations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using Predefined Configurations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1761,44 +1749,267 @@
   
 
 
-<h1 id="installation">Installation</h1>
-<h2 id="prerequisites">Prerequisites</h2>
-<ul>
-<li>Python 3.12+</li>
-<li>pip</li>
-</ul>
-<h2 id="installation-via-pip">Installation via Pip</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>pictologics
+<h1 id="quick-start">Quick Start</h1>
+<p>Get from zero to extracting radiomic features in under 5 minutes. This page walks you through the core concepts and a minimal working example so you can start analyzing medical images right away.</p>
+<h2 id="what-is-radiomics">What Is Radiomics?</h2>
+<p>Radiomics is the process of extracting quantitative features — such as texture, shape, and intensity statistics — from medical images (<a href="https://journals.lww.com/thoracicimaging/fulltext/2018/01000/cardiac_computed_tomography_radiomics__a.5.aspx">Kolossváry, Márton et al. J Thorac Imaging. 2018 Jan;33(1):26-34</a>). These features can then be used in statistical models, machine learning, or clinical research to characterize tissue properties that may not be visible to the human eye.</p>
+<p><strong>Pictologics</strong> automates this process: you provide an image and (optionally) a segmentation mask, and it returns a set of reproducible, IBSI-compliant features.</p>
+<h2 id="minimal-example">Minimal Example</h2>
+<p>The fastest way to get started is with a <strong>pipeline</strong>. A pipeline is a sequence of processing steps — such as resampling, intensity binning, and feature extraction — that are applied to your image in order. Think of it as a recipe: you define the steps once, and then apply the same recipe to any number of images.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_image</span><span class="p">,</span> <span class="n">RadiomicsPipeline</span><span class="p">,</span> <span class="n">format_results</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.results</span><span class="w"> </span><span class="kn">import</span> <span class="n">save_results</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Step 1: Load your data</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Pictologics accepts NIfTI (.nii, .nii.gz) and DICOM files.</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># The &quot;image&quot; is the medical scan (e.g., a CT or MRI volume).</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># The &quot;mask&quot; is a binary segmentation that defines the region of interest (ROI)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># — the specific area in the image you want to analyze (e.g., a tumor).</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/ct_scan.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/segmentation.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># Step 2: Create a pipeline and add a configuration</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># A configuration is a named set of processing steps.</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># Here we define three steps:</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="c1">#   1. Resample the image to 1mm isotropic voxel spacing (standardizes resolution)</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="c1">#   2. Discretise intensities into 32 bins (required for texture analysis)</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="c1">#   3. Extract intensity, morphology (shape), and texture features</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;my_analysis&quot;</span><span class="p">,</span> <span class="p">[</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>        <span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">],</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    <span class="p">}},</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="p">])</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="c1"># Step 3: Run the pipeline</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="c1"># The pipeline applies each step in order: resample → discretise → extract.</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="c1"># &quot;subject_id&quot; is an optional label used to identify this case in the output.</span>
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">,</span> <span class="n">subject_id</span><span class="o">=</span><span class="s2">&quot;patient_001&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="c1"># Step 4: Save the extracted features to a CSV file</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="c1"># Each feature becomes a column; each subject becomes a row.</span>
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="n">formatted</span> <span class="o">=</span> <span class="n">format_results</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;wide&quot;</span><span class="p">,</span> <span class="n">output_type</span><span class="o">=</span><span class="s2">&quot;dict&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="n">save_results</span><span class="p">(</span><span class="n">formatted</span><span class="p">,</span> <span class="s2">&quot;features.csv&quot;</span><span class="p">)</span>
 </code></pre></div>
-<h2 id="installation-from-github">Installation from GitHub</h2>
-<p>If you want the latest development version (or you want to install before the
-next PyPI release), you can install directly from the GitHub repository.</p>
-<h3 id="latest-from-main">Latest from <code>main</code></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;pictologics @ git+https://github.com/martonkolossvary/pictologics.git@main&quot;</span>
-</code></pre></div>
-<h3 id="pinned-to-a-tag-or-commit">Pinned to a tag or commit</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Example: install from a tag</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;pictologics @ git+https://github.com/martonkolossvary/pictologics.git@v0.1.0&quot;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Example: install from a commit SHA</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;pictologics @ git+https://github.com/martonkolossvary/pictologics.git@&lt;commit_sha&gt;&quot;</span>
-</code></pre></div>
-<h3 id="editable-install-development">Editable install (development)</h3>
-<p>Use this if you plan to modify the code.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/martonkolossvary/pictologics.git
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">cd</span><span class="w"> </span>pictologics
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
-</code></pre></div>
-<h2 id="eager-compilation-warmup">Eager Compilation (Warmup)</h2>
-<p>Pictologics uses Numba for Just-In-Time (JIT) compilation to accelerate feature extraction. To ensure fast runtime performance, Pictologics performs an <strong>automatic warmup mechanism</strong> during import. This compiles the core functions immediately when <code>import pictologics</code> is executed.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>This may cause the <code>import pictologics</code> statement to take a few seconds (typically 2-10s depending on your CPU) to complete. This is expected behavior and guarantees that subsequent function calls are executed at full speed without initial compilation lag.</p>
+<div class="admonition tip">
+<p class="admonition-title">What does the output look like?</p>
+<p>The result is a dictionary mapping configuration names to feature sets. Each feature set is a
+<code>pandas.Series</code> with descriptive names like:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Feature Name</th>
+<th style="text-align: left;">Family</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>mean_intensity_Q4LE</code></td>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: left;">Mean value within the ROI</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>volume_RNU0</code></td>
+<td style="text-align: left;">Morphology</td>
+<td style="text-align: left;">Volume of the ROI computed from a mesh surface</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>sphericity_QCFX</code></td>
+<td style="text-align: left;">Morphology</td>
+<td style="text-align: left;">How sphere-like the ROI shape is (1.0 = perfect sphere)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>joint_entropy_TU9B</code></td>
+<td style="text-align: left;">Texture (GLCM)</td>
+<td style="text-align: left;">Entropy of the grey-level co-occurrence matrix</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The trailing 4-character code</strong> (e.g., <code>Q4LE</code>, <code>RNU0</code>) is the official
+<a href="https://theibsi.github.io/">IBSI feature identifier</a>. Identifiers more than 4 letters long are specific to Pictologics and are not part of the IBSI standard (for example due to typos or missing abbreviations in the documentation). The
+<a href="https://ibsi.readthedocs.io/en/latest/">Image Biomarker Standardisation Initiative (IBSI)</a> assigns a
+unique alphanumeric code to every standardised radiomic feature. Pictologics appends this
+code to every feature name so you can always trace a result back to its exact IBSI definition
+— for example, <code>mean_intensity_Q4LE</code> corresponds to IBSI feature <strong>Q4LE</strong> ("Mean intensity").</p>
+<p>Saving to CSV produces a table where each row is one subject and each column is one feature.</p>
 </div>
-<h3 id="disabling-warmup">Disabling Warmup</h3>
-<p>If you need fast import times (e.g., for CLI tools checking versions or lightweight scripts) and are willing to pay the compilation cost at the first function call, you can disable this behavior by setting the environment variable:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PICTOLOGICS_DISABLE_WARMUP</span><span class="o">=</span><span class="m">1</span>
+<h2 id="two-input-modes">Two Input Modes</h2>
+<p>Pictologics supports two approaches for defining which voxels to analyze. The right choice depends on how your data is structured.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Mode</th>
+<th style="text-align: left;">Input Files</th>
+<th style="text-align: left;">When to Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Image + Mask</strong></td>
+<td style="text-align: left;">2 files (image + segmentation)</td>
+<td style="text-align: left;">Standard radiomics with explicit ROI masks</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Sentinel Values</strong></td>
+<td style="text-align: left;">1 file (embedded background marker)</td>
+<td style="text-align: left;">Pre-cropped lesion exports, coronary artery CTs</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mode-1-image-mask-traditional">Mode 1: Image + Mask (Traditional)</h3>
+<p>This is the most common setup. You have <strong>two separate files</strong>:</p>
+<ul>
+<li>An <strong>image</strong> containing raw intensity values (e.g., CT Hounsfield Units or MRI signal intensities).</li>
+<li>A <strong>mask</strong> (also called a segmentation) that defines the region of interest (ROI). In the simplest case this is a binary volume (1 = inside the ROI, 0 = outside), but it can also contain <strong>multiple integer labels</strong> encoding different structures (e.g., 1 = left ventricle, 2 = right ventricle). Pictologics can select, combine, or iterate over these labels using the <code>binarize_mask</code> pipeline step — see <a href="../data_loading/#combining-specific-segments-into-a-binary-mask">Data Loading → Combining Segments</a> and the <a href="../cookbook/">Cookbook</a> for detailed examples.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Load image and mask from separate files</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;ct_scan.nii.gz&quot;</span><span class="p">)</span>       <span class="c1"># The medical scan</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;segmentation.nii.gz&quot;</span><span class="p">)</span>   <span class="c1"># Binary ROI (1 = analyze, 0 = ignore)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Run the pipeline — features are computed only within the mask</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
 </code></pre></div>
+<h3 id="mode-2-sentinel-values-single-file">Mode 2: Sentinel Values (Single-File)</h3>
+<p>Some workflows produce a <strong>single file</strong> where the ROI is embedded in the data itself. Valid voxels contain real intensity values, while background or excluded regions are filled with a <strong>sentinel value</strong> — a fixed, artificial number (such as -2048) that signals "this voxel is not real data."</p>
+<p>This is common in pre-cropped lesion exports and research datasets where masking is embedded rather than stored separately.</p>
+<p>If left untreated, sentinel values corrupt resampling (interpolation bleeds the artificial value into neighbors) and filtering (convolution kernels mix sentinel values into the response). Handling sentinel values properly requires <strong>two complementary mechanisms</strong>:</p>
+<ol>
+<li><strong><code>source_mode="auto"</code></strong> creates a <em>source mask</em> that protects <strong>resampling and filtering only</strong>. It applies masked interpolation and normalized convolution so sentinel voxels don't corrupt valid neighbors. However, it does <strong>not</strong> change the ROI — sentinel voxels still remain in the region used for feature extraction.</li>
+<li><strong><code>resegment</code></strong> restricts the <strong>ROI</strong> to a valid intensity range, excluding sentinel voxels from <strong>feature extraction</strong>. Without this step, sentinel values would bias intensity statistics, texture matrices, and all other computed features.</li>
+</ol>
+<p>You typically need both:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Configure the pipeline with automatic sentinel detection.</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># source_mode=&quot;auto&quot; tells the pipeline to scan for common sentinel values</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># (e.g., -2048, -1024, 0) and apply protected resampling/filtering if one is found.</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;sentinel_aware&quot;</span><span class="p">,</span> <span class="p">[</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="c1"># resegment is still needed to exclude sentinels from the ROI for feature extraction</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">100</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">3000</span><span class="p">}},</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">]}},</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="p">],</span> <span class="n">source_mode</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="c1"># Run without a mask — the ROI is derived from non-sentinel voxels via resegment</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">image</span><span class="p">)</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Modality</th>
+<th style="text-align: left;">Common Sentinel</th>
+<th style="text-align: left;">Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">CT</td>
+<td style="text-align: left;">-2048 HU</td>
+<td style="text-align: left;">Outside value range</td>
+</tr>
+<tr>
+<td style="text-align: left;">CT</td>
+<td style="text-align: left;">-1024 HU</td>
+<td style="text-align: left;">Missing data</td>
+</tr>
+<tr>
+<td style="text-align: left;">MRI</td>
+<td style="text-align: left;">0</td>
+<td style="text-align: left;">Background</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition tip">
+<p class="admonition-title">Source Mode Options</p>
+<ul>
+<li><code>"full_image"</code> (default) — All voxels are assumed valid. Use this for standard image + mask workflows.</li>
+<li><code>"auto"</code> — Automatically detect and handle sentinel values. Protects resampling and filtering. Combine with <code>resegment</code> to also exclude sentinels from the ROI.</li>
+<li><code>"roi_only"</code> — Explicitly enable sentinel handling. Pair with <code>sentinel_value=-2048</code> (or your known value) for deterministic behavior.</li>
+</ul>
+</div>
+<h2 id="pipeline-steps-at-a-glance">Pipeline Steps at a Glance</h2>
+<p>Steps execute <strong>in the order you define them</strong>, so you have full control over the processing sequence. Here are the most commonly used steps:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Step</th>
+<th style="text-align: left;">Purpose</th>
+<th style="text-align: left;">When to Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>resample</code></td>
+<td style="text-align: left;">Standardize voxel spacing across patients</td>
+<td style="text-align: left;">Almost always — ensures features are comparable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>resegment</code></td>
+<td style="text-align: left;">Restrict ROI to an intensity range (e.g., [-100, 400] HU)</td>
+<td style="text-align: left;">When you need to exclude outliers or sentinel values</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>keep_largest_component</code></td>
+<td style="text-align: left;">Remove small disconnected mask fragments</td>
+<td style="text-align: left;">When your mask has noise or satellite lesions</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>binarize_mask</code></td>
+<td style="text-align: left;">Select specific labels from a multi-label mask</td>
+<td style="text-align: left;">When your mask encodes multiple structures</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>discretise</code></td>
+<td style="text-align: left;">Bin intensities for texture features (FBN or FBS)</td>
+<td style="text-align: left;"><strong>Required</strong> before <code>extract_features</code> with texture</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>filter</code></td>
+<td style="text-align: left;">Apply IBSI 2 image filters (LoG, Gabor, Wavelets, etc.)</td>
+<td style="text-align: left;">For filtered radiomics / response map analysis</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>extract_features</code></td>
+<td style="text-align: left;">Calculate radiomic features from the processed ROI</td>
+<td style="text-align: left;">The final step — produces the output features</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Full Step Reference</p>
+<p>For a complete list of all steps, their parameters, and usage examples, see the
+<strong><a href="../pipeline/">Pipeline &amp; Preprocessing</a></strong> guide.</p>
+</div>
+<h2 id="using-predefined-configurations">Using Predefined Configurations</h2>
+<p>If you don't want to define steps manually, Pictologics includes <strong>6 standard configurations</strong> that are ready to use. They cover common discretisation strategies with sensible defaults:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># Run a single predefined configuration</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="c1"># &quot;standard_fbn_32&quot; uses 0.5mm isotropic resampling and 32 fixed bins</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;ct_scan.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">mask</span><span class="o">=</span><span class="s2">&quot;segmentation.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">],</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="p">)</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="c1"># Or run all 6 standard configurations at once</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="n">all_results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;ct_scan.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="n">mask</span><span class="o">=</span><span class="s2">&quot;segmentation.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;all_standard&quot;</span><span class="p">],</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="p">)</span>
+</code></pre></div>
+<p>See <strong><a href="../configurations/">Configuration &amp; Reproducibility</a></strong> for the full list and how to export/share configurations.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><strong><a href="../data_loading/">Data Loading</a></strong> — Loading DICOM series, NIfTI files, SEG objects, and merging masks</li>
+<li><strong><a href="../pipeline/">Pipeline &amp; Preprocessing</a></strong> — Full reference for all preprocessing steps and feature extraction</li>
+<li><strong><a href="../image_filtering/">Image Filtering</a></strong> — IBSI 2 compliant filter suite</li>
+<li><strong><a href="../configurations/">Configuration &amp; Reproducibility</a></strong> — Predefined configs, YAML/JSON export, sharing</li>
+<li><strong><a href="../cookbook/">Cookbook</a></strong> — End-to-end batch processing scripts and real-world recipes</li>
+</ul>
 
 
 

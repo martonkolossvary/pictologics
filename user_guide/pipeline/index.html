@@ -13,10 +13,10 @@
       
       
       
-        <link rel="prev" href="../feature_calculations/">
+        <link rel="prev" href="../data_loading/">
       
       
-        <link rel="next" href="../predefined_configurations/">
+        <link rel="next" href="../image_filtering/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Pipeline Usage - Pictologics</title>
+        <title>Pipeline & Preprocessing - Pictologics</title>
       
     
     
@@ -88,7 +88,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#radiomics-pipeline" class="md-skip">
+        <a href="#pipeline-preprocessing" class="md-skip">
           Skip to content
         </a>
       
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Pipeline Usage
+              Pipeline & Preprocessing
             
           </span>
         </div>
@@ -567,6 +567,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../quick_start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../data_loading/" class="md-nav__link">
         
   
@@ -575,62 +603,6 @@
     
   
     Data Loading
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../image_filtering/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Image Filtering
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../feature_calculations/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Feature Calculations
   
 
     
@@ -667,7 +639,7 @@
   <span class="md-ellipsis">
     
   
-    Pipeline Usage
+    Pipeline & Preprocessing
   
 
     
@@ -685,7 +657,7 @@
   <span class="md-ellipsis">
     
   
-    Pipeline Usage
+    Pipeline & Preprocessing
   
 
     
@@ -714,7 +686,7 @@
   <a href="#why-use-the-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why use the Pipeline?
+        Why Use the Pipeline?
       
     </span>
   </a>
@@ -722,24 +694,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#linear-step-execution" class="md-nav__link">
+  <a href="#getting-started" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Linear Step Execution
+        Getting Started
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
+    <nav class="md-nav" aria-label="Getting Started">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
   <a href="#masks-are-optional" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Masks are optional
+        Masks Are Optional
       
     </span>
   </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -755,77 +733,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#deduplication-performance-optimization" class="md-nav__link">
+  <a href="#linear-step-execution" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Deduplication (Performance Optimization)
+        Linear Step Execution
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Deduplication (Performance Optimization)">
+    <nav class="md-nav" aria-label="Linear Step Execution">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
+  <a href="#intelligent-image-routing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How It Works
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#behavior-deduplicatetrue-vs-false" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Behavior: deduplicate=True vs False
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Usage
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#configuration-parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-to-use-deduplication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When to Use Deduplication
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-6-configs-with-shared-preprocessing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example: 6 Configs with Shared Preprocessing
+        Intelligent Image Routing
       
     </span>
   </a>
@@ -838,49 +761,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#custom-configurations" class="md-nav__link">
+  <a href="#available-preprocessing-steps" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Custom Configurations
+        Available Preprocessing Steps
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Custom Configurations">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#structure-of-a-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Structure of a Configuration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#practical-tips" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Practical tips
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#available-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Available Steps
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Available Steps">
+    <nav class="md-nav" aria-label="Available Preprocessing Steps">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -939,10 +828,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#6-discretise" class="md-nav__link">
+  <a href="#6-binarize_mask" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. discretise
+        6. binarize_mask
       
     </span>
   </a>
@@ -950,10 +839,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#7-filter" class="md-nav__link">
+  <a href="#7-discretise" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. filter
+        7. discretise
       
     </span>
   </a>
@@ -961,18 +850,24 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#8-extract_features" class="md-nav__link">
+  <a href="#8-filter" class="md-nav__link">
     <span class="md-ellipsis">
       
-        8. extract_features
+        8. filter
       
     </span>
   </a>
   
 </li>
         
-      </ul>
-    </nav>
+          <li class="md-nav__item">
+  <a href="#9-extract_features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. extract_features
+      
+    </span>
+  </a>
   
 </li>
         
@@ -982,22 +877,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#examples" class="md-nav__link">
+  <a href="#working-with-results" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Examples
+        Working with Results
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Examples">
+    <nav class="md-nav" aria-label="Working with Results">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#example-1-standard-suite-fast-baseline" class="md-nav__link">
+  <a href="#format-options" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 1: Standard suite (fast baseline)
+        Format Options
       
     </span>
   </a>
@@ -1005,10 +900,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-1b-maskless-run-whole-image-roi" class="md-nav__link">
+  <a href="#output-types" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 1b: Maskless run (whole-image ROI)
+        Output Types
       
     </span>
   </a>
@@ -1016,10 +911,38 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-2-enable-spatiallocal-intensity-extras-custom-config" class="md-nav__link">
+  <a href="#batch-processing-pattern" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 2: Enable spatial/local intensity extras (custom config)
+        Batch Processing Pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deduplication-performance-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deduplication (Performance Optimization)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deduplication (Performance Optimization)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
       
     </span>
   </a>
@@ -1027,10 +950,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-3-only-compute-the-expensive-parts-explicit-families" class="md-nav__link">
+  <a href="#checking-statistics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 3: Only compute the expensive parts (explicit families)
+        Checking Statistics
       
     </span>
   </a>
@@ -1038,65 +961,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-4-ivh-with-physical-unit-mapping-advanced" class="md-nav__link">
+  <a href="#configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 4: IVH with physical-unit mapping (advanced)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-5-texture-with-ngldm-tolerance-ngldm_alpha" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example 5: Texture with NGLDM tolerance (ngldm_alpha)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-custom-ct-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example: Custom CT Pipeline
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-7-laplacian-of-gaussian-log-filter" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example 7: Laplacian of Gaussian (LoG) Filter
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-8-laws-texture-energy-ibsi-2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example 8: Laws Texture Energy (IBSI 2)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-9-wavelet-decomposition" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example 9: Wavelet Decomposition
+        Configuration
       
     </span>
   </a>
@@ -1120,10 +988,93 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#configuration-export-import" class="md-nav__link">
+  <a href="#examples" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration Export &amp; Import
+        Examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#standard-suite-fast-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standard Suite (Fast Baseline)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enable-spatiallocal-intensity-extras" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enable Spatial/Local Intensity Extras
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ivh-with-physical-unit-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IVH with Physical-Unit Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-ct-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom CT Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#log-filtered-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LoG Filtered Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-step-by-step-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Step-by-Step Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance Tips
       
     </span>
   </a>
@@ -1146,14 +1097,70 @@
   
   
     <li class="md-nav__item">
-      <a href="../predefined_configurations/" class="md-nav__link">
+      <a href="../image_filtering/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Predefined Configurations
+    Image Filtering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configurations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration & Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cookbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cookbook
   
 
     
@@ -1182,34 +1189,6 @@
     
   
     Utilities
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../case_examples/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Case Examples
   
 
     
@@ -1965,7 +1944,7 @@
   <a href="#why-use-the-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why use the Pipeline?
+        Why Use the Pipeline?
       
     </span>
   </a>
@@ -1973,24 +1952,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#linear-step-execution" class="md-nav__link">
+  <a href="#getting-started" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Linear Step Execution
+        Getting Started
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
+    <nav class="md-nav" aria-label="Getting Started">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
   <a href="#masks-are-optional" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Masks are optional
+        Masks Are Optional
       
     </span>
   </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2006,77 +1991,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#deduplication-performance-optimization" class="md-nav__link">
+  <a href="#linear-step-execution" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Deduplication (Performance Optimization)
+        Linear Step Execution
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Deduplication (Performance Optimization)">
+    <nav class="md-nav" aria-label="Linear Step Execution">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
+  <a href="#intelligent-image-routing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How It Works
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#behavior-deduplicatetrue-vs-false" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Behavior: deduplicate=True vs False
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Usage
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#configuration-parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-to-use-deduplication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        When to Use Deduplication
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-6-configs-with-shared-preprocessing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example: 6 Configs with Shared Preprocessing
+        Intelligent Image Routing
       
     </span>
   </a>
@@ -2089,49 +2019,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#custom-configurations" class="md-nav__link">
+  <a href="#available-preprocessing-steps" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Custom Configurations
+        Available Preprocessing Steps
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Custom Configurations">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#structure-of-a-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Structure of a Configuration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#practical-tips" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Practical tips
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#available-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Available Steps
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Available Steps">
+    <nav class="md-nav" aria-label="Available Preprocessing Steps">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2190,10 +2086,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#6-discretise" class="md-nav__link">
+  <a href="#6-binarize_mask" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. discretise
+        6. binarize_mask
       
     </span>
   </a>
@@ -2201,10 +2097,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#7-filter" class="md-nav__link">
+  <a href="#7-discretise" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. filter
+        7. discretise
       
     </span>
   </a>
@@ -2212,18 +2108,24 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#8-extract_features" class="md-nav__link">
+  <a href="#8-filter" class="md-nav__link">
     <span class="md-ellipsis">
       
-        8. extract_features
+        8. filter
       
     </span>
   </a>
   
 </li>
         
-      </ul>
-    </nav>
+          <li class="md-nav__item">
+  <a href="#9-extract_features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. extract_features
+      
+    </span>
+  </a>
   
 </li>
         
@@ -2233,22 +2135,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#examples" class="md-nav__link">
+  <a href="#working-with-results" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Examples
+        Working with Results
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Examples">
+    <nav class="md-nav" aria-label="Working with Results">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#example-1-standard-suite-fast-baseline" class="md-nav__link">
+  <a href="#format-options" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 1: Standard suite (fast baseline)
+        Format Options
       
     </span>
   </a>
@@ -2256,10 +2158,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-1b-maskless-run-whole-image-roi" class="md-nav__link">
+  <a href="#output-types" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 1b: Maskless run (whole-image ROI)
+        Output Types
       
     </span>
   </a>
@@ -2267,10 +2169,38 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-2-enable-spatiallocal-intensity-extras-custom-config" class="md-nav__link">
+  <a href="#batch-processing-pattern" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 2: Enable spatial/local intensity extras (custom config)
+        Batch Processing Pattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deduplication-performance-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deduplication (Performance Optimization)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deduplication (Performance Optimization)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
       
     </span>
   </a>
@@ -2278,10 +2208,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-3-only-compute-the-expensive-parts-explicit-families" class="md-nav__link">
+  <a href="#checking-statistics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 3: Only compute the expensive parts (explicit families)
+        Checking Statistics
       
     </span>
   </a>
@@ -2289,65 +2219,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-4-ivh-with-physical-unit-mapping-advanced" class="md-nav__link">
+  <a href="#configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example 4: IVH with physical-unit mapping (advanced)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-5-texture-with-ngldm-tolerance-ngldm_alpha" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example 5: Texture with NGLDM tolerance (ngldm_alpha)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-custom-ct-pipeline" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example: Custom CT Pipeline
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-7-laplacian-of-gaussian-log-filter" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example 7: Laplacian of Gaussian (LoG) Filter
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-8-laws-texture-energy-ibsi-2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example 8: Laws Texture Energy (IBSI 2)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#example-9-wavelet-decomposition" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example 9: Wavelet Decomposition
+        Configuration
       
     </span>
   </a>
@@ -2371,10 +2246,93 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#configuration-export-import" class="md-nav__link">
+  <a href="#examples" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration Export &amp; Import
+        Examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#standard-suite-fast-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standard Suite (Fast Baseline)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enable-spatiallocal-intensity-extras" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enable Spatial/Local Intensity Extras
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ivh-with-physical-unit-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IVH with Physical-Unit Mapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-ct-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom CT Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#log-filtered-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LoG Filtered Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-step-by-step-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Step-by-Step Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance Tips
       
     </span>
   </a>
@@ -2401,56 +2359,56 @@
   
 
 
-<h1 id="radiomics-pipeline">Radiomics Pipeline</h1>
-<p>The <code>RadiomicsPipeline</code> is the core engine of Pictologics for executing reproducible, standardized radiomic feature extraction workflows. It manages the entire lifecycle of the data, from loading and preprocessing to feature extraction and logging.</p>
-<h2 id="why-use-the-pipeline">Why use the Pipeline?</h2>
+<h1 id="pipeline-preprocessing">Pipeline &amp; Preprocessing</h1>
+<p>The <code>RadiomicsPipeline</code> is the core engine of Pictologics for executing reproducible, standardized radiomic feature extraction workflows. It manages the entire lifecycle from preprocessing to feature extraction and logging.</p>
+<h2 id="why-use-the-pipeline">Why Use the Pipeline?</h2>
 <ol>
-<li><strong>Reproducibility</strong>: By defining a configuration (a sequence of steps), you ensure that the exact same preprocessing is applied to every image.</li>
-<li><strong>State Management</strong>: The pipeline automatically handles the state of the image and masks (morphological and intensity) as they pass through steps like resampling and resegmentation.</li>
-<li><strong>Standardisation</strong>: It comes with built-in configurations that adhere to IBSI standards.</li>
-<li><strong>Batch Processing</strong>: You can run multiple configurations (e.g., different binning strategies) on the same image in a single pass.</li>
-<li><strong>Flexibility</strong>: The pipeline executes steps in a <strong>linear fashion</strong>, allowing you to arrange steps in any order, repeat steps if needed, and implement arbitrarily complex workflows.</li>
+<li><strong>Reproducibility</strong>: Define a configuration once and apply it consistently to every image.</li>
+<li><strong>State Management</strong>: The pipeline tracks the image and masks (morphological and intensity) through every step.</li>
+<li><strong>Standardisation</strong>: Built-in configurations follow IBSI standards.</li>
+<li><strong>Batch Processing</strong>: Run multiple configurations (e.g., different binning strategies) on the same image in a single pass.</li>
+<li><strong>Flexibility</strong>: Steps execute <strong>linearly</strong>, so you can arrange them in any order or repeat steps.</li>
 </ol>
-<hr />
-<h2 id="linear-step-execution">Linear Step Execution</h2>
-<p>The pipeline module executes steps <strong>linearly in order</strong>. This means:</p>
-<ul>
-<li>Steps are applied one after another in the exact sequence you define.</li>
-<li>You can <strong>repeat steps</strong> if needed (e.g., apply <code>discretise</code> multiple times with different settings).</li>
-<li>You can <strong>arrange steps in any order</strong> appropriate for your workflow.</li>
-<li>This linear design allows for implementing <strong>complex, multi-stage preprocessing</strong> while maintaining full control.</li>
-</ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Example: Complex workflow with repeated steps</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">complex_config</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)}},</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;keep_largest_component&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;apply_to&quot;</span><span class="p">:</span> <span class="s2">&quot;morph&quot;</span><span class="p">}},</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">}},</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter_outliers&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;sigma&quot;</span><span class="p">:</span> <span class="mf">3.0</span><span class="p">}},</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{}},</span>  <span class="c1"># Round after all preprocessing</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">]}},</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">]</span>
+<h2 id="getting-started">Getting Started</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span><span class="p">,</span> <span class="n">format_results</span><span class="p">,</span> <span class="n">save_results</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># 1. Initialize the pipeline</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># 2. Run a predefined configuration</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">mask</span><span class="o">=</span><span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">subject_id</span><span class="o">=</span><span class="s2">&quot;Subject_001&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">],</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="p">)</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># 3. Format and save results</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="n">row</span> <span class="o">=</span> <span class="n">format_results</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;wide&quot;</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;subject_id&quot;</span><span class="p">:</span> <span class="s2">&quot;Subject_001&quot;</span><span class="p">})</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">save_results</span><span class="p">([</span><span class="n">row</span><span class="p">],</span> <span class="s2">&quot;results.csv&quot;</span><span class="p">)</span>
 </code></pre></div>
-<hr />
-<h2 id="masks-are-optional">Masks are optional</h2>
-<p><code>RadiomicsPipeline.run(...)</code> accepts an optional <code>mask</code> argument.</p>
+<h3 id="masks-are-optional">Masks Are Optional</h3>
+<p><code>RadiomicsPipeline.run(...)</code> accepts an optional <code>mask</code> argument:</p>
 <ul>
-<li>If you pass a mask path / mask <code>Image</code>, it is used as the ROI (standard radiomics workflow).</li>
-<li>If you omit <code>mask</code> (or pass <code>mask=None</code> / <code>mask=""</code>), Pictologics generates a full (all-ones) ROI mask internally,
-  meaning the <strong>entire image</strong> is treated as the initial ROI.</li>
+<li>Pass a mask path or <code>Image</code> object → used as the ROI (standard workflow).</li>
+<li>Omit <code>mask</code> (or pass <code>mask=None</code> / <code>mask=""</code>) → Pictologics generates a full (all-ones) ROI mask, treating the <strong>entire image</strong> as the initial ROI.</li>
 </ul>
 <div class="admonition warning">
-<p class="admonition-title">Warning</p>
-<p><strong>Empty ROI is an error</strong>
-If preprocessing removes all ROI voxels (e.g., too strict <code>resegment</code> thresholds), the pipeline raises a clear
-error rather than returning empty/partial feature sets.</p>
+<p class="admonition-title">Empty ROI is an Error</p>
+<p>If preprocessing removes all ROI voxels (e.g., too strict <code>resegment</code> thresholds), the pipeline raises a clear <code>EmptyROIMaskError</code> rather than returning empty/partial feature sets.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Morphology with Whole-Image ROI</p>
+<p>With a maskless run, morphology features describe the ROI mask after mask-refining steps
+(e.g., <code>resegment</code>, <code>keep_largest_component</code>). This is valid computationally, but may not be
+scientifically meaningful for all studies.</p>
 </div>
 <h2 id="predefined-configurations">Predefined Configurations</h2>
-<p>Pictologics includes <strong>6 standard configurations</strong> designed for common radiomics workflows. All standard configurations share:</p>
+<p>Pictologics includes <strong>6 standard configurations</strong> designed for common radiomics workflows. All share:</p>
 <ul>
 <li><strong>Resampling</strong>: 0.5mm × 0.5mm × 0.5mm isotropic spacing</li>
 <li><strong>Feature Families</strong>: intensity, morphology, texture, histogram, and IVH</li>
-<li><strong>Performance-optimized</strong>: Spatial/local intensity disabled by default</li>
+<li><strong>Performance</strong>: Spatial/local intensity disabled by default</li>
 </ul>
 <table>
 <thead>
@@ -2493,92 +2451,70 @@ error rather than returning empty/partial feature sets.</p>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Run a single configuration</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">)</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># Run all 6 standard configurations</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">all_results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run_all_standard_configs</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Run a single configuration</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">])</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Run all 6 standard configurations</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">all_results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;all_standard&quot;</span><span class="p">])</span>
 </code></pre></div>
 <div class="admonition tip">
-<p class="admonition-title">Learn More</p>
-<p>For detailed configuration specifications, FBN vs FBS guidance, export/import capabilities, and best practices, see the <strong><a href="../predefined_configurations/">Predefined Configurations</a></strong> guide.</p>
+<p class="admonition-title">Configuration Management</p>
+<p>For detailed documentation on FBN vs FBS guidance, export/import, YAML/JSON formats, schema versioning, and sharing configurations, see the <strong><a href="../configurations/">Configuration &amp; Reproducibility</a></strong> guide.</p>
 </div>
-<hr />
-<h2 id="deduplication-performance-optimization">Deduplication (Performance Optimization)</h2>
-<p>When running multiple configurations that share preprocessing steps but differ only in discretization (e.g., running all 6 standard configurations), the pipeline can <strong>automatically avoid redundant computation</strong> by enabling deduplication.</p>
-<h3 id="how-it-works">How It Works</h3>
-<div class="admonition info">
-<p class="admonition-title">Enabled by Default</p>
-<p>Deduplication is <strong>enabled by default</strong> (<code>deduplicate=True</code>). You don't need to explicitly set it—just create a pipeline and run multiple configurations to benefit from automatic optimization.</p>
-</div>
-<p>The deduplication system analyzes your configurations and identifies which feature families can be computed once and reused:</p>
-<ol>
-<li><strong>Preprocessing Signature</strong>: Each configuration's preprocessing steps (resample, resegment, filter_outliers, etc.) are hashed into a unique signature.</li>
-<li><strong>Feature Family Dependencies</strong>: The system knows which preprocessing steps affect which feature families:<ul>
-<li><strong>Morphology</strong>: Depends only on mask geometry operations (resample, binarize_mask, keep_largest_component). <strong>Not affected by intensity operations or filters.</strong></li>
-<li><strong>Intensity</strong> (including spatial/local): Depends on intensity preprocessing (resample, resegment, filter_outliers, filter). Different filters produce different intensity features.</li>
-<li><strong>Texture/Histogram/IVH</strong>: Depends on all of the above <strong>plus</strong> discretization</li>
-</ul>
-</li>
-<li><strong>Execution Plan</strong>: When configs share preprocessing but differ only in discretization, families like morphology and intensity are computed once and reused.</li>
-</ol>
-<h3 id="behavior-deduplicatetrue-vs-false">Behavior: deduplicate=True vs False</h3>
+<h2 id="linear-step-execution">Linear Step Execution</h2>
+<p>Steps are applied <strong>one after another</strong> in the exact sequence you define. You can <strong>repeat steps</strong>, <strong>arrange steps in any order</strong>, and implement <strong>complex multi-stage preprocessing</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Example: Complex workflow with repeated steps</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">complex_config</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)}},</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;keep_largest_component&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;apply_to&quot;</span><span class="p">:</span> <span class="s2">&quot;morph&quot;</span><span class="p">}},</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">}},</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter_outliers&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;sigma&quot;</span><span class="p">:</span> <span class="mf">3.0</span><span class="p">}},</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{}},</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">]}},</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="p">]</span>
+</code></pre></div>
+<h3 id="intelligent-image-routing">Intelligent Image Routing</h3>
+<p>After discretisation, the pipeline maintains both the <strong>original (raw)</strong> image and the <strong>discretised</strong> image, ensuring each feature type gets the appropriate input automatically:</p>
 <table>
 <thead>
 <tr>
-<th style="text-align: left;">Setting</th>
-<th style="text-align: left;">Behavior</th>
-<th style="text-align: left;">Results</th>
+<th style="text-align: left;">Feature Family</th>
+<th style="text-align: left;">Image Used</th>
+<th style="text-align: left;">Why</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;"><code>deduplicate=True</code> (default)</td>
-<td style="text-align: left;">Features computed once per unique preprocessing signature, then <strong>copied</strong> to matching configs</td>
-<td style="text-align: left;">All configs receive complete, identical feature values for reused families</td>
+<td style="text-align: left;"><strong>Intensity</strong></td>
+<td style="text-align: left;">Raw image</td>
+<td style="text-align: left;">Statistics require original continuous values</td>
 </tr>
 <tr>
-<td style="text-align: left;"><code>deduplicate=False</code></td>
-<td style="text-align: left;">Features computed independently for every config</td>
-<td style="text-align: left;">Same results, but slower execution</td>
+<td style="text-align: left;"><strong>Morphology</strong></td>
+<td style="text-align: left;">Raw image</td>
+<td style="text-align: left;">Volume/surface calculations use original geometry</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Histogram</strong></td>
+<td style="text-align: left;">Discretised</td>
+<td style="text-align: left;">Bin-based statistics require integer bins</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Texture</strong> (GLCM, GLRLM, etc.)</td>
+<td style="text-align: left;">Discretised</td>
+<td style="text-align: left;">Co-occurrence matrices require discrete grey levels</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>IVH</strong></td>
+<td style="text-align: left;">Configurable</td>
+<td style="text-align: left;">Can use raw (continuous) or discretised values</td>
 </tr>
 </tbody>
 </table>
-<div class="admonition note">
-<p class="admonition-title">Results Are Always Complete</p>
-<p>When deduplication copies features, they are <strong>copied into the results dictionary</strong>—never empty or missing. Every configuration returns a complete feature set, whether features were freshly computed or reused from cache.</p>
-</div>
-<div class="admonition tip">
-<p class="admonition-title">Copy Behavior</p>
-<p>Reused features are <strong>deep copied</strong> to each configuration's result dictionary. Modifying results from one configuration will NOT affect results from another.</p>
-</div>
-<h3 id="usage">Usage</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># Deduplication is enabled by default - no need to set it!</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>  <span class="c1"># deduplicate=True by default</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Run all 6 standard configurations</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run_all_standard_configs</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">)</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1"># Check deduplication statistics</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">pipeline</span><span class="o">.</span><span class="n">deduplication_stats</span><span class="p">)</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="c1"># Example output:</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="c1"># {</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="c1">#     &#39;reused_families&#39;: 24,  # Families reused from cache</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1">#     &#39;computed_families&#39;: 12, # Families freshly computed</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="c1">#     &#39;cache_hit_rate&#39;: 0.67   # 67% of families were reused</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="c1"># }</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="c1"># Verify: all configs have complete results (no missing features)</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="k">for</span> <span class="n">config_name</span><span class="p">,</span> <span class="n">features</span> <span class="ow">in</span> <span class="n">results</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">config_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">features</span><span class="p">)</span><span class="si">}</span><span class="s2"> features&quot;</span><span class="p">)</span>
-</code></pre></div>
-<h3 id="configuration-parameters">Configuration Parameters</h3>
+<h2 id="available-preprocessing-steps">Available Preprocessing Steps</h2>
+<h3 id="1-resample">1. <code>resample</code></h3>
+<p>Resamples the image and mask to a new voxel spacing.</p>
 <table>
 <thead>
 <tr>
@@ -2590,186 +2526,197 @@ error rather than returning empty/partial feature sets.</p>
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;"><code>deduplicate</code></td>
-<td style="text-align: left;"><code>bool</code></td>
-<td style="text-align: left;"><code>True</code></td>
-<td style="text-align: left;">Enable/disable deduplication optimization</td>
+<td style="text-align: left;"><code>new_spacing</code></td>
+<td style="text-align: left;"><code>tuple</code></td>
+<td style="text-align: left;"><em>(required)</em></td>
+<td style="text-align: left;">Target spacing (x, y, z) in mm</td>
 </tr>
 <tr>
-<td style="text-align: left;"><code>deduplication_rules</code></td>
-<td style="text-align: left;"><code>str</code> or <code>DeduplicationRules</code></td>
-<td style="text-align: left;"><code>"1.0.0"</code></td>
-<td style="text-align: left;">Rules version for reproducibility</td>
+<td style="text-align: left;"><code>interpolation</code></td>
+<td style="text-align: left;"><code>str</code></td>
+<td style="text-align: left;"><code>"linear"</code></td>
+<td style="text-align: left;">Image interpolation: <code>"linear"</code>, <code>"cubic"</code>, <code>"nearest"</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>mask_interpolation</code></td>
+<td style="text-align: left;"><code>str</code></td>
+<td style="text-align: left;"><code>"nearest"</code></td>
+<td style="text-align: left;">Mask interpolation: <code>"nearest"</code>, <code>"linear"</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>mask_threshold</code></td>
+<td style="text-align: left;"><code>float</code></td>
+<td style="text-align: left;"><code>0.5</code></td>
+<td style="text-align: left;">Threshold for non-nearest mask interpolation</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>round_intensities</code></td>
+<td style="text-align: left;"><code>bool</code></td>
+<td style="text-align: left;"><code>False</code></td>
+<td style="text-align: left;">Round intensities to nearest integer after resampling</td>
 </tr>
 </tbody>
 </table>
-<h3 id="when-to-use-deduplication">When to Use Deduplication</h3>
-<div class="admonition success">
-<p class="admonition-title">Recommended For</p>
-<ul>
-<li>Running <strong>multiple discretization strategies</strong> (FBN 8/16/32 + FBS 8/16/32) on the same preprocessed image</li>
-<li><strong>Batch processing</strong> where many configs share preprocessing steps</li>
-<li><strong>Sensitivity studies</strong> varying only discretization parameters</li>
-</ul>
-</div>
-<div class="admonition warning">
-<p class="admonition-title">Not Recommended For</p>
-<ul>
-<li>Single configuration runs (no benefit)</li>
-<li>Configurations with different preprocessing steps (nothing to deduplicate)</li>
-<li>Memory-constrained environments (cached results consume memory)</li>
-</ul>
-</div>
-<h3 id="example-6-configs-with-shared-preprocessing">Example: 6 Configs with Shared Preprocessing</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># Define shared preprocessing</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">base_steps</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">100</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">3000</span><span class="p">}},</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="p">]</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">extract_all</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="s2">&quot;ivh&quot;</span><span class="p">]},</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="p">}</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="c1"># Create pipeline (deduplication enabled by default)</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>  <span class="c1"># No need to set deduplicate=True</span>
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="c1"># Add 6 configurations (only discretization differs)</span>
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="k">for</span> <span class="n">n_bins</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">):</span>
-<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    <span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span>
-<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>        <span class="sa">f</span><span class="s2">&quot;fbn_</span><span class="si">{</span><span class="n">n_bins</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
-<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>        <span class="n">base_steps</span> <span class="o">+</span> <span class="p">[</span>
-<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>            <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="n">n_bins</span><span class="p">}},</span>
-<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>            <span class="n">extract_all</span><span class="p">,</span>
-<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>        <span class="p">],</span>
-<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>    <span class="p">)</span>
-<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>
-<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a><span class="k">for</span> <span class="n">bin_width</span> <span class="ow">in</span> <span class="p">(</span><span class="mf">8.0</span><span class="p">,</span> <span class="mf">16.0</span><span class="p">,</span> <span class="mf">32.0</span><span class="p">):</span>
-<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>    <span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span>
-<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>        <span class="sa">f</span><span class="s2">&quot;fbs_</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">bin_width</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
-<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>        <span class="n">base_steps</span> <span class="o">+</span> <span class="p">[</span>
-<a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>            <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBS&quot;</span><span class="p">,</span> <span class="s2">&quot;bin_width&quot;</span><span class="p">:</span> <span class="n">bin_width</span><span class="p">}},</span>
-<a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>            <span class="n">extract_all</span><span class="p">,</span>
-<a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>        <span class="p">],</span>
-<a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>    <span class="p">)</span>
-<a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>
-<a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a><span class="c1"># Run all configs - morphology/intensity computed once, texture 6 times</span>
-<a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-<a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>    <span class="n">mask</span><span class="o">=</span><span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>    <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;fbn_8&quot;</span><span class="p">,</span> <span class="s2">&quot;fbn_16&quot;</span><span class="p">,</span> <span class="s2">&quot;fbn_32&quot;</span><span class="p">,</span> <span class="s2">&quot;fbs_8&quot;</span><span class="p">,</span> <span class="s2">&quot;fbs_16&quot;</span><span class="p">,</span> <span class="s2">&quot;fbs_32&quot;</span><span class="p">],</span>
-<a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a><span class="p">)</span>
-<a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>
-<a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a><span class="c1"># Inspect cache performance</span>
-<a id="__codelineno-3-44" name="__codelineno-3-44" href="#__codelineno-3-44"></a><span class="n">stats</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">deduplication_stats</span>
-<a id="__codelineno-3-45" name="__codelineno-3-45" href="#__codelineno-3-45"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cache hit rate: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;cache_hit_rate&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-3-46" name="__codelineno-3-46" href="#__codelineno-3-46"></a>
-<a id="__codelineno-3-47" name="__codelineno-3-47" href="#__codelineno-3-47"></a><span class="c1"># Verify all configs have complete, identical morphology values</span>
-<a id="__codelineno-3-48" name="__codelineno-3-48" href="#__codelineno-3-48"></a><span class="n">ref_vol</span> <span class="o">=</span> <span class="n">results</span><span class="p">[</span><span class="s2">&quot;fbn_8&quot;</span><span class="p">][</span><span class="s2">&quot;volume_mesh_ml_HTUR&quot;</span><span class="p">]</span>
-<a id="__codelineno-3-49" name="__codelineno-3-49" href="#__codelineno-3-49"></a><span class="k">for</span> <span class="n">config</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;fbn_16&quot;</span><span class="p">,</span> <span class="s2">&quot;fbn_32&quot;</span><span class="p">,</span> <span class="s2">&quot;fbs_8&quot;</span><span class="p">,</span> <span class="s2">&quot;fbs_16&quot;</span><span class="p">,</span> <span class="s2">&quot;fbs_32&quot;</span><span class="p">]:</span>
-<a id="__codelineno-3-50" name="__codelineno-3-50" href="#__codelineno-3-50"></a>    <span class="k">assert</span> <span class="n">results</span><span class="p">[</span><span class="n">config</span><span class="p">][</span><span class="s2">&quot;volume_mesh_ml_HTUR&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">ref_vol</span>
-<a id="__codelineno-3-51" name="__codelineno-3-51" href="#__codelineno-3-51"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✓ Morphology features identical across all configurations&quot;</span><span class="p">)</span>
-</code></pre></div>
-<p>In this example, <code>morphology</code> and <code>intensity</code> features are computed only once (for the first config) and reused for all 6 configurations, while <code>texture</code> and <code>histogram</code> are computed 6 times (once per discretization). This can provide significant speedups for large datasets.</p>
-<div class="admonition tip">
-<p class="admonition-title">API Reference</p>
-<p>For detailed documentation of the deduplication classes (<code>ConfigurationAnalyzer</code>, <code>DeduplicationPlan</code>, <code>PreprocessingSignature</code>, <code>DeduplicationRules</code>), see the <strong><a href="../../api/deduplication/">Deduplication API</a></strong> reference.</p>
-</div>
-<hr />
-<h2 id="custom-configurations">Custom Configurations</h2>
-<p>For advanced users, the pipeline allows you to define custom sequences of steps. A configuration is a list of dictionaries, where each dictionary represents a step.</p>
-<h3 id="structure-of-a-configuration">Structure of a Configuration</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">config</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="p">{</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;step_name&quot;</span><span class="p">,</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span> <span class="s2">&quot;param1&quot;</span><span class="p">:</span> <span class="n">value1</span><span class="p">,</span> <span class="s2">&quot;param2&quot;</span><span class="p">:</span> <span class="n">value2</span> <span class="p">}</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="p">},</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="c1"># ... more steps</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">]</span>
-</code></pre></div>
-<h3 id="practical-tips">Practical tips</h3>
-<ul>
-<li>Keep preprocessing steps explicit (resampling, resegmentation, discretisation) so your results are reproducible.</li>
-<li>For CT in Hounsfield Units, FBS (<code>bin_width</code>) is often more interpretable; for MRI/PET, FBN (<code>n_bins</code>) can be a
-    reasonable choice depending on your intensity normalization.</li>
-<li>If you only need a subset of feature families, set <code>families</code> to avoid unnecessary work.</li>
-</ul>
-<h3 id="available-steps">Available Steps</h3>
-<h4 id="1-resample">1. <code>resample</code></h4>
-<p>Resamples the image and mask to a new voxel spacing.</p>
-<ul>
-<li><code>new_spacing</code>: Tuple of (x, y, z) spacing in mm (e.g., <code>(1.0, 1.0, 1.0)</code>).<ul>
-<li>Alias: <code>spacing</code> (older configs/tests).</li>
-</ul>
-</li>
-<li><code>interpolation</code>: Interpolation for the image (<code>"linear"</code>, <code>"cubic"</code>, <code>"nearest"</code>). Default: <code>"linear"</code>.</li>
-<li><code>mask_interpolation</code>: Interpolation for the mask (<code>"nearest"</code>, <code>"linear"</code>). Default: <code>"nearest"</code>.</li>
-<li><code>mask_threshold</code>: When using non-nearest mask interpolation, voxels above this threshold become ROI. Default: <code>0.5</code>.</li>
-<li><code>round_intensities</code>: Whether to round image intensities to nearest integer after resampling. Default: <code>False</code>.</li>
-</ul>
-<h4 id="2-resegment">2. <code>resegment</code></h4>
-<p>Refines the mask based on intensity thresholds (e.g., excluding bone from a soft tissue mask).
-This is also the <strong>IBSI-recommended approach</strong> for filtering out <strong>sentinel/NA values</strong> (e.g., -1024, -2048 in DICOM)
-that represent missing or invalid data.</p>
-<ul>
-<li><code>range_min</code>: Minimum intensity value.</li>
-<li><code>range_max</code>: Maximum intensity value.</li>
-</ul>
-<h4 id="3-filter_outliers">3. <code>filter_outliers</code></h4>
+<h3 id="2-resegment">2. <code>resegment</code></h3>
+<p>Refines the ROI mask based on intensity thresholds, excluding voxels outside the specified range from feature extraction. This is essential for removing sentinel/NA values (e.g., -1024, -2048) from the ROI. Note that <code>resegment</code> only affects the <strong>ROI</strong> — if your pipeline also includes resampling or filtering, pair it with <code>source_mode="auto"</code> to protect those stages from sentinel contamination (see <a href="../data_loading/#handling-sentinel-na-values">Data Loading → Sentinel Handling</a>).</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>range_min</code></td>
+<td style="text-align: left;"><code>float</code></td>
+<td style="text-align: left;"><code>None</code></td>
+<td style="text-align: left;">Minimum intensity value</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>range_max</code></td>
+<td style="text-align: left;"><code>float</code></td>
+<td style="text-align: left;"><code>None</code></td>
+<td style="text-align: left;">Maximum intensity value</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-filter_outliers">3. <code>filter_outliers</code></h3>
 <p>Removes outliers from the intensity mask based on standard deviations from the mean.</p>
-<ul>
-<li><code>sigma</code>: Number of standard deviations (e.g., <code>3.0</code>).</li>
-</ul>
-<h4 id="4-keep_largest_component">4. <code>keep_largest_component</code></h4>
-<p>Restricts the mask to the largest connected component. Useful for removing noise or disconnected artifacts.</p>
-<ul>
-<li><code>apply_to</code>: Which mask(s) to process. Options:<ul>
-<li><code>"both"</code> (default): Apply to both morphological and intensity masks.</li>
-<li><code>"morph"</code>: Apply only to the morphological mask.</li>
-<li><code>"intensity"</code>: Apply only to the intensity mask.</li>
-</ul>
-</li>
-</ul>
-<h4 id="5-round_intensities">5. <code>round_intensities</code></h4>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>sigma</code></td>
+<td style="text-align: left;"><code>float</code></td>
+<td style="text-align: left;"><code>3.0</code></td>
+<td style="text-align: left;">Number of standard deviations</td>
+</tr>
+</tbody>
+</table>
+<h3 id="4-keep_largest_component">4. <code>keep_largest_component</code></h3>
+<p>Restricts the mask to the largest connected component.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>apply_to</code></td>
+<td style="text-align: left;"><code>str</code></td>
+<td style="text-align: left;"><code>"both"</code></td>
+<td style="text-align: left;"><code>"both"</code>, <code>"morph"</code>, or <code>"intensity"</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="5-round_intensities">5. <code>round_intensities</code></h3>
 <p>Rounds image intensities to the nearest integer. Useful before discretisation if values are close to integers.</p>
-<ul>
-<li><em>No parameters.</em></li>
-</ul>
-<h4 id="6-discretise">6. <code>discretise</code></h4>
-<p>Discretises the image intensities into bins. This is <strong>crucial</strong> for texture analysis.</p>
-<ul>
-<li><code>method</code>: <code>"FBN"</code> (Fixed Bin Number) or <code>"FBS"</code> (Fixed Bin Size).</li>
-<li><code>n_bins</code>: Number of bins (for FBN).</li>
-<li><code>bin_width</code>: Width of each bin (for FBS).</li>
-</ul>
-<h4 id="7-filter">7. <code>filter</code></h4>
-<p>Applies an image filter (convolutional filter) to the image. Supports IBSI 2 standard filters.</p>
-<ul>
-<li>
-<p><code>type</code>: Filter type (required). Options:</p>
-<ul>
-<li><code>"mean"</code>: Mean filter</li>
-<li><code>"log"</code>: Laplacian of Gaussian</li>
-<li><code>"laws"</code>: Laws' texture energy kernels</li>
-<li><code>"gabor"</code>: Gabor filter</li>
-<li><code>"wavelet"</code>: Separable wavelets (Haar, Daubechies, Coiflet)</li>
-<li><code>"simoncelli"</code>: Non-separable Simoncelli wavelet</li>
-<li><code>"riesz"</code>: Riesz transform</li>
-</ul>
-<div class="admonition tip">
-<p class="admonition-title">See Filter Details</p>
-<p>For detailed explanations and visual examples of each filter, see the <a href="../image_filtering/">Image Filtering</a> guide.</p>
-</div>
-</li>
-<li>
-<p><code>boundary</code>: Boundary condition. Options: <code>"mirror"</code> (default), <code>"nearest"</code>, <code>"zero"</code>, <code>"periodic"</code>.</p>
-</li>
-<li>Additional filter-specific parameters (see table below).</li>
-</ul>
-<p><strong>Filter Parameter Reference:</strong></p>
+<p><em>No parameters.</em></p>
+<h3 id="6-binarize_mask">6. <code>binarize_mask</code></h3>
+<p>Creates a binary mask from a multi-label mask.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>threshold</code></td>
+<td style="text-align: left;"><code>float</code></td>
+<td style="text-align: left;"><code>0.5</code></td>
+<td style="text-align: left;">Threshold value for binarization</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>mask_values</code></td>
+<td style="text-align: left;"><code>int</code>, <code>list</code>, or <code>tuple</code></td>
+<td style="text-align: left;"><code>None</code></td>
+<td style="text-align: left;">Specific label(s) to select. Tuple <code>(min, max)</code> selects a range</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>apply_to</code></td>
+<td style="text-align: left;"><code>str</code></td>
+<td style="text-align: left;"><code>"both"</code></td>
+<td style="text-align: left;"><code>"both"</code>, <code>"morph"</code>, or <code>"intensity"</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="7-discretise">7. <code>discretise</code></h3>
+<p>Discretises image intensities into bins. <strong>Required</strong> before texture feature extraction.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>method</code></td>
+<td style="text-align: left;"><code>str</code></td>
+<td style="text-align: left;"><em>(required)</em></td>
+<td style="text-align: left;"><code>"FBN"</code> (Fixed Bin Number) or <code>"FBS"</code> (Fixed Bin Size)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>n_bins</code></td>
+<td style="text-align: left;"><code>int</code></td>
+<td style="text-align: left;"><code>None</code></td>
+<td style="text-align: left;">Number of bins (for FBN)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>bin_width</code></td>
+<td style="text-align: left;"><code>float</code></td>
+<td style="text-align: left;"><code>None</code></td>
+<td style="text-align: left;">Width of each bin (for FBS)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="8-filter">8. <code>filter</code></h3>
+<p>Applies an IBSI 2 image filter. See the <strong><a href="../image_filtering/">Image Filtering</a></strong> guide for detailed documentation.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>type</code></td>
+<td style="text-align: left;"><code>str</code></td>
+<td style="text-align: left;"><em>(required)</em></td>
+<td style="text-align: left;"><code>"mean"</code>, <code>"log"</code>, <code>"laws"</code>, <code>"gabor"</code>, <code>"wavelet"</code>, <code>"simoncelli"</code>, <code>"riesz"</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>boundary</code></td>
+<td style="text-align: left;"><code>str</code></td>
+<td style="text-align: left;"><code>"mirror"</code></td>
+<td style="text-align: left;">Boundary condition</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Filter-specific parameters:</strong></p>
 <table>
 <thead>
 <tr>
@@ -2787,7 +2734,7 @@ that represent missing or invalid data.</p>
 <tr>
 <td style="text-align: left;"><code>log</code></td>
 <td style="text-align: left;"><code>sigma_mm</code></td>
-<td style="text-align: left;"><code>truncate</code>, <code>boundary</code>, <code>spacing_mm</code></td>
+<td style="text-align: left;"><code>truncate</code>, <code>boundary</code></td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>laws</code></td>
@@ -2797,7 +2744,7 @@ that represent missing or invalid data.</p>
 <tr>
 <td style="text-align: left;"><code>gabor</code></td>
 <td style="text-align: left;"><code>sigma_mm</code>, <code>lambda_mm</code>, <code>gamma</code></td>
-<td style="text-align: left;"><code>rotation_invariant</code>, <code>delta_theta</code>, <code>pooling</code>, <code>average_over_planes</code>, <code>spacing_mm</code>, <code>boundary</code></td>
+<td style="text-align: left;"><code>rotation_invariant</code>, <code>delta_theta</code>, <code>pooling</code>, <code>boundary</code></td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>wavelet</code></td>
@@ -2807,302 +2754,366 @@ that represent missing or invalid data.</p>
 <tr>
 <td style="text-align: left;"><code>simoncelli</code></td>
 <td style="text-align: left;"><code>level</code></td>
-<td style="text-align: left;"><em>(no boundary)</em></td>
+<td style="text-align: left;">—</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>riesz</code></td>
 <td style="text-align: left;"><code>order</code></td>
-<td style="text-align: left;"><code>variant</code> (<code>"base"</code>, <code>"log"</code>, <code>"simoncelli"</code>), <code>sigma_mm</code>, <code>level</code></td>
+<td style="text-align: left;"><code>variant</code>, <code>sigma_mm</code>, <code>level</code></td>
 </tr>
 </tbody>
 </table>
 <div class="admonition note">
-<p class="admonition-title">Automatic spacing injection</p>
-<p>For filters that require physical spacing (<code>log</code>, <code>gabor</code>), the pipeline automatically uses the image's voxel spacing if <code>spacing_mm</code> is not explicitly provided.</p>
+<p class="admonition-title">Automatic Spacing Injection</p>
+<p>For filters requiring physical spacing (<code>log</code>, <code>gabor</code>), the pipeline uses the image's voxel spacing automatically.</p>
 </div>
+<h3 id="9-extract_features">9. <code>extract_features</code></h3>
+<p>Calculates radiomic features from the current state.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>families</code></td>
+<td style="text-align: left;"><code>list[str]</code></td>
+<td style="text-align: left;"><em>(required)</em></td>
+<td style="text-align: left;">Feature families to extract (see table below)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>include_spatial_intensity</code></td>
+<td style="text-align: left;"><code>bool</code></td>
+<td style="text-align: left;"><code>False</code></td>
+<td style="text-align: left;">Include Moran's I / Geary's C</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>include_local_intensity</code></td>
+<td style="text-align: left;"><code>bool</code></td>
+<td style="text-align: left;"><code>False</code></td>
+<td style="text-align: left;">Include local intensity peaks</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>ivh_params</code></td>
+<td style="text-align: left;"><code>dict</code></td>
+<td style="text-align: left;"><code>None</code></td>
+<td style="text-align: left;">Parameters for IVH: <code>bin_width</code>, <code>min_val</code>, <code>max_val</code>, etc.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>ivh_discretisation</code></td>
+<td style="text-align: left;"><code>dict</code></td>
+<td style="text-align: left;"><code>None</code></td>
+<td style="text-align: left;">Temporary discretisation for IVH only</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>ivh_use_continuous</code></td>
+<td style="text-align: left;"><code>bool</code></td>
+<td style="text-align: left;"><code>False</code></td>
+<td style="text-align: left;">Use raw values for IVH</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>texture_matrix_params</code></td>
+<td style="text-align: left;"><code>dict</code></td>
+<td style="text-align: left;"><code>None</code></td>
+<td style="text-align: left;">E.g., <code>{"ngldm_alpha": 1}</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Available feature families:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Family</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>"intensity"</code></td>
+<td style="text-align: left;">First-order statistics (Mean, Skewness, etc.)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>"spatial_intensity"</code></td>
+<td style="text-align: left;">Moran's I / Geary's C only</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>"local_intensity"</code></td>
+<td style="text-align: left;">Local/global intensity peak features only</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>"morphology"</code></td>
+<td style="text-align: left;">Shape and size features (Volume, Sphericity, etc.)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>"texture"</code></td>
+<td style="text-align: left;">GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>"histogram"</code></td>
+<td style="text-align: left;">Intensity histogram features</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>"ivh"</code></td>
+<td style="text-align: left;">Intensity-Volume Histogram features</td>
+</tr>
+</tbody>
+</table>
+<h2 id="working-with-results">Working with Results</h2>
+<p>The <code>format_results()</code> function converts pipeline output into different formats for analysis or export.</p>
+<h3 id="format-options">Format Options</h3>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Wide Format</label><label for="__tabbed_1_2">Long Format</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>One row per subject with all features as columns. Column names use the pattern <code>{config}__{feature}</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">row</span> <span class="o">=</span> <span class="n">format_results</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;wide&quot;</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;subject_id&quot;</span><span class="p">:</span> <span class="s2">&quot;case1&quot;</span><span class="p">})</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># Returns: {&quot;subject_id&quot;: &quot;case1&quot;, &quot;standard_fbn_32__mean_intensity_Q4LE&quot;: 123.4, ...}</span>
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<p>Tidy data with one row per feature. Config name is automatically included.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">format_results</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;long&quot;</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;subject_id&quot;</span><span class="p">:</span> <span class="s2">&quot;case1&quot;</span><span class="p">},</span> <span class="n">output_type</span><span class="o">=</span><span class="s2">&quot;pandas&quot;</span><span class="p">)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># Returns DataFrame: [subject_id, config, feature_name, value]</span>
+</code></pre></div>
+</div>
+</div>
+</div>
+<h3 id="output-types">Output Types</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>"dict"</code> (default)</td>
+<td style="text-align: left;">Python dictionary (wide) or list of dicts (long)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>"pandas"</code></td>
+<td style="text-align: left;"><code>pandas.DataFrame</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>"json"</code></td>
+<td style="text-align: left;">JSON string</td>
+</tr>
+</tbody>
+</table>
+<h3 id="batch-processing-pattern">Batch Processing Pattern</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">all_rows</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">image_files</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">res</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">file</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">all_rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">format_results</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;wide&quot;</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;filename&quot;</span><span class="p">:</span> <span class="n">file</span><span class="o">.</span><span class="n">name</span><span class="p">}))</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># Save everything at once</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">save_results</span><span class="p">(</span><span class="n">all_rows</span><span class="p">,</span> <span class="s2">&quot;full_study_results.csv&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="deduplication-performance-optimization">Deduplication (Performance Optimization)</h2>
+<p>When running multiple configurations that share preprocessing steps, the pipeline <strong>automatically avoids redundant computation</strong>.</p>
+<div class="admonition info">
+<p class="admonition-title">Enabled by Default</p>
+<p>Deduplication is enabled by default (<code>deduplicate=True</code>). Just run multiple configs to benefit.</p>
+</div>
+<h3 id="how-it-works">How It Works</h3>
+<p>The system analyzes your configurations and identifies reusable features:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Feature Family</th>
+<th style="text-align: left;">Depends On</th>
+<th style="text-align: left;">Independent Of</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Morphology</strong></td>
+<td style="text-align: left;">Mask geometry (resample, binarize_mask, keep_largest_component)</td>
+<td style="text-align: left;">Intensity values, filters, discretization</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Intensity</strong></td>
+<td style="text-align: left;">Intensity preprocessing (resample, resegment, filter_outliers, filter)</td>
+<td style="text-align: left;">Discretization</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Texture / Histogram</strong></td>
+<td style="text-align: left;">All of the above <strong>plus</strong> discretization</td>
+<td style="text-align: left;">—</td>
+</tr>
+</tbody>
+</table>
+<p>When configs share preprocessing but differ only in discretization:</p>
+<ul>
+<li><strong>Morphology</strong> and <strong>intensity</strong> are computed <strong>once</strong> and reused</li>
+<li><strong>Texture</strong> and <strong>histogram</strong> are computed per configuration</li>
+</ul>
+<h3 id="checking-statistics">Checking Statistics</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">stats</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">deduplication_stats</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cache hit rate: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;cache_hit_rate&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Reused: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;reused_families&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> families&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Computed: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;computed_families&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> families&quot;</span><span class="p">)</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Results Are Always Complete</p>
+<p>When deduplication reuses features, they are <strong>deep copied</strong> into each configuration's results. Every config returns a complete feature set — no missing values.</p>
+</div>
+<h3 id="configuration">Configuration</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Parameter</th>
+<th style="text-align: left;">Type</th>
+<th style="text-align: left;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>deduplicate</code></td>
+<td style="text-align: left;"><code>bool</code></td>
+<td style="text-align: left;"><code>True</code></td>
+<td style="text-align: left;">Enable/disable deduplication</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>deduplication_rules</code></td>
+<td style="text-align: left;"><code>str</code> or <code>DeduplicationRules</code></td>
+<td style="text-align: left;"><code>"1.0.0"</code></td>
+<td style="text-align: left;">Rules version for reproducibility</td>
+</tr>
+</tbody>
+</table>
 <div class="admonition tip">
-<p class="admonition-title">IBSI 2 Compliance</p>
-<p>For IBSI 2 Phase 2 compliance, use <code>boundary="mirror"</code> and apply filters after resampling and intensity rounding.</p>
+<p class="admonition-title">API Reference</p>
+<p>For detailed documentation of <code>ConfigurationAnalyzer</code>, <code>DeduplicationPlan</code>, <code>PreprocessingSignature</code>, and <code>DeduplicationRules</code>, see the <strong><a href="../../api/deduplication/">Deduplication API</a></strong> reference.</p>
 </div>
-<h4 id="8-extract_features">8. <code>extract_features</code></h4>
-<p>Calculates the radiomic features based on the current state of the image and mask.</p>
-<div class="admonition note">
-<p class="admonition-title">Feature Calculation Inputs</p>
-<p>The pipeline automatically selects the appropriate image state for each feature family:</p>
-<ul>
-<li><strong>Intensity, Morphology, Spatial Intensity, Local Intensity</strong>: Calculated on the <strong>Raw Image</strong> (non-discretised, floating-point values).</li>
-<li><strong>Texture, Histogram</strong>: Calculated on the <strong>Discretised Image</strong> (integer bins).</li>
-<li><strong>IVH</strong>: Configurable. Defaults to <strong>Discretised Image</strong>, but can use <strong>Raw Image</strong> (<code>ivh_use_continuous=True</code>) or a <strong>Temporary Discretisation</strong> (<code>ivh_discretisation={...}</code>).</li>
-</ul>
-</div>
-<ul>
-<li><code>families</code>: List of feature families to extract. Options:<ul>
-<li><code>"intensity"</code>: First-order statistics (Mean, Skewness, etc.).<ul>
-<li>By default, spatial/local intensity features are <strong>not</strong> included.</li>
-<li>Enable via <code>include_spatial_intensity=True</code> and/or <code>include_local_intensity=True</code>
-    in the step <code>params</code>.</li>
-</ul>
-</li>
-<li><code>"spatial_intensity"</code>: Compute only spatial intensity (Moran's I / Geary's C).</li>
-<li><code>"local_intensity"</code>: Compute only local/global intensity peak features.</li>
-<li><code>"morphology"</code>: Shape and size features (Volume, Sphericity, etc.).</li>
-<li><code>"texture"</code>: GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM.</li>
-<li><code>"histogram"</code>: Intensity histogram features.</li>
-<li><code>"ivh"</code>: Intensity-Volume Histogram features.</li>
-</ul>
-</li>
-</ul>
-<p>Additional optional parameters (advanced usage):</p>
-<ul>
-<li><code>include_spatial_intensity</code> / <code>include_local_intensity</code>: Booleans controlling whether the expensive
-    spatial/local intensity extras are included when <code>"intensity"</code> is requested.</li>
-<li><code>ivh_params</code>: Dict forwarded to <code>calculate_ivh_features(...)</code>. Supported keys include:
-    <code>bin_width</code>, <code>min_val</code>, <code>max_val</code>, <code>target_range_min</code>, <code>target_range_max</code>.</li>
-<li><code>ivh_discretisation</code>: Dict specifying a <strong>temporary discretisation</strong> for IVH only. This allows
-    using different binning for IVH vs texture features. Example: <code>{"method": "FBS", "bin_width": 2.5, "min_val": -1000}</code>.</li>
-<li><code>ivh_use_continuous</code>: Boolean. If <code>True</code>, uses raw (non-discretised) intensity values for IVH calculation.
-    Useful for "continuous IVH" as specified in some IBSI configurations.</li>
-<li><code>texture_matrix_params</code>: Dict forwarded to <code>calculate_all_texture_matrices(...)</code>.
-    Currently useful key: <code>ngldm_alpha</code> (IBSI default is <code>0</code>).</li>
-</ul>
-<hr />
-<h2 id="examples">Examples</h2>
-<h3 id="example-1-standard-suite-fast-baseline">Example 1: Standard suite (fast baseline)</h3>
-<p>Runs all 6 built-in configurations. Spatial/local intensity extras are disabled by default.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">mask</span><span class="o">=</span><span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;all_standard&quot;</span><span class="p">],</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="p">)</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="c1"># Access one configuration</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="nb">print</span><span class="p">(</span><span class="n">results</span><span class="p">[</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
-</code></pre></div>
-<h3 id="example-1b-maskless-run-whole-image-roi">Example 1b: Maskless run (whole-image ROI)</h3>
-<p>If you do not have a segmentation mask, you can omit the <code>mask</code> argument entirely.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="c1"># mask omitted -&gt; whole-image ROI</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">],</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="p">)</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">results</span><span class="p">[</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
-</code></pre></div>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p><strong>Morphology meaning</strong>
-With a maskless run, morphology features describe the ROI mask after any mask-refining steps
-(e.g., <code>resegment</code>, <code>keep_largest_component</code>). Starting from a whole-image ROI can be valid,
-but may not be scientifically meaningful for many radiomics studies.</p>
-</div>
-<h3 id="example-2-enable-spatiallocal-intensity-extras-custom-config">Example 2: Enable spatial/local intensity extras (custom config)</h3>
-<p>Use this when you explicitly need Moran’s I / Geary’s C and local intensity peak features.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">cfg</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">)}},</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="p">{</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>            <span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="s2">&quot;ivh&quot;</span><span class="p">],</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>            <span class="s2">&quot;include_spatial_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>            <span class="s2">&quot;include_local_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>        <span class="p">},</span>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="p">},</span>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="p">]</span>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;with_intensity_extras&quot;</span><span class="p">,</span> <span class="n">cfg</span><span class="p">)</span>
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="n">out</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;with_intensity_extras&quot;</span><span class="p">])</span>
-<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;with_intensity_extras&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">like</span><span class="o">=</span><span class="s2">&quot;_&quot;</span><span class="p">))</span>
-</code></pre></div>
-<h3 id="example-3-only-compute-the-expensive-parts-explicit-families">Example 3: Only compute the expensive parts (explicit families)</h3>
-<p>If you only want spatial/local intensity and not the entire first-order intensity set:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">cfg</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="p">{</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;spatial_intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;local_intensity&quot;</span><span class="p">]},</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="p">},</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="p">]</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;intensity_extras_only&quot;</span><span class="p">,</span> <span class="n">cfg</span><span class="p">)</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="n">out</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;intensity_extras_only&quot;</span><span class="p">])</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;intensity_extras_only&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
-</code></pre></div>
-<h3 id="example-4-ivh-with-physical-unit-mapping-advanced">Example 4: IVH with physical-unit mapping (advanced)</h3>
-<p>When you discretise with FBS, you can map IVH to physical units by passing <code>bin_width</code> and <code>min_val</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">cfg</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBS&quot;</span><span class="p">,</span> <span class="s2">&quot;bin_width&quot;</span><span class="p">:</span> <span class="mf">25.0</span><span class="p">,</span> <span class="s2">&quot;min_val&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">}},</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="p">{</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>            <span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;ivh&quot;</span><span class="p">],</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>            <span class="s2">&quot;ivh_params&quot;</span><span class="p">:</span> <span class="p">{</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>                <span class="s2">&quot;bin_width&quot;</span><span class="p">:</span> <span class="mf">25.0</span><span class="p">,</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>                <span class="s2">&quot;min_val&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>                <span class="s2">&quot;target_range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">,</span>
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>            <span class="p">},</span>
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>        <span class="p">},</span>
-<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>    <span class="p">},</span>
-<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="p">]</span>
-<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>
-<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;ivh_hu&quot;</span><span class="p">,</span> <span class="n">cfg</span><span class="p">)</span>
-<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="n">out</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ivh_hu&quot;</span><span class="p">])</span>
-<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;ivh_hu&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
-</code></pre></div>
-<h3 id="example-5-texture-with-ngldm-tolerance-ngldm_alpha">Example 5: Texture with NGLDM tolerance (<code>ngldm_alpha</code>)</h3>
-<p>IBSI default is <code>ngldm_alpha=0</code> (exact match). If you want tolerance of ±1 grey level, set <code>ngldm_alpha=1</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">cfg</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="p">{</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>            <span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;texture&quot;</span><span class="p">],</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>            <span class="s2">&quot;texture_matrix_params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;ngldm_alpha&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">},</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>        <span class="p">},</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="p">},</span>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="p">]</span>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;texture_ngldm_tolerant&quot;</span><span class="p">,</span> <span class="n">cfg</span><span class="p">)</span>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="n">out</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;texture_ngldm_tolerant&quot;</span><span class="p">])</span>
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;texture_ngldm_tolerant&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
-</code></pre></div>
-<h3 id="example-custom-ct-pipeline">Example: Custom CT Pipeline</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">custom_config</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="c1"># 1. Resample to 1mm isotropic</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="p">{</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="p">},</span>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="c1"># 2. Restrict to soft tissue window (-150 to 250 HU)</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="p">{</span>
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span>
-<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">150</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">250</span><span class="p">}</span>
-<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    <span class="p">},</span>
-<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    <span class="c1"># 3. Discretise with Fixed Bin Number = 64</span>
-<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>    <span class="p">{</span>
-<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span>
-<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">64</span><span class="p">}</span>
-<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>    <span class="p">},</span>
-<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    <span class="c1"># 4. Extract everything</span>
-<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>    <span class="p">{</span>
-<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span>
-<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="s2">&quot;ivh&quot;</span><span class="p">]}</span>
-<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>    <span class="p">}</span>
-<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a><span class="p">]</span>
-<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>
-<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
-<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;my_custom_ct&quot;</span><span class="p">,</span> <span class="n">custom_config</span><span class="p">)</span>
-<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;my_custom_ct&quot;</span><span class="p">])</span>
-</code></pre></div>
-<hr />
-<h3 id="example-7-laplacian-of-gaussian-log-filter">Example 7: Laplacian of Gaussian (LoG) Filter</h3>
-<p>Apply LoG filter for edge/blob detection before feature extraction:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">log_config</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span> <span class="s2">&quot;interpolation&quot;</span><span class="p">:</span> <span class="s2">&quot;cubic&quot;</span><span class="p">}},</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{}},</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">}},</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>        <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;log&quot;</span><span class="p">,</span>
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>        <span class="s2">&quot;sigma_mm&quot;</span><span class="p">:</span> <span class="mf">1.5</span><span class="p">,</span>
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>        <span class="s2">&quot;truncate&quot;</span><span class="p">:</span> <span class="mf">4.0</span><span class="p">,</span>
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    <span class="p">}},</span>
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">]}},</span>
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="p">]</span>
-<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>
-<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;log_filtered&quot;</span><span class="p">,</span> <span class="n">log_config</span><span class="p">)</span>
-<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;image.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask.nii.gz&quot;</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;log_filtered&quot;</span><span class="p">])</span>
-</code></pre></div>
-<h3 id="example-8-laws-texture-energy-ibsi-2">Example 8: Laws Texture Energy (IBSI 2)</h3>
-<p>Extract texture energy using Laws kernel with rotation invariance:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">laws_config</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span> <span class="s2">&quot;interpolation&quot;</span><span class="p">:</span> <span class="s2">&quot;cubic&quot;</span><span class="p">}},</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{}},</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">}},</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>        <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;laws&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>        <span class="s2">&quot;kernel&quot;</span><span class="p">:</span> <span class="s2">&quot;L5E5E5&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>        <span class="s2">&quot;rotation_invariant&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>        <span class="s2">&quot;pooling&quot;</span><span class="p">:</span> <span class="s2">&quot;max&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>        <span class="s2">&quot;compute_energy&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>        <span class="s2">&quot;energy_distance&quot;</span><span class="p">:</span> <span class="mi">7</span><span class="p">,</span>
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>    <span class="p">}},</span>
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">]}},</span>
-<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="p">]</span>
-</code></pre></div>
-<h3 id="example-9-wavelet-decomposition">Example 9: Wavelet Decomposition</h3>
-<p>Apply Daubechies 3 wavelet with rotation-invariant averaging:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">wavelet_config</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span> <span class="s2">&quot;interpolation&quot;</span><span class="p">:</span> <span class="s2">&quot;cubic&quot;</span><span class="p">}},</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{}},</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">}},</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>        <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;wavelet&quot;</span><span class="p">,</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>        <span class="s2">&quot;wavelet&quot;</span><span class="p">:</span> <span class="s2">&quot;db3&quot;</span><span class="p">,</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>        <span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>        <span class="s2">&quot;decomposition&quot;</span><span class="p">:</span> <span class="s2">&quot;LLH&quot;</span><span class="p">,</span>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>        <span class="s2">&quot;rotation_invariant&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>        <span class="s2">&quot;pooling&quot;</span><span class="p">:</span> <span class="s2">&quot;average&quot;</span><span class="p">,</span>
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>    <span class="p">}},</span>
-<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
-<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">]}},</span>
-<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="p">]</span>
-</code></pre></div>
-<hr />
 <h2 id="logging">Logging</h2>
-<p>The pipeline maintains a detailed log of every step executed, including parameters and any errors encountered. This is vital for auditing and debugging.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># After running the pipeline</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">save_log</span><span class="p">(</span><span class="s2">&quot;pipeline_execution_log.json&quot;</span><span class="p">)</span>
+<p>The pipeline maintains a detailed log of every step executed, including parameters and errors.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Save log after running</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">save_log</span><span class="p">(</span><span class="s2">&quot;pipeline_execution_log.json&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Clear log between runs</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">clear_log</span><span class="p">()</span>
 </code></pre></div>
 <p>The log file contains:</p>
 <ul>
-<li>Timestamp</li>
-<li>Subject ID</li>
-<li>Configuration Name</li>
-<li>List of executed steps with their parameters</li>
+<li>Timestamp and subject ID</li>
+<li>Configuration name</li>
+<li>Source mode and sentinel detection status</li>
+<li>List of executed steps with parameters</li>
 <li>Status of each step</li>
 </ul>
-<hr />
-<h2 id="configuration-export-import">Configuration Export &amp; Import</h2>
-<p>Pictologics supports exporting and importing pipeline configurations in <strong>YAML</strong> and <strong>JSON</strong> formats for reproducible research.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;my_study_config&quot;</span><span class="p">,</span> <span class="p">[</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">]}},</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="p">])</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>
-<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="c1"># Export to YAML or JSON</span>
-<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">save_configs</span><span class="p">(</span><span class="s2">&quot;my_configs.yaml&quot;</span><span class="p">)</span>
-<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>
-<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="c1"># Import from file</span>
-<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="o">.</span><span class="n">load_configs</span><span class="p">(</span><span class="s2">&quot;my_configs.yaml&quot;</span><span class="p">)</span>
+<h2 id="examples">Examples</h2>
+<h3 id="standard-suite-fast-baseline">Standard Suite (Fast Baseline)</h3>
+<p>Run all 6 built-in configurations:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;path/to/image.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">mask</span><span class="o">=</span><span class="s2">&quot;path/to/mask.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;all_standard&quot;</span><span class="p">],</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="p">)</span>
+</code></pre></div>
+<h3 id="enable-spatiallocal-intensity-extras">Enable Spatial/Local Intensity Extras</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">cfg</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">)}},</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">}},</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="p">{</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>            <span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="s2">&quot;ivh&quot;</span><span class="p">],</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>            <span class="s2">&quot;include_spatial_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>  <span class="c1"># Moran&#39;s I / Geary&#39;s C</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>            <span class="s2">&quot;include_local_intensity&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>    <span class="c1"># Local intensity peaks</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>        <span class="p">},</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    <span class="p">},</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="p">]</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;with_extras&quot;</span><span class="p">,</span> <span class="n">cfg</span><span class="p">)</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;image.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask.nii.gz&quot;</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;with_extras&quot;</span><span class="p">])</span>
+</code></pre></div>
+<h3 id="ivh-with-physical-unit-mapping">IVH with Physical-Unit Mapping</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">cfg</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBS&quot;</span><span class="p">,</span> <span class="s2">&quot;bin_width&quot;</span><span class="p">:</span> <span class="mf">25.0</span><span class="p">,</span> <span class="s2">&quot;min_val&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">}},</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="p">{</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>        <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>        <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>            <span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;ivh&quot;</span><span class="p">],</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>            <span class="s2">&quot;ivh_params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;bin_width&quot;</span><span class="p">:</span> <span class="mf">25.0</span><span class="p">,</span> <span class="s2">&quot;min_val&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span> <span class="s2">&quot;target_range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">},</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>        <span class="p">},</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="p">},</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="p">]</span>
+</code></pre></div>
+<h3 id="custom-ct-pipeline">Custom CT Pipeline</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">custom_config</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">150</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">250</span><span class="p">}},</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;discretise&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;method&quot;</span><span class="p">:</span> <span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="s2">&quot;n_bins&quot;</span><span class="p">:</span> <span class="mi">64</span><span class="p">}},</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>        <span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="s2">&quot;ivh&quot;</span><span class="p">]</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="p">}},</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="p">]</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;my_custom_ct&quot;</span><span class="p">,</span> <span class="n">custom_config</span><span class="p">)</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;my_custom_ct&quot;</span><span class="p">])</span>
+</code></pre></div>
+<h3 id="log-filtered-features">LoG Filtered Features</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">log_config</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span> <span class="s2">&quot;interpolation&quot;</span><span class="p">:</span> <span class="s2">&quot;cubic&quot;</span><span class="p">}},</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;round_intensities&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{}},</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">1000</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">400</span><span class="p">}},</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;log&quot;</span><span class="p">,</span> <span class="s2">&quot;sigma_mm&quot;</span><span class="p">:</span> <span class="mf">1.5</span><span class="p">,</span> <span class="s2">&quot;truncate&quot;</span><span class="p">:</span> <span class="mf">4.0</span><span class="p">}},</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;histogram&quot;</span><span class="p">]}},</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="p">]</span>
+</code></pre></div>
+<h3 id="manual-step-by-step-extraction">Manual Step-by-Step Extraction</h3>
+<p>If you need granular control, call features directly without the pipeline:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_image</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="n">resample_image</span><span class="p">,</span> <span class="n">resegment_mask</span><span class="p">,</span> <span class="n">filter_outliers</span><span class="p">,</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="n">discretise_image</span><span class="p">,</span> <span class="n">apply_mask</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="p">)</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.features.intensity</span><span class="w"> </span><span class="kn">import</span> <span class="n">calculate_intensity_features</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.features.morphology</span><span class="w"> </span><span class="kn">import</span> <span class="n">calculate_morphology_features</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.features.texture</span><span class="w"> </span><span class="kn">import</span> <span class="n">calculate_all_texture_features</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="c1"># Load and preprocess</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;image.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;mask.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="n">image</span> <span class="o">=</span> <span class="n">resample_image</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">new_spacing</span><span class="o">=</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">))</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">resample_image</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">new_spacing</span><span class="o">=</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span> <span class="n">interpolation</span><span class="o">=</span><span class="s2">&quot;nearest&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">resegment_mask</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">range_min</span><span class="o">=-</span><span class="mi">1000</span><span class="p">,</span> <span class="n">range_max</span><span class="o">=</span><span class="mi">400</span><span class="p">)</span>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="c1"># Discretise for texture</span>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="n">disc_image</span> <span class="o">=</span> <span class="n">discretise_image</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s2">&quot;FBN&quot;</span><span class="p">,</span> <span class="n">n_bins</span><span class="o">=</span><span class="mi">32</span><span class="p">,</span> <span class="n">roi_mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a>
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="c1"># Extract features</span>
+<a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="n">morph</span> <span class="o">=</span> <span class="n">calculate_morphology_features</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">image</span><span class="o">=</span><span class="n">image</span><span class="p">,</span> <span class="n">intensity_mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+<a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a><span class="n">intensity</span> <span class="o">=</span> <span class="n">calculate_intensity_features</span><span class="p">(</span><span class="n">apply_mask</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">))</span>
+<a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a><span class="n">texture</span> <span class="o">=</span> <span class="n">calculate_all_texture_features</span><span class="p">(</span><span class="n">disc_image</span><span class="o">.</span><span class="n">array</span><span class="p">,</span> <span class="n">mask</span><span class="o">.</span><span class="n">array</span><span class="p">,</span> <span class="n">n_bins</span><span class="o">=</span><span class="mi">32</span><span class="p">)</span>
+<a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a>
+<a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a><span class="n">all_features</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">morph</span><span class="p">,</span> <span class="o">**</span><span class="n">intensity</span><span class="p">,</span> <span class="o">**</span><span class="n">texture</span><span class="p">}</span>
+<a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Extracted </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">all_features</span><span class="p">)</span><span class="si">}</span><span class="s2"> features&quot;</span><span class="p">)</span>
 </code></pre></div>
 <div class="admonition tip">
-<p class="admonition-title">Full Configuration Guide</p>
-<p>For complete documentation on configuration file formats, schema versioning, merging configurations, 
-validation, and the template system API, see the <strong><a href="../predefined_configurations/">Predefined Configurations</a></strong> guide.</p>
+<p class="admonition-title">Use the Pipeline Instead</p>
+<p>The <code>RadiomicsPipeline</code> accomplishes the same workflow with automatic image routing, logging,
+deduplication, and configuration export. Manual extraction is mainly useful for debugging
+or understanding the underlying process.</p>
 </div>
+<h2 id="performance-tips">Performance Tips</h2>
+<ul>
+<li><strong>Spatial/local intensity</strong> can be extremely slow on large ROIs. Keep them disabled unless needed.</li>
+<li><strong>Texture</strong> requires discretisation. Without a <code>discretise</code> step, the pipeline raises an error.</li>
+<li>For large 3D images, consider coarser spacing for exploratory work.</li>
+<li>For CT in Hounsfield Units, FBS (<code>bin_width</code>) is often more interpretable; for MRI/PET, FBN (<code>n_bins</code>) may be preferable.</li>
+</ul>
 
 
 

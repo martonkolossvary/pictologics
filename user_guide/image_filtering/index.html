@@ -13,10 +13,10 @@
       
       
       
-        <link rel="prev" href="../data_loading/">
+        <link rel="prev" href="../pipeline/">
       
       
-        <link rel="next" href="../feature_calculations/">
+        <link rel="next" href="../configurations/">
       
       
         
@@ -567,6 +567,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../quick_start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../data_loading/" class="md-nav__link">
         
   
@@ -575,6 +603,34 @@
     
   
     Data Loading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline & Preprocessing
   
 
     
@@ -949,6 +1005,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#source-masking-for-sentinel-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source Masking for Sentinel Values
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Source Masking for Sentinel Values">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#direct-api-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct API Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -965,14 +1071,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../feature_calculations/" class="md-nav__link">
+      <a href="../configurations/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Feature Calculations
+    Configuration & Reproducibility
   
 
     
@@ -993,42 +1099,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../pipeline/" class="md-nav__link">
+      <a href="../cookbook/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Pipeline Usage
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../predefined_configurations/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Predefined Configurations
+    Cookbook
   
 
     
@@ -1057,34 +1135,6 @@
     
   
     Utilities
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../case_examples/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Case Examples
   
 
     
@@ -2131,6 +2181,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#source-masking-for-sentinel-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source Masking for Sentinel Values
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Source Masking for Sentinel Values">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#direct-api-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct API Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2164,7 +2264,6 @@
 <p class="admonition-title">IBSI 2 Compliance</p>
 <p>To maintain IBSI 2 compliance, filters should be applied <strong>after</strong> interpolation to isotropic spacing and <strong>before</strong> discretisation. Most filters also require specific boundary conditions (usually <code>mirror</code>).</p>
 </div>
-<hr />
 <h2 id="available-filters">Available Filters</h2>
 <table>
 <thead>
@@ -2212,7 +2311,6 @@
 </tr>
 </tbody>
 </table>
-<hr />
 <h2 id="mean-filter">Mean Filter</h2>
 <p>The Mean filter replaces each voxel's intensity with the average intensity of its neighborhood. It smooths the image and reduces noise.</p>
 <h3 id="parameters">Parameters</h3>
@@ -2256,7 +2354,6 @@
 </div>
 </div>
 </div>
-<hr />
 <h2 id="laplacian-of-gaussian-log">Laplacian of Gaussian (LoG)</h2>
 <p>The Laplacian of Gaussian (LoG) filter highlights regions of rapid intensity change (edges) and blobs. It first smooths the image with a Gaussian kernel (scale σ) and then calculates the Laplacian (second derivative).</p>
 <h3 id="parameters_1">Parameters</h3>
@@ -2310,7 +2407,6 @@
 </div>
 </div>
 </div>
-<hr />
 <h2 id="laws-texture-energy">Laws Texture Energy</h2>
 <p>Laws filters use a set of 1D kernels (Level, Edge, Spot, Wave, Ripple) combined to form 3D masks. These masks detect specific types of texture energy.</p>
 <h3 id="parameters_2">Parameters</h3>
@@ -2363,14 +2459,13 @@
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># Rotation invariant energy map</span>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">response</span> <span class="o">=</span> <span class="n">laws_filter</span><span class="p">(</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">image_array</span><span class="p">,</span> 
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">kernel</span><span class="o">=</span><span class="s2">&quot;E5L5S5&quot;</span><span class="p">,</span> 
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">kernels</span><span class="o">=</span><span class="s2">&quot;E5L5S5&quot;</span><span class="p">,</span> 
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">rotation_invariant</span><span class="o">=</span><span class="kc">True</span>
 <a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="p">)</span>
 </code></pre></div>
 </div>
 </div>
 </div>
-<hr />
 <h2 id="gabor-filter">Gabor Filter</h2>
 <p>Gabor filters are sinusoidal waves modulated by a Gaussian envelope. They are excellent for analyzing texture frequency and directionality.</p>
 <h3 id="parameters_3">Parameters</h3>
@@ -2437,7 +2532,6 @@
 </div>
 </div>
 </div>
-<hr />
 <h2 id="separable-wavelets">Separable Wavelets</h2>
 <p>Separable wavelet transforms decompose the image into low-frequency (L) and high-frequency (H) components along each axis (x, y, z). This results in 8 sub-bands (LLL, LLH, ..., HHH).</p>
 <h3 id="parameters_4">Parameters</h3>
@@ -2490,7 +2584,7 @@
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">response</span> <span class="o">=</span> <span class="n">wavelet_transform</span><span class="p">(</span>
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">image_array</span><span class="p">,</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">wavelet_name</span><span class="o">=</span><span class="s2">&quot;coif1&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">wavelet</span><span class="o">=</span><span class="s2">&quot;coif1&quot;</span><span class="p">,</span>
 <a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">decomposition</span><span class="o">=</span><span class="s2">&quot;LLH&quot;</span><span class="p">,</span>
 <a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="n">level</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
 <a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">rotation_invariant</span><span class="o">=</span><span class="kc">True</span>
@@ -2499,7 +2593,6 @@
 </div>
 </div>
 </div>
-<hr />
 <h2 id="simoncelli-wavelet">Simoncelli Wavelet</h2>
 <p>The Simoncelli wavelet (non-separable) provides isotropic texture analysis. It is valuable when the direction of texture is unknown or irrelevant.</p>
 <h3 id="parameters_5">Parameters</h3>
@@ -2537,7 +2630,6 @@
 </div>
 </div>
 </div>
-<hr />
 <h2 id="riesz-transform">Riesz Transform</h2>
 <p>The Riesz transform provides a steerable filter bank. It can be combined with other filters (like LoG or Simoncelli) to analyze texture orientation and phase.</p>
 <h3 id="parameters_6">Parameters</h3>
@@ -2552,8 +2644,8 @@
 <tbody>
 <tr>
 <td style="text-align: left;"><code>order</code></td>
-<td style="text-align: left;"><code>int</code></td>
-<td style="text-align: left;">Order of the Riesz transform.</td>
+<td style="text-align: left;"><code>Tuple[int, ...]</code></td>
+<td style="text-align: left;">Order tuple <code>(l1, l2, l3)</code> specifying derivative order per axis, e.g. <code>(1, 0, 0)</code>.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><code>variant</code></td>
@@ -2568,19 +2660,73 @@
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;riesz&quot;</span><span class="p">,</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="s2">&quot;order&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="s2">&quot;variant&quot;</span><span class="p">:</span> <span class="s2">&quot;hessian_trace&quot;</span>  <span class="c1"># Example variant</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="s2">&quot;order&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="s2">&quot;variant&quot;</span><span class="p">:</span> <span class="s2">&quot;log&quot;</span>
 <a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="p">}}</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.filters</span><span class="w"> </span><span class="kn">import</span> <span class="n">riesz_transform</span>
 <a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">response</span> <span class="o">=</span> <span class="n">riesz_transform</span><span class="p">(</span><span class="n">image_array</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">response</span> <span class="o">=</span> <span class="n">riesz_transform</span><span class="p">(</span><span class="n">image_array</span><span class="p">,</span> <span class="n">order</span><span class="o">=</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
 </code></pre></div>
 </div>
 </div>
 </div>
+<h2 id="source-masking-for-sentinel-values">Source Masking for Sentinel Values</h2>
+<p>When images contain <strong>sentinel values</strong> (e.g., -2048 HU for outside-FOV regions), these artificial values can contaminate filter responses. All Pictologics filters support a <code>source_mask</code> parameter to handle this. Note that source masking protects <strong>filtering (and resampling) only</strong> — you still need a <code>resegment</code> step to exclude sentinel voxels from the <strong>ROI</strong> used for feature extraction (see <a href="../data_loading/#handling-sentinel-na-values">Data Loading → Sentinel Handling</a>).</p>
+<h3 id="how-it-works">How It Works</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Filter Type</th>
+<th style="text-align: left;">Strategy</th>
+<th style="text-align: left;">Filters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Spatial (normalized convolution)</strong></td>
+<td style="text-align: left;">Weights convolution by valid-voxel contribution, then normalizes</td>
+<td style="text-align: left;">Mean, LoG, Laws</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>FFT-based (zero-fill)</strong></td>
+<td style="text-align: left;">Zeros out sentinel voxels before frequency-domain processing</td>
+<td style="text-align: left;">Gabor, Simoncelli, Riesz</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Separable wavelet</strong></td>
+<td style="text-align: left;">Zeros out sentinel voxels before decomposition</td>
+<td style="text-align: left;">Wavelet</td>
+</tr>
+</tbody>
+</table>
+<h3 id="pipeline-usage">Pipeline Usage</h3>
+<p>When using the pipeline, source masking is handled <strong>automatically</strong> based on the <code>source_mode</code> configuration. No changes to filter steps are needed — but remember to include <code>resegment</code> to also exclude sentinels from the ROI:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;filtered_features&quot;</span><span class="p">,</span> <span class="p">[</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resample&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;new_spacing&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)}},</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;filter&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;log&quot;</span><span class="p">,</span> <span class="s2">&quot;sigma_mm&quot;</span><span class="p">:</span> <span class="mf">3.0</span><span class="p">}},</span>  <span class="c1"># source_mask passed automatically</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;resegment&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range_min&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">100</span><span class="p">,</span> <span class="s2">&quot;range_max&quot;</span><span class="p">:</span> <span class="mi">3000</span><span class="p">}},</span>  <span class="c1"># exclude sentinels from ROI</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">]}},</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="p">],</span> <span class="n">source_mode</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="direct-api-usage">Direct API Usage</h3>
+<p>When using filters directly, pass <code>source_mask</code> explicitly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.filters</span><span class="w"> </span><span class="kn">import</span> <span class="n">mean_filter</span><span class="p">,</span> <span class="n">laplacian_of_gaussian</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="c1"># Create a boolean mask (True = valid)</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="n">valid_mask</span> <span class="o">=</span> <span class="n">image_array</span> <span class="o">&gt;</span> <span class="o">-</span><span class="mi">1000</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="c1"># Spatial filters return (response, valid_mask) when source_mask is provided</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="n">response</span><span class="p">,</span> <span class="n">output_valid</span> <span class="o">=</span> <span class="n">mean_filter</span><span class="p">(</span><span class="n">image_array</span><span class="p">,</span> <span class="n">support</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span> <span class="n">source_mask</span><span class="o">=</span><span class="n">valid_mask</span><span class="p">)</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="n">response</span><span class="p">,</span> <span class="n">output_valid</span> <span class="o">=</span> <span class="n">laplacian_of_gaussian</span><span class="p">(</span><span class="n">image_array</span><span class="p">,</span> <span class="n">sigma_mm</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span> <span class="n">source_mask</span><span class="o">=</span><span class="n">valid_mask</span><span class="p">)</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="c1"># FFT-based filters accept source_mask but return only the response</span>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.filters</span><span class="w"> </span><span class="kn">import</span> <span class="n">gabor_filter</span>
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="n">response</span> <span class="o">=</span> <span class="n">gabor_filter</span><span class="p">(</span><span class="n">image_array</span><span class="p">,</span> <span class="n">sigma_mm</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">lambda_mm</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">source_mask</span><span class="o">=</span><span class="n">valid_mask</span><span class="p">)</span>
+</code></pre></div>
+<p>See the <strong><a href="../quick_start/">Quick Start</a></strong> guide for a complete sentinel workflow example.</p>
 
 
 

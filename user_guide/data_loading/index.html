@@ -13,10 +13,10 @@
       
       
       
-        <link rel="prev" href="../installation/">
+        <link rel="prev" href="../quick_start/">
       
       
-        <link rel="next" href="../image_filtering/">
+        <link rel="next" href="../pipeline/">
       
       
         
@@ -564,6 +564,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../quick_start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -701,6 +729,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Handling Sentinel (NA) Values">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach-1-resegmentation-simple" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 1: Resegmentation (Simple)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#approach-2-source-masking-protects-resampling-filtering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 2: Source Masking (Protects Resampling &amp; Filtering)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -965,17 +1021,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#complete-workflow-examples" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Complete Workflow Examples
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#summary-of-loading-functions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1001,6 +1046,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline & Preprocessing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1041,14 +1114,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../feature_calculations/" class="md-nav__link">
+      <a href="../configurations/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Feature Calculations
+    Configuration & Reproducibility
   
 
     
@@ -1069,42 +1142,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../pipeline/" class="md-nav__link">
+      <a href="../cookbook/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Pipeline Usage
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../predefined_configurations/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Predefined Configurations
+    Cookbook
   
 
     
@@ -1133,34 +1178,6 @@
     
   
     Utilities
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../case_examples/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Case Examples
   
 
     
@@ -1988,6 +2005,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Handling Sentinel (NA) Values">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approach-1-resegmentation-simple" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 1: Resegmentation (Simple)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#approach-2-source-masking-protects-resampling-filtering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approach 2: Source Masking (Protects Resampling &amp; Filtering)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -2251,17 +2296,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#complete-workflow-examples" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Complete Workflow Examples
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#summary-of-loading-functions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2320,7 +2354,6 @@
 <p class="admonition-title">Note</p>
 <p>Pictologics uses <strong>(X, Y, Z)</strong> axis ordering to match ITK/SimpleITK conventions. This differs from raw DICOM (which uses Rows, Columns = Y, X) and matplotlib (which expects height, width = Y, X). All loaders handle these transformations automatically.</p>
 </div>
-<hr />
 <h2 id="basic-loading-with-load_image">Basic Loading with <code>load_image()</code></h2>
 <p>The <code>load_image()</code> function is the primary entry point for loading data. It automatically detects the file format and handles the appropriate loading strategy.</p>
 <h3 id="loading-nifti-files">Loading NIfTI Files</h3>
@@ -2402,7 +2435,9 @@
 </tr>
 </tbody>
 </table>
-<p>Since DICOM uses integer storage and cannot represent <code>NaN</code>, these sentinel values are substituted for missing data. To exclude them from analysis, use the <strong><code>resegment</code></strong> preprocessing step in your pipeline:</p>
+<p>Since DICOM uses integer storage and cannot represent <code>NaN</code>, these sentinel values are substituted for missing data. Pictologics offers two approaches for handling them:</p>
+<h4 id="approach-1-resegmentation-simple">Approach 1: Resegmentation (Simple)</h4>
+<p>Use the <strong><code>resegment</code></strong> preprocessing step to exclude sentinel values by restricting the ROI to a valid intensity range:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
@@ -2413,66 +2448,109 @@
 <a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;intensity&quot;</span><span class="p">,</span> <span class="s2">&quot;texture&quot;</span><span class="p">]}},</span>
 <a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="p">])</span>
 </code></pre></div>
-<p>This is the <strong>IBSI-recommended approach</strong> — filter invalid intensities before feature extraction rather than at load time.</p>
+<div class="admonition warning">
+<p class="admonition-title">Limitations of resegmentation alone</p>
+<p>Resegmentation removes sentinel voxels from the ROI <strong>after</strong> earlier pipeline steps have already
+run. This means:</p>
+<ul>
+<li><strong>Resampling</strong>: When the image is resampled to a new voxel spacing, the interpolation kernel
+  reads neighboring voxels — including sentinel values. A valid voxel next to a -2048 sentinel
+  will receive a blended value that is far below its true intensity, corrupting the resampled
+  output.</li>
+<li><strong>Filtering</strong>: Convolution-based filters (e.g., LoG, Gabor, wavelets) sum intensities over
+  a local neighborhood. Any sentinel voxels within the kernel window contribute their artificial
+  values to the filter response, producing incorrect texture and edge features.</li>
+</ul>
+<p>This approach works well when the pipeline <strong>only</strong> discretises and extracts features (no
+resampling or filtering). For pipelines that include resampling or filtering, combine
+resegmentation with <strong>Approach 2</strong> (source masking) — see below.</p>
+</div>
+<h4 id="approach-2-source-masking-protects-resampling-filtering">Approach 2: Source Masking (Protects Resampling &amp; Filtering)</h4>
+<p>When your images contain sentinel values that could <strong>contaminate resampling and filtering</strong> (e.g., pre-cropped lesion exports), use sentinel detection and source masking. This creates a <em>source mask</em> that ensures sentinel voxels are excluded from interpolation and convolution operations:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_image</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="n">detect_sentinel_value</span><span class="p">,</span> <span class="n">create_source_mask_from_sentinel</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;lesion_export.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1"># Automatically detect sentinel value</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">sentinel</span> <span class="o">=</span> <span class="n">detect_sentinel_value</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Detected sentinel: </span><span class="si">{</span><span class="n">sentinel</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>  <span class="c1"># e.g., -2048.0</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="c1"># Create source mask (1 = valid, 0 = sentinel)</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="n">source_mask</span> <span class="o">=</span> <span class="n">create_source_mask_from_sentinel</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">sentinel</span><span class="p">)</span>
+</code></pre></div>
+<p>The source mask enables <strong>masked interpolation</strong> for resampling and <strong>normalized convolution</strong> for filters, preventing sentinel values from bleeding into valid regions.</p>
+<div class="admonition warning">
+<p class="admonition-title">Source masking does not replace resegmentation</p>
+<p>The source mask protects <strong>resampling and filtering only</strong> — it does <strong>not</strong> change the ROI
+used for feature extraction. Sentinel voxels will still be included in intensity statistics,
+texture matrices, and all other computed features unless you also add a <code>resegment</code> step to
+restrict the ROI to a valid intensity range. In practice, you typically need <strong>both</strong>:</p>
+<ul>
+<li><code>source_mode="auto"</code> (or an explicit source mask) to protect preprocessing</li>
+<li><code>resegment</code> to define the correct ROI for feature extraction</li>
+</ul>
+<p>See the <strong><a href="../quick_start/">Quick Start</a></strong> guide for a complete workflow and the
+<strong><a href="../cookbook/">Cookbook</a></strong> for batch processing examples.</p>
+</div>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>Check your data's minimum value to identify potential sentinels:
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;scan.dcm&quot;</span><span class="p">)</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Min: </span><span class="si">{</span><span class="n">image</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">min</span><span class="p">()</span><span class="si">}</span><span class="s2">, Max: </span><span class="si">{</span><span class="n">image</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># If min is -1024 or -2048, those are likely sentinels</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;scan.dcm&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Min: </span><span class="si">{</span><span class="n">image</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">min</span><span class="p">()</span><span class="si">}</span><span class="s2">, Max: </span><span class="si">{</span><span class="n">image</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># If min is -1024 or -2048, those are likely sentinels</span>
 </code></pre></div></p>
 </div>
-<hr />
 <h2 id="multi-phase-dicom-series">Multi-Phase DICOM Series</h2>
 <p>Many clinical acquisitions contain multiple phases (e.g., cardiac CT with multiple timepoints). Pictologics can detect and load specific phases from datasets.</p>
 <h3 id="discovering-available-phases">Discovering Available Phases</h3>
 <p>Use <code>get_dicom_phases()</code> to explore what's available before loading:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.utilities</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_dicom_phases</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Discover phases in a multi-phase DICOM directory</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">phases</span> <span class="o">=</span> <span class="n">get_dicom_phases</span><span class="p">(</span><span class="s2">&quot;path/to/cardiac_ct/&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">phases</span><span class="p">)</span><span class="si">}</span><span class="s2"> phases:&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="k">for</span> <span class="n">phase</span> <span class="ow">in</span> <span class="n">phases</span><span class="p">:</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;--- Phase </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">index</span><span class="si">}</span><span class="s2"> ---&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Label:       </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">label</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Split Tag:   </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">split_tag</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Split Value: </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">split_value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Num Slices:  </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">num_slices</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="c1"># Show first file path as example</span>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Example File: </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">file_paths</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.utilities</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_dicom_phases</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># Discover phases in a multi-phase DICOM directory</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">phases</span> <span class="o">=</span> <span class="n">get_dicom_phases</span><span class="p">(</span><span class="s2">&quot;path/to/cardiac_ct/&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">phases</span><span class="p">)</span><span class="si">}</span><span class="s2"> phases:&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="k">for</span> <span class="n">phase</span> <span class="ow">in</span> <span class="n">phases</span><span class="p">:</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;--- Phase </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">index</span><span class="si">}</span><span class="s2"> ---&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Label:       </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">label</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Split Tag:   </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">split_tag</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Split Value: </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">split_value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Num Slices:  </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">num_slices</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="c1"># Show first file path as example</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Example File: </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">file_paths</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>Example output:
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Found 10 phases:
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>--- Phase 0 ---
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Label:       Phase 0%
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>Split Tag:   NominalPercentageOfCardiacPhase
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Split Value: 0
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>Num Slices:  256
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>Example File: IM-0001-0001.dcm
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>--- Phase 1 ---
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>Label:       Phase 10%
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>Split Tag:   NominalPercentageOfCardiacPhase
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>Split Value: 10
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>Num Slices:  256
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>Example File: IM-0001-0225.dcm
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>...
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Found 10 phases:
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>--- Phase 0 ---
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>Label:       Phase 0%
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>Split Tag:   NominalPercentageOfCardiacPhase
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>Split Value: 0
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>Num Slices:  256
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>Example File: IM-0001-0001.dcm
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>--- Phase 1 ---
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>Label:       Phase 10%
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>Split Tag:   NominalPercentageOfCardiacPhase
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>Split Value: 10
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>Num Slices:  256
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>Example File: IM-0001-0225.dcm
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>...
 </code></pre></div></p>
 <p>Each <code>DicomPhaseInfo</code> object contains:</p>
 <ul>
 <li><code>index</code>: Phase index (0, 1, 2, ...)</li>
 <li><code>label</code>: Human-readable label (e.g., "CardiacPhase=0", "TemporalPosition=1")</li>
 <li><code>num_slices</code>: Number of slices in this phase</li>
-<li><code>tag_name</code>: The DICOM tag used for detection</li>
-<li><code>tag_value</code>: The actual tag value</li>
+<li><code>split_tag</code>: The DICOM tag used for detection</li>
+<li><code>split_value</code>: The actual tag value</li>
 </ul>
 <h3 id="loading-a-specific-phase">Loading a Specific Phase</h3>
 <p>Use the <code>dataset_index</code> parameter to load a particular phase:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Load the first phase (index 0)</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">phase_0</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/cardiac_ct/&quot;</span><span class="p">,</span> <span class="n">dataset_index</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Load the second phase (index 1)</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">phase_1</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/cardiac_ct/&quot;</span><span class="p">,</span> <span class="n">dataset_index</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Load the first phase (index 0)</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">phase_0</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/cardiac_ct/&quot;</span><span class="p">,</span> <span class="n">dataset_index</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Load the second phase (index 1)</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">phase_1</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/cardiac_ct/&quot;</span><span class="p">,</span> <span class="n">dataset_index</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="phase-detection-priority">Phase Detection Priority</h3>
 <p>Pictologics automatically detects phases using these DICOM tags (in order of priority):</p>
@@ -2483,155 +2561,152 @@
 <li><strong>AcquisitionNumber</strong> - Acquisition sequence number</li>
 <li><strong>EchoNumber</strong> - Multi-echo MRI</li>
 </ol>
-<hr />
 <h2 id="4d-nifti-files">4D NIfTI Files</h2>
 <p>NIfTI files can contain 4D data (3D + time/phase). Use <code>dataset_index</code> similarly:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Load a 4D NIfTI file - get the first volume</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">vol_0</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/4d_data.nii.gz&quot;</span><span class="p">,</span> <span class="n">dataset_index</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Load the second volume</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">vol_1</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/4d_data.nii.gz&quot;</span><span class="p">,</span> <span class="n">dataset_index</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Load a 4D NIfTI file - get the first volume</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">vol_0</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/4d_data.nii.gz&quot;</span><span class="p">,</span> <span class="n">dataset_index</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Load the second volume</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">vol_1</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/4d_data.nii.gz&quot;</span><span class="p">,</span> <span class="n">dataset_index</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
 </code></pre></div>
-<hr />
 <h2 id="dicom-segmentation-seg-files">DICOM Segmentation (SEG) Files</h2>
 <p>DICOM SEG files are specialized objects containing segmentation masks. Use <code>load_seg()</code> for full control, or let <code>load_image()</code> auto-detect them.</p>
 <h3 id="auto-detection-in-load_image">Auto-Detection in load_image()</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># load_image() automatically detects DICOM SEG files</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># load_image() automatically detects DICOM SEG files</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="detailed-control-with-load_seg">Detailed Control with load_seg()</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_seg</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.loaders</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_segment_info</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># First, inspect what segments are available</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="n">segments</span> <span class="o">=</span> <span class="n">get_segment_info</span><span class="p">(</span><span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">)</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="k">for</span> <span class="n">seg</span> <span class="ow">in</span> <span class="n">segments</span><span class="p">:</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Segment </span><span class="si">{</span><span class="n">seg</span><span class="p">[</span><span class="s1">&#39;segment_number&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">seg</span><span class="p">[</span><span class="s1">&#39;segment_label&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="c1"># Load all segments combined into a single label mask</span>
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="c1"># Each segment gets its numeric label (1, 2, 3, etc.)</span>
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="n">combined_mask</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span><span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">)</span>
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="nb">print</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">combined_mask</span><span class="o">.</span><span class="n">array</span><span class="p">))</span>  <span class="c1"># [0, 1, 2, 3, ...]</span>
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="c1"># Background = 0, Segment 1 = 1, Segment 2 = 2, etc.</span>
-<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>
-<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="c1"># Load only specific segments</span>
-<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="n">liver_mask</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span>
-<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>    <span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">,</span>
-<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>    <span class="n">segment_numbers</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>  <span class="c1"># Only segments 1 and 2</span>
-<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="p">)</span>
-<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a>
-<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a><span class="c1"># Load segments separately (returns dict)</span>
-<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a><span class="n">separate_masks</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span>
-<a id="__codelineno-12-23" name="__codelineno-12-23" href="#__codelineno-12-23"></a>    <span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">,</span>
-<a id="__codelineno-12-24" name="__codelineno-12-24" href="#__codelineno-12-24"></a>    <span class="n">combine_segments</span><span class="o">=</span><span class="kc">False</span>
-<a id="__codelineno-12-25" name="__codelineno-12-25" href="#__codelineno-12-25"></a><span class="p">)</span>
-<a id="__codelineno-12-26" name="__codelineno-12-26" href="#__codelineno-12-26"></a><span class="c1"># separate_masks = {1: Image(...), 2: Image(...), ...}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_seg</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.loaders</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_segment_info</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="c1"># First, inspect what segments are available</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="n">segments</span> <span class="o">=</span> <span class="n">get_segment_info</span><span class="p">(</span><span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="k">for</span> <span class="n">seg</span> <span class="ow">in</span> <span class="n">segments</span><span class="p">:</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Segment </span><span class="si">{</span><span class="n">seg</span><span class="p">[</span><span class="s1">&#39;segment_number&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">seg</span><span class="p">[</span><span class="s1">&#39;segment_label&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="c1"># Load all segments combined into a single label mask</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="c1"># Each segment gets its numeric label (1, 2, 3, etc.)</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="n">combined_mask</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span><span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="nb">print</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">combined_mask</span><span class="o">.</span><span class="n">array</span><span class="p">))</span>  <span class="c1"># [0, 1, 2, 3, ...]</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="c1"># Background = 0, Segment 1 = 1, Segment 2 = 2, etc.</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="c1"># Load only specific segments</span>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="n">liver_mask</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a>    <span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">,</span>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a>    <span class="n">segment_numbers</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>  <span class="c1"># Only segments 1 and 2</span>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="p">)</span>
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a>
+<a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="c1"># Load segments separately (returns dict)</span>
+<a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a><span class="n">separate_masks</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span>
+<a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a>    <span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">,</span>
+<a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a>    <span class="n">combine_segments</span><span class="o">=</span><span class="kc">False</span>
+<a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a><span class="p">)</span>
+<a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a><span class="c1"># separate_masks = {1: Image(...), 2: Image(...), ...}</span>
 </code></pre></div>
 <h3 id="working-with-separate-segments">Working with Separate Segments</h3>
 <p>When using <code>combine_segments=False</code>, you can iterate over segments for individual analysis:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Get each segment as a separate binary mask</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">masks</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span><span class="s2">&quot;seg.dcm&quot;</span><span class="p">,</span> <span class="n">combine_segments</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># Iterate over segments</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="k">for</span> <span class="n">seg_num</span><span class="p">,</span> <span class="n">mask</span> <span class="ow">in</span> <span class="n">masks</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Segment </span><span class="si">{</span><span class="n">seg_num</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">mask</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">}</span><span class="s2"> voxels&quot;</span><span class="p">)</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="c1"># Process each segment for radiomics</span>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="k">for</span> <span class="n">seg_num</span><span class="p">,</span> <span class="n">mask</span> <span class="ow">in</span> <span class="n">masks</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>    <span class="n">features</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Get each segment as a separate binary mask</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">masks</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span><span class="s2">&quot;seg.dcm&quot;</span><span class="p">,</span> <span class="n">combine_segments</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="c1"># Iterate over segments</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="k">for</span> <span class="n">seg_num</span><span class="p">,</span> <span class="n">mask</span> <span class="ow">in</span> <span class="n">masks</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Segment </span><span class="si">{</span><span class="n">seg_num</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">mask</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">}</span><span class="s2"> voxels&quot;</span><span class="p">)</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="c1"># Process each segment for radiomics</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="k">for</span> <span class="n">seg_num</span><span class="p">,</span> <span class="n">mask</span> <span class="ow">in</span> <span class="n">masks</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>    <span class="n">features</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="combining-specific-segments-into-a-binary-mask">Combining Specific Segments into a Binary Mask</h3>
 <p>To merge selected segments into a single binary mask:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Load specific segments separately</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">masks</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span><span class="s2">&quot;seg.dcm&quot;</span><span class="p">,</span> <span class="n">segment_numbers</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">combine_segments</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="c1"># Combine into single binary mask using logical OR</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">masks</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">array</span> <span class="o">|</span> <span class="n">masks</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">array</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Load specific segments separately</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">masks</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span><span class="s2">&quot;seg.dcm&quot;</span><span class="p">,</span> <span class="n">segment_numbers</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">combine_segments</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># Combine into single binary mask using logical OR</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">masks</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">array</span> <span class="o">|</span> <span class="n">masks</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">array</span>
 </code></pre></div>
 <h3 id="aligning-seg-to-a-reference-image">Aligning SEG to a Reference Image</h3>
 <p>SEG files may have different geometry than the source image. Use <code>reference_image</code> to align:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Load the CT image</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/ct_series/&quot;</span><span class="p">)</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># Load and align the segmentation to CT geometry</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>    <span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">,</span>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span>
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="p">)</span>
-<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>
-<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="c1"># Now mask.array.shape == ct.array.shape</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Load the CT image</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/ct_series/&quot;</span><span class="p">)</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># Load and align the segmentation to CT geometry</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>    <span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">,</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="p">)</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="c1"># Now mask.array.shape == ct.array.shape</span>
 </code></pre></div>
-<hr />
 <h2 id="merging-multiple-images-with-load_and_merge_images">Merging Multiple Images with <code>load_and_merge_images()</code></h2>
 <p>When you have multiple segmentation masks (e.g., different organs, or masks split across files), use <code>load_and_merge_images()</code> to combine them.</p>
 <h3 id="basic-merging">Basic Merging</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_and_merge_images</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="c1"># Merge multiple mask files into one</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">combined_mask</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">([</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>    <span class="s2">&quot;path/to/liver_mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>    <span class="s2">&quot;path/to/kidney_mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>    <span class="s2">&quot;path/to/spleen_mask.nii.gz&quot;</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="p">])</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_and_merge_images</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># Merge multiple mask files into one</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">combined_mask</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">([</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>    <span class="s2">&quot;path/to/liver_mask.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>    <span class="s2">&quot;path/to/kidney_mask.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    <span class="s2">&quot;path/to/spleen_mask.nii.gz&quot;</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="p">])</span>
 </code></pre></div>
 <h3 id="relabeling-masks-for-visualization">Relabeling Masks for Visualization</h3>
 <p>When merging binary masks, assign unique labels to each:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Each mask gets a unique label (1, 2, 3, ...)</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>    <span class="p">[</span><span class="s2">&quot;mask1.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask2.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask3.nii.gz&quot;</span><span class="p">],</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>    <span class="n">relabel_masks</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="p">)</span>
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="c1"># Result: voxels from mask1 = 1, mask2 = 2, mask3 = 3</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Each mask gets a unique label (1, 2, 3, ...)</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>    <span class="p">[</span><span class="s2">&quot;mask1.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask2.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask3.nii.gz&quot;</span><span class="p">],</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>    <span class="n">relabel_masks</span><span class="o">=</span><span class="kc">True</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="p">)</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="c1"># Result: voxels from mask1 = 1, mask2 = 2, mask3 = 3</span>
 </code></pre></div>
 <h3 id="merge-strategy-options">Merge Strategy Options</h3>
 <p>Control how overlapping voxels are handled:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># &quot;max&quot; (default): Take the maximum value at each voxel</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s2">&quot;max&quot;</span><span class="p">)</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="c1"># &quot;sum&quot;: Add values (useful for probability maps)</span>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s2">&quot;sum&quot;</span><span class="p">)</span>
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>
-<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="c1"># &quot;first&quot;: Keep the first non-zero value</span>
-<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s2">&quot;first&quot;</span><span class="p">)</span>
-<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>
-<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="c1"># &quot;last&quot;: Keep the last non-zero value</span>
-<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">merge_strategy</span><span class="o">=</span><span class="s2">&quot;last&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># &quot;max&quot; (default): Take the maximum value at each voxel</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;max&quot;</span><span class="p">)</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># &quot;min&quot;: Take the minimum value at each voxel</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;min&quot;</span><span class="p">)</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="c1"># &quot;first&quot;: Keep the first non-zero value</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;first&quot;</span><span class="p">)</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="c1"># &quot;last&quot;: Keep the last non-zero value</span>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;last&quot;</span><span class="p">)</span>
 </code></pre></div>
-<hr />
 <h2 id="handling-cropped-masks">Handling Cropped Masks</h2>
 <p>Medical imaging software often stores segmentation masks as <strong>cropped volumes</strong> (bounding boxes around the region of interest) to minimize storage. When loading these cropped masks, they need to be repositioned into the original image's coordinate space for proper visualization and analysis.</p>
 <p>The <code>pictologics</code> loader uses the spatial metadata (<code>ImagePositionPatient</code> for DICOM, affine matrix for NIfTI) to calculate where the cropped mask belongs in the full volume.</p>
 <h3 id="repositioning-a-single-cropped-mask">Repositioning a Single Cropped Mask</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Load the full CT image</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/full_ct/&quot;</span><span class="p">)</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># Load a cropped mask and reposition it</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="n">cropped_mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>    <span class="s2">&quot;path/to/cropped_mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span>
-<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="p">)</span>
-<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="c1"># cropped_mask now has the same shape as ct</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Load the full CT image</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/full_ct/&quot;</span><span class="p">)</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1"># Load a cropped mask and reposition it</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="n">cropped_mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>    <span class="s2">&quot;path/to/cropped_mask.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="p">)</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="c1"># cropped_mask now has the same shape as ct</span>
 </code></pre></div>
 <h3 id="merging-multiple-cropped-masks">Merging Multiple Cropped Masks</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Load CT as reference</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/ct/&quot;</span><span class="p">)</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1"># Merge cropped masks into reference space</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>    <span class="p">[</span><span class="s2">&quot;cropped_liver.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;cropped_kidney.nii.gz&quot;</span><span class="p">],</span>
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
-<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>    <span class="n">relabel_masks</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># Load CT as reference</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/ct/&quot;</span><span class="p">)</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="c1"># Merge cropped masks into reference space</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>    <span class="p">[</span><span class="s2">&quot;cropped_liver.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;cropped_kidney.nii.gz&quot;</span><span class="p">],</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>    <span class="n">relabel_masks</span><span class="o">=</span><span class="kc">True</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="p">)</span>
 </code></pre></div>
 <h3 id="handling-axis-transposition">Handling Axis Transposition</h3>
 <p>If your masks have different axis ordering (e.g., from different software), specify the transformation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>    <span class="n">mask_paths</span><span class="p">,</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>    <span class="n">transpose_axes</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># Swap X and Y axes</span>
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>    <span class="n">mask_paths</span><span class="p">,</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>    <span class="n">transpose_axes</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># Swap X and Y axes</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="p">)</span>
 </code></pre></div>
 <h3 id="error-handling">Error Handling</h3>
 <table>
@@ -2664,103 +2739,20 @@
 <p class="admonition-title">Tip</p>
 <p><strong>Label Order</strong>: When using <code>relabel_masks=True</code>, labels are assigned based on the order of files in <code>image_paths</code>. Use <code>sorted()</code> for consistent ordering, or specify the exact order you want.</p>
 </div>
-<hr />
 <h2 id="creating-a-full-mask">Creating a Full Mask</h2>
 <p>When you don't have a segmentation mask and want to analyze the entire image:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_full_mask</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="c1"># Create a mask of all ones matching the image geometry</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;scan.nii.gz&quot;</span><span class="p">)</span>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="n">full_mask</span> <span class="o">=</span> <span class="n">create_full_mask</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>
-<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="c1"># Now use full_mask for whole-image analysis</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_full_mask</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="c1"># Create a mask of all ones matching the image geometry</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;scan.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="n">full_mask</span> <span class="o">=</span> <span class="n">create_full_mask</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="c1"># Now use full_mask for whole-image analysis</span>
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>If you pass <code>mask=None</code> to <code>RadiomicsPipeline.run()</code>, it automatically creates a full mask internally.</p>
 </div>
-<hr />
-<h2 id="complete-workflow-examples">Complete Workflow Examples</h2>
-<div class="admonition example">
-<p class="admonition-title">Example 1: Standard NIfTI Workflow</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_image</span><span class="p">,</span> <span class="n">RadiomicsPipeline</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="c1"># Load image and mask</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;patient_ct.nii.gz&quot;</span><span class="p">)</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;tumor_segmentation.nii.gz&quot;</span><span class="p">)</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="c1"># Run radiomics pipeline</span>
-<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
-<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">config_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;standard_fbn_32&quot;</span><span class="p">])</span>
-</code></pre></div>
-</div>
-<div class="admonition example">
-<p class="admonition-title">Example 2: Multi-Phase DICOM Analysis</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_image</span>
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.utilities</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_dicom_phases</span>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>
-<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="c1"># Discover available phases</span>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="n">phases</span> <span class="o">=</span> <span class="n">get_dicom_phases</span><span class="p">(</span><span class="s2">&quot;cardiac_ct_folder/&quot;</span><span class="p">)</span>
-<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">phases</span><span class="p">)</span><span class="si">}</span><span class="s2"> cardiac phases&quot;</span><span class="p">)</span>
-<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>
-<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="c1"># Analyze each phase</span>
-<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="k">for</span> <span class="n">phase</span> <span class="ow">in</span> <span class="n">phases</span><span class="p">:</span>
-<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>    <span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;cardiac_ct_folder/&quot;</span><span class="p">,</span> <span class="n">dataset_index</span><span class="o">=</span><span class="n">phase</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
-<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Phase </span><span class="si">{</span><span class="n">phase</span><span class="o">.</span><span class="n">label</span><span class="si">}</span><span class="s2">: shape = </span><span class="si">{</span><span class="n">image</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a>    <span class="c1"># ... run analysis on each phase</span>
-</code></pre></div>
-</div>
-<div class="admonition example">
-<p class="admonition-title">Example 3: DICOM SEG with Reference Alignment</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_image</span><span class="p">,</span> <span class="n">load_seg</span>
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics.loaders</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_segment_info</span>
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>
-<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="c1"># Load the CT series</span>
-<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;ct_series/&quot;</span><span class="p">)</span>
-<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>
-<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="c1"># Check available segments</span>
-<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="n">segments</span> <span class="o">=</span> <span class="n">get_segment_info</span><span class="p">(</span><span class="s2">&quot;segmentation.dcm&quot;</span><span class="p">)</span>
-<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Available segments:&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="s1">&#39;segment_label&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">segments</span><span class="p">])</span>
-<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a>
-<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a><span class="c1"># Load only the liver segment, aligned to CT</span>
-<a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a><span class="n">liver</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span>
-<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a>    <span class="s2">&quot;segmentation.dcm&quot;</span><span class="p">,</span>
-<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a>    <span class="n">segment_numbers</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
-<a id="__codelineno-25-15" name="__codelineno-25-15" href="#__codelineno-25-15"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span>
-<a id="__codelineno-25-16" name="__codelineno-25-16" href="#__codelineno-25-16"></a><span class="p">)</span>
-<a id="__codelineno-25-17" name="__codelineno-25-17" href="#__codelineno-25-17"></a>
-<a id="__codelineno-25-18" name="__codelineno-25-18" href="#__codelineno-25-18"></a><span class="c1"># Verify alignment</span>
-<a id="__codelineno-25-19" name="__codelineno-25-19" href="#__codelineno-25-19"></a><span class="k">assert</span> <span class="n">liver</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="n">ct</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">shape</span>
-</code></pre></div>
-</div>
-<div class="admonition example">
-<p class="admonition-title">Example 4: Merging Cropped Multi-Organ Masks</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_image</span><span class="p">,</span> <span class="n">load_and_merge_images</span>
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="c1"># Reference CT</span>
-<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;full_body_ct/&quot;</span><span class="p">)</span>
-<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>
-<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="c1"># List of cropped organ masks</span>
-<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="n">organ_masks</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a>    <span class="s2">&quot;liver_cropped.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a>    <span class="s2">&quot;spleen_cropped.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a>    <span class="s2">&quot;left_kidney_cropped.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a>    <span class="s2">&quot;right_kidney_cropped.nii.gz&quot;</span>
-<a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a><span class="p">]</span>
-<a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a>
-<a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a><span class="c1"># Merge all into reference space with unique labels</span>
-<a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
-<a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a>    <span class="n">organ_masks</span><span class="p">,</span>
-<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
-<a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a>    <span class="n">relabel_masks</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a><span class="p">)</span>
-<a id="__codelineno-26-21" name="__codelineno-26-21" href="#__codelineno-26-21"></a>
-<a id="__codelineno-26-22" name="__codelineno-26-22" href="#__codelineno-26-22"></a><span class="c1"># Result: combined.array contains:</span>
-<a id="__codelineno-26-23" name="__codelineno-26-23" href="#__codelineno-26-23"></a><span class="c1"># 0 = background, 1 = liver, 2 = spleen, 3 = left kidney, 4 = right kidney</span>
-</code></pre></div>
-</div>
-<hr />
 <h2 id="summary-of-loading-functions">Summary of Loading Functions</h2>
 <table>
 <thead>
@@ -2796,12 +2788,10 @@
 </tr>
 </tbody>
 </table>
-<hr />
 <h2 id="next-steps">Next Steps</h2>
 <ul>
-<li><a href="../feature_calculations/">Feature Calculations</a> - Get started with your first radiomics analysis</li>
-<li><a href="../pipeline/">Pipeline Usage</a> - Configure and run the radiomics pipeline</li>
-<li><a href="../utilities/">Utilities</a> - DICOM database parsing, visualization, and more</li>
+<li><a href="../pipeline/">Pipeline &amp; Preprocessing</a> - Configure and run the radiomics pipeline</li>
+<li><a href="../cookbook/">Cookbook</a> - End-to-end batch processing scripts</li>
 </ul>
 
 

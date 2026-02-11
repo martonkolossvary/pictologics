@@ -562,6 +562,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../user_guide/quick_start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../user_guide/data_loading/" class="md-nav__link">
         
   
@@ -570,6 +598,34 @@
     
   
     Data Loading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_guide/pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline & Preprocessing
   
 
     
@@ -618,14 +674,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../user_guide/feature_calculations/" class="md-nav__link">
+      <a href="../user_guide/configurations/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Feature Calculations
+    Configuration & Reproducibility
   
 
     
@@ -646,42 +702,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../user_guide/pipeline/" class="md-nav__link">
+      <a href="../user_guide/cookbook/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Pipeline Usage
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../user_guide/predefined_configurations/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Predefined Configurations
+    Cookbook
   
 
     
@@ -710,34 +738,6 @@
     
   
     Utilities
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../user_guide/case_examples/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Case Examples
   
 
     
@@ -1759,24 +1759,11 @@
 <li><strong>Hardware</strong>: Apple M4 Pro, 14 cores, 48 GB</li>
 <li><strong>OS</strong>: macOS 26.2 (arm64)</li>
 <li><strong>Python</strong>: 3.12.10</li>
-<li><strong>Core deps</strong>: pictologics 0.3.2, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7</li>
+<li><strong>Core deps</strong>: pictologics 0.3.3, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7</li>
 <li><strong>PyRadiomics stack (parity runs)</strong>: pyradiomics 3.1.1.dev111+g8ed579383, SimpleITK 2.5.3</li>
 <li><strong>BLAS/LAPACK</strong>: Apple Accelerate (from <code>numpy.show_config()</code>)</li>
 </ul>
-<div class="admonition info">
-<p class="admonition-title">Benchmark Methodology</p>
-<p><strong>Reported values</strong>: All timings are the <strong>average of 5 runs</strong> to reduce variance. The benchmark
-script explicitly calls <code>warmup_jit()</code> before timing to avoid including Numba compilation
-overhead in the measured runtimes.</p>
-<p><strong>Fair comparison</strong>: For benchmarking, <strong>all features within each family are calculated</strong> to
-ensure a fair comparison with PyRadiomics. This represents the worst-case scenario where every
-feature is requested.</p>
-<p><strong>Real-world performance</strong>: In practice, Pictologics uses <strong>intelligent deduplication</strong> to avoid
-redundant computation. When you run multiple configurations (e.g., comparing different
-discretisation methods), the pipeline automatically reuses preprocessing steps and feature
-calculations that would produce identical results. This can lead to significantly faster
-run times than shown here, especially when extracting features across many configurations.</p>
-</div>
+<p>Note: the benchmark script explicitly calls <code>warmup_jit()</code> before timing to avoid including Numba compilation overhead in the measured runtimes. Timing and memory measurement are separated — <code>tracemalloc</code> is NOT active during timing to avoid biasing the comparison (its per-allocation hooks penalise pure-Python code more than JIT/C code). All calculations are repeated 5 times and the <strong>mean</strong> runtime is reported; peak memory is measured once separately.</p>
 <h3 id="intensity">Intensity</h3>
 <table>
 <thead>
@@ -1806,73 +1793,73 @@ run times than shown here, especially when extracting features across many confi
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0340 s</td>
-<td style="text-align: left;">0.84 MB</td>
+<td style="text-align: left;">0.0298 s</td>
+<td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0280 s</td>
+<td style="text-align: left;">0.0295 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0297 s</td>
+<td style="text-align: left;">0.0289 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0316 s</td>
+<td style="text-align: left;">0.0290 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0309 s</td>
+<td style="text-align: left;">0.0275 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0305 s</td>
+<td style="text-align: left;">0.0302 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">1.2988 s</td>
+<td style="text-align: left;">1.2636 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">1.3367 s</td>
+<td style="text-align: left;">1.2756 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">1.3608 s</td>
+<td style="text-align: left;">1.2750 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">1.3218 s</td>
+<td style="text-align: left;">1.2912 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">1.3635 s</td>
+<td style="text-align: left;">1.2832 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">1.2953 s</td>
+<td style="text-align: left;">1.2549 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
@@ -1978,145 +1965,145 @@ run times than shown here, especially when extracting features across many confi
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0043 s</td>
+<td style="text-align: left;">0.0033 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0041 s</td>
+<td style="text-align: left;">0.0029 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0040 s</td>
+<td style="text-align: left;">0.0031 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0039 s</td>
+<td style="text-align: left;">0.0031 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0039 s</td>
+<td style="text-align: left;">0.0033 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0041 s</td>
+<td style="text-align: left;">0.0031 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0109 s</td>
+<td style="text-align: left;">0.0092 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0107 s</td>
+<td style="text-align: left;">0.0090 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0104 s</td>
+<td style="text-align: left;">0.0098 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0110 s</td>
+<td style="text-align: left;">0.0094 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0109 s</td>
+<td style="text-align: left;">0.0093 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0109 s</td>
+<td style="text-align: left;">0.0094 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0170 s</td>
+<td style="text-align: left;">0.0160 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0170 s</td>
+<td style="text-align: left;">0.0160 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0170 s</td>
+<td style="text-align: left;">0.0161 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0168 s</td>
+<td style="text-align: left;">0.0159 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0170 s</td>
+<td style="text-align: left;">0.0164 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0176 s</td>
+<td style="text-align: left;">0.0158 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0333 s</td>
+<td style="text-align: left;">0.0327 s</td>
 <td style="text-align: left;">20.46 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0335 s</td>
+<td style="text-align: left;">0.0316 s</td>
 <td style="text-align: left;">20.46 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0348 s</td>
+<td style="text-align: left;">0.0334 s</td>
 <td style="text-align: left;">20.46 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0349 s</td>
+<td style="text-align: left;">0.0317 s</td>
 <td style="text-align: left;">20.46 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0342 s</td>
+<td style="text-align: left;">0.0314 s</td>
 <td style="text-align: left;">20.46 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0350 s</td>
+<td style="text-align: left;">0.0310 s</td>
 <td style="text-align: left;">20.46 MB</td>
 </tr>
 </tbody>
@@ -2150,145 +2137,145 @@ run times than shown here, especially when extracting features across many confi
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0002 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.15 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0002 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.13 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0002 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.13 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0002 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.13 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0002 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.13 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0002 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.14 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0003 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.16 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0002 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.14 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0002 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.13 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0003 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.13 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0002 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.14 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0003 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.15 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0003 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.21 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0003 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.16 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0003 s</td>
+<td style="text-align: left;">0.0002 s</td>
 <td style="text-align: left;">0.14 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0003 s</td>
+<td style="text-align: left;">0.0002 s</td>
 <td style="text-align: left;">0.14 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0003 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.15 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0003 s</td>
+<td style="text-align: left;">0.0001 s</td>
 <td style="text-align: left;">0.18 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0002 s</td>
 <td style="text-align: left;">0.20 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0002 s</td>
 <td style="text-align: left;">0.16 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0002 s</td>
 <td style="text-align: left;">0.14 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0002 s</td>
 <td style="text-align: left;">0.14 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0002 s</td>
 <td style="text-align: left;">0.15 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0002 s</td>
 <td style="text-align: left;">0.17 MB</td>
 </tr>
 </tbody>
@@ -2322,145 +2309,145 @@ run times than shown here, especially when extracting features across many confi
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0090 s</td>
+<td style="text-align: left;">0.0037 s</td>
 <td style="text-align: left;">1.70 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0087 s</td>
+<td style="text-align: left;">0.0038 s</td>
 <td style="text-align: left;">1.70 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0089 s</td>
+<td style="text-align: left;">0.0044 s</td>
 <td style="text-align: left;">1.70 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0086 s</td>
+<td style="text-align: left;">0.0040 s</td>
 <td style="text-align: left;">1.70 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0090 s</td>
+<td style="text-align: left;">0.0037 s</td>
 <td style="text-align: left;">1.70 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0086 s</td>
-<td style="text-align: left;">1.70 MB</td>
+<td style="text-align: left;">0.0043 s</td>
+<td style="text-align: left;">1.69 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0290 s</td>
-<td style="text-align: left;">13.51 MB</td>
+<td style="text-align: left;">0.0160 s</td>
+<td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0298 s</td>
-<td style="text-align: left;">13.50 MB</td>
+<td style="text-align: left;">0.0154 s</td>
+<td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0296 s</td>
+<td style="text-align: left;">0.0152 s</td>
 <td style="text-align: left;">13.50 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0311 s</td>
-<td style="text-align: left;">13.50 MB</td>
+<td style="text-align: left;">0.0152 s</td>
+<td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0320 s</td>
-<td style="text-align: left;">13.50 MB</td>
+<td style="text-align: left;">0.0157 s</td>
+<td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0310 s</td>
-<td style="text-align: left;">13.50 MB</td>
+<td style="text-align: left;">0.0156 s</td>
+<td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0590 s</td>
-<td style="text-align: left;">45.50 MB</td>
+<td style="text-align: left;">0.0372 s</td>
+<td style="text-align: left;">45.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0592 s</td>
-<td style="text-align: left;">45.50 MB</td>
+<td style="text-align: left;">0.0378 s</td>
+<td style="text-align: left;">45.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0578 s</td>
-<td style="text-align: left;">45.50 MB</td>
+<td style="text-align: left;">0.0375 s</td>
+<td style="text-align: left;">45.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0566 s</td>
-<td style="text-align: left;">45.50 MB</td>
+<td style="text-align: left;">0.0383 s</td>
+<td style="text-align: left;">45.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0673 s</td>
-<td style="text-align: left;">45.50 MB</td>
+<td style="text-align: left;">0.0408 s</td>
+<td style="text-align: left;">45.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0601 s</td>
-<td style="text-align: left;">45.50 MB</td>
+<td style="text-align: left;">0.0383 s</td>
+<td style="text-align: left;">45.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.1114 s</td>
+<td style="text-align: left;">0.0817 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.1071 s</td>
+<td style="text-align: left;">0.0804 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.1161 s</td>
-<td style="text-align: left;">107.80 MB</td>
+<td style="text-align: left;">0.0846 s</td>
+<td style="text-align: left;">107.79 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.1190 s</td>
+<td style="text-align: left;">0.0823 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.1107 s</td>
+<td style="text-align: left;">0.0807 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.1192 s</td>
+<td style="text-align: left;">0.0818 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 </tbody>
@@ -2484,9 +2471,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0010 s</td>
-<td style="text-align: left;">0.0043 s</td>
-<td style="text-align: left;">4.27x</td>
+<td style="text-align: left;">0.0008 s</td>
+<td style="text-align: left;">0.0037 s</td>
+<td style="text-align: left;">4.71x</td>
 <td style="text-align: left;">0.48 MB</td>
 <td style="text-align: left;">0.94 MB</td>
 </tr>
@@ -2494,9 +2481,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0011 s</td>
-<td style="text-align: left;">0.0044 s</td>
-<td style="text-align: left;">4.07x</td>
+<td style="text-align: left;">0.0008 s</td>
+<td style="text-align: left;">0.0038 s</td>
+<td style="text-align: left;">5.01x</td>
 <td style="text-align: left;">0.48 MB</td>
 <td style="text-align: left;">0.94 MB</td>
 </tr>
@@ -2504,9 +2491,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0011 s</td>
-<td style="text-align: left;">0.0043 s</td>
-<td style="text-align: left;">4.10x</td>
+<td style="text-align: left;">0.0009 s</td>
+<td style="text-align: left;">0.0037 s</td>
+<td style="text-align: left;">4.28x</td>
 <td style="text-align: left;">0.48 MB</td>
 <td style="text-align: left;">0.94 MB</td>
 </tr>
@@ -2514,9 +2501,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0011 s</td>
-<td style="text-align: left;">0.0045 s</td>
-<td style="text-align: left;">4.21x</td>
+<td style="text-align: left;">0.0009 s</td>
+<td style="text-align: left;">0.0037 s</td>
+<td style="text-align: left;">4.14x</td>
 <td style="text-align: left;">0.48 MB</td>
 <td style="text-align: left;">0.94 MB</td>
 </tr>
@@ -2524,9 +2511,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0011 s</td>
-<td style="text-align: left;">0.0046 s</td>
-<td style="text-align: left;">4.25x</td>
+<td style="text-align: left;">0.0008 s</td>
+<td style="text-align: left;">0.0038 s</td>
+<td style="text-align: left;">4.67x</td>
 <td style="text-align: left;">0.48 MB</td>
 <td style="text-align: left;">0.94 MB</td>
 </tr>
@@ -2534,9 +2521,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0010 s</td>
-<td style="text-align: left;">0.0043 s</td>
-<td style="text-align: left;">4.20x</td>
+<td style="text-align: left;">0.0009 s</td>
+<td style="text-align: left;">0.0038 s</td>
+<td style="text-align: left;">4.10x</td>
 <td style="text-align: left;">0.48 MB</td>
 <td style="text-align: left;">0.94 MB</td>
 </tr>
@@ -2544,9 +2531,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0060 s</td>
-<td style="text-align: left;">0.0097 s</td>
-<td style="text-align: left;">1.62x</td>
+<td style="text-align: left;">0.0053 s</td>
+<td style="text-align: left;">0.0093 s</td>
+<td style="text-align: left;">1.74x</td>
 <td style="text-align: left;">3.82 MB</td>
 <td style="text-align: left;">6.68 MB</td>
 </tr>
@@ -2554,9 +2541,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0060 s</td>
-<td style="text-align: left;">0.0095 s</td>
-<td style="text-align: left;">1.58x</td>
+<td style="text-align: left;">0.0054 s</td>
+<td style="text-align: left;">0.0092 s</td>
+<td style="text-align: left;">1.70x</td>
 <td style="text-align: left;">3.82 MB</td>
 <td style="text-align: left;">6.68 MB</td>
 </tr>
@@ -2564,9 +2551,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0060 s</td>
-<td style="text-align: left;">0.0097 s</td>
-<td style="text-align: left;">1.62x</td>
+<td style="text-align: left;">0.0053 s</td>
+<td style="text-align: left;">0.0093 s</td>
+<td style="text-align: left;">1.74x</td>
 <td style="text-align: left;">3.82 MB</td>
 <td style="text-align: left;">6.68 MB</td>
 </tr>
@@ -2574,9 +2561,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0057 s</td>
-<td style="text-align: left;">0.0097 s</td>
-<td style="text-align: left;">1.68x</td>
+<td style="text-align: left;">0.0053 s</td>
+<td style="text-align: left;">0.0092 s</td>
+<td style="text-align: left;">1.74x</td>
 <td style="text-align: left;">3.82 MB</td>
 <td style="text-align: left;">6.68 MB</td>
 </tr>
@@ -2584,9 +2571,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0060 s</td>
-<td style="text-align: left;">0.0099 s</td>
-<td style="text-align: left;">1.66x</td>
+<td style="text-align: left;">0.0053 s</td>
+<td style="text-align: left;">0.0091 s</td>
+<td style="text-align: left;">1.72x</td>
 <td style="text-align: left;">3.82 MB</td>
 <td style="text-align: left;">6.68 MB</td>
 </tr>
@@ -2594,9 +2581,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0058 s</td>
-<td style="text-align: left;">0.0098 s</td>
-<td style="text-align: left;">1.69x</td>
+<td style="text-align: left;">0.0053 s</td>
+<td style="text-align: left;">0.0092 s</td>
+<td style="text-align: left;">1.73x</td>
 <td style="text-align: left;">3.82 MB</td>
 <td style="text-align: left;">6.68 MB</td>
 </tr>
@@ -2604,8 +2591,48 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
+<td style="text-align: left;">0.0181 s</td>
+<td style="text-align: left;">0.0255 s</td>
+<td style="text-align: left;">1.41x</td>
+<td style="text-align: left;">12.88 MB</td>
+<td style="text-align: left;">23.38 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBN 32</td>
 <td style="text-align: left;">0.0190 s</td>
-<td style="text-align: left;">0.0263 s</td>
+<td style="text-align: left;">0.0251 s</td>
+<td style="text-align: left;">1.32x</td>
+<td style="text-align: left;">12.88 MB</td>
+<td style="text-align: left;">23.38 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBN 64</td>
+<td style="text-align: left;">0.0182 s</td>
+<td style="text-align: left;">0.0257 s</td>
+<td style="text-align: left;">1.41x</td>
+<td style="text-align: left;">12.88 MB</td>
+<td style="text-align: left;">23.38 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBS 10.0</td>
+<td style="text-align: left;">0.0181 s</td>
+<td style="text-align: left;">0.0254 s</td>
+<td style="text-align: left;">1.40x</td>
+<td style="text-align: left;">12.88 MB</td>
+<td style="text-align: left;">23.38 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBS 25.0</td>
+<td style="text-align: left;">0.0181 s</td>
+<td style="text-align: left;">0.0251 s</td>
 <td style="text-align: left;">1.39x</td>
 <td style="text-align: left;">12.88 MB</td>
 <td style="text-align: left;">23.38 MB</td>
@@ -2613,50 +2640,10 @@ run times than shown here, especially when extracting features across many confi
 <tr>
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">75</td>
-<td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0200 s</td>
-<td style="text-align: left;">0.0269 s</td>
-<td style="text-align: left;">1.35x</td>
-<td style="text-align: left;">12.88 MB</td>
-<td style="text-align: left;">23.38 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0192 s</td>
-<td style="text-align: left;">0.0275 s</td>
-<td style="text-align: left;">1.43x</td>
-<td style="text-align: left;">12.88 MB</td>
-<td style="text-align: left;">23.38 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0185 s</td>
-<td style="text-align: left;">0.0262 s</td>
-<td style="text-align: left;">1.42x</td>
-<td style="text-align: left;">12.88 MB</td>
-<td style="text-align: left;">23.38 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0187 s</td>
-<td style="text-align: left;">0.0258 s</td>
-<td style="text-align: left;">1.38x</td>
-<td style="text-align: left;">12.88 MB</td>
-<td style="text-align: left;">23.38 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0191 s</td>
-<td style="text-align: left;">0.0254 s</td>
-<td style="text-align: left;">1.33x</td>
+<td style="text-align: left;">0.0181 s</td>
+<td style="text-align: left;">0.0256 s</td>
+<td style="text-align: left;">1.42x</td>
 <td style="text-align: left;">12.88 MB</td>
 <td style="text-align: left;">23.38 MB</td>
 </tr>
@@ -2664,28 +2651,8 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0470 s</td>
-<td style="text-align: left;">0.0571 s</td>
-<td style="text-align: left;">1.21x</td>
-<td style="text-align: left;">30.52 MB</td>
-<td style="text-align: left;">53.41 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0445 s</td>
-<td style="text-align: left;">0.0554 s</td>
-<td style="text-align: left;">1.24x</td>
-<td style="text-align: left;">30.52 MB</td>
-<td style="text-align: left;">53.41 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0445 s</td>
-<td style="text-align: left;">0.0546 s</td>
+<td style="text-align: left;">0.0424 s</td>
+<td style="text-align: left;">0.0520 s</td>
 <td style="text-align: left;">1.23x</td>
 <td style="text-align: left;">30.52 MB</td>
 <td style="text-align: left;">53.41 MB</td>
@@ -2693,10 +2660,30 @@ run times than shown here, especially when extracting features across many confi
 <tr>
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">100</td>
+<td style="text-align: left;">FBN 32</td>
+<td style="text-align: left;">0.0423 s</td>
+<td style="text-align: left;">0.0515 s</td>
+<td style="text-align: left;">1.22x</td>
+<td style="text-align: left;">30.52 MB</td>
+<td style="text-align: left;">53.41 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBN 64</td>
+<td style="text-align: left;">0.0425 s</td>
+<td style="text-align: left;">0.0509 s</td>
+<td style="text-align: left;">1.20x</td>
+<td style="text-align: left;">30.52 MB</td>
+<td style="text-align: left;">53.41 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0439 s</td>
-<td style="text-align: left;">0.0570 s</td>
-<td style="text-align: left;">1.30x</td>
+<td style="text-align: left;">0.0450 s</td>
+<td style="text-align: left;">0.0513 s</td>
+<td style="text-align: left;">1.14x</td>
 <td style="text-align: left;">30.52 MB</td>
 <td style="text-align: left;">53.41 MB</td>
 </tr>
@@ -2704,9 +2691,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0439 s</td>
-<td style="text-align: left;">0.0569 s</td>
-<td style="text-align: left;">1.30x</td>
+<td style="text-align: left;">0.0427 s</td>
+<td style="text-align: left;">0.0532 s</td>
+<td style="text-align: left;">1.24x</td>
 <td style="text-align: left;">30.52 MB</td>
 <td style="text-align: left;">53.41 MB</td>
 </tr>
@@ -2714,9 +2701,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0453 s</td>
-<td style="text-align: left;">0.0580 s</td>
-<td style="text-align: left;">1.28x</td>
+<td style="text-align: left;">0.0469 s</td>
+<td style="text-align: left;">0.0508 s</td>
+<td style="text-align: left;">1.08x</td>
 <td style="text-align: left;">30.52 MB</td>
 <td style="text-align: left;">53.41 MB</td>
 </tr>
@@ -2724,19 +2711,19 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0008 s</td>
-<td style="text-align: left;">0.0203 s</td>
-<td style="text-align: left;">25.64x</td>
+<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0049 s</td>
+<td style="text-align: left;">13.27x</td>
 <td style="text-align: left;">0.24 MB</td>
-<td style="text-align: left;">0.72 MB</td>
+<td style="text-align: left;">0.71 MB</td>
 </tr>
 <tr>
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0008 s</td>
-<td style="text-align: left;">0.0133 s</td>
-<td style="text-align: left;">17.07x</td>
+<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0050 s</td>
+<td style="text-align: left;">12.35x</td>
 <td style="text-align: left;">0.24 MB</td>
 <td style="text-align: left;">0.71 MB</td>
 </tr>
@@ -2744,9 +2731,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0009 s</td>
-<td style="text-align: left;">0.0131 s</td>
-<td style="text-align: left;">15.31x</td>
+<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0054 s</td>
+<td style="text-align: left;">13.52x</td>
 <td style="text-align: left;">0.24 MB</td>
 <td style="text-align: left;">0.71 MB</td>
 </tr>
@@ -2754,19 +2741,19 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0019 s</td>
-<td style="text-align: left;">0.0140 s</td>
-<td style="text-align: left;">7.29x</td>
+<td style="text-align: left;">0.0012 s</td>
+<td style="text-align: left;">0.0056 s</td>
+<td style="text-align: left;">4.52x</td>
 <td style="text-align: left;">0.24 MB</td>
-<td style="text-align: left;">0.75 MB</td>
+<td style="text-align: left;">0.71 MB</td>
 </tr>
 <tr>
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0008 s</td>
-<td style="text-align: left;">0.0130 s</td>
-<td style="text-align: left;">16.44x</td>
+<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0052 s</td>
+<td style="text-align: left;">12.39x</td>
 <td style="text-align: left;">0.24 MB</td>
 <td style="text-align: left;">0.71 MB</td>
 </tr>
@@ -2774,9 +2761,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0008 s</td>
-<td style="text-align: left;">0.0126 s</td>
-<td style="text-align: left;">15.89x</td>
+<td style="text-align: left;">0.0004 s</td>
+<td style="text-align: left;">0.0048 s</td>
+<td style="text-align: left;">12.65x</td>
 <td style="text-align: left;">0.24 MB</td>
 <td style="text-align: left;">0.71 MB</td>
 </tr>
@@ -2784,9 +2771,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0029 s</td>
-<td style="text-align: left;">0.0660 s</td>
-<td style="text-align: left;">22.96x</td>
+<td style="text-align: left;">0.0026 s</td>
+<td style="text-align: left;">0.0158 s</td>
+<td style="text-align: left;">6.10x</td>
 <td style="text-align: left;">1.40 MB</td>
 <td style="text-align: left;">4.61 MB</td>
 </tr>
@@ -2794,219 +2781,219 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0029 s</td>
-<td style="text-align: left;">0.0661 s</td>
-<td style="text-align: left;">23.12x</td>
+<td style="text-align: left;">0.0025 s</td>
+<td style="text-align: left;">0.0163 s</td>
+<td style="text-align: left;">6.53x</td>
 <td style="text-align: left;">1.40 MB</td>
 <td style="text-align: left;">4.61 MB</td>
 </tr>
 <tr>
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">50</td>
+<td style="text-align: left;">FBN 64</td>
+<td style="text-align: left;">0.0026 s</td>
+<td style="text-align: left;">0.0174 s</td>
+<td style="text-align: left;">6.70x</td>
+<td style="text-align: left;">1.40 MB</td>
+<td style="text-align: left;">4.61 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">50</td>
+<td style="text-align: left;">FBS 10.0</td>
+<td style="text-align: left;">0.0025 s</td>
+<td style="text-align: left;">0.0178 s</td>
+<td style="text-align: left;">7.09x</td>
+<td style="text-align: left;">1.40 MB</td>
+<td style="text-align: left;">4.61 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">50</td>
+<td style="text-align: left;">FBS 25.0</td>
+<td style="text-align: left;">0.0025 s</td>
+<td style="text-align: left;">0.0169 s</td>
+<td style="text-align: left;">6.79x</td>
+<td style="text-align: left;">1.40 MB</td>
+<td style="text-align: left;">4.61 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">50</td>
+<td style="text-align: left;">FBS 50.0</td>
+<td style="text-align: left;">0.0026 s</td>
+<td style="text-align: left;">0.0161 s</td>
+<td style="text-align: left;">6.08x</td>
+<td style="text-align: left;">1.40 MB</td>
+<td style="text-align: left;">4.61 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBN 16</td>
+<td style="text-align: left;">0.0103 s</td>
+<td style="text-align: left;">0.0559 s</td>
+<td style="text-align: left;">5.44x</td>
+<td style="text-align: left;">5.81 MB</td>
+<td style="text-align: left;">17.95 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBN 32</td>
+<td style="text-align: left;">0.0109 s</td>
+<td style="text-align: left;">0.0581 s</td>
+<td style="text-align: left;">5.35x</td>
+<td style="text-align: left;">5.81 MB</td>
+<td style="text-align: left;">17.95 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBN 64</td>
+<td style="text-align: left;">0.0109 s</td>
+<td style="text-align: left;">0.0625 s</td>
+<td style="text-align: left;">5.72x</td>
+<td style="text-align: left;">5.81 MB</td>
+<td style="text-align: left;">17.95 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBS 10.0</td>
+<td style="text-align: left;">0.0111 s</td>
+<td style="text-align: left;">0.0631 s</td>
+<td style="text-align: left;">5.69x</td>
+<td style="text-align: left;">5.81 MB</td>
+<td style="text-align: left;">17.95 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBS 25.0</td>
+<td style="text-align: left;">0.0109 s</td>
+<td style="text-align: left;">0.0595 s</td>
+<td style="text-align: left;">5.48x</td>
+<td style="text-align: left;">5.81 MB</td>
+<td style="text-align: left;">17.95 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBS 50.0</td>
+<td style="text-align: left;">0.0105 s</td>
+<td style="text-align: left;">0.0554 s</td>
+<td style="text-align: left;">5.25x</td>
+<td style="text-align: left;">5.81 MB</td>
+<td style="text-align: left;">17.94 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBN 16</td>
+<td style="text-align: left;">0.0200 s</td>
+<td style="text-align: left;">0.1080 s</td>
+<td style="text-align: left;">5.40x</td>
+<td style="text-align: left;">12.16 MB</td>
+<td style="text-align: left;">39.00 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBN 32</td>
+<td style="text-align: left;">0.0210 s</td>
+<td style="text-align: left;">0.1151 s</td>
+<td style="text-align: left;">5.49x</td>
+<td style="text-align: left;">12.16 MB</td>
+<td style="text-align: left;">39.00 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBN 64</td>
+<td style="text-align: left;">0.0214 s</td>
+<td style="text-align: left;">0.1200 s</td>
+<td style="text-align: left;">5.62x</td>
+<td style="text-align: left;">12.16 MB</td>
+<td style="text-align: left;">39.00 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBS 10.0</td>
+<td style="text-align: left;">0.0238 s</td>
+<td style="text-align: left;">0.1308 s</td>
+<td style="text-align: left;">5.49x</td>
+<td style="text-align: left;">12.16 MB</td>
+<td style="text-align: left;">39.01 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBS 25.0</td>
+<td style="text-align: left;">0.0212 s</td>
+<td style="text-align: left;">0.1146 s</td>
+<td style="text-align: left;">5.40x</td>
+<td style="text-align: left;">12.16 MB</td>
+<td style="text-align: left;">39.01 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBS 50.0</td>
+<td style="text-align: left;">0.0215 s</td>
+<td style="text-align: left;">0.1151 s</td>
+<td style="text-align: left;">5.37x</td>
+<td style="text-align: left;">12.16 MB</td>
+<td style="text-align: left;">39.00 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Morphology</td>
+<td style="text-align: right;">25</td>
+<td style="text-align: left;">FBN 16</td>
+<td style="text-align: left;">0.0030 s</td>
+<td style="text-align: left;">0.0525 s</td>
+<td style="text-align: left;">17.60x</td>
+<td style="text-align: left;">1.17 MB</td>
+<td style="text-align: left;">1.18 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Morphology</td>
+<td style="text-align: right;">25</td>
+<td style="text-align: left;">FBN 32</td>
+<td style="text-align: left;">0.0029 s</td>
+<td style="text-align: left;">0.0524 s</td>
+<td style="text-align: left;">17.98x</td>
+<td style="text-align: left;">1.17 MB</td>
+<td style="text-align: left;">1.18 MB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Morphology</td>
+<td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
 <td style="text-align: left;">0.0030 s</td>
-<td style="text-align: left;">0.0652 s</td>
-<td style="text-align: left;">21.59x</td>
-<td style="text-align: left;">1.40 MB</td>
-<td style="text-align: left;">4.61 MB</td>
+<td style="text-align: left;">0.0529 s</td>
+<td style="text-align: left;">17.70x</td>
+<td style="text-align: left;">1.17 MB</td>
+<td style="text-align: left;">1.18 MB</td>
 </tr>
 <tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">50</td>
+<td style="text-align: left;">Morphology</td>
+<td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0031 s</td>
-<td style="text-align: left;">0.0689 s</td>
-<td style="text-align: left;">22.38x</td>
-<td style="text-align: left;">1.40 MB</td>
-<td style="text-align: left;">4.61 MB</td>
+<td style="text-align: left;">0.0043 s</td>
+<td style="text-align: left;">0.0531 s</td>
+<td style="text-align: left;">12.47x</td>
+<td style="text-align: left;">1.17 MB</td>
+<td style="text-align: left;">1.18 MB</td>
 </tr>
 <tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">50</td>
+<td style="text-align: left;">Morphology</td>
+<td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
 <td style="text-align: left;">0.0029 s</td>
-<td style="text-align: left;">0.0663 s</td>
-<td style="text-align: left;">22.78x</td>
-<td style="text-align: left;">1.40 MB</td>
-<td style="text-align: left;">4.61 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">50</td>
-<td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0029 s</td>
-<td style="text-align: left;">0.0667 s</td>
-<td style="text-align: left;">23.21x</td>
-<td style="text-align: left;">1.40 MB</td>
-<td style="text-align: left;">4.61 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0103 s</td>
-<td style="text-align: left;">0.2515 s</td>
-<td style="text-align: left;">24.48x</td>
-<td style="text-align: left;">5.81 MB</td>
-<td style="text-align: left;">17.95 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0117 s</td>
-<td style="text-align: left;">0.2713 s</td>
-<td style="text-align: left;">23.09x</td>
-<td style="text-align: left;">5.81 MB</td>
-<td style="text-align: left;">17.95 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0112 s</td>
-<td style="text-align: left;">0.2625 s</td>
-<td style="text-align: left;">23.35x</td>
-<td style="text-align: left;">5.81 MB</td>
-<td style="text-align: left;">17.95 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0117 s</td>
-<td style="text-align: left;">0.2629 s</td>
-<td style="text-align: left;">22.41x</td>
-<td style="text-align: left;">5.81 MB</td>
-<td style="text-align: left;">17.95 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0112 s</td>
-<td style="text-align: left;">0.2573 s</td>
-<td style="text-align: left;">22.88x</td>
-<td style="text-align: left;">5.81 MB</td>
-<td style="text-align: left;">17.95 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0110 s</td>
-<td style="text-align: left;">0.2535 s</td>
-<td style="text-align: left;">23.09x</td>
-<td style="text-align: left;">5.81 MB</td>
-<td style="text-align: left;">17.95 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0248 s</td>
-<td style="text-align: left;">0.5414 s</td>
-<td style="text-align: left;">21.81x</td>
-<td style="text-align: left;">12.16 MB</td>
-<td style="text-align: left;">39.01 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0238 s</td>
-<td style="text-align: left;">0.5456 s</td>
-<td style="text-align: left;">22.97x</td>
-<td style="text-align: left;">12.16 MB</td>
-<td style="text-align: left;">39.01 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0236 s</td>
-<td style="text-align: left;">0.5485 s</td>
-<td style="text-align: left;">23.28x</td>
-<td style="text-align: left;">12.16 MB</td>
-<td style="text-align: left;">39.01 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0241 s</td>
-<td style="text-align: left;">0.5450 s</td>
-<td style="text-align: left;">22.58x</td>
-<td style="text-align: left;">12.16 MB</td>
-<td style="text-align: left;">39.01 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0228 s</td>
-<td style="text-align: left;">0.5280 s</td>
-<td style="text-align: left;">23.19x</td>
-<td style="text-align: left;">12.16 MB</td>
-<td style="text-align: left;">39.01 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0234 s</td>
-<td style="text-align: left;">0.5328 s</td>
-<td style="text-align: left;">22.81x</td>
-<td style="text-align: left;">12.16 MB</td>
-<td style="text-align: left;">39.01 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Morphology</td>
-<td style="text-align: right;">25</td>
-<td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0038 s</td>
-<td style="text-align: left;">0.0539 s</td>
-<td style="text-align: left;">14.22x</td>
-<td style="text-align: left;">1.17 MB</td>
-<td style="text-align: left;">1.18 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Morphology</td>
-<td style="text-align: right;">25</td>
-<td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0039 s</td>
-<td style="text-align: left;">0.0541 s</td>
-<td style="text-align: left;">13.74x</td>
-<td style="text-align: left;">1.17 MB</td>
-<td style="text-align: left;">1.18 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Morphology</td>
-<td style="text-align: right;">25</td>
-<td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0038 s</td>
-<td style="text-align: left;">0.0539 s</td>
-<td style="text-align: left;">14.11x</td>
-<td style="text-align: left;">1.17 MB</td>
-<td style="text-align: left;">1.18 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Morphology</td>
-<td style="text-align: right;">25</td>
-<td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0061 s</td>
-<td style="text-align: left;">0.0547 s</td>
-<td style="text-align: left;">8.97x</td>
-<td style="text-align: left;">1.17 MB</td>
-<td style="text-align: left;">1.18 MB</td>
-</tr>
-<tr>
-<td style="text-align: left;">Morphology</td>
-<td style="text-align: right;">25</td>
-<td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0040 s</td>
-<td style="text-align: left;">0.0542 s</td>
-<td style="text-align: left;">13.39x</td>
+<td style="text-align: left;">0.0532 s</td>
+<td style="text-align: left;">18.22x</td>
 <td style="text-align: left;">1.17 MB</td>
 <td style="text-align: left;">1.18 MB</td>
 </tr>
@@ -3014,9 +3001,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0039 s</td>
-<td style="text-align: left;">0.0541 s</td>
-<td style="text-align: left;">13.85x</td>
+<td style="text-align: left;">0.0030 s</td>
+<td style="text-align: left;">0.0523 s</td>
+<td style="text-align: left;">17.64x</td>
 <td style="text-align: left;">1.17 MB</td>
 <td style="text-align: left;">1.18 MB</td>
 </tr>
@@ -3024,9 +3011,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0104 s</td>
-<td style="text-align: left;">0.9377 s</td>
-<td style="text-align: left;">90.08x</td>
+<td style="text-align: left;">0.0093 s</td>
+<td style="text-align: left;">0.9535 s</td>
+<td style="text-align: left;">102.15x</td>
 <td style="text-align: left;">5.43 MB</td>
 <td style="text-align: left;">8.68 MB</td>
 </tr>
@@ -3034,9 +3021,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0104 s</td>
-<td style="text-align: left;">0.9366 s</td>
-<td style="text-align: left;">90.08x</td>
+<td style="text-align: left;">0.0095 s</td>
+<td style="text-align: left;">0.9532 s</td>
+<td style="text-align: left;">100.82x</td>
 <td style="text-align: left;">5.43 MB</td>
 <td style="text-align: left;">8.68 MB</td>
 </tr>
@@ -3044,9 +3031,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0103 s</td>
-<td style="text-align: left;">0.9458 s</td>
-<td style="text-align: left;">91.68x</td>
+<td style="text-align: left;">0.0093 s</td>
+<td style="text-align: left;">0.9564 s</td>
+<td style="text-align: left;">102.85x</td>
 <td style="text-align: left;">5.43 MB</td>
 <td style="text-align: left;">8.68 MB</td>
 </tr>
@@ -3054,9 +3041,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0103 s</td>
-<td style="text-align: left;">0.9384 s</td>
-<td style="text-align: left;">90.90x</td>
+<td style="text-align: left;">0.0093 s</td>
+<td style="text-align: left;">0.9459 s</td>
+<td style="text-align: left;">101.83x</td>
 <td style="text-align: left;">5.43 MB</td>
 <td style="text-align: left;">8.68 MB</td>
 </tr>
@@ -3064,9 +3051,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0103 s</td>
-<td style="text-align: left;">0.9377 s</td>
-<td style="text-align: left;">90.65x</td>
+<td style="text-align: left;">0.0091 s</td>
+<td style="text-align: left;">0.9551 s</td>
+<td style="text-align: left;">105.36x</td>
 <td style="text-align: left;">5.43 MB</td>
 <td style="text-align: left;">8.68 MB</td>
 </tr>
@@ -3074,9 +3061,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0107 s</td>
-<td style="text-align: left;">0.9370 s</td>
-<td style="text-align: left;">87.68x</td>
+<td style="text-align: left;">0.0096 s</td>
+<td style="text-align: left;">0.9524 s</td>
+<td style="text-align: left;">99.54x</td>
 <td style="text-align: left;">5.43 MB</td>
 <td style="text-align: left;">8.68 MB</td>
 </tr>
@@ -3084,9 +3071,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0170 s</td>
-<td style="text-align: left;">1.7065 s</td>
-<td style="text-align: left;">100.68x</td>
+<td style="text-align: left;">0.0160 s</td>
+<td style="text-align: left;">1.7255 s</td>
+<td style="text-align: left;">108.00x</td>
 <td style="text-align: left;">8.84 MB</td>
 <td style="text-align: left;">36.60 MB</td>
 </tr>
@@ -3094,9 +3081,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0165 s</td>
-<td style="text-align: left;">1.7326 s</td>
-<td style="text-align: left;">104.81x</td>
+<td style="text-align: left;">0.0158 s</td>
+<td style="text-align: left;">1.7075 s</td>
+<td style="text-align: left;">107.89x</td>
 <td style="text-align: left;">8.84 MB</td>
 <td style="text-align: left;">36.60 MB</td>
 </tr>
@@ -3104,9 +3091,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0168 s</td>
-<td style="text-align: left;">1.7458 s</td>
-<td style="text-align: left;">103.87x</td>
+<td style="text-align: left;">0.0154 s</td>
+<td style="text-align: left;">1.7000 s</td>
+<td style="text-align: left;">110.09x</td>
 <td style="text-align: left;">8.84 MB</td>
 <td style="text-align: left;">36.60 MB</td>
 </tr>
@@ -3114,9 +3101,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0167 s</td>
-<td style="text-align: left;">1.7611 s</td>
-<td style="text-align: left;">105.37x</td>
+<td style="text-align: left;">0.0156 s</td>
+<td style="text-align: left;">1.7501 s</td>
+<td style="text-align: left;">112.12x</td>
 <td style="text-align: left;">8.84 MB</td>
 <td style="text-align: left;">36.60 MB</td>
 </tr>
@@ -3124,9 +3111,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0169 s</td>
-<td style="text-align: left;">1.7043 s</td>
-<td style="text-align: left;">101.14x</td>
+<td style="text-align: left;">0.0159 s</td>
+<td style="text-align: left;">1.7368 s</td>
+<td style="text-align: left;">109.01x</td>
 <td style="text-align: left;">8.84 MB</td>
 <td style="text-align: left;">36.60 MB</td>
 </tr>
@@ -3134,9 +3121,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0168 s</td>
-<td style="text-align: left;">1.6992 s</td>
-<td style="text-align: left;">101.40x</td>
+<td style="text-align: left;">0.0159 s</td>
+<td style="text-align: left;">1.7340 s</td>
+<td style="text-align: left;">109.07x</td>
 <td style="text-align: left;">8.84 MB</td>
 <td style="text-align: left;">36.60 MB</td>
 </tr>
@@ -3144,9 +3131,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0361 s</td>
-<td style="text-align: left;">9.0401 s</td>
-<td style="text-align: left;">250.39x</td>
+<td style="text-align: left;">0.0314 s</td>
+<td style="text-align: left;">8.3858 s</td>
+<td style="text-align: left;">267.25x</td>
 <td style="text-align: left;">20.46 MB</td>
 <td style="text-align: left;">77.49 MB</td>
 </tr>
@@ -3154,9 +3141,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0343 s</td>
-<td style="text-align: left;">8.8616 s</td>
-<td style="text-align: left;">258.03x</td>
+<td style="text-align: left;">0.0313 s</td>
+<td style="text-align: left;">8.3651 s</td>
+<td style="text-align: left;">267.04x</td>
 <td style="text-align: left;">20.46 MB</td>
 <td style="text-align: left;">77.49 MB</td>
 </tr>
@@ -3164,9 +3151,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0339 s</td>
-<td style="text-align: left;">8.7991 s</td>
-<td style="text-align: left;">259.87x</td>
+<td style="text-align: left;">0.0311 s</td>
+<td style="text-align: left;">8.3842 s</td>
+<td style="text-align: left;">269.81x</td>
 <td style="text-align: left;">20.46 MB</td>
 <td style="text-align: left;">77.49 MB</td>
 </tr>
@@ -3174,9 +3161,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0334 s</td>
-<td style="text-align: left;">8.7507 s</td>
-<td style="text-align: left;">261.82x</td>
+<td style="text-align: left;">0.0332 s</td>
+<td style="text-align: left;">8.6233 s</td>
+<td style="text-align: left;">259.37x</td>
 <td style="text-align: left;">20.46 MB</td>
 <td style="text-align: left;">77.49 MB</td>
 </tr>
@@ -3184,9 +3171,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0323 s</td>
-<td style="text-align: left;">8.6826 s</td>
-<td style="text-align: left;">269.05x</td>
+<td style="text-align: left;">0.0311 s</td>
+<td style="text-align: left;">8.4174 s</td>
+<td style="text-align: left;">270.87x</td>
 <td style="text-align: left;">20.46 MB</td>
 <td style="text-align: left;">77.49 MB</td>
 </tr>
@@ -3194,9 +3181,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0344 s</td>
-<td style="text-align: left;">9.1090 s</td>
-<td style="text-align: left;">265.13x</td>
+<td style="text-align: left;">0.0328 s</td>
+<td style="text-align: left;">8.4632 s</td>
+<td style="text-align: left;">258.17x</td>
 <td style="text-align: left;">20.46 MB</td>
 <td style="text-align: left;">77.49 MB</td>
 </tr>
@@ -3204,9 +3191,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0048 s</td>
-<td style="text-align: left;">0.0478 s</td>
-<td style="text-align: left;">9.91x</td>
+<td style="text-align: left;">0.0032 s</td>
+<td style="text-align: left;">0.0129 s</td>
+<td style="text-align: left;">4.07x</td>
 <td style="text-align: left;">2.13 MB</td>
 <td style="text-align: left;">0.69 MB</td>
 </tr>
@@ -3214,9 +3201,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0051 s</td>
-<td style="text-align: left;">0.0512 s</td>
-<td style="text-align: left;">10.04x</td>
+<td style="text-align: left;">0.0034 s</td>
+<td style="text-align: left;">0.0155 s</td>
+<td style="text-align: left;">4.57x</td>
 <td style="text-align: left;">2.07 MB</td>
 <td style="text-align: left;">0.75 MB</td>
 </tr>
@@ -3224,9 +3211,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0057 s</td>
-<td style="text-align: left;">0.0655 s</td>
-<td style="text-align: left;">11.54x</td>
+<td style="text-align: left;">0.0039 s</td>
+<td style="text-align: left;">0.0262 s</td>
+<td style="text-align: left;">6.69x</td>
 <td style="text-align: left;">4.53 MB</td>
 <td style="text-align: left;">1.95 MB</td>
 </tr>
@@ -3234,9 +3221,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0072 s</td>
-<td style="text-align: left;">0.0921 s</td>
-<td style="text-align: left;">12.80x</td>
+<td style="text-align: left;">0.0057 s</td>
+<td style="text-align: left;">0.0565 s</td>
+<td style="text-align: left;">9.87x</td>
 <td style="text-align: left;">10.10 MB</td>
 <td style="text-align: left;">3.77 MB</td>
 </tr>
@@ -3244,9 +3231,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0052 s</td>
-<td style="text-align: left;">0.0540 s</td>
-<td style="text-align: left;">10.30x</td>
+<td style="text-align: left;">0.0037 s</td>
+<td style="text-align: left;">0.0171 s</td>
+<td style="text-align: left;">4.66x</td>
 <td style="text-align: left;">2.16 MB</td>
 <td style="text-align: left;">0.91 MB</td>
 </tr>
@@ -3254,9 +3241,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0051 s</td>
-<td style="text-align: left;">0.0488 s</td>
-<td style="text-align: left;">9.63x</td>
+<td style="text-align: left;">0.0035 s</td>
+<td style="text-align: left;">0.0136 s</td>
+<td style="text-align: left;">3.88x</td>
 <td style="text-align: left;">2.13 MB</td>
 <td style="text-align: left;">0.71 MB</td>
 </tr>
@@ -3264,19 +3251,19 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0243 s</td>
-<td style="text-align: left;">0.2995 s</td>
-<td style="text-align: left;">12.31x</td>
+<td style="text-align: left;">0.0195 s</td>
+<td style="text-align: left;">0.0653 s</td>
+<td style="text-align: left;">3.35x</td>
 <td style="text-align: left;">19.85 MB</td>
-<td style="text-align: left;">6.29 MB</td>
+<td style="text-align: left;">6.28 MB</td>
 </tr>
 <tr>
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0246 s</td>
-<td style="text-align: left;">0.3060 s</td>
-<td style="text-align: left;">12.47x</td>
+<td style="text-align: left;">0.0206 s</td>
+<td style="text-align: left;">0.0685 s</td>
+<td style="text-align: left;">3.32x</td>
 <td style="text-align: left;">19.95 MB</td>
 <td style="text-align: left;">6.29 MB</td>
 </tr>
@@ -3284,9 +3271,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0191 s</td>
-<td style="text-align: left;">0.3193 s</td>
-<td style="text-align: left;">16.70x</td>
+<td style="text-align: left;">0.0164 s</td>
+<td style="text-align: left;">0.0814 s</td>
+<td style="text-align: left;">4.96x</td>
 <td style="text-align: left;">9.83 MB</td>
 <td style="text-align: left;">4.82 MB</td>
 </tr>
@@ -3294,9 +3281,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0177 s</td>
-<td style="text-align: left;">0.3543 s</td>
-<td style="text-align: left;">20.05x</td>
+<td style="text-align: left;">0.0151 s</td>
+<td style="text-align: left;">0.1093 s</td>
+<td style="text-align: left;">7.26x</td>
 <td style="text-align: left;">11.96 MB</td>
 <td style="text-align: left;">5.41 MB</td>
 </tr>
@@ -3304,9 +3291,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0254 s</td>
-<td style="text-align: left;">0.3098 s</td>
-<td style="text-align: left;">12.18x</td>
+<td style="text-align: left;">0.0204 s</td>
+<td style="text-align: left;">0.0708 s</td>
+<td style="text-align: left;">3.47x</td>
 <td style="text-align: left;">19.30 MB</td>
 <td style="text-align: left;">6.09 MB</td>
 </tr>
@@ -3314,9 +3301,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0247 s</td>
-<td style="text-align: left;">0.3007 s</td>
-<td style="text-align: left;">12.17x</td>
+<td style="text-align: left;">0.0212 s</td>
+<td style="text-align: left;">0.0670 s</td>
+<td style="text-align: left;">3.17x</td>
 <td style="text-align: left;">21.08 MB</td>
 <td style="text-align: left;">6.60 MB</td>
 </tr>
@@ -3324,9 +3311,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0784 s</td>
-<td style="text-align: left;">1.2263 s</td>
-<td style="text-align: left;">15.64x</td>
+<td style="text-align: left;">0.0702 s</td>
+<td style="text-align: left;">0.2361 s</td>
+<td style="text-align: left;">3.36x</td>
 <td style="text-align: left;">84.43 MB</td>
 <td style="text-align: left;">25.62 MB</td>
 </tr>
@@ -3334,19 +3321,19 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0734 s</td>
-<td style="text-align: left;">1.2323 s</td>
-<td style="text-align: left;">16.78x</td>
+<td style="text-align: left;">0.0701 s</td>
+<td style="text-align: left;">0.2446 s</td>
+<td style="text-align: left;">3.49x</td>
 <td style="text-align: left;">86.59 MB</td>
-<td style="text-align: left;">26.23 MB</td>
+<td style="text-align: left;">26.22 MB</td>
 </tr>
 <tr>
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0770 s</td>
-<td style="text-align: left;">1.2478 s</td>
-<td style="text-align: left;">16.20x</td>
+<td style="text-align: left;">0.0698 s</td>
+<td style="text-align: left;">0.2576 s</td>
+<td style="text-align: left;">3.69x</td>
 <td style="text-align: left;">63.72 MB</td>
 <td style="text-align: left;">20.14 MB</td>
 </tr>
@@ -3354,9 +3341,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0498 s</td>
-<td style="text-align: left;">1.2860 s</td>
-<td style="text-align: left;">25.84x</td>
+<td style="text-align: left;">0.0474 s</td>
+<td style="text-align: left;">0.2854 s</td>
+<td style="text-align: left;">6.02x</td>
 <td style="text-align: left;">13.36 MB</td>
 <td style="text-align: left;">17.08 MB</td>
 </tr>
@@ -3364,19 +3351,19 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0756 s</td>
-<td style="text-align: left;">1.2271 s</td>
-<td style="text-align: left;">16.24x</td>
+<td style="text-align: left;">0.0693 s</td>
+<td style="text-align: left;">0.2439 s</td>
+<td style="text-align: left;">3.52x</td>
 <td style="text-align: left;">89.44 MB</td>
-<td style="text-align: left;">25.80 MB</td>
+<td style="text-align: left;">25.79 MB</td>
 </tr>
 <tr>
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0721 s</td>
-<td style="text-align: left;">1.2117 s</td>
-<td style="text-align: left;">16.80x</td>
+<td style="text-align: left;">0.0657 s</td>
+<td style="text-align: left;">0.2396 s</td>
+<td style="text-align: left;">3.65x</td>
 <td style="text-align: left;">88.88 MB</td>
 <td style="text-align: left;">25.65 MB</td>
 </tr>
@@ -3384,9 +3371,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.1986 s</td>
-<td style="text-align: left;">2.5783 s</td>
-<td style="text-align: left;">12.98x</td>
+<td style="text-align: left;">0.1478 s</td>
+<td style="text-align: left;">0.4804 s</td>
+<td style="text-align: left;">3.25x</td>
 <td style="text-align: left;">213.37 MB</td>
 <td style="text-align: left;">64.12 MB</td>
 </tr>
@@ -3394,9 +3381,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.2078 s</td>
-<td style="text-align: left;">2.5764 s</td>
-<td style="text-align: left;">12.40x</td>
+<td style="text-align: left;">0.1611 s</td>
+<td style="text-align: left;">0.5027 s</td>
+<td style="text-align: left;">3.12x</td>
 <td style="text-align: left;">224.11 MB</td>
 <td style="text-align: left;">66.17 MB</td>
 </tr>
@@ -3404,19 +3391,19 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.2104 s</td>
-<td style="text-align: left;">2.5853 s</td>
-<td style="text-align: left;">12.29x</td>
+<td style="text-align: left;">0.1599 s</td>
+<td style="text-align: left;">0.5183 s</td>
+<td style="text-align: left;">3.24x</td>
 <td style="text-align: left;">204.71 MB</td>
-<td style="text-align: left;">60.72 MB</td>
+<td style="text-align: left;">60.71 MB</td>
 </tr>
 <tr>
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.1030 s</td>
-<td style="text-align: left;">2.5900 s</td>
-<td style="text-align: left;">25.15x</td>
+<td style="text-align: left;">0.1016 s</td>
+<td style="text-align: left;">0.5579 s</td>
+<td style="text-align: left;">5.49x</td>
 <td style="text-align: left;">22.17 MB</td>
 <td style="text-align: left;">37.15 MB</td>
 </tr>
@@ -3424,9 +3411,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.1980 s</td>
-<td style="text-align: left;">2.6275 s</td>
-<td style="text-align: left;">13.27x</td>
+<td style="text-align: left;">0.1861 s</td>
+<td style="text-align: left;">0.5048 s</td>
+<td style="text-align: left;">2.71x</td>
 <td style="text-align: left;">230.74 MB</td>
 <td style="text-align: left;">68.10 MB</td>
 </tr>
@@ -3434,9 +3421,9 @@ run times than shown here, especially when extracting features across many confi
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.2021 s</td>
-<td style="text-align: left;">2.6235 s</td>
-<td style="text-align: left;">12.98x</td>
+<td style="text-align: left;">0.1915 s</td>
+<td style="text-align: left;">0.4984 s</td>
+<td style="text-align: left;">2.60x</td>
 <td style="text-align: left;">229.77 MB</td>
 <td style="text-align: left;">68.48 MB</td>
 </tr>

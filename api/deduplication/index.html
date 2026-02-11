@@ -562,6 +562,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../user_guide/quick_start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../user_guide/data_loading/" class="md-nav__link">
         
   
@@ -570,6 +598,34 @@
     
   
     Data Loading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user_guide/pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipeline & Preprocessing
   
 
     
@@ -618,14 +674,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../user_guide/feature_calculations/" class="md-nav__link">
+      <a href="../../user_guide/configurations/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Feature Calculations
+    Configuration & Reproducibility
   
 
     
@@ -646,42 +702,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../user_guide/pipeline/" class="md-nav__link">
+      <a href="../../user_guide/cookbook/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Pipeline Usage
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../user_guide/predefined_configurations/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Predefined Configurations
+    Cookbook
   
 
     
@@ -710,34 +738,6 @@
     
   
     Utilities
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../user_guide/case_examples/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Case Examples
   
 
     
@@ -2246,7 +2246,7 @@
 <a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># Check performance statistics</span>
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="nb">print</span><span class="p">(</span><span class="n">pipeline</span><span class="o">.</span><span class="n">deduplication_stats</span><span class="p">)</span>
 </code></pre></div>
-<p>For complete usage examples, see <a href="../../user_guide/case_examples/#case-7-multi-configuration-batch-with-deduplication">Case 7: Multi-configuration batch with deduplication</a>.</p>
+<p>For complete usage examples, see <a href="../../user_guide/cookbook/#case-7-multi-configuration-batch-with-deduplication">Case 7: Multi-configuration batch with deduplication</a>.</p>
 <hr />
 <h2 id="how-results-are-handled">How Results Are Handled</h2>
 <p>When deduplication reuses features from a previous configuration, the features are <strong>copied</strong> to the reusing configuration's results—they are never empty or missing.</p>
@@ -2291,7 +2291,7 @@
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># Concatenate into single DataFrame - NO missing values!</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>  <span class="c1"># (3, N) - all rows complete</span>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>  <span class="c1"># 0 - no NaN values</span>
 </code></pre></div>
@@ -3893,7 +3893,7 @@ across all filter configurations.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Access pipeline deduplication settings</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">(</span><span class="n">deduplicate</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">pipeline</span><span class="o">.</span><span class="n">deduplicate</span><span class="p">)</span>              <span class="c1"># True</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">pipeline</span><span class="o">.</span><span class="n">deduplication_enabled</span><span class="p">)</span>    <span class="c1"># True</span>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">pipeline</span><span class="o">.</span><span class="n">deduplication_stats</span><span class="p">)</span>      <span class="c1"># Statistics after run()</span>
 </code></pre></div>
 
