@@ -2,7 +2,7 @@
 Pictologics: IBSI-compliant radiomic feature extraction from medical images.
 """
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 from .deduplication import (
     CURRENT_RULES_VERSION,
@@ -20,7 +20,7 @@ from .loader import (
     load_image,
 )
 from .loaders import load_seg
-from .pipeline import RadiomicsPipeline
+from .pipeline import RadiomicsPipeline, SourceMode
 from .results import format_results, save_results
 from .warmup import warmup_jit
 
@@ -36,6 +36,7 @@ __all__ = [
     "create_full_mask",
     "load_and_merge_images",
     "RadiomicsPipeline",
+    "SourceMode",
     "format_results",
     "save_results",
     # Deduplication

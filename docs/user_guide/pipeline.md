@@ -1,61 +1,58 @@
-# Radiomics Pipeline
+# Pipeline & Preprocessing
 
-The `RadiomicsPipeline` is the core engine of Pictologics for executing reproducible, standardized radiomic feature extraction workflows. It manages the entire lifecycle of the data, from loading and preprocessing to feature extraction and logging.
+The `RadiomicsPipeline` is the core engine of Pictologics for executing reproducible, standardized radiomic feature extraction workflows. It manages the entire lifecycle from preprocessing to feature extraction and logging.
 
-## Why use the Pipeline?
+## Why Use the Pipeline?
 
-1.  **Reproducibility**: By defining a configuration (a sequence of steps), you ensure that the exact same preprocessing is applied to every image.
-2.  **State Management**: The pipeline automatically handles the state of the image and masks (morphological and intensity) as they pass through steps like resampling and resegmentation.
-3.  **Standardisation**: It comes with built-in configurations that adhere to IBSI standards.
-4.  **Batch Processing**: You can run multiple configurations (e.g., different binning strategies) on the same image in a single pass.
-5.  **Flexibility**: The pipeline executes steps in a **linear fashion**, allowing you to arrange steps in any order, repeat steps if needed, and implement arbitrarily complex workflows.
+1.  **Reproducibility**: Define a configuration once and apply it consistently to every image.
+2.  **State Management**: The pipeline tracks the image and masks (morphological and intensity) through every step.
+3.  **Standardisation**: Built-in configurations follow IBSI standards.
+4.  **Batch Processing**: Run multiple configurations (e.g., different binning strategies) on the same image in a single pass.
+5.  **Flexibility**: Steps execute **linearly**, so you can arrange them in any order or repeat steps.
 
----
-
-## Linear Step Execution
-
-The pipeline module executes steps **linearly in order**. This means:
-
-- Steps are applied one after another in the exact sequence you define.
-- You can **repeat steps** if needed (e.g., apply `discretise` multiple times with different settings).
-- You can **arrange steps in any order** appropriate for your workflow.
-- This linear design allows for implementing **complex, multi-stage preprocessing** while maintaining full control.
+## Getting Started
 
 ```python
-# Example: Complex workflow with repeated steps
-complex_config = [
-    {"step": "resample", "params": {"new_spacing": (2.0, 2.0, 2.0)}},
-    {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    {"step": "filter_outliers", "params": {"sigma": 3.0}},
-    {"step": "round_intensities", "params": {}},  # Round after all preprocessing
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["texture", "histogram"]}},
-]
+from pictologics import RadiomicsPipeline, format_results, save_results
+
+# 1. Initialize the pipeline
+pipeline = RadiomicsPipeline()
+
+# 2. Run a predefined configuration
+results = pipeline.run(
+    image="path/to/image.nii.gz",
+    mask="path/to/mask.nii.gz",
+    subject_id="Subject_001",
+    config_names=["standard_fbn_32"],
+)
+
+# 3. Format and save results
+row = format_results(results, fmt="wide", meta={"subject_id": "Subject_001"})
+save_results([row], "results.csv")
 ```
 
----
+### Masks Are Optional
 
-## Masks are optional
+`RadiomicsPipeline.run(...)` accepts an optional `mask` argument:
 
-`RadiomicsPipeline.run(...)` accepts an optional `mask` argument.
+- Pass a mask path or `Image` object → used as the ROI (standard workflow).
+- Omit `mask` (or pass `mask=None` / `mask=""`) → Pictologics generates a full (all-ones) ROI mask, treating the **entire image** as the initial ROI.
 
-- If you pass a mask path / mask `Image`, it is used as the ROI (standard radiomics workflow).
-- If you omit `mask` (or pass `mask=None` / `mask=""`), Pictologics generates a full (all-ones) ROI mask internally,
-  meaning the **entire image** is treated as the initial ROI.
+!!! warning "Empty ROI is an Error"
+    If preprocessing removes all ROI voxels (e.g., too strict `resegment` thresholds), the pipeline raises a clear `EmptyROIMaskError` rather than returning empty/partial feature sets.
 
-!!! warning
-    **Empty ROI is an error**
-    If preprocessing removes all ROI voxels (e.g., too strict `resegment` thresholds), the pipeline raises a clear
-    error rather than returning empty/partial feature sets.
+!!! note "Morphology with Whole-Image ROI"
+    With a maskless run, morphology features describe the ROI mask after mask-refining steps
+    (e.g., `resegment`, `keep_largest_component`). This is valid computationally, but may not be
+    scientifically meaningful for all studies.
 
 ## Predefined Configurations
 
-Pictologics includes **6 standard configurations** designed for common radiomics workflows. All standard configurations share:
+Pictologics includes **6 standard configurations** designed for common radiomics workflows. All share:
 
 - **Resampling**: 0.5mm × 0.5mm × 0.5mm isotropic spacing
 - **Feature Families**: intensity, morphology, texture, histogram, and IVH
-- **Performance-optimized**: Spatial/local intensity disabled by default
+- **Performance**: Spatial/local intensity disabled by default
 
 | Configuration | Method | Parameters |
 | :--- | :--- | :--- |
@@ -67,306 +64,273 @@ Pictologics includes **6 standard configurations** designed for common radiomics
 | `standard_fbs_32` | Fixed Bin Size | `bin_width=32.0` |
 
 ```python
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-
 # Run a single configuration
-results = pipeline.run("standard_fbn_32", image, mask)
+results = pipeline.run(image, mask, config_names=["standard_fbn_32"])
 
 # Run all 6 standard configurations
-all_results = pipeline.run_all_standard_configs(image, mask)
+all_results = pipeline.run(image, mask, config_names=["all_standard"])
 ```
 
-!!! tip "Learn More"
-    For detailed configuration specifications, FBN vs FBS guidance, export/import capabilities, and best practices, see the **[Predefined Configurations](predefined_configurations.md)** guide.
+!!! tip "Configuration Management"
+    For detailed documentation on FBN vs FBS guidance, export/import, YAML/JSON formats, schema versioning, and sharing configurations, see the **[Configuration & Reproducibility](configurations.md)** guide.
 
----
+## Linear Step Execution
 
-## Deduplication (Performance Optimization)
-
-When running multiple configurations that share preprocessing steps but differ only in discretization (e.g., running all 6 standard configurations), the pipeline can **automatically avoid redundant computation** by enabling deduplication.
-
-### How It Works
-
-!!! info "Enabled by Default"
-    Deduplication is **enabled by default** (`deduplicate=True`). You don't need to explicitly set it—just create a pipeline and run multiple configurations to benefit from automatic optimization.
-
-The deduplication system analyzes your configurations and identifies which feature families can be computed once and reused:
-
-1. **Preprocessing Signature**: Each configuration's preprocessing steps (resample, resegment, filter_outliers, etc.) are hashed into a unique signature.
-2. **Feature Family Dependencies**: The system knows which preprocessing steps affect which feature families:
-    - **Morphology**: Depends only on mask geometry operations (resample, binarize_mask, keep_largest_component). **Not affected by intensity operations or filters.**
-    - **Intensity** (including spatial/local): Depends on intensity preprocessing (resample, resegment, filter_outliers, filter). Different filters produce different intensity features.
-    - **Texture/Histogram/IVH**: Depends on all of the above **plus** discretization
-3. **Execution Plan**: When configs share preprocessing but differ only in discretization, families like morphology and intensity are computed once and reused.
-
-### Behavior: deduplicate=True vs False
-
-| Setting | Behavior | Results |
-| :--- | :--- | :--- |
-| `deduplicate=True` (default) | Features computed once per unique preprocessing signature, then **copied** to matching configs | All configs receive complete, identical feature values for reused families |
-| `deduplicate=False` | Features computed independently for every config | Same results, but slower execution |
-
-!!! note "Results Are Always Complete"
-    When deduplication copies features, they are **copied into the results dictionary**—never empty or missing. Every configuration returns a complete feature set, whether features were freshly computed or reused from cache.
-
-!!! tip "Copy Behavior"
-    Reused features are **deep copied** to each configuration's result dictionary. Modifying results from one configuration will NOT affect results from another.
-
-### Usage
+Steps are applied **one after another** in the exact sequence you define. You can **repeat steps**, **arrange steps in any order**, and implement **complex multi-stage preprocessing**:
 
 ```python
-from pictologics import RadiomicsPipeline
-
-# Deduplication is enabled by default - no need to set it!
-pipeline = RadiomicsPipeline()  # deduplicate=True by default
-
-# Run all 6 standard configurations
-results = pipeline.run_all_standard_configs(image, mask)
-
-# Check deduplication statistics
-print(pipeline.deduplication_stats)
-# Example output:
-# {
-#     'reused_families': 24,  # Families reused from cache
-#     'computed_families': 12, # Families freshly computed
-#     'cache_hit_rate': 0.67   # 67% of families were reused
-# }
-
-# Verify: all configs have complete results (no missing features)
-for config_name, features in results.items():
-    print(f"{config_name}: {len(features)} features")
-```
-
-### Configuration Parameters
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `deduplicate` | `bool` | `True` | Enable/disable deduplication optimization |
-| `deduplication_rules` | `str` or `DeduplicationRules` | `"1.0.0"` | Rules version for reproducibility |
-
-### When to Use Deduplication
-
-!!! success "Recommended For"
-    - Running **multiple discretization strategies** (FBN 8/16/32 + FBS 8/16/32) on the same preprocessed image
-    - **Batch processing** where many configs share preprocessing steps
-    - **Sensitivity studies** varying only discretization parameters
-
-!!! warning "Not Recommended For"
-    - Single configuration runs (no benefit)
-    - Configurations with different preprocessing steps (nothing to deduplicate)
-    - Memory-constrained environments (cached results consume memory)
-
-### Example: 6 Configs with Shared Preprocessing
-
-```python
-from pictologics import RadiomicsPipeline
-
-# Define shared preprocessing
-base_steps = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
-]
-
-extract_all = {
-    "step": "extract_features",
-    "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"]},
-}
-
-# Create pipeline (deduplication enabled by default)
-pipeline = RadiomicsPipeline()  # No need to set deduplicate=True
-
-# Add 6 configurations (only discretization differs)
-for n_bins in (8, 16, 32):
-    pipeline.add_config(
-        f"fbn_{n_bins}",
-        base_steps + [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
-            extract_all,
-        ],
-    )
-
-for bin_width in (8.0, 16.0, 32.0):
-    pipeline.add_config(
-        f"fbs_{int(bin_width)}",
-        base_steps + [
-            {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
-            extract_all,
-        ],
-    )
-
-# Run all configs - morphology/intensity computed once, texture 6 times
-results = pipeline.run(
-    image="path/to/image.nii.gz",
-    mask="path/to/mask.nii.gz",
-    config_names=["fbn_8", "fbn_16", "fbn_32", "fbs_8", "fbs_16", "fbs_32"],
-)
-
-# Inspect cache performance
-stats = pipeline.deduplication_stats
-print(f"Cache hit rate: {stats['cache_hit_rate']:.1%}")
-
-# Verify all configs have complete, identical morphology values
-ref_vol = results["fbn_8"]["volume_mesh_ml_HTUR"]
-for config in ["fbn_16", "fbn_32", "fbs_8", "fbs_16", "fbs_32"]:
-    assert results[config]["volume_mesh_ml_HTUR"] == ref_vol
-print("✓ Morphology features identical across all configurations")
-```
-
-In this example, `morphology` and `intensity` features are computed only once (for the first config) and reused for all 6 configurations, while `texture` and `histogram` are computed 6 times (once per discretization). This can provide significant speedups for large datasets.
-
-!!! tip "API Reference"
-    For detailed documentation of the deduplication classes (`ConfigurationAnalyzer`, `DeduplicationPlan`, `PreprocessingSignature`, `DeduplicationRules`), see the **[Deduplication API](../api/deduplication.md)** reference.
-
----
-
-## Custom Configurations
-
-For advanced users, the pipeline allows you to define custom sequences of steps. A configuration is a list of dictionaries, where each dictionary represents a step.
-
-### Structure of a Configuration
-
-```python
-config = [
-    {
-        "step": "step_name",
-        "params": { "param1": value1, "param2": value2 }
-    },
-    # ... more steps
+# Example: Complex workflow with repeated steps
+complex_config = [
+    {"step": "resample", "params": {"new_spacing": (2.0, 2.0, 2.0)}},
+    {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    {"step": "filter_outliers", "params": {"sigma": 3.0}},
+    {"step": "round_intensities", "params": {}},
+    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+    {"step": "extract_features", "params": {"families": ["texture", "histogram"]}},
 ]
 ```
 
-### Practical tips
+### Intelligent Image Routing
 
-*   Keep preprocessing steps explicit (resampling, resegmentation, discretisation) so your results are reproducible.
-*   For CT in Hounsfield Units, FBS (`bin_width`) is often more interpretable; for MRI/PET, FBN (`n_bins`) can be a
-    reasonable choice depending on your intensity normalization.
-*   If you only need a subset of feature families, set `families` to avoid unnecessary work.
+After discretisation, the pipeline maintains both the **original (raw)** image and the **discretised** image, ensuring each feature type gets the appropriate input automatically:
 
-### Available Steps
+| Feature Family | Image Used | Why |
+|:---------------|:-----------|:----|
+| **Intensity** | Raw image | Statistics require original continuous values |
+| **Morphology** | Raw image | Volume/surface calculations use original geometry |
+| **Histogram** | Discretised | Bin-based statistics require integer bins |
+| **Texture** (GLCM, GLRLM, etc.) | Discretised | Co-occurrence matrices require discrete grey levels |
+| **IVH** | Configurable | Can use raw (continuous) or discretised values |
 
-#### 1. `resample`
+## Available Preprocessing Steps
+
+### 1. `resample`
+
 Resamples the image and mask to a new voxel spacing.
 
-*   `new_spacing`: Tuple of (x, y, z) spacing in mm (e.g., `(1.0, 1.0, 1.0)`).
-    *   Alias: `spacing` (older configs/tests).
-*   `interpolation`: Interpolation for the image (`"linear"`, `"cubic"`, `"nearest"`). Default: `"linear"`.
-*   `mask_interpolation`: Interpolation for the mask (`"nearest"`, `"linear"`). Default: `"nearest"`.
-*   `mask_threshold`: When using non-nearest mask interpolation, voxels above this threshold become ROI. Default: `0.5`.
-*   `round_intensities`: Whether to round image intensities to nearest integer after resampling. Default: `False`.
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `new_spacing` | `tuple` | *(required)* | Target spacing (x, y, z) in mm |
+| `interpolation` | `str` | `"linear"` | Image interpolation: `"linear"`, `"cubic"`, `"nearest"` |
+| `mask_interpolation` | `str` | `"nearest"` | Mask interpolation: `"nearest"`, `"linear"` |
+| `mask_threshold` | `float` | `0.5` | Threshold for non-nearest mask interpolation |
+| `round_intensities` | `bool` | `False` | Round intensities to nearest integer after resampling |
 
-#### 2. `resegment`
-Refines the mask based on intensity thresholds (e.g., excluding bone from a soft tissue mask).
-This is also the **IBSI-recommended approach** for filtering out **sentinel/NA values** (e.g., -1024, -2048 in DICOM)
-that represent missing or invalid data.
+### 2. `resegment`
 
-*   `range_min`: Minimum intensity value.
-*   `range_max`: Maximum intensity value.
+Refines the ROI mask based on intensity thresholds, excluding voxels outside the specified range from feature extraction. This is essential for removing sentinel/NA values (e.g., -1024, -2048) from the ROI. Note that `resegment` only affects the **ROI** — if your pipeline also includes resampling or filtering, pair it with `source_mode="auto"` to protect those stages from sentinel contamination (see [Data Loading → Sentinel Handling](data_loading.md#handling-sentinel-na-values)).
 
-#### 3. `filter_outliers`
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `range_min` | `float` | `None` | Minimum intensity value |
+| `range_max` | `float` | `None` | Maximum intensity value |
+
+### 3. `filter_outliers`
+
 Removes outliers from the intensity mask based on standard deviations from the mean.
 
-*   `sigma`: Number of standard deviations (e.g., `3.0`).
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `sigma` | `float` | `3.0` | Number of standard deviations |
 
-#### 4. `keep_largest_component`
-Restricts the mask to the largest connected component. Useful for removing noise or disconnected artifacts.
+### 4. `keep_largest_component`
 
-*   `apply_to`: Which mask(s) to process. Options:
-    *   `"both"` (default): Apply to both morphological and intensity masks.
-    *   `"morph"`: Apply only to the morphological mask.
-    *   `"intensity"`: Apply only to the intensity mask.
+Restricts the mask to the largest connected component.
 
-#### 5. `round_intensities`
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
+
+### 5. `round_intensities`
+
 Rounds image intensities to the nearest integer. Useful before discretisation if values are close to integers.
 
-*   *No parameters.*
+*No parameters.*
 
-#### 6. `discretise`
-Discretises the image intensities into bins. This is **crucial** for texture analysis.
+### 6. `binarize_mask`
 
-*   `method`: `"FBN"` (Fixed Bin Number) or `"FBS"` (Fixed Bin Size).
-*   `n_bins`: Number of bins (for FBN).
-*   `bin_width`: Width of each bin (for FBS).
+Creates a binary mask from a multi-label mask.
 
-#### 7. `filter`
-Applies an image filter (convolutional filter) to the image. Supports IBSI 2 standard filters.
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `threshold` | `float` | `0.5` | Threshold value for binarization |
+| `mask_values` | `int`, `list`, or `tuple` | `None` | Specific label(s) to select. Tuple `(min, max)` selects a range |
+| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
 
-*   `type`: Filter type (required). Options:
-    *   `"mean"`: Mean filter
-    *   `"log"`: Laplacian of Gaussian
-    *   `"laws"`: Laws' texture energy kernels
-    *   `"gabor"`: Gabor filter
-    *   `"wavelet"`: Separable wavelets (Haar, Daubechies, Coiflet)
-    *   `"simoncelli"`: Non-separable Simoncelli wavelet
-    *   `"riesz"`: Riesz transform
-    
-    !!! tip "See Filter Details"
-        For detailed explanations and visual examples of each filter, see the [Image Filtering](image_filtering.md) guide.
+### 7. `discretise`
 
-*   `boundary`: Boundary condition. Options: `"mirror"` (default), `"nearest"`, `"zero"`, `"periodic"`.
-*   Additional filter-specific parameters (see table below).
+Discretises image intensities into bins. **Required** before texture feature extraction.
 
-**Filter Parameter Reference:**
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `method` | `str` | *(required)* | `"FBN"` (Fixed Bin Number) or `"FBS"` (Fixed Bin Size) |
+| `n_bins` | `int` | `None` | Number of bins (for FBN) |
+| `bin_width` | `float` | `None` | Width of each bin (for FBS) |
+
+### 8. `filter`
+
+Applies an IBSI 2 image filter. See the **[Image Filtering](image_filtering.md)** guide for detailed documentation.
+
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `type` | `str` | *(required)* | `"mean"`, `"log"`, `"laws"`, `"gabor"`, `"wavelet"`, `"simoncelli"`, `"riesz"` |
+| `boundary` | `str` | `"mirror"` | Boundary condition |
+
+**Filter-specific parameters:**
 
 | Filter | Required Params | Optional Params |
 |:-------|:----------------|:----------------|
 | `mean` | `support` | `boundary` |
-| `log` | `sigma_mm` | `truncate`, `boundary`, `spacing_mm` |
+| `log` | `sigma_mm` | `truncate`, `boundary` |
 | `laws` | `kernel` | `rotation_invariant`, `pooling`, `compute_energy`, `energy_distance`, `boundary` |
-| `gabor` | `sigma_mm`, `lambda_mm`, `gamma` | `rotation_invariant`, `delta_theta`, `pooling`, `average_over_planes`, `spacing_mm`, `boundary` |
+| `gabor` | `sigma_mm`, `lambda_mm`, `gamma` | `rotation_invariant`, `delta_theta`, `pooling`, `boundary` |
 | `wavelet` | `wavelet`, `level`, `decomposition` | `rotation_invariant`, `pooling`, `boundary` |
-| `simoncelli` | `level` | *(no boundary)* |
-| `riesz` | `order` | `variant` (`"base"`, `"log"`, `"simoncelli"`), `sigma_mm`, `level` |
+| `simoncelli` | `level` | — |
+| `riesz` | `order` | `variant`, `sigma_mm`, `level` |
 
-!!! note "Automatic spacing injection"
-    For filters that require physical spacing (`log`, `gabor`), the pipeline automatically uses the image's voxel spacing if `spacing_mm` is not explicitly provided.
+!!! note "Automatic Spacing Injection"
+    For filters requiring physical spacing (`log`, `gabor`), the pipeline uses the image's voxel spacing automatically.
 
-!!! tip "IBSI 2 Compliance"
-    For IBSI 2 Phase 2 compliance, use `boundary="mirror"` and apply filters after resampling and intensity rounding.
+### 9. `extract_features`
 
-#### 8. `extract_features`
-Calculates the radiomic features based on the current state of the image and mask.
+Calculates radiomic features from the current state.
 
-!!! note "Feature Calculation Inputs"
-     The pipeline automatically selects the appropriate image state for each feature family:
-    
-    *   **Intensity, Morphology, Spatial Intensity, Local Intensity**: Calculated on the **Raw Image** (non-discretised, floating-point values).
-    *   **Texture, Histogram**: Calculated on the **Discretised Image** (integer bins).
-    *   **IVH**: Configurable. Defaults to **Discretised Image**, but can use **Raw Image** (`ivh_use_continuous=True`) or a **Temporary Discretisation** (`ivh_discretisation={...}`).
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `families` | `list[str]` | *(required)* | Feature families to extract (see table below) |
+| `include_spatial_intensity` | `bool` | `False` | Include Moran's I / Geary's C |
+| `include_local_intensity` | `bool` | `False` | Include local intensity peaks |
+| `ivh_params` | `dict` | `None` | Parameters for IVH: `bin_width`, `min_val`, `max_val`, etc. |
+| `ivh_discretisation` | `dict` | `None` | Temporary discretisation for IVH only |
+| `ivh_use_continuous` | `bool` | `False` | Use raw values for IVH |
+| `texture_matrix_params` | `dict` | `None` | E.g., `{"ngldm_alpha": 1}` |
 
-*   `families`: List of feature families to extract. Options:
-    *   `"intensity"`: First-order statistics (Mean, Skewness, etc.).
-        *   By default, spatial/local intensity features are **not** included.
-        *   Enable via `include_spatial_intensity=True` and/or `include_local_intensity=True`
-            in the step `params`.
-    *   `"spatial_intensity"`: Compute only spatial intensity (Moran's I / Geary's C).
-    *   `"local_intensity"`: Compute only local/global intensity peak features.
-    *   `"morphology"`: Shape and size features (Volume, Sphericity, etc.).
-    *   `"texture"`: GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM.
-    *   `"histogram"`: Intensity histogram features.
-    *   `"ivh"`: Intensity-Volume Histogram features.
+**Available feature families:**
 
-Additional optional parameters (advanced usage):
+| Family | Description |
+|:-------|:------------|
+| `"intensity"` | First-order statistics (Mean, Skewness, etc.) |
+| `"spatial_intensity"` | Moran's I / Geary's C only |
+| `"local_intensity"` | Local/global intensity peak features only |
+| `"morphology"` | Shape and size features (Volume, Sphericity, etc.) |
+| `"texture"` | GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM |
+| `"histogram"` | Intensity histogram features |
+| `"ivh"` | Intensity-Volume Histogram features |
 
-*   `include_spatial_intensity` / `include_local_intensity`: Booleans controlling whether the expensive
-    spatial/local intensity extras are included when `"intensity"` is requested.
-*   `ivh_params`: Dict forwarded to `calculate_ivh_features(...)`. Supported keys include:
-    `bin_width`, `min_val`, `max_val`, `target_range_min`, `target_range_max`.
-*   `ivh_discretisation`: Dict specifying a **temporary discretisation** for IVH only. This allows
-    using different binning for IVH vs texture features. Example: `{"method": "FBS", "bin_width": 2.5, "min_val": -1000}`.
-*   `ivh_use_continuous`: Boolean. If `True`, uses raw (non-discretised) intensity values for IVH calculation.
-    Useful for "continuous IVH" as specified in some IBSI configurations.
-*   `texture_matrix_params`: Dict forwarded to `calculate_all_texture_matrices(...)`.
-    Currently useful key: `ngldm_alpha` (IBSI default is `0`).
+## Working with Results
 
----
+The `format_results()` function converts pipeline output into different formats for analysis or export.
+
+### Format Options
+
+=== "Wide Format"
+
+    One row per subject with all features as columns. Column names use the pattern `{config}__{feature}`.
+
+    ```python
+    row = format_results(results, fmt="wide", meta={"subject_id": "case1"})
+    # Returns: {"subject_id": "case1", "standard_fbn_32__mean_intensity_Q4LE": 123.4, ...}
+    ```
+
+=== "Long Format"
+
+    Tidy data with one row per feature. Config name is automatically included.
+
+    ```python
+    df = format_results(results, fmt="long", meta={"subject_id": "case1"}, output_type="pandas")
+    # Returns DataFrame: [subject_id, config, feature_name, value]
+    ```
+
+### Output Types
+
+| Type | Returns |
+|:-----|:--------|
+| `"dict"` (default) | Python dictionary (wide) or list of dicts (long) |
+| `"pandas"` | `pandas.DataFrame` |
+| `"json"` | JSON string |
+
+### Batch Processing Pattern
+
+```python
+all_rows = []
+for file in image_files:
+    res = pipeline.run(image=file, ...)
+    all_rows.append(format_results(res, fmt="wide", meta={"filename": file.name}))
+
+# Save everything at once
+save_results(all_rows, "full_study_results.csv")
+```
+
+## Deduplication (Performance Optimization)
+
+When running multiple configurations that share preprocessing steps, the pipeline **automatically avoids redundant computation**.
+
+!!! info "Enabled by Default"
+    Deduplication is enabled by default (`deduplicate=True`). Just run multiple configs to benefit.
+
+### How It Works
+
+The system analyzes your configurations and identifies reusable features:
+
+| Feature Family | Depends On | Independent Of |
+| :--- | :--- | :--- |
+| **Morphology** | Mask geometry (resample, binarize_mask, keep_largest_component) | Intensity values, filters, discretization |
+| **Intensity** | Intensity preprocessing (resample, resegment, filter_outliers, filter) | Discretization |
+| **Texture / Histogram** | All of the above **plus** discretization | — |
+
+When configs share preprocessing but differ only in discretization:
+
+- **Morphology** and **intensity** are computed **once** and reused
+- **Texture** and **histogram** are computed per configuration
+
+### Checking Statistics
+
+```python
+stats = pipeline.deduplication_stats
+print(f"Cache hit rate: {stats['cache_hit_rate']:.1%}")
+print(f"Reused: {stats['reused_families']} families")
+print(f"Computed: {stats['computed_families']} families")
+```
+
+!!! note "Results Are Always Complete"
+    When deduplication reuses features, they are **deep copied** into each configuration's results. Every config returns a complete feature set — no missing values.
+
+### Configuration
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `deduplicate` | `bool` | `True` | Enable/disable deduplication |
+| `deduplication_rules` | `str` or `DeduplicationRules` | `"1.0.0"` | Rules version for reproducibility |
+
+!!! tip "API Reference"
+    For detailed documentation of `ConfigurationAnalyzer`, `DeduplicationPlan`, `PreprocessingSignature`, and `DeduplicationRules`, see the **[Deduplication API](../api/deduplication.md)** reference.
+
+## Logging
+
+The pipeline maintains a detailed log of every step executed, including parameters and errors.
+
+```python
+# Save log after running
+pipeline.save_log("pipeline_execution_log.json")
+
+# Clear log between runs
+pipeline.clear_log()
+```
+
+The log file contains:
+
+- Timestamp and subject ID
+- Configuration name
+- Source mode and sentinel detection status
+- List of executed steps with parameters
+- Status of each step
 
 ## Examples
 
-### Example 1: Standard suite (fast baseline)
+### Standard Suite (Fast Baseline)
 
-Runs all 6 built-in configurations. Spatial/local intensity extras are disabled by default.
+Run all 6 built-in configurations:
 
 ```python
 from pictologics import RadiomicsPipeline
@@ -377,42 +341,11 @@ results = pipeline.run(
     mask="path/to/mask.nii.gz",
     config_names=["all_standard"],
 )
-
-# Access one configuration
-print(results["standard_fbn_32"].head())
-
 ```
 
-### Example 1b: Maskless run (whole-image ROI)
-
-If you do not have a segmentation mask, you can omit the `mask` argument entirely.
+### Enable Spatial/Local Intensity Extras
 
 ```python
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-results = pipeline.run(
-    image="path/to/image.nii.gz",
-    # mask omitted -> whole-image ROI
-    config_names=["standard_fbn_32"],
-)
-
-print(results["standard_fbn_32"].head())
-```
-
-!!! note
-    **Morphology meaning**
-    With a maskless run, morphology features describe the ROI mask after any mask-refining steps
-    (e.g., `resegment`, `keep_largest_component`). Starting from a whole-image ROI can be valid,
-    but may not be scientifically meaningful for many radiomics studies.
-
-### Example 2: Enable spatial/local intensity extras (custom config)
-
-Use this when you explicitly need Moran’s I / Geary’s C and local intensity peak features.
-
-```python
-from pictologics import RadiomicsPipeline
-
 cfg = [
     {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5)}},
     {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
@@ -420,44 +353,19 @@ cfg = [
         "step": "extract_features",
         "params": {
             "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-            "include_spatial_intensity": True,
-            "include_local_intensity": True,
+            "include_spatial_intensity": True,  # Moran's I / Geary's C
+            "include_local_intensity": True,    # Local intensity peaks
         },
     },
 ]
 
-pipeline = RadiomicsPipeline().add_config("with_intensity_extras", cfg)
-out = pipeline.run("path/to/image.nii.gz", "path/to/mask.nii.gz", config_names=["with_intensity_extras"])
-print(out["with_intensity_extras"].filter(like="_"))
+pipeline = RadiomicsPipeline().add_config("with_extras", cfg)
+results = pipeline.run("image.nii.gz", "mask.nii.gz", config_names=["with_extras"])
 ```
 
-### Example 3: Only compute the expensive parts (explicit families)
-
-If you only want spatial/local intensity and not the entire first-order intensity set:
+### IVH with Physical-Unit Mapping
 
 ```python
-from pictologics import RadiomicsPipeline
-
-cfg = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {
-        "step": "extract_features",
-        "params": {"families": ["spatial_intensity", "local_intensity"]},
-    },
-]
-
-pipeline = RadiomicsPipeline().add_config("intensity_extras_only", cfg)
-out = pipeline.run("path/to/image.nii.gz", "path/to/mask.nii.gz", config_names=["intensity_extras_only"])
-print(out["intensity_extras_only"].head())
-```
-
-### Example 4: IVH with physical-unit mapping (advanced)
-
-When you discretise with FBS, you can map IVH to physical units by passing `bin_width` and `min_val`.
-
-```python
-from pictologics import RadiomicsPipeline
-
 cfg = [
     {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
     {"step": "discretise", "params": {"method": "FBS", "bin_width": 25.0, "min_val": -1000}},
@@ -465,186 +373,82 @@ cfg = [
         "step": "extract_features",
         "params": {
             "families": ["ivh"],
-            "ivh_params": {
-                "bin_width": 25.0,
-                "min_val": -1000,
-                "target_range_max": 400,
-            },
+            "ivh_params": {"bin_width": 25.0, "min_val": -1000, "target_range_max": 400},
         },
     },
 ]
-
-pipeline = RadiomicsPipeline().add_config("ivh_hu", cfg)
-out = pipeline.run("path/to/image.nii.gz", "path/to/mask.nii.gz", config_names=["ivh_hu"])
-print(out["ivh_hu"].head())
 ```
 
-### Example 5: Texture with NGLDM tolerance (`ngldm_alpha`)
-
-IBSI default is `ngldm_alpha=0` (exact match). If you want tolerance of ±1 grey level, set `ngldm_alpha=1`.
-
-```python
-from pictologics import RadiomicsPipeline
-
-cfg = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {
-        "step": "extract_features",
-        "params": {
-            "families": ["texture"],
-            "texture_matrix_params": {"ngldm_alpha": 1},
-        },
-    },
-]
-
-pipeline = RadiomicsPipeline().add_config("texture_ngldm_tolerant", cfg)
-out = pipeline.run("path/to/image.nii.gz", "path/to/mask.nii.gz", config_names=["texture_ngldm_tolerant"])
-print(out["texture_ngldm_tolerant"].head())
-```
-
-### Example: Custom CT Pipeline
+### Custom CT Pipeline
 
 ```python
 custom_config = [
-    # 1. Resample to 1mm isotropic
-    {
-        "step": "resample",
-        "params": {"new_spacing": (1.0, 1.0, 1.0)}
-    },
-    # 2. Restrict to soft tissue window (-150 to 250 HU)
-    {
-        "step": "resegment",
-        "params": {"range_min": -150, "range_max": 250}
-    },
-    # 3. Discretise with Fixed Bin Number = 64
-    {
-        "step": "discretise",
-        "params": {"method": "FBN", "n_bins": 64}
-    },
-    # 4. Extract everything
-    {
-        "step": "extract_features",
-        "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"]}
-    }
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "resegment", "params": {"range_min": -150, "range_max": 250}},
+    {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
+    {"step": "extract_features", "params": {
+        "families": ["intensity", "morphology", "texture", "histogram", "ivh"]
+    }},
 ]
 
-pipeline = RadiomicsPipeline()
-pipeline.add_config("my_custom_ct", custom_config)
+pipeline = RadiomicsPipeline().add_config("my_custom_ct", custom_config)
 results = pipeline.run(image, mask, config_names=["my_custom_ct"])
 ```
 
----
-
-### Example 7: Laplacian of Gaussian (LoG) Filter
-
-Apply LoG filter for edge/blob detection before feature extraction:
+### LoG Filtered Features
 
 ```python
-from pictologics import RadiomicsPipeline
-
 log_config = [
     {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic"}},
     {"step": "round_intensities", "params": {}},
     {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    {"step": "filter", "params": {
-        "type": "log",
-        "sigma_mm": 1.5,
-        "truncate": 4.0,
-    }},
+    {"step": "filter", "params": {"type": "log", "sigma_mm": 1.5, "truncate": 4.0}},
     {"step": "extract_features", "params": {"families": ["intensity", "morphology", "histogram"]}},
 ]
-
-pipeline = RadiomicsPipeline().add_config("log_filtered", log_config)
-results = pipeline.run("image.nii.gz", "mask.nii.gz", config_names=["log_filtered"])
 ```
 
-### Example 8: Laws Texture Energy (IBSI 2)
+### Manual Step-by-Step Extraction
 
-Extract texture energy using Laws kernel with rotation invariance:
+If you need granular control, call features directly without the pipeline:
 
 ```python
-laws_config = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic"}},
-    {"step": "round_intensities", "params": {}},
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    {"step": "filter", "params": {
-        "type": "laws",
-        "kernel": "L5E5E5",
-        "rotation_invariant": True,
-        "pooling": "max",
-        "compute_energy": True,
-        "energy_distance": 7,
-    }},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["intensity", "texture", "histogram"]}},
-]
+import numpy as np
+from pictologics import load_image
+from pictologics.preprocessing import (
+    resample_image, resegment_mask, filter_outliers,
+    discretise_image, apply_mask
+)
+from pictologics.features.intensity import calculate_intensity_features
+from pictologics.features.morphology import calculate_morphology_features
+from pictologics.features.texture import calculate_all_texture_features
+
+# Load and preprocess
+image = load_image("image.nii.gz")
+mask = load_image("mask.nii.gz")
+image = resample_image(image, new_spacing=(1.0, 1.0, 1.0))
+mask = resample_image(mask, new_spacing=(1.0, 1.0, 1.0), interpolation="nearest")
+mask = resegment_mask(image, mask, range_min=-1000, range_max=400)
+
+# Discretise for texture
+disc_image = discretise_image(image, method="FBN", n_bins=32, roi_mask=mask)
+
+# Extract features
+morph = calculate_morphology_features(mask, image=image, intensity_mask=mask)
+intensity = calculate_intensity_features(apply_mask(image, mask))
+texture = calculate_all_texture_features(disc_image.array, mask.array, n_bins=32)
+
+all_features = {**morph, **intensity, **texture}
+print(f"Extracted {len(all_features)} features")
 ```
 
-### Example 9: Wavelet Decomposition
+!!! tip "Use the Pipeline Instead"
+    The `RadiomicsPipeline` accomplishes the same workflow with automatic image routing, logging,
+    deduplication, and configuration export. Manual extraction is mainly useful for debugging
+    or understanding the underlying process.
 
-Apply Daubechies 3 wavelet with rotation-invariant averaging:
+## Performance Tips
 
-```python
-wavelet_config = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic"}},
-    {"step": "round_intensities", "params": {}},
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    {"step": "filter", "params": {
-        "type": "wavelet",
-        "wavelet": "db3",
-        "level": 1,
-        "decomposition": "LLH",
-        "rotation_invariant": True,
-        "pooling": "average",
-    }},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture"]}},
-]
-```
-
----
-
-## Logging
-
-The pipeline maintains a detailed log of every step executed, including parameters and any errors encountered. This is vital for auditing and debugging.
-
-```python
-# After running the pipeline
-pipeline.save_log("pipeline_execution_log.json")
-```
-
-The log file contains:
-
-*   Timestamp
-*   Subject ID
-*   Configuration Name
-*   List of executed steps with their parameters
-*   Status of each step
-
----
-
-## Configuration Export & Import
-
-Pictologics supports exporting and importing pipeline configurations in **YAML** and **JSON** formats for reproducible research.
-
-```python
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-pipeline.add_config("my_study_config", [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture"]}},
-])
-
-# Export to YAML or JSON
-pipeline.save_configs("my_configs.yaml")
-
-# Import from file
-pipeline = RadiomicsPipeline.load_configs("my_configs.yaml")
-```
-
-!!! tip "Full Configuration Guide"
-    For complete documentation on configuration file formats, schema versioning, merging configurations, 
-    validation, and the template system API, see the **[Predefined Configurations](predefined_configurations.md)** guide.
+- **Spatial/local intensity** can be extremely slow on large ROIs. Keep them disabled unless needed.
+- **Texture** requires discretisation. Without a `discretise` step, the pipeline raises an error.
+- For large 3D images, consider coarser spacing for exploratory work.
+- For CT in Hounsfield Units, FBS (`bin_width`) is often more interpretable; for MRI/PET, FBN (`n_bins`) may be preferable.

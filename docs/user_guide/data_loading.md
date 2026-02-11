@@ -20,8 +20,6 @@ from pictologics import Image
 !!! note
     Pictologics uses **(X, Y, Z)** axis ordering to match ITK/SimpleITK conventions. This differs from raw DICOM (which uses Rows, Columns = Y, X) and matplotlib (which expects height, width = Y, X). All loaders handle these transformations automatically.
 
----
-
 ## Basic Loading with `load_image()`
 
 The `load_image()` function is the primary entry point for loading data. It automatically detects the file format and handles the appropriate loading strategy.
@@ -93,7 +91,11 @@ Medical imaging formats often use a **sentinel value** to represent missing or i
 | MR | 0 (often used for background/air) |
 | PET | 0 or negative values |
 
-Since DICOM uses integer storage and cannot represent `NaN`, these sentinel values are substituted for missing data. To exclude them from analysis, use the **`resegment`** preprocessing step in your pipeline:
+Since DICOM uses integer storage and cannot represent `NaN`, these sentinel values are substituted for missing data. Pictologics offers two approaches for handling them:
+
+#### Approach 1: Resegmentation (Simple)
+
+Use the **`resegment`** preprocessing step to exclude sentinel values by restricting the ROI to a valid intensity range:
 
 ```python
 from pictologics import RadiomicsPipeline
@@ -107,7 +109,53 @@ pipeline.add_config("ct_analysis", [
 ])
 ```
 
-This is the **IBSI-recommended approach** — filter invalid intensities before feature extraction rather than at load time.
+!!! warning "Limitations of resegmentation alone"
+    Resegmentation removes sentinel voxels from the ROI **after** earlier pipeline steps have already
+    run. This means:
+
+    - **Resampling**: When the image is resampled to a new voxel spacing, the interpolation kernel
+      reads neighboring voxels — including sentinel values. A valid voxel next to a -2048 sentinel
+      will receive a blended value that is far below its true intensity, corrupting the resampled
+      output.
+    - **Filtering**: Convolution-based filters (e.g., LoG, Gabor, wavelets) sum intensities over
+      a local neighborhood. Any sentinel voxels within the kernel window contribute their artificial
+      values to the filter response, producing incorrect texture and edge features.
+
+    This approach works well when the pipeline **only** discretises and extracts features (no
+    resampling or filtering). For pipelines that include resampling or filtering, combine
+    resegmentation with **Approach 2** (source masking) — see below.
+
+#### Approach 2: Source Masking (Protects Resampling & Filtering)
+
+When your images contain sentinel values that could **contaminate resampling and filtering** (e.g., pre-cropped lesion exports), use sentinel detection and source masking. This creates a *source mask* that ensures sentinel voxels are excluded from interpolation and convolution operations:
+
+```python
+from pictologics import load_image
+from pictologics.preprocessing import detect_sentinel_value, create_source_mask_from_sentinel
+
+image = load_image("lesion_export.nii.gz")
+
+# Automatically detect sentinel value
+sentinel = detect_sentinel_value(image)
+print(f"Detected sentinel: {sentinel}")  # e.g., -2048.0
+
+# Create source mask (1 = valid, 0 = sentinel)
+source_mask = create_source_mask_from_sentinel(image, sentinel)
+```
+
+The source mask enables **masked interpolation** for resampling and **normalized convolution** for filters, preventing sentinel values from bleeding into valid regions.
+
+!!! warning "Source masking does not replace resegmentation"
+    The source mask protects **resampling and filtering only** — it does **not** change the ROI
+    used for feature extraction. Sentinel voxels will still be included in intensity statistics,
+    texture matrices, and all other computed features unless you also add a `resegment` step to
+    restrict the ROI to a valid intensity range. In practice, you typically need **both**:
+
+    - `source_mode="auto"` (or an explicit source mask) to protect preprocessing
+    - `resegment` to define the correct ROI for feature extraction
+
+    See the **[Quick Start](quick_start.md)** guide for a complete workflow and the
+    **[Cookbook](cookbook.md)** for batch processing examples.
 
 !!! tip
     Check your data's minimum value to identify potential sentinels:
@@ -116,8 +164,6 @@ This is the **IBSI-recommended approach** — filter invalid intensities before 
     print(f"Min: {image.array.min()}, Max: {image.array.max()}")
     # If min is -1024 or -2048, those are likely sentinels
     ```
-
----
 
 ## Multi-Phase DICOM Series
 
@@ -167,8 +213,8 @@ Each `DicomPhaseInfo` object contains:
 - `index`: Phase index (0, 1, 2, ...)
 - `label`: Human-readable label (e.g., "CardiacPhase=0", "TemporalPosition=1")
 - `num_slices`: Number of slices in this phase
-- `tag_name`: The DICOM tag used for detection
-- `tag_value`: The actual tag value
+- `split_tag`: The DICOM tag used for detection
+- `split_value`: The actual tag value
 
 
 ### Loading a Specific Phase
@@ -193,8 +239,6 @@ Pictologics automatically detects phases using these DICOM tags (in order of pri
 4. **AcquisitionNumber** - Acquisition sequence number
 5. **EchoNumber** - Multi-echo MRI
 
----
-
 ## 4D NIfTI Files
 
 NIfTI files can contain 4D data (3D + time/phase). Use `dataset_index` similarly:
@@ -206,8 +250,6 @@ vol_0 = load_image("path/to/4d_data.nii.gz", dataset_index=0)
 # Load the second volume
 vol_1 = load_image("path/to/4d_data.nii.gz", dataset_index=1)
 ```
-
----
 
 ## DICOM Segmentation (SEG) Files
 
@@ -225,6 +267,7 @@ mask = load_image("path/to/segmentation.dcm")
 ```python
 from pictologics import load_seg
 from pictologics.loaders import get_segment_info
+import numpy as np
 
 # First, inspect what segments are available
 segments = get_segment_info("path/to/segmentation.dcm")
@@ -297,8 +340,6 @@ mask = load_seg(
 # Now mask.array.shape == ct.array.shape
 ```
 
----
-
 ## Merging Multiple Images with `load_and_merge_images()`
 
 When you have multiple segmentation masks (e.g., different organs, or masks split across files), use `load_and_merge_images()` to combine them.
@@ -335,19 +376,17 @@ Control how overlapping voxels are handled:
 
 ```python
 # "max" (default): Take the maximum value at each voxel
-combined = load_and_merge_images(masks, merge_strategy="max")
+combined = load_and_merge_images(masks, conflict_resolution="max")
 
-# "sum": Add values (useful for probability maps)
-combined = load_and_merge_images(masks, merge_strategy="sum")
+# "min": Take the minimum value at each voxel
+combined = load_and_merge_images(masks, conflict_resolution="min")
 
 # "first": Keep the first non-zero value
-combined = load_and_merge_images(masks, merge_strategy="first")
+combined = load_and_merge_images(masks, conflict_resolution="first")
 
 # "last": Keep the last non-zero value
-combined = load_and_merge_images(masks, merge_strategy="last")
+combined = load_and_merge_images(masks, conflict_resolution="last")
 ```
-
----
 
 ## Handling Cropped Masks
 
@@ -410,8 +449,6 @@ combined = load_and_merge_images(
 !!! tip
     **Label Order**: When using `relabel_masks=True`, labels are assigned based on the order of files in `image_paths`. Use `sorted()` for consistent ordering, or specify the exact order you want.
 
----
-
 ## Creating a Full Mask
 
 When you don't have a segmentation mask and want to analyze the entire image:
@@ -429,90 +466,7 @@ full_mask = create_full_mask(image)
 !!! tip
     If you pass `mask=None` to `RadiomicsPipeline.run()`, it automatically creates a full mask internally.
 
----
 
-## Complete Workflow Examples
-
-!!! example "Example 1: Standard NIfTI Workflow"
-    ```python
-    from pictologics import load_image, RadiomicsPipeline
-
-    # Load image and mask
-    image = load_image("patient_ct.nii.gz")
-    mask = load_image("tumor_segmentation.nii.gz")
-
-    # Run radiomics pipeline
-    pipeline = RadiomicsPipeline()
-    results = pipeline.run(image, mask, config_names=["standard_fbn_32"])
-    ```
-
-!!! example "Example 2: Multi-Phase DICOM Analysis"
-    ```python
-    from pictologics import load_image
-    from pictologics.utilities import get_dicom_phases
-
-    # Discover available phases
-    phases = get_dicom_phases("cardiac_ct_folder/")
-    print(f"Found {len(phases)} cardiac phases")
-
-    # Analyze each phase
-    for phase in phases:
-        image = load_image("cardiac_ct_folder/", dataset_index=phase.index)
-        print(f"Phase {phase.label}: shape = {image.array.shape}")
-        # ... run analysis on each phase
-    ```
-
-!!! example "Example 3: DICOM SEG with Reference Alignment"
-    ```python
-    from pictologics import load_image, load_seg
-    from pictologics.loaders import get_segment_info
-
-    # Load the CT series
-    ct = load_image("ct_series/")
-
-    # Check available segments
-    segments = get_segment_info("segmentation.dcm")
-    print("Available segments:", [s['segment_label'] for s in segments])
-
-    # Load only the liver segment, aligned to CT
-    liver = load_seg(
-        "segmentation.dcm",
-        segment_numbers=[1],
-        reference_image=ct
-    )
-
-    # Verify alignment
-    assert liver.array.shape == ct.array.shape
-    ```
-
-!!! example "Example 4: Merging Cropped Multi-Organ Masks"
-    ```python
-    from pictologics import load_image, load_and_merge_images
-
-    # Reference CT
-    ct = load_image("full_body_ct/")
-
-    # List of cropped organ masks
-    organ_masks = [
-        "liver_cropped.nii.gz",
-        "spleen_cropped.nii.gz",
-        "left_kidney_cropped.nii.gz",
-        "right_kidney_cropped.nii.gz"
-    ]
-
-    # Merge all into reference space with unique labels
-    combined = load_and_merge_images(
-        organ_masks,
-        reference_image=ct,
-        reposition_to_reference=True,
-        relabel_masks=True
-    )
-
-    # Result: combined.array contains:
-    # 0 = background, 1 = liver, 2 = spleen, 3 = left kidney, 4 = right kidney
-    ```
-
----
 
 ## Summary of Loading Functions
 
@@ -525,10 +479,7 @@ full_mask = create_full_mask(image)
 | `create_full_mask()` | Create an all-ones mask matching image geometry |
 | `get_dicom_phases()` | Discover available phases in multi-phase DICOM |
 
----
-
 ## Next Steps
 
-- [Feature Calculations](feature_calculations.md) - Get started with your first radiomics analysis
-- [Pipeline Usage](pipeline.md) - Configure and run the radiomics pipeline
-- [Utilities](utilities.md) - DICOM database parsing, visualization, and more
+- [Pipeline & Preprocessing](pipeline.md) - Configure and run the radiomics pipeline
+- [Cookbook](cookbook.md) - End-to-end batch processing scripts

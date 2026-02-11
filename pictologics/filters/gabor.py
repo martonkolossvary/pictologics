@@ -8,7 +8,12 @@ import numpy as np
 from numpy import typing as npt
 from scipy.signal import fftconvolve
 
-from .base import BoundaryCondition, ensure_float32, get_scipy_mode
+from .base import (
+    BoundaryCondition,
+    _prepare_masked_image,
+    ensure_float32,
+    get_scipy_mode,
+)
 
 # Threshold for enabling parallel processing (voxels)
 # Lower than other filters because Gabor has high per-slice cost
@@ -28,6 +33,7 @@ def gabor_filter(
     pooling: str = "average",
     average_over_planes: bool = False,
     use_parallel: Union[bool, None] = None,
+    source_mask: Optional[npt.NDArray[np.bool_]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply 2D Gabor filter to 3D image (IBSI code: Q88H).
@@ -49,6 +55,9 @@ def gabor_filter(
         average_over_planes: If True, average 2D responses over 3 orthogonal planes
         use_parallel: If True, process slices in parallel. If None (default),
             auto-enables for images > ~80³ voxels.
+        source_mask: Optional boolean mask where True = valid voxel.
+            When provided, zeros out invalid (sentinel) voxels before
+            FFT-based convolution to prevent contamination.
 
     Returns:
         Response map (modulus of complex response)
@@ -82,6 +91,10 @@ def gabor_filter(
     """
     # Convert to float32
     image = ensure_float32(image)
+
+    # Apply source_mask preprocessing (zero out invalid voxels for FFT-based filter)
+    if source_mask is not None:
+        image = _prepare_masked_image(image, source_mask)
 
     # Handle spacing
     if isinstance(spacing_mm, (int, float)):

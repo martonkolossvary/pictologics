@@ -1,14 +1,19 @@
 # pictologics/filters/wavelets.py
 """Wavelet transform implementations (separable and non-separable)."""
 
-from typing import Any, List, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import pywt
 from numpy import typing as npt
 from scipy.ndimage import convolve1d
 
-from .base import BoundaryCondition, ensure_float32, get_scipy_mode
+from .base import (
+    BoundaryCondition,
+    _prepare_masked_image,
+    ensure_float32,
+    get_scipy_mode,
+)
 
 # Threshold for enabling parallel processing (voxels)
 _PARALLEL_THRESHOLD = 2_000_000  # ~128³
@@ -23,6 +28,7 @@ def wavelet_transform(
     rotation_invariant: bool = False,
     pooling: str = "average",
     use_parallel: Union[bool, None] = None,
+    source_mask: Optional[npt.NDArray[np.bool_]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply 3D separable wavelet transform (undecimated/stationary).
@@ -45,6 +51,9 @@ def wavelet_transform(
         pooling: Pooling method for rotation invariance
         use_parallel: If True, use parallel processing for rotation_invariant mode.
             If None (default), auto-enables for images > ~128³ voxels.
+        source_mask: Optional boolean mask where True = valid voxel.
+            When provided, zeros out invalid (sentinel) voxels before
+            wavelet decomposition to prevent contamination.
 
     Returns:
         Response map for the specified decomposition
@@ -72,6 +81,10 @@ def wavelet_transform(
 
     # Convert to float32
     image = ensure_float32(image)
+
+    # Apply source_mask preprocessing (zero out invalid voxels)
+    if source_mask is not None:
+        image = _prepare_masked_image(image, source_mask)
 
     # Handle boundary
     if isinstance(boundary, str):
@@ -265,6 +278,7 @@ def simoncelli_wavelet(
     image: npt.NDArray[np.floating[Any]],
     level: int = 1,
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.PERIODIC,
+    source_mask: Optional[npt.NDArray[np.bool_]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Simoncelli non-separable wavelet (IBSI code: PRT7).
@@ -281,6 +295,7 @@ def simoncelli_wavelet(
         image: 3D input image array
         level: Decomposition level (1 = highest frequency band)
         boundary: Boundary condition (FFT is inherently periodic)
+        source_mask: Optional boolean mask where True = valid voxel
 
     Returns:
         Band-pass response map (B map) for the specified level
@@ -302,6 +317,10 @@ def simoncelli_wavelet(
     # Convert to float32
     image = ensure_float32(image)
 
+    # Apply source_mask preprocessing (zero out invalid voxels for FFT-based filter)
+    if source_mask is not None:
+        image = _prepare_masked_image(image, source_mask)
+
     shape = image.shape
     ndim = len(shape)
 
@@ -311,50 +330,19 @@ def simoncelli_wavelet(
     # Normalized max frequency for this level (relative to Nyquist=1.0)
     max_freq = 1.0 / (2**j)
 
-    # Use centered grid coordinates [-1, 1] relative to geometric center (N-1)/2
+    # Build frequency grid using centered [-1, 1] coordinates (IBSI 2 convention).
+    # NOTE: This grid differs from np.fft.fftfreq by a factor of (N-1)/N.
+    # The IBSI 2 reference values were validated with this specific grid, so
+    # it must be preserved exactly. The non-symmetric grid for even N also
+    # means rfftn/irfftn cannot be used (they assume conjugate symmetry).
     center = (np.array(shape) - 1.0) / 2.0
-
-    # Generate value grid for each dimension
-    grids = []
-    for i, s in enumerate(shape):
-        dim_grid = np.arange(s)
-        # Normalize to [-1, 1] relative to center
-        grids.append((dim_grid - center[i]) / center[i])
-
-    # Optimize: Use rfftn (Real FFT) logic
-    # The output of rfftn has shape (N1, N2, ..., N d//2 + 1)
-    # We must construct the frequency grid to match this specific shape
-
-    # Adjust the last dimension grid for rfftn
-    # rfftn frequencies correspond to the first N//2 + 1 elements
-    grids[-1] = grids[-1][: shape[-1] // 2 + 1]
-
-    # Compute Euclidean distance via broadcasting (lazy evaluation)
-    # meshgrid with sparse=True returns coordinate vectors that broadcast
-    mesh_vectors = np.meshgrid(*grids, indexing="ij", sparse=True)
-
-    # Compute dist^2 via broadcasting
-    dist_sq = np.asarray(sum(g**2 for g in mesh_vectors), dtype=np.float64)
-    dist = np.sqrt(dist_sq)
-
-    # Avoid log(0) and divide by zero
-    val = 2.0 * dist / max_freq
-    log_arg = np.where(val > 0, val, 1.0)
-
-    with np.errstate(all="ignore"):
-        g_sim = np.cos(np.pi / 2.0 * np.log2(log_arg))
-
-    # Apply band-pass mask
-    mask = (dist >= max_freq / 4.0) & (dist <= max_freq)
-    g_sim = np.where(mask, g_sim, 0.0)
 
     grids = []
     for i, s in enumerate(shape):
         dim_grid = np.arange(s)
         # Normalize to [-1, 1] relative to center
         grid_norm = (dim_grid - center[i]) / center[i]
-
-        # Shift to move the "center" (DC-like area) to array start/corner
+        # Shift to move DC to array start (index 0), matching fftn layout
         grid_shifted = np.fft.ifftshift(grid_norm)
         grids.append(grid_shifted)
 
@@ -363,7 +351,7 @@ def simoncelli_wavelet(
     dist_sq = np.asarray(sum(g**2 for g in mesh_vectors), dtype=np.float64)
     dist = np.sqrt(dist_sq)
 
-    # Calculate transfer function (same as before)
+    # Calculate transfer function (Simoncelli band-pass, IBSI 2 Eq. 27)
     val = 2.0 * dist / max_freq
     log_arg = np.where(val > 0, val, 1.0)
 
@@ -375,6 +363,7 @@ def simoncelli_wavelet(
     g_sim = np.where(mask, g_sim, 0.0)
 
     # Apply filter in frequency domain using full FFT
+    # (full FFT required because the centered grid is non-symmetric for even N)
     F = np.fft.fftn(image)
 
     # Explicitly specify axes to avoid NumPy 2.0 DeprecationWarning

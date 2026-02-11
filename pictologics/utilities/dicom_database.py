@@ -12,6 +12,7 @@ large datasets, with stateless file processing and immutable intermediate result
 from __future__ import annotations
 
 import json
+import logging
 import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
@@ -22,6 +23,8 @@ import numpy as np
 import pandas as pd
 import pydicom
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Dataclass Definitions
@@ -850,8 +853,8 @@ def _is_dicom_file(file_path: Path) -> Optional[Path]:
     try:
         if pydicom.misc.is_dicom(file_path):
             return file_path
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not check DICOM status for %s: %s", file_path, e)
     return None
 
 
@@ -923,7 +926,8 @@ def _scan_dicom_files(
         try:
             if pydicom.misc.is_dicom(file_path):
                 dicom_files.append(file_path)
-        except Exception:
+        except Exception as e:
+            logger.debug("Skipping non-DICOM file %s: %s", file_path, e)
             continue
 
     return dicom_files
@@ -988,7 +992,8 @@ def _extract_all_metadata(
             metadata = _extract_single_file_metadata(file_path, extract_private_tags)
             if metadata:
                 metadata_list.append(metadata)
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to extract metadata from %s: %s", file_path, e)
             continue
 
     return metadata_list
@@ -1052,7 +1057,8 @@ def _extract_single_file_metadata(
     try:
         # Read header only (no pixel data)
         dcm = pydicom.dcmread(file_path, stop_before_pixels=True)
-    except Exception:
+    except Exception as e:
+        logger.debug("Cannot read DICOM file %s: %s", file_path, e)
         return None
 
     metadata: dict[str, Any] = {
@@ -1111,7 +1117,8 @@ def _extract_single_file_metadata(
             slice_normal = np.cross(row_cosines, col_cosines)
             position = np.array(metadata["ImagePositionPatient"])
             metadata["ProjectionScore"] = float(np.dot(position, slice_normal))
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to compute projection score: %s", e)
             metadata["ProjectionScore"] = None
     else:
         metadata["ProjectionScore"] = None
@@ -1146,7 +1153,8 @@ def _extract_single_file_metadata(
                 try:
                     key = f"Private_{elem.tag.group:04X}_{elem.tag.element:04X}"
                     metadata[key] = str(elem.value)
-                except Exception:
+                except Exception as e:
+                    logger.debug("Failed to extract private tag %s: %s", elem.tag, e)
                     continue
 
     return metadata
@@ -1169,7 +1177,8 @@ def _get_tag_value(
         if hasattr(value, "__iter__") and not isinstance(value, (str, bytes)):
             return list(value)
         return value
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to get tag '%s': %s", tag_name, e)
         return default
 
 

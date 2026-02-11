@@ -92,11 +92,11 @@ Comparisons between **Pictologics** and **PyRadiomics** (single-thread parity).
 - **Hardware**: Apple M4 Pro, 14 cores, 48 GB
 - **OS**: macOS 26.2 (arm64)
 - **Python**: 3.12.10
-- **Core deps**: pictologics 0.3.2, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
+- **Core deps**: pictologics 0.3.3, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
 - **PyRadiomics stack (parity runs)**: pyradiomics 3.1.1.dev111+g8ed579383, SimpleITK 2.5.3
 - **BLAS/LAPACK**: Apple Accelerate (from `numpy.show_config()`)
 
-Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoid including Numba compilation overhead in the measured runtimes. All calculations are repeated 5 times and the average runtime is reported.
+Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoid including Numba compilation overhead in the measured runtimes. Timing and memory measurement are separated — `tracemalloc` is NOT active during timing to avoid biasing the comparison (its per-allocation hooks penalise pure-Python code more than JIT/C code). All calculations are repeated 5 times and the **mean** runtime is reported; peak memory is measured once separately.
 
 ### Intensity
 

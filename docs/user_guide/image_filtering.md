@@ -13,8 +13,6 @@ Applying filters is a key step in advanced radiomics. The process generally invo
 !!! note "IBSI 2 Compliance"
     To maintain IBSI 2 compliance, filters should be applied **after** interpolation to isotropic spacing and **before** discretisation. Most filters also require specific boundary conditions (usually `mirror`).
 
----
-
 ## Available Filters
 
 | Filter | Code (IBSI) | Description |
@@ -26,8 +24,6 @@ Applying filters is a key step in advanced radiomics. The process generally invo
 | [**Separable Wavelet**](#separable-wavelets) | - | Decomposes image into frequency sub-bands (Haar, db, etc.). |
 | [**Simoncelli Wavelet**](#simoncelli-wavelet) | PRT7 | Isotropic, non-separable wavelet transform. |
 | [**Riesz Transform**](#riesz-transform) | AYRS | Steerable filter bank for texture orientation. |
-
----
 
 ## Mean Filter
 
@@ -59,8 +55,6 @@ The Mean filter replaces each voxel's intensity with the average intensity of it
     
     response = mean_filter(image_array, support=3, boundary="mirror")
     ```
-
----
 
 ## Laplacian of Gaussian (LoG)
 
@@ -99,8 +93,6 @@ The Laplacian of Gaussian (LoG) filter highlights regions of rapid intensity cha
     )
     ```
 
----
-
 ## Laws Texture Energy
 
 Laws filters use a set of 1D kernels (Level, Edge, Spot, Wave, Ripple) combined to form 3D masks. These masks detect specific types of texture energy.
@@ -135,12 +127,10 @@ Laws filters use a set of 1D kernels (Level, Edge, Spot, Wave, Ripple) combined 
     # Rotation invariant energy map
     response = laws_filter(
         image_array, 
-        kernel="E5L5S5", 
+        kernels="E5L5S5", 
         rotation_invariant=True
     )
     ```
-
----
 
 ## Gabor Filter
 
@@ -184,8 +174,6 @@ Gabor filters are sinusoidal waves modulated by a Gaussian envelope. They are ex
     )
     ```
 
----
-
 ## Separable Wavelets
 
 Separable wavelet transforms decompose the image into low-frequency (L) and high-frequency (H) components along each axis (x, y, z). This results in 8 sub-bands (LLL, LLH, ..., HHH).
@@ -220,14 +208,12 @@ Separable wavelet transforms decompose the image into low-frequency (L) and high
     
     response = wavelet_transform(
         image_array,
-        wavelet_name="coif1",
+        wavelet="coif1",
         decomposition="LLH",
         level=1,
         rotation_invariant=True
     )
     ```
-
----
 
 ## Simoncelli Wavelet
 
@@ -258,8 +244,6 @@ The Simoncelli wavelet (non-separable) provides isotropic texture analysis. It i
     response = simoncelli_wavelet(image_array, level=1)
     ```
 
----
-
 ## Riesz Transform
 
 The Riesz transform provides a steerable filter bank. It can be combined with other filters (like LoG or Simoncelli) to analyze texture orientation and phase.
@@ -268,7 +252,7 @@ The Riesz transform provides a steerable filter bank. It can be combined with ot
 
 | Parameter | Type | Description |
 |:----------|:-----|:------------|
-| `order` | `int` | Order of the Riesz transform. |
+| `order` | `Tuple[int, ...]` | Order tuple `(l1, l2, l3)` specifying derivative order per axis, e.g. `(1, 0, 0)`. |
 | `variant` | `str` | Feature variant: `"base"`, `"log"`, or `"simoncelli"`. |
 
 ### Usage
@@ -278,8 +262,8 @@ The Riesz transform provides a steerable filter bank. It can be combined with ot
     ```python
     {"step": "filter", "params": {
         "type": "riesz",
-        "order": 2,
-        "variant": "hessian_trace"  # Example variant
+        "order": [2, 0, 0],
+        "variant": "log"
     }}
     ```
 
@@ -288,5 +272,51 @@ The Riesz transform provides a steerable filter bank. It can be combined with ot
     ```python
     from pictologics.filters import riesz_transform
     
-    response = riesz_transform(image_array, order=2)
+    response = riesz_transform(image_array, order=(2, 0, 0))
     ```
+
+## Source Masking for Sentinel Values
+
+When images contain **sentinel values** (e.g., -2048 HU for outside-FOV regions), these artificial values can contaminate filter responses. All Pictologics filters support a `source_mask` parameter to handle this. Note that source masking protects **filtering (and resampling) only** — you still need a `resegment` step to exclude sentinel voxels from the **ROI** used for feature extraction (see [Data Loading → Sentinel Handling](data_loading.md#handling-sentinel-na-values)).
+
+### How It Works
+
+| Filter Type | Strategy | Filters |
+|:------------|:---------|:--------|
+| **Spatial (normalized convolution)** | Weights convolution by valid-voxel contribution, then normalizes | Mean, LoG, Laws |
+| **FFT-based (zero-fill)** | Zeros out sentinel voxels before frequency-domain processing | Gabor, Simoncelli, Riesz |
+| **Separable wavelet** | Zeros out sentinel voxels before decomposition | Wavelet |
+
+### Pipeline Usage
+
+When using the pipeline, source masking is handled **automatically** based on the `source_mode` configuration. No changes to filter steps are needed — but remember to include `resegment` to also exclude sentinels from the ROI:
+
+```python
+pipeline.add_config("filtered_features", [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "filter", "params": {"type": "log", "sigma_mm": 3.0}},  # source_mask passed automatically
+    {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},  # exclude sentinels from ROI
+    {"step": "extract_features", "params": {"families": ["intensity", "texture"]}},
+], source_mode="auto")
+```
+
+### Direct API Usage
+
+When using filters directly, pass `source_mask` explicitly:
+
+```python
+from pictologics.filters import mean_filter, laplacian_of_gaussian
+
+# Create a boolean mask (True = valid)
+valid_mask = image_array > -1000
+
+# Spatial filters return (response, valid_mask) when source_mask is provided
+response, output_valid = mean_filter(image_array, support=15, source_mask=valid_mask)
+response, output_valid = laplacian_of_gaussian(image_array, sigma_mm=3.0, source_mask=valid_mask)
+
+# FFT-based filters accept source_mask but return only the response
+from pictologics.filters import gabor_filter
+response = gabor_filter(image_array, sigma_mm=5.0, lambda_mm=2.0, source_mask=valid_mask)
+```
+
+See the **[Quick Start](quick_start.md)** guide for a complete sentinel workflow example.

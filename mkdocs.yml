@@ -69,13 +69,13 @@ nav:
   - Home: index.md
   - User Guide:
     - Installation: user_guide/installation.md
+    - Quick Start: user_guide/quick_start.md
     - Data Loading: user_guide/data_loading.md
+    - Pipeline & Preprocessing: user_guide/pipeline.md
     - Image Filtering: user_guide/image_filtering.md
-    - Feature Calculations: user_guide/feature_calculations.md
-    - Pipeline Usage: user_guide/pipeline.md
-    - Predefined Configurations: user_guide/predefined_configurations.md
+    - Configuration & Reproducibility: user_guide/configurations.md
+    - Cookbook: user_guide/cookbook.md
     - Utilities: user_guide/utilities.md
-    - Case Examples: user_guide/case_examples.md
   - API Reference:
     - Loaders: api/loader.md
     - Preprocessing: api/preprocessing.md

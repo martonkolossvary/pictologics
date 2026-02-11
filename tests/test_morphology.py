@@ -18,6 +18,7 @@ from pictologics.features.morphology import (
     _calculate_ellipsoid_surface_area,
     _get_bounding_box_features,
     _get_convex_hull_features,
+    _get_intensity_morphology_features,
     _get_mvee_features,
     _get_pca_features,
     _max_pairwise_distance_numba,
@@ -424,6 +425,22 @@ class TestMorphologyFeatures(unittest.TestCase):
         # I will accept hitting the final exception which is easy (shape check).
         # The recompute exception is very rare (numerical conditioning).
         # I'll add the final exception test which I wrote above.
+
+    def test_intensity_morphology_no_mask_moments(self):
+        """Covers _get_intensity_morphology_features fallback when mask_moments=None."""
+        arr = np.zeros((5, 5, 5), dtype=int)
+        arr[1:4, 1:4, 1:4] = 1
+        mask = self._create_image(arr)
+
+        img_arr = np.full((5, 5, 5), 10.0, dtype=float)
+        image = self._create_image(img_arr)
+
+        # Call directly without mask_moments to trigger the else branch at line 764
+        features = _get_intensity_morphology_features(
+            mask, image, mask, mesh_volume=27.0, mask_moments=None
+        )
+        self.assertIn("integrated_intensity_99N0", features)
+        self.assertIn("center_of_mass_shift_KLMA", features)
 
 
 if __name__ == "__main__":

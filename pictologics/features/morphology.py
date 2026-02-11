@@ -532,7 +532,14 @@ def _get_shape_features(surface_area: float, mesh_volume: float) -> dict[str, fl
     return features
 
 
-def _get_pca_features(mask: Image, mesh_volume: float, surface_area: float) -> tuple[
+def _get_pca_features(
+    mask: Image,
+    mesh_volume: float,
+    surface_area: float,
+    mask_moments: Optional[
+        tuple[float, float, float, float, float, float, float, float, float, float]
+    ] = None,
+) -> tuple[
     dict[str, float],
     Optional[npt.NDArray[np.floating[Any]]],
     Optional[npt.NDArray[np.floating[Any]]],
@@ -540,9 +547,12 @@ def _get_pca_features(mask: Image, mesh_volume: float, surface_area: float) -> t
     """Calculate PCA-based features and return eigenvalues/vectors."""
     features: dict[str, float] = {}
 
-    n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = _accumulate_moments_from_mask_numba(
-        mask.array
-    )
+    if mask_moments is not None:
+        n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = mask_moments
+    else:
+        n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = (
+            _accumulate_moments_from_mask_numba(mask.array)
+        )
     if n <= 3:
         return features, None, None
 
@@ -726,7 +736,13 @@ def _get_mvee_features(
 
 
 def _get_intensity_morphology_features(
-    mask: Image, image: Image, intensity_mask: Image, mesh_volume: float
+    mask: Image,
+    image: Image,
+    intensity_mask: Image,
+    mesh_volume: float,
+    mask_moments: Optional[
+        tuple[float, float, float, float, float, float, float, float, float, float]
+    ] = None,
 ) -> dict[str, float]:
     """Calculate intensity-weighted morphological features."""
     features: dict[str, float] = {}
@@ -742,9 +758,12 @@ def _get_intensity_morphology_features(
         features["integrated_intensity_99N0"] = mesh_volume * mean_intensity
 
         # Center of Mass Shift
-        n_m, s0_m, s1_m, s2_m, _, _, _, _, _, _ = _accumulate_moments_from_mask_numba(
-            mask.array
-        )
+        if mask_moments is not None:
+            n_m, s0_m, s1_m, s2_m = mask_moments[0], mask_moments[1], mask_moments[2], mask_moments[3]
+        else:
+            n_m, s0_m, s1_m, s2_m, _, _, _, _, _, _ = (
+                _accumulate_moments_from_mask_numba(mask.array)
+            )
         if n_m > 0:
             m0 = s0_m / float(n_m)
             m1 = s1_m / float(n_m)
@@ -814,8 +833,13 @@ def calculate_morphology_features(
     # 3. Shape Features
     features.update(_get_shape_features(surface_area, mesh_volume))
 
+    # Pre-compute mask moments once (used by PCA and intensity morphology features)
+    mask_moments = _accumulate_moments_from_mask_numba(mask.array)
+
     # 4. PCA Based Features
-    pca_feats, evals, evecs = _get_pca_features(mask, mesh_volume, surface_area)
+    pca_feats, evals, evecs = _get_pca_features(
+        mask, mesh_volume, surface_area, mask_moments=mask_moments
+    )
     features.update(pca_feats)
 
     # 5. Convex Hull Features
@@ -831,7 +855,9 @@ def calculate_morphology_features(
     # 8. Intensity Based Features
     if image is not None:
         features.update(
-            _get_intensity_morphology_features(mask, image, i_mask, mesh_volume)
+            _get_intensity_morphology_features(
+                mask, image, i_mask, mesh_volume, mask_moments=mask_moments
+            )
         )
 
     return features

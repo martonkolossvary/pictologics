@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.3] - 2026-02-11
+
+### Changed
+- **Sentinel Value Implementation**: Implemented proper handling of sentinel values in the pipeline to assure that they do not influence the feature extraction. 
+- **Complete overhaul of User Guide**: Rewrote the user guide to improve clarity and organization. 
+- **Benchmark Methodology Updates**: Refined timing methods for benchmarking with optimized measurement techniques, resulting in up to 40% faster execution for PyRadiomics compared to previous implementations. Therefore speed improvements of pictologics are now more modest.
+
+---
+
 ## [0.3.2] - 2026-02-01
 
 ### Added
@@ -107,6 +116,8 @@
 
 ---
 
+[0.3.3]: https://github.com/martonkolossvary/pictologics/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/martonkolossvary/pictologics/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/martonkolossvary/pictologics/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/martonkolossvary/pictologics/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/martonkolossvary/pictologics/compare/v0.1.0...v0.2.0

@@ -24,6 +24,195 @@ from scipy.ndimage import affine_transform, label
 
 from .loader import Image
 
+# Common sentinel values used in medical imaging to denote "no data" or "background"
+COMMON_SENTINEL_VALUES: tuple[float, ...] = (-2048.0, -1024.0, -1000.0, 0.0, -32768.0)
+
+
+def detect_sentinel_value(
+    image: Image,
+    candidate_values: tuple[float, ...] = COMMON_SENTINEL_VALUES,
+    min_presence_fraction: float = 0.01,
+    roi_mask: Optional[Image] = None,
+) -> Optional[float]:
+    """
+    Detect if image contains a common sentinel value outside the ROI.
+
+    A sentinel value is detected if:
+    1. It appears in a significant fraction of voxels (>= min_presence_fraction)
+    2. If roi_mask is provided, the sentinel primarily appears outside the ROI
+
+    This is used by the pipeline's AUTO source_mode to automatically detect
+    images that have been pre-masked with sentinel values.
+
+    Args:
+        image: Input Image object.
+        candidate_values: Values to check for sentinel patterns.
+            Defaults to common medical imaging sentinels: -2048, -1024, -1000, 0, -32768.
+        min_presence_fraction: Minimum fraction of voxels that must equal
+            the candidate to consider it a sentinel. Default is 1%.
+        roi_mask: Optional ROI mask. If provided, checks that sentinel values
+            are primarily outside the mask (ratio > 2:1 outside vs inside).
+
+    Returns:
+        The detected sentinel value, or None if not detected.
+
+    Example:
+        ```python
+        from pictologics.preprocessing import detect_sentinel_value
+        from pictologics.loader import load_image
+
+        image = load_image("image_with_sentinel.nii.gz")
+        sentinel = detect_sentinel_value(image)
+
+        if sentinel is not None:
+            print(f"Detected sentinel value: {sentinel}")
+        ```
+    """
+    array = image.array
+    total_voxels = array.size
+
+    for candidate in candidate_values:
+        count = np.sum(array == candidate)
+        fraction = count / total_voxels
+
+        if fraction >= min_presence_fraction:
+            # If ROI mask provided, verify sentinel is primarily outside
+            if roi_mask is not None:
+                roi_arr = roi_mask.array > 0
+                inside_count = np.sum((array == candidate) & roi_arr)
+                outside_count = np.sum((array == candidate) & ~roi_arr)
+
+                # Sentinel should be mostly outside ROI (at least 2:1 ratio)
+                if outside_count > inside_count * 2:
+                    return candidate
+            else:
+                return candidate
+
+    return None
+
+
+def create_source_mask_from_sentinel(
+    image: Image,
+    sentinel_value: float,
+    tolerance: float = 0.0,
+) -> Image:
+    """
+    Create a source validity mask by marking sentinel voxels as invalid.
+
+    The returned mask has value 1 for valid (non-sentinel) voxels and 0 for
+    invalid (sentinel) voxels. This mask can be used with the Image.source_mask
+    attribute to exclude sentinel voxels from resampling and filtering.
+
+    Args:
+        image: Input Image object.
+        sentinel_value: The value considered as sentinel (invalid data).
+        tolerance: Values within this tolerance of sentinel_value are also
+            considered invalid. Default 0 means exact match only.
+
+    Returns:
+        Image object with binary mask (1 = valid, 0 = sentinel).
+
+    Example:
+        ```python
+        from pictologics.preprocessing import create_source_mask_from_sentinel
+        from pictologics.loader import load_image
+
+        image = load_image("ct_with_background.nii.gz")
+
+        # Create mask excluding -2048 sentinel values
+        source_mask = create_source_mask_from_sentinel(image, sentinel_value=-2048)
+
+        # Apply to image for sentinel-aware processing
+        image_with_mask = image.with_source_mask(source_mask)
+        ```
+    """
+    if tolerance == 0:
+        valid = image.array != sentinel_value
+    else:
+        valid = np.abs(image.array - sentinel_value) > tolerance
+
+    return Image(
+        array=valid.astype(np.uint8),
+        spacing=image.spacing,
+        origin=image.origin,
+        direction=image.direction,
+        modality="SOURCE_MASK",
+    )
+
+
+def _resample_with_source_mask(
+    image_array: npt.NDArray[np.floating[Any]],
+    source_mask: npt.NDArray[np.bool_],
+    matrix: npt.NDArray[np.floating[Any]],
+    offset: npt.NDArray[np.floating[Any]],
+    output_shape: tuple[int, ...],
+    order: int,
+    mode: str,
+    weight_threshold: float = 0.01,
+) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]:
+    """
+    Resample image using normalized interpolation that excludes invalid (sentinel) voxels.
+
+    This implements normalized convolution for resampling, where only valid source
+    voxels contribute to the interpolated output values.
+
+    Algorithm:
+        1. Zero out invalid voxels in image (image * mask)
+        2. Resample zeroed image -> weighted_sum
+        3. Resample mask (as float) -> weight_sum
+        4. Normalize: result = weighted_sum / weight_sum
+        5. Mark output voxels with low weight as invalid
+
+    Args:
+        image_array: Input image array.
+        source_mask: Boolean mask where True = valid voxel.
+        matrix: Affine transform matrix (diagonal elements).
+        offset: Affine transform offset.
+        output_shape: Shape of output array.
+        order: Interpolation order.
+        mode: Boundary mode.
+        weight_threshold: Minimum weight to consider output voxel valid.
+            Output voxels with weight < threshold are marked as invalid.
+            Default 0.01 means at least 1% of interpolation weight from valid voxels.
+
+    Returns:
+        Tuple of (resampled_image, resampled_source_mask).
+    """
+    # Step 1: Zero out invalid voxels
+    valid_image = np.where(source_mask, image_array, 0.0).astype(np.float64)
+
+    # Step 2: Resample zeroed image - this gives weighted sum where invalid=0
+    weighted_sum = affine_transform(
+        valid_image,
+        matrix=matrix,
+        offset=offset,
+        output_shape=output_shape,
+        order=order,
+        mode=mode,
+    )
+
+    # Step 3: Resample mask as weights
+    weight_sum = affine_transform(
+        source_mask.astype(np.float64),
+        matrix=matrix,
+        offset=offset,
+        output_shape=output_shape,
+        order=order,
+        mode=mode,
+    )
+
+    # Step 4: Normalize (avoid division by zero)
+    # Voxels with weight_sum < threshold are considered invalid
+    valid_output = weight_sum >= weight_threshold
+
+    result = np.zeros_like(weighted_sum)
+    result[valid_output] = weighted_sum[valid_output] / weight_sum[valid_output]
+
+    # Output source mask based on interpolation weights
+    output_source_mask = valid_output
+
+    return result, output_source_mask
+
 
 def resample_image(
     image: Image,
@@ -32,6 +221,7 @@ def resample_image(
     boundary_mode: str = "nearest",
     round_intensities: bool = False,
     mask_threshold: Optional[float] = None,
+    source_mask: Optional[Image | npt.NDArray[np.bool_]] = None,
 ) -> Image:
     """
     Resample image to new voxel spacing using IBSI-compliant 'Align grid centers' method.
@@ -54,9 +244,20 @@ def resample_image(
         mask_threshold: If provided, treat output as a binary mask.
                         Values >= threshold become 1, others 0.
                         Commonly 0.5 for partial volume correction.
+        source_mask: Optional source validity mask. If provided (or if image.source_mask
+                     is set), only valid voxels are used for interpolation. This prevents
+                     sentinel values (e.g., -2048 in CT) from contaminating the resampled
+                     output. Can be an Image object or a boolean numpy array.
 
     Returns:
-        Resampled Image object.
+        Resampled Image object. If source_mask was used, the output Image will have
+        its source_mask attribute set to the resampled validity mask.
+
+    Note:
+        When source_mask is active, the function uses normalized interpolation:
+        the contribution of each input voxel is weighted by its validity, and the
+        result is normalized by the sum of valid weights. This ensures that sentinel
+        voxels do not affect the output.
 
     Example:
         Resample image to isotropic 1mm spacing using linear interpolation:
@@ -71,9 +272,32 @@ def resample_image(
             interpolation="linear"
         )
         ```
+
+        Resample with sentinel-value exclusion:
+
+        ```python
+        # Image has -2048 outside ROI
+        image_with_sentinel = image.with_source_mask(roi_mask)
+        resampled = resample_image(
+            image_with_sentinel,
+            new_spacing=(1.0, 1.0, 1.0)
+        )
+        # Sentinel voxels were excluded from interpolation
+        ```
     """
     if any(s <= 0 for s in new_spacing):
         raise ValueError(f"New spacing must be positive, got {new_spacing}")
+
+    # Determine effective source mask
+    effective_source: Optional[npt.NDArray[np.bool_]] = None
+
+    if source_mask is not None:
+        if isinstance(source_mask, Image):
+            effective_source = source_mask.array > 0
+        else:
+            effective_source = source_mask.astype(bool)
+    elif image.has_source_mask:
+        effective_source = image.source_mask
 
     # Map interpolation string to spline order
     interpolation_map = {
@@ -116,14 +340,30 @@ def resample_image(
 
     offset = center_orig - matrix * center_new
 
-    resampled_array = affine_transform(
-        image.array,
-        matrix=matrix,
-        offset=offset,
-        output_shape=new_shape,
-        order=order,
-        mode=boundary_mode,
-    )
+    # Perform resampling
+    new_source_mask: Optional[npt.NDArray[np.bool_]] = None
+
+    if effective_source is None:
+        # Original behavior - use all voxels
+        resampled_array = affine_transform(
+            image.array,
+            matrix=matrix,
+            offset=offset,
+            output_shape=tuple(new_shape),
+            order=order,
+            mode=boundary_mode,
+        )
+    else:
+        # Masked resampling using normalized interpolation
+        resampled_array, new_source_mask = _resample_with_source_mask(
+            image.array,
+            effective_source,
+            matrix=matrix,
+            offset=offset,
+            output_shape=tuple(new_shape),
+            order=order,
+            mode=boundary_mode,
+        )
 
     # Post-processing
     if mask_threshold is not None:
@@ -146,6 +386,7 @@ def resample_image(
         origin=new_origin,
         direction=image.direction,
         modality=image.modality,
+        source_mask=new_source_mask,
     )
 
 
@@ -380,7 +621,7 @@ def extract_roi(
 
     roi_mask = np.isin(mask.array, mask_values)
 
-    new_array = image.array.astype(float).copy()
+    new_array = image.array.astype(float)
     new_array[~roi_mask] = np.nan
 
     return Image(

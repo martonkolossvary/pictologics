@@ -31,7 +31,7 @@ results = pipeline.run(image, mask, config_names=["config1", "config2", "config3
 print(pipeline.deduplication_stats)
 ```
 
-For complete usage examples, see [Case 7: Multi-configuration batch with deduplication](../user_guide/case_examples.md#case-7-multi-configuration-batch-with-deduplication).
+For complete usage examples, see [Case 7: Multi-configuration batch with deduplication](../user_guide/cookbook.md#case-7-multi-configuration-batch-with-deduplication).
 
 ---
 
@@ -74,7 +74,7 @@ for config_name, features in results.items():
     rows.append(row)
 
 # Concatenate into single DataFrame - NO missing values!
-df = pd.concat(rows, ignore_index=True)
+df = pd.DataFrame(rows)
 print(df.shape)  # (3, N) - all rows complete
 print(df.isna().sum().sum())  # 0 - no NaN values
 ```
@@ -194,6 +194,6 @@ These settings are preserved during serialization (`to_dict()`, `save_configs()`
 # Access pipeline deduplication settings
 pipeline = RadiomicsPipeline(deduplicate=True)
 
-print(pipeline.deduplicate)              # True
+print(pipeline.deduplication_enabled)    # True
 print(pipeline.deduplication_stats)      # Statistics after run()
 ```

@@ -65,6 +65,11 @@ class Image:
         direction (Optional[npt.NDArray[np.floating[Any]]]): 3x3 direction cosine matrix defining the
             orientation of the image axes in world space. Defaults to identity matrix.
         modality (str): The imaging modality (e.g., 'CT', 'MR', 'PT'). Defaults to 'Unknown'.
+        source_mask (Optional[npt.NDArray[np.bool_]]): Optional boolean mask indicating
+            which voxels contain valid source data (True) vs sentinel/invalid values (False).
+            When set, preprocessing operations like resampling and filtering will exclude
+            invalid voxels from interpolation/convolution to prevent sentinel value contamination.
+            If None, all voxels are assumed to contain valid data (traditional behavior).
     """
 
     array: npt.NDArray[np.floating[Any]]
@@ -72,6 +77,70 @@ class Image:
     origin: tuple[float, float, float]
     direction: Optional[npt.NDArray[np.floating[Any]]] = None
     modality: str = "Unknown"
+    source_mask: Optional[npt.NDArray[np.bool_]] = None
+
+    @property
+    def has_source_mask(self) -> bool:
+        """Whether this image has a source validity mask (indicating sentinel values were excluded)."""
+        return self.source_mask is not None
+
+    def with_source_mask(
+        self,
+        mask: "npt.NDArray[np.bool_] | npt.NDArray[np.integer[Any]] | Image",
+    ) -> "Image":
+        """
+        Return a copy of this image with a source validity mask applied.
+
+        The source mask indicates which voxels contain valid data (True) vs
+        sentinel/invalid values (False). When set, spatial operations like
+        resampling and filtering will exclude invalid voxels.
+
+        Args:
+            mask: Boolean array, integer array (>0 = valid), or Image object.
+                  Must have the same shape as the image array.
+
+        Returns:
+            New Image with source_mask set.
+
+        Raises:
+            ValueError: If mask shape doesn't match image shape.
+
+        Example:
+            ```python
+            from pictologics.loader import load_image
+
+            image = load_image("image_with_sentinel.nii.gz")
+            roi_mask = load_image("roi_mask.nii.gz")
+
+            # Use ROI mask as source validity mask
+            image_with_source = image.with_source_mask(roi_mask)
+
+            # Now resampling will exclude sentinel voxels
+            from pictologics.preprocessing import resample_image
+            resampled = resample_image(image_with_source, new_spacing=(1, 1, 1))
+            ```
+        """
+        if isinstance(mask, Image):
+            # Explicit cast to bool to satisfy type checker
+            mask_arr = (mask.array > 0).astype(bool)
+        else:
+            mask_arr = (mask > 0).astype(bool)
+
+        if mask_arr.shape != self.array.shape:
+            raise ValueError(
+                f"Source mask shape {mask_arr.shape} must match image shape {self.array.shape}"
+            )
+
+        return Image(
+            array=self.array.copy(),
+            spacing=self.spacing,
+            origin=self.origin,
+            direction=(
+                self.direction if self.direction is None else self.direction.copy()
+            ),
+            modality=self.modality,
+            source_mask=mask_arr.astype(bool),
+        )
 
 
 def create_full_mask(reference_image: Image, dtype: DTypeLike = np.uint8) -> Image:

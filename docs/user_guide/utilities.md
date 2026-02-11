@@ -122,8 +122,6 @@ for patient in db.patients:
             # series.instances is a list of DicomInstance objects
 ```
 
----
-
 ## Visualization
 
 Pictologics provides flexible utilities for visualizing medical images and segmentation masks. The visualization functions support three display modes:
@@ -251,8 +249,6 @@ print(f"Processed {len(results)} cases")
     - Use `ProcessPoolExecutor` (not `ThreadPoolExecutor`) to avoid Python's GIL
     - Set `max_workers` to the number of CPU cores (4-8 is typically optimal)
     - Each worker loads one image at a time, so memory usage scales with `max_workers`
-
----
 
 ## DICOM Structured Reports (SR)
 

@@ -1,13 +1,40 @@
 # pictologics/filters/log.py
 """Laplacian of Gaussian filter implementation (IBSI code: L6PA)."""
 
-from typing import Any, Tuple, Union
+from typing import Any, Optional, Tuple, Union, overload
 
 import numpy as np
 from numpy import typing as npt
 from scipy.ndimage import gaussian_laplace
 
-from .base import BoundaryCondition, ensure_float32, get_scipy_mode
+from .base import (
+    BoundaryCondition,
+    _normalized_gaussian_laplace,
+    ensure_float32,
+    get_scipy_mode,
+)
+
+
+@overload
+def laplacian_of_gaussian(
+    image: npt.NDArray[np.floating[Any]],
+    sigma_mm: float,
+    spacing_mm: Union[float, Tuple[float, float, float]] = ...,
+    truncate: float = ...,
+    boundary: Union[BoundaryCondition, str] = ...,
+    source_mask: None = ...,
+) -> npt.NDArray[np.floating[Any]]: ...
+
+
+@overload
+def laplacian_of_gaussian(
+    image: npt.NDArray[np.floating[Any]],
+    sigma_mm: float,
+    spacing_mm: Union[float, Tuple[float, float, float]] = ...,
+    truncate: float = ...,
+    boundary: Union[BoundaryCondition, str] = ...,
+    source_mask: npt.NDArray[np.bool_] = ...,
+) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]: ...
 
 
 def laplacian_of_gaussian(
@@ -16,7 +43,11 @@ def laplacian_of_gaussian(
     spacing_mm: Union[float, Tuple[float, float, float]] = 1.0,
     truncate: float = 4.0,
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.ZERO,
-) -> npt.NDArray[np.floating[Any]]:
+    source_mask: Optional[npt.NDArray[np.bool_]] = None,
+) -> Union[
+    npt.NDArray[np.floating[Any]],
+    tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]],
+]:
     """
     Apply 3D Laplacian of Gaussian filter (IBSI code: L6PA).
 
@@ -28,9 +59,13 @@ def laplacian_of_gaussian(
         spacing_mm: Voxel spacing in mm (scalar for isotropic, or tuple)
         truncate: Filter size cutoff in σ units (default 4.0, WGPM)
         boundary: Boundary condition for padding (GBYQ)
+        source_mask: Optional boolean mask where True = valid voxel.
+            When provided, uses normalized convolution to exclude invalid
+            (sentinel) voxels from computation.
 
     Returns:
-        Response map with same dimensions as input
+        If source_mask is None: Response map with same dimensions as input
+        If source_mask provided: Tuple of (response_map, output_valid_mask)
 
     Example:
         Apply LoG filter with 5.0mm sigma on an image with 2.0mm spacing:
@@ -42,12 +77,18 @@ def laplacian_of_gaussian(
         # Create dummy 3D image
         image = np.random.rand(50, 50, 50)
 
-        # Apply filter
+        # Apply filter (original API)
         response = laplacian_of_gaussian(
             image,
             sigma_mm=5.0,
             spacing_mm=(2.0, 2.0, 2.0),
             truncate=4.0
+        )
+
+        # With source_mask for sentinel exclusion
+        mask = image > -1000
+        response, valid_mask = laplacian_of_gaussian(
+            image, sigma_mm=5.0, spacing_mm=2.0, source_mask=mask
         )
         ```
 
@@ -72,6 +113,11 @@ def laplacian_of_gaussian(
 
     mode = get_scipy_mode(boundary)
 
-    # Apply Laplacian of Gaussian
-    # scipy.ndimage.gaussian_laplace already implements LoG correctly
-    return gaussian_laplace(image, sigma=sigma_voxels, mode=mode, truncate=truncate)  # type: ignore[no-any-return]
+    if source_mask is not None:
+        # Use normalized convolution for source masking
+        return _normalized_gaussian_laplace(
+            image, source_mask, sigma=sigma_voxels, mode=mode, truncate=truncate
+        )
+    else:
+        # Original behavior - return just the result (backward compatible)
+        return gaussian_laplace(image, sigma=sigma_voxels, mode=mode, truncate=truncate)  # type: ignore[no-any-return]

@@ -1,24 +1,24 @@
-# Case examples
+# Cookbook
 
-This section provides practical, end-to-end examples for common Pictologics workflows. The goal is to show how to combine loading, preprocessing, feature extraction, and result export patterns into scripts you can reuse. Many of these common processing techniques are in development to make the batch processing of cases even more easy. Therefore check back often to see any of these processing steps being implemented into the core package.
+Practical, end-to-end recipes for common Pictologics workflows. Each recipe shows how to combine loading, preprocessing, feature extraction, and result export into reusable scripts.
 
 !!! tip "Share Your Configurations"
-    All custom configurations used in these examples can be exported to YAML/JSON files for reproducibility.
-    Use `pipeline.save_configs("my_configs.yaml")` to save your configurations and share them with collaborators.
-    See the **[Predefined Configurations](predefined_configurations.md)** guide for details.
-
----
+    All custom configurations used in these recipes can be exported to YAML/JSON files for reproducibility.
+    Use `pipeline.save_configs("my_configs.yaml")` to save and share configurations.
+    See the **[Configuration & Reproducibility](configurations.md)** guide for details.
 
 ## Case 1: Batch radiomics from a folder of NIfTI files (no masks)
 
 ### Scenario
 
-You have a folder of NIfTI volumes where each file is a separate exported segmentation-like volume. There are no mask files.
+You have a folder of NIfTI volumes where each file is a separate pre-cropped lesion export. There are **no separate mask files** — voxels outside the region of interest may be filled with a **sentinel value** (e.g., -2048 HU).
 
 You want to:
 
 - Process every `*.nii` / `*.nii.gz` file in a folder.
 - Use the whole image as the initial ROI (because no mask is provided).
+- Automatically detect and handle sentinel values in each image.
+- Use sentinel-aware resampling and filtering (masked interpolation / normalized convolution).
 - Resample to **0.5×0.5×0.5 mm**.
 - Restrict the ROI to intensities in **[-100, 3000]** (CT HU example).
 - Remove disjoint parts by keeping the **largest connected component**.
@@ -39,12 +39,32 @@ You want to:
       In that case, Pictologics generates a full (all-ones) ROI mask internally (whole-image ROI).
     - **Empty ROI is an error**: If your preprocessing removes all voxels (e.g., a too-tight HU range), the pipeline raises
       a clear error instead of silently returning empty outputs.
-    - **Morphology on whole-image ROI**: Shape features will describe the shape of the ROI mask.
-      With a maskless run, that ROI starts as the full image volume, then becomes whatever remains after resegmentation
-      and connected-component filtering. This is valid computationally, but make sure it matches your scientific intent.
-    - **Sentinel value filtering**: The `resegment` step with `range_min=-100` also filters out common DICOM sentinel
-      values (e.g., -1024, -2048) that represent missing/invalid data. This is the IBSI-recommended approach for
-      handling NA values in medical imaging data.
+    - **Morphology on whole-image ROI**: Shape features describe the shape of the ROI mask.
+      With a maskless run, the ROI starts as the full image volume. The `resegment` step then restricts
+      the ROI to voxels within a valid intensity range, removing sentinel-valued voxels. After resegmentation
+      and connected-component filtering, the resulting morphology features describe the shape of the
+      actual data region (e.g., the lesion) rather than the full image bounding box. This is generally
+      the desired behavior, but verify that the derived ROI matches your scientific intent.
+    - **Sentinel value handling — two complementary mechanisms**: These NIfTI files may contain sentinel
+      values (e.g., -1024, -2048) marking missing or invalid data. Handling them properly requires
+      **both** of the following:
+
+        1. **`source_mode="auto"`** creates a *source mask* that protects **resampling and filtering only**.
+           It applies masked interpolation (resampling ignores sentinel neighbors) and normalized
+           convolution (filter kernels exclude sentinel voxels). However, it does **not** change the
+           ROI — sentinel voxels still remain in the region used for feature extraction.
+        2. **`resegment`** restricts the **ROI** to a valid intensity range, effectively excluding sentinel
+           voxels from **feature extraction**. Without this step, sentinel values would bias intensity
+           statistics, texture matrices, and all other computed features.
+
+        You typically need both: `source_mode="auto"` to protect preprocessing, and `resegment` to
+        define the correct ROI for analysis.
+    - **Automatic sentinel detection**: With `source_mode="auto"`, the pipeline scans for common sentinel values
+      (-2048, -1024, -1000, 0, -32768) and emits a `UserWarning` if one is found, so you can verify which value
+      was detected in each image.
+    - **Mask generation**: When `mask` is omitted, the pipeline generates a full ROI mask. The `resegment` step
+      then removes sentinel voxels from the ROI, effectively deriving the correct analysis mask automatically
+      from the non-sentinel voxels.
 
 !!! tip "Performance Tip: Manual Feature Separation"
     This example demonstrates **manual feature separation** for maximum efficiency:
@@ -56,6 +76,10 @@ You want to:
     that apply to all discretization strategies, while each discretization config contains only the 
     features that actually depend on it. See [Case 8](#case-8-manual-feature-separation-advanced) for 
     a detailed explanation of this technique.
+
+    Note that you don't have to do this manually — the pipeline's **automatic deduplication** can detect
+    shared preprocessing steps across configurations and avoid recomputing them for you. This is
+    demonstrated in [Case 7](#case-7-multi-configuration-batch-with-deduplication).
 
 ### Full example script
 
@@ -108,9 +132,11 @@ You want to:
         pipeline = RadiomicsPipeline()
 
         # Add "orig" config for discretization-independent features (computed once)
+        # source_mode="auto" detects sentinel values and protects resampling/filtering
         pipeline.add_config(
             "case1_orig",
             base_steps + [extract_orig],
+            source_mode="auto",
         )
 
         # Add discretization-dependent configs (texture/histogram/ivh only)
@@ -121,6 +147,7 @@ You want to:
                     {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
                     extract_discretized,
                 ],
+                source_mode="auto",
             )
 
         for bin_width in (8, 16):
@@ -130,6 +157,7 @@ You want to:
                     {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
                     extract_discretized,
                 ],
+                source_mode="auto",
             )
 
         # Prepare for batch processing
@@ -179,7 +207,16 @@ You want to:
   - `file`
   - Feature columns prefixed by configuration name (e.g., `case1_fbn_8__mean_intensity_Q4LE`).
 
----
+!!! tip "Alternative: Explicit Sentinel Value"
+    If you know the sentinel value in advance, use `source_mode="roi_only"` with `sentinel_value` for deterministic behavior:
+    ```python
+    pipeline.add_config(
+        "case1_orig",
+        base_steps + [extract_orig],
+        source_mode="roi_only",
+        sentinel_value=-2048,
+    )
+    ```
 
 ## Case 2: Batch radiomics from DICOM case folders (Image + Segmentation)
 
@@ -332,8 +369,6 @@ You want to:
     if __name__ == "__main__":
         main()
     ```
-
----
 
 ## Case 3: Batch radiomics from a flat NIfTI folder (multiple masks per image)
 
@@ -490,8 +525,6 @@ You want to:
     if __name__ == "__main__":
         main()
     ```
-
----
 
 
 ## Case 4: Parallel batch radiomics from DICOM cases (merge multiple segmentation folders)
@@ -703,8 +736,6 @@ You want to:
         main()
     ```
 
----
-
 ## Case 5: Batch radiomics from DICOM SEG files with multiple segments
 
 ### Scenario
@@ -837,8 +868,6 @@ You want to:
   - `segment_number` - Numeric segment ID from SEG file
   - `segment_label` - Human-readable segment name (e.g., "Liver", "Spleen")
   - Feature columns prefixed by configuration name
-
----
 
 ## Case 6: Filtered radiomics using IBSI 2 filters
 
@@ -1032,13 +1061,9 @@ all_configs = filter_configs + ["standard_fbn_32"]
 results = pipeline.run(image, mask, config_names=all_configs)
 ```
 
----
-
 ## Output Options
 
-For details on result formatting (`wide` vs `long`, `output_type` options) and export functions, see the [Feature Calculations - Working with Results](feature_calculations.md#working-with-results).
-
----
+For details on result formatting (`wide` vs `long`, `output_type` options) and export functions, see the [Pipeline & Preprocessing - Working with Results](pipeline.md#working-with-results).
 
 ## Case 7: Multi-configuration batch with deduplication
 
@@ -1264,13 +1289,11 @@ pipeline.save_configs("my_pipeline.yaml")
 
 # Import preserves settings
 loaded = RadiomicsPipeline.load_configs("my_pipeline.yaml")
-print(f"Loaded deduplicate setting: {loaded.deduplicate}")
+print(f"Loaded deduplicate setting: {loaded.deduplication_enabled}")
 ```
 
 !!! tip "Learn More"
     For detailed documentation of the deduplication system, including the underlying classes and how feature family dependencies are determined, see the [Deduplication](pipeline.md#deduplication-performance-optimization) section in the Pipeline guide and the [Deduplication API](../api/deduplication.md) reference.
-
----
 
 ## Case 8: Manual Feature Separation (Advanced)
 

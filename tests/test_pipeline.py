@@ -206,7 +206,11 @@ def test_step_resample_success(
     assert mock_resample.call_count == 3
     # Check image call args using ANY for image object to avoid array comparison ambiguity
     mock_resample.assert_any_call(
-        ANY, (2, 2, 2), interpolation="bspline", round_intensities=False
+        ANY,
+        (2, 2, 2),
+        interpolation="bspline",
+        round_intensities=False,
+        source_mask=None,
     )
 
 
@@ -701,6 +705,16 @@ def test_empty_roi_check(pipeline: RadiomicsPipeline, mock_image: Image) -> None
 
     with pytest.raises(EmptyROIMaskError):
         pipeline._ensure_nonempty_roi(state, "test")
+
+
+def test_empty_morph_roi_only(pipeline: RadiomicsPipeline) -> None:
+    """Covers the morph-only empty branch in _ensure_nonempty_roi."""
+    state = MagicMock()
+    state.intensity_mask.array = np.ones((10, 10, 10))   # Non-empty
+    state.morph_mask.array = np.zeros((10, 10, 10))       # Empty
+
+    with pytest.raises(EmptyROIMaskError, match="ROI is empty"):
+        pipeline._ensure_nonempty_roi(state, "morph_empty")
 
 
 def test_ivh_discretisation_mode(
@@ -1466,10 +1480,13 @@ def test_last_deduplication_plan_property(pipeline: RadiomicsPipeline) -> None:
     # After computing a plan, it should be accessible
     from pictologics.deduplication import ConfigurationAnalyzer
 
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["intensity"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+        ],
+    )
 
     analyzer = ConfigurationAnalyzer(pipeline._configs, pipeline._deduplication_rules)
     plan = analyzer.analyze()
@@ -1508,14 +1525,20 @@ def test_extract_single_family_texture_glrlm(
     mock_glrlm.return_value = {"glrlm_sre": 0.5}
 
     # Add two configs to trigger deduplication path
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_glrlm"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_glrlm"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_glrlm"]}},
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_glrlm"]}},
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_glrlm.assert_called()
@@ -1546,14 +1569,20 @@ def test_extract_single_family_texture_glszm(
     }
     mock_glszm.return_value = {"glszm_lze": 0.7}
 
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_glszm"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_glszm"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_glszm"]}},
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_glszm"]}},
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_glszm.assert_called()
@@ -1584,14 +1613,20 @@ def test_extract_single_family_texture_gldzm(
     }
     mock_gldzm.return_value = {"gldzm_dze": 0.3}
 
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_gldzm"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_gldzm"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_gldzm"]}},
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_gldzm"]}},
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_gldzm.assert_called()
@@ -1622,14 +1657,20 @@ def test_extract_single_family_texture_ngtdm(
     }
     mock_ngtdm.return_value = {"ngtdm_coarseness": 0.8}
 
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_ngtdm"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_ngtdm"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_ngtdm"]}},
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_ngtdm"]}},
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_ngtdm.assert_called()
@@ -1660,14 +1701,20 @@ def test_extract_single_family_texture_ngldm(
     }
     mock_ngldm.return_value = {"ngldm_lde": 0.6}
 
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_ngldm"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_ngldm"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_ngldm"]}},
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_ngldm"]}},
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_ngldm.assert_called()
@@ -1690,14 +1737,20 @@ def test_extract_histogram_via_dedup_path(
     mock_disc.return_value = mock_image
     mock_hist.return_value = {"hist_mean": 0.5}
 
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["histogram"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["histogram"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["histogram"]}},
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["histogram"]}},
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_hist.assert_called()
@@ -1717,12 +1770,12 @@ def test_extract_histogram_without_discretisation_warns(
     mock_hist.return_value = {"hist_mean": 0.5}
 
     # No discretise step - should trigger warning
-    pipeline.add_config("cfg1", [
-        {"step": "extract_features", "params": {"families": ["histogram"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "extract_features", "params": {"families": ["histogram"]}}
-    ])
+    pipeline.add_config(
+        "cfg1", [{"step": "extract_features", "params": {"families": ["histogram"]}}]
+    )
+    pipeline.add_config(
+        "cfg2", [{"step": "extract_features", "params": {"families": ["histogram"]}}]
+    )
 
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
@@ -1743,12 +1796,12 @@ def test_extract_ivh_via_dedup_path(
     pipeline = RadiomicsPipeline(deduplicate=True)
     mock_ivh.return_value = {"ivh_v10": 0.5}
 
-    pipeline.add_config("cfg1", [
-        {"step": "extract_features", "params": {"families": ["ivh"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "extract_features", "params": {"families": ["ivh"]}}
-    ])
+    pipeline.add_config(
+        "cfg1", [{"step": "extract_features", "params": {"families": ["ivh"]}}]
+    )
+    pipeline.add_config(
+        "cfg2", [{"step": "extract_features", "params": {"families": ["ivh"]}}]
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_ivh.assert_called()
@@ -1768,18 +1821,38 @@ def test_extract_ivh_via_dedup_path_with_discretisation(
     # Test ivh_discretisation branch via dedup - include min_val to cover line 1155
     with patch("pictologics.pipeline.discretise_image") as mock_disc:
         mock_disc.return_value = mock_image
-        pipeline.add_config("cfg1", [
-            {"step": "extract_features", "params": {
-                "families": ["ivh"],
-                "ivh_discretisation": {"method": "FBS", "bin_width": 2.5, "min_val": -100.0}
-            }}
-        ])
-        pipeline.add_config("cfg2", [
-            {"step": "extract_features", "params": {
-                "families": ["ivh"],
-                "ivh_discretisation": {"method": "FBS", "bin_width": 2.5, "min_val": -100.0}
-            }}
-        ])
+        pipeline.add_config(
+            "cfg1",
+            [
+                {
+                    "step": "extract_features",
+                    "params": {
+                        "families": ["ivh"],
+                        "ivh_discretisation": {
+                            "method": "FBS",
+                            "bin_width": 2.5,
+                            "min_val": -100.0,
+                        },
+                    },
+                }
+            ],
+        )
+        pipeline.add_config(
+            "cfg2",
+            [
+                {
+                    "step": "extract_features",
+                    "params": {
+                        "families": ["ivh"],
+                        "ivh_discretisation": {
+                            "method": "FBS",
+                            "bin_width": 2.5,
+                            "min_val": -100.0,
+                        },
+                    },
+                }
+            ],
+        )
         result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
         mock_disc.assert_called()
@@ -1806,14 +1879,20 @@ def test_extract_ivh_discretised_auto_bin_width(
 
     # Use discretise step but don't set explicit bin_width in ivh_params
     # This should trigger the auto bin_width=1.0 for discretised images (line 1163)
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["ivh"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["ivh"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["ivh"]}},
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["ivh"]}},
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_ivh.assert_called()
@@ -1834,18 +1913,24 @@ def test_extract_ivh_with_ivh_params_via_dedup(
     mock_ivh.return_value = {"ivh_v10": 0.5}
 
     # Pass ivh_params with max_val to ensure line 1155 is hit
-    pipeline.add_config("cfg1", [
-        {"step": "extract_features", "params": {
-            "families": ["ivh"],
-            "ivh_params": {"max_val": 500.0}
-        }}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "extract_features", "params": {
-            "families": ["ivh"],
-            "ivh_params": {"max_val": 500.0}
-        }}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_params": {"max_val": 500.0}},
+            }
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_params": {"max_val": 500.0}},
+            }
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_ivh.assert_called()
@@ -1865,18 +1950,24 @@ def test_extract_ivh_via_dedup_path_continuous(
     pipeline = RadiomicsPipeline(deduplicate=True)
     mock_ivh.return_value = {"ivh_v10": 0.5}
 
-    pipeline.add_config("cfg1", [
-        {"step": "extract_features", "params": {
-            "families": ["ivh"],
-            "ivh_use_continuous": True
-        }}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "extract_features", "params": {
-            "families": ["ivh"],
-            "ivh_use_continuous": True
-        }}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_use_continuous": True},
+            }
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_use_continuous": True},
+            }
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_ivh.assert_called()
@@ -1893,12 +1984,12 @@ def test_extract_morphology_via_dedup_path(
     pipeline = RadiomicsPipeline(deduplicate=True)
     mock_morph.return_value = {"morph_volume": 100.0}
 
-    pipeline.add_config("cfg1", [
-        {"step": "extract_features", "params": {"families": ["morphology"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "extract_features", "params": {"families": ["morphology"]}}
-    ])
+    pipeline.add_config(
+        "cfg1", [{"step": "extract_features", "params": {"families": ["morphology"]}}]
+    )
+    pipeline.add_config(
+        "cfg2", [{"step": "extract_features", "params": {"families": ["morphology"]}}]
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_morph.assert_called()
@@ -1921,20 +2012,32 @@ def test_extract_intensity_with_spatial_local_via_dedup(
     mock_spatial.return_value = {"spatial_peak": 100.0}
     mock_local.return_value = {"local_peak": 75.0}
 
-    pipeline.add_config("cfg1", [
-        {"step": "extract_features", "params": {
-            "families": ["intensity"],
-            "include_spatial_intensity": True,
-            "include_local_intensity": True,
-        }}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "extract_features", "params": {
-            "families": ["intensity"],
-            "include_spatial_intensity": True,
-            "include_local_intensity": True,
-        }}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["intensity"],
+                    "include_spatial_intensity": True,
+                    "include_local_intensity": True,
+                },
+            }
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["intensity"],
+                    "include_spatial_intensity": True,
+                    "include_local_intensity": True,
+                },
+            }
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_intensity.assert_called()
@@ -1953,12 +2056,14 @@ def test_extract_spatial_intensity_via_dedup(
     pipeline = RadiomicsPipeline(deduplicate=True)
     mock_spatial.return_value = {"spatial_peak": 100.0}
 
-    pipeline.add_config("cfg1", [
-        {"step": "extract_features", "params": {"families": ["spatial_intensity"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "extract_features", "params": {"families": ["spatial_intensity"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [{"step": "extract_features", "params": {"families": ["spatial_intensity"]}}],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [{"step": "extract_features", "params": {"families": ["spatial_intensity"]}}],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_spatial.assert_called()
@@ -1975,12 +2080,14 @@ def test_extract_local_intensity_via_dedup(
     pipeline = RadiomicsPipeline(deduplicate=True)
     mock_local.return_value = {"local_peak": 75.0}
 
-    pipeline.add_config("cfg1", [
-        {"step": "extract_features", "params": {"families": ["local_intensity"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "extract_features", "params": {"families": ["local_intensity"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [{"step": "extract_features", "params": {"families": ["local_intensity"]}}],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [{"step": "extract_features", "params": {"families": ["local_intensity"]}}],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_local.assert_called()
@@ -2011,14 +2118,20 @@ def test_extract_texture_glcm_via_dedup(
     }
     mock_glcm.return_value = {"glcm_energy": 0.5}
 
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_glcm"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["texture_glcm"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_glcm"]}},
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["texture_glcm"]}},
+        ],
+    )
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_glcm.assert_called()
@@ -2049,20 +2162,32 @@ def test_extract_texture_with_ngldm_alpha(
     }
     mock_ngldm.return_value = {"ngldm_lde": 0.6}
 
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {
-            "families": ["texture_ngldm"],
-            "texture_matrix_params": {"ngldm_alpha": 0.5}
-        }}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {
-            "families": ["texture_ngldm"],
-            "texture_matrix_params": {"ngldm_alpha": 0.5}
-        }}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["texture_ngldm"],
+                    "texture_matrix_params": {"ngldm_alpha": 0.5},
+                },
+            },
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["texture_ngldm"],
+                    "texture_matrix_params": {"ngldm_alpha": 0.5},
+                },
+            },
+        ],
+    )
     pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_ngldm.assert_called()
@@ -2084,12 +2209,18 @@ def test_ivh_with_ivh_params_bin_width(
     """Test IVH features with explicit bin_width in ivh_params."""
     mock_ivh.return_value = {"ivh_v10": 0.5}
 
-    pipeline.add_config("ivh_params_test", [
-        {"step": "extract_features", "params": {
-            "families": ["ivh"],
-            "ivh_params": {"bin_width": 5.0, "min_val": 0.0, "max_val": 100.0}
-        }}
-    ])
+    pipeline.add_config(
+        "ivh_params_test",
+        [
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["ivh"],
+                    "ivh_params": {"bin_width": 5.0, "min_val": 0.0, "max_val": 100.0},
+                },
+            }
+        ],
+    )
     pipeline.run(mock_image, mock_mask, config_names=["ivh_params_test"])
 
     mock_ivh.assert_called()
@@ -2109,12 +2240,18 @@ def test_ivh_with_ivh_params_target_range(
     """Test IVH features with target_range parameters."""
     mock_ivh.return_value = {"ivh_v10": 0.5}
 
-    pipeline.add_config("ivh_target_range", [
-        {"step": "extract_features", "params": {
-            "families": ["ivh"],
-            "ivh_params": {"target_range_min": 10.0, "target_range_max": 90.0}
-        }}
-    ])
+    pipeline.add_config(
+        "ivh_target_range",
+        [
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["ivh"],
+                    "ivh_params": {"target_range_min": 10.0, "target_range_max": 90.0},
+                },
+            }
+        ],
+    )
     pipeline.run(mock_image, mock_mask, config_names=["ivh_target_range"])
 
     mock_ivh.assert_called()
@@ -2136,12 +2273,22 @@ def test_ivh_discretisation_with_bin_width_in_params(
     mock_discretise.return_value = mock_image  # Return same image
     mock_ivh.return_value = {"ivh_v10": 0.5}
 
-    pipeline.add_config("ivh_disc_bw", [
-        {"step": "extract_features", "params": {
-            "families": ["ivh"],
-            "ivh_discretisation": {"method": "FBS", "bin_width": 2.5, "min_val": -50.0}
-        }}
-    ])
+    pipeline.add_config(
+        "ivh_disc_bw",
+        [
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["ivh"],
+                    "ivh_discretisation": {
+                        "method": "FBS",
+                        "bin_width": 2.5,
+                        "min_val": -50.0,
+                    },
+                },
+            }
+        ],
+    )
     pipeline.run(mock_image, mock_mask, config_names=["ivh_disc_bw"])
 
     mock_discretise.assert_called()
@@ -2160,14 +2307,20 @@ def test_to_dict_with_deduplication_plan(pipeline: RadiomicsPipeline) -> None:
     from pictologics.deduplication import ConfigurationAnalyzer
 
     # Add configs and compute plan
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["intensity"]}}
-    ])
-    pipeline.add_config("cfg2", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
-        {"step": "extract_features", "params": {"families": ["intensity"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+        ],
+    )
+    pipeline.add_config(
+        "cfg2",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+        ],
+    )
 
     # Compute and store plan
     analyzer = ConfigurationAnalyzer(pipeline._configs, pipeline._deduplication_rules)
@@ -2176,10 +2329,7 @@ def test_to_dict_with_deduplication_plan(pipeline: RadiomicsPipeline) -> None:
     pipeline._configs_modified_since_plan = False
 
     # Export with deduplication info
-    data = pipeline.to_dict(
-        config_names=["cfg1", "cfg2"],
-        include_deduplication=True
-    )
+    data = pipeline.to_dict(config_names=["cfg1", "cfg2"], include_deduplication=True)
 
     assert "deduplication" in data
     assert "last_plan" in data["deduplication"]
@@ -2191,9 +2341,9 @@ def test_to_dict_deduplication_plan_stale(pipeline: RadiomicsPipeline) -> None:
     from pictologics.deduplication import ConfigurationAnalyzer
 
     # Add config and compute plan
-    pipeline.add_config("cfg1", [
-        {"step": "extract_features", "params": {"families": ["morphology"]}}
-    ])
+    pipeline.add_config(
+        "cfg1", [{"step": "extract_features", "params": {"families": ["morphology"]}}]
+    )
 
     analyzer = ConfigurationAnalyzer(pipeline._configs, pipeline._deduplication_rules)
     plan = analyzer.analyze()
@@ -2214,10 +2364,13 @@ def test_from_dict_restores_deduplication_plan() -> None:
 
     # Create pipeline and add configs
     pipeline = RadiomicsPipeline()
-    pipeline.add_config("cfg1", [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-        {"step": "extract_features", "params": {"families": ["intensity"]}}
-    ])
+    pipeline.add_config(
+        "cfg1",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+        ],
+    )
 
     # Compute and store plan
     analyzer = ConfigurationAnalyzer(pipeline._configs, pipeline._deduplication_rules)
@@ -2241,14 +2394,18 @@ def test_from_dict_handles_invalid_deduplication_plan() -> None:
     data = {
         "schema_version": "1.0",
         "configs": {
-            "test": {"steps": [{"step": "extract_features", "params": {"families": ["morphology"]}}]}
+            "test": {
+                "steps": [
+                    {"step": "extract_features", "params": {"families": ["morphology"]}}
+                ]
+            }
         },
         "deduplication": {
             "enabled": True,
             "tolerance": 1e-9,
             "rules_version": "1.0.0",
-            "last_plan": {"invalid": "plan_data"}  # Invalid format
-        }
+            "last_plan": {"invalid": "plan_data"},  # Invalid format
+        },
     }
 
     with warnings.catch_warnings(record=True) as w:
@@ -2258,4 +2415,7 @@ def test_from_dict_handles_invalid_deduplication_plan() -> None:
         # Should still work, just without restored plan
         assert pipeline._last_deduplication_plan is None
         assert len(w) >= 1
-        assert any("failed to restore deduplication plan" in str(warning.message).lower() for warning in w)
+        assert any(
+            "failed to restore deduplication plan" in str(warning.message).lower()
+            for warning in w
+        )

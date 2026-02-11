@@ -2,17 +2,18 @@
 """Riesz transform implementation (IBSI code: AYRS)."""
 
 from math import factorial, sqrt
-from typing import Any, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 import numpy as np
 from numpy import typing as npt
 
-from .base import ensure_float32
+from .base import _prepare_masked_image, ensure_float32
 
 
 def riesz_transform(
     image: npt.NDArray[np.floating[Any]],
     order: Tuple[int, ...],
+    source_mask: Optional[npt.NDArray[np.bool_]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Riesz transform (IBSI code: AYRS).
@@ -25,6 +26,9 @@ def riesz_transform(
         order: Tuple (l1, l2, l3) specifying derivative order per axis
                e.g., (1,0,0) = first-order along k1 (gradient-like)
                      (2,0,0), (1,1,0), (0,2,0) = second-order (Hessian-like)
+        source_mask: Optional boolean mask where True = valid voxel.
+            When provided, zeros out invalid (sentinel) voxels before
+            FFT-based transform to prevent contamination.
 
     Returns:
         Riesz-transformed image (real part)
@@ -50,6 +54,10 @@ def riesz_transform(
     """
     # Convert to float32
     image = ensure_float32(image)
+
+    # Apply source_mask preprocessing (zero out invalid voxels for FFT-based filter)
+    if source_mask is not None:
+        image = _prepare_masked_image(image, source_mask)
 
     L = sum(order)  # Total order
 
@@ -115,6 +123,7 @@ def riesz_log(
     spacing_mm: Union[float, Tuple[float, float, float]] = 1.0,
     order: Tuple[int, ...] = (1, 0, 0),
     truncate: float = 4.0,
+    source_mask: Optional[npt.NDArray[np.bool_]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Riesz transform to LoG-filtered image.
@@ -128,6 +137,7 @@ def riesz_log(
         spacing_mm: Voxel spacing in mm
         order: Riesz order tuple (l1, l2, l3)
         truncate: LoG truncation parameter
+        source_mask: Optional boolean mask where True = valid voxel
 
     Returns:
         Riesz-transformed LoG response
@@ -155,17 +165,28 @@ def riesz_log(
 
     # First apply LoG
     log_response = laplacian_of_gaussian(
-        image, sigma_mm=sigma_mm, spacing_mm=spacing_mm, truncate=truncate
+        image,
+        sigma_mm=sigma_mm,
+        spacing_mm=spacing_mm,
+        truncate=truncate,
+        source_mask=source_mask,
     )
 
+    # Handle tuple return from LoG if source_mask was used
+    if isinstance(log_response, tuple):
+        log_response = log_response[0]
+
     # Then apply Riesz transform
-    return riesz_transform(log_response, order=order)
+    # We pass source_mask again to enforce zeroing of invalid regions
+    # (though LoG normalized convolution might have filled them, Riesz is global)
+    return riesz_transform(log_response, order=order, source_mask=source_mask)
 
 
 def riesz_simoncelli(
     image: npt.NDArray[np.floating[Any]],
     level: int = 1,
     order: Tuple[int, ...] = (1, 0, 0),
+    source_mask: Optional[npt.NDArray[np.bool_]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Riesz transform to Simoncelli wavelet-filtered image.
@@ -177,6 +198,7 @@ def riesz_simoncelli(
         image: 3D input image array
         level: Simoncelli decomposition level
         order: Riesz order tuple (l1, l2, l3)
+        source_mask: Optional boolean mask where True = valid voxel
 
     Returns:
         Riesz-transformed Simoncelli response
@@ -201,10 +223,15 @@ def riesz_simoncelli(
     """
     from .wavelets import simoncelli_wavelet
 
-    # First apply Simoncelli
+    # Preprocess once: float32 conversion + source mask zeroing
+    image = ensure_float32(image)
+    if source_mask is not None:
+        image = _prepare_masked_image(image, source_mask)
+
+    # Apply Simoncelli wavelet (already preprocessed, skip redundant work)
     sim_response = simoncelli_wavelet(image, level=level)
 
-    # Then apply Riesz transform
+    # Apply Riesz transform to the Simoncelli response
     return riesz_transform(sim_response, order=order)
 
 

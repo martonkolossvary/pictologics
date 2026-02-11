@@ -1,8 +1,6 @@
-# Predefined Configurations
+# Configuration & Reproducibility
 
 Pictologics provides a comprehensive configuration management system designed for **reproducible radiomics research**. This guide covers the standard configurations, configuration file formats, and tools for sharing and managing pipeline configurations.
-
----
 
 ## Overview
 
@@ -13,14 +11,12 @@ The configuration system enables you to:
 - **Share configurations** – Collaborate by exchanging configuration files with colleagues
 - **Ensure reproducibility** – Schema versioning ensures configurations remain compatible across versions
 
----
-
 ## Using Standard Configurations
 
 Pictologics includes **6 standard configurations** optimized for radiomics feature extraction. All standard configurations share these characteristics:
 
 - Isotropic resampling to **0.5mm × 0.5mm × 0.5mm**
-- Spline interpolation (order 3) with anti-aliasing
+- Cubic interpolation for images, nearest-neighbor for masks
 - Complete feature extraction: **intensity**, **morphology**, **texture**, **histogram**, and **IVH**
 - Performance-optimized: spatial and local intensity features disabled by default
 
@@ -30,18 +26,18 @@ Pictologics includes **6 standard configurations** optimized for radiomics featu
 from pictologics import RadiomicsPipeline
 
 pipeline = RadiomicsPipeline()
-results = pipeline.run("standard_fbn_32", image, mask)
+results = pipeline.run(image, mask, config_names=["standard_fbn_32"])
 ```
 
 ### Running All Standard Configurations
 
-Process all 6 standard configurations in a single call:
+Process all 6 standard configurations in a single call using the special `"all_standard"` shorthand:
 
 ```python
 from pictologics import RadiomicsPipeline
 
 pipeline = RadiomicsPipeline()
-all_results = pipeline.run_all_standard_configs(image, mask, subject_id="patient_001")
+all_results = pipeline.run(image, mask, config_names=["all_standard"], subject_id="patient_001")
 ```
 
 ### Running Multiple Specific Configurations
@@ -50,32 +46,31 @@ all_results = pipeline.run_all_standard_configs(image, mask, subject_id="patient
 from pictologics import RadiomicsPipeline
 
 pipeline = RadiomicsPipeline()
-results = pipeline.run_multiple(
-    ["standard_fbn_16", "standard_fbn_32", "standard_fbs_16"],
+results = pipeline.run(
     image,
     mask,
-    subject_id="patient_001"
+    config_names=["standard_fbn_16", "standard_fbn_32", "standard_fbs_16"],
+    subject_id="patient_001",
 )
 ```
 
 ### Accessing Results
 
-Results are returned as `RadiomicsResults` objects containing features organized by family:
+Results are returned as a dictionary mapping configuration names to `pandas.Series` objects:
 
 ```python
-# Get all features as a flat dictionary
-features = results.to_dict()
+# Access features for a specific configuration
+features = results["standard_fbn_32"]
+print(features["mean_intensity_Q4LE"])  # Access a single feature by name
 
-# Access specific feature families
-intensity_features = results.intensity
-morphology_features = results.morphology
-texture_features = results.texture
+# Iterate over all configurations
+for config_name, series in results.items():
+    print(f"{config_name}: {len(series)} features")
 
-# Export to pandas DataFrame
-df = results.to_dataframe()
+# Convert to a pandas DataFrame (one row per configuration)
+import pandas as pd
+df = pd.DataFrame(results).T
 ```
-
----
 
 ## Configuration Specifications
 
@@ -98,9 +93,7 @@ standard_fbn_32:
     - step: resample
       params:
         new_spacing: [0.5, 0.5, 0.5]
-        interpolation_order: 3
-        anti_aliasing: true
-        anti_aliasing_sigma: null
+        interpolation: cubic
     - step: discretise
       params:
         method: FBN
@@ -136,9 +129,7 @@ standard_fbs_16:
     - step: resample
       params:
         new_spacing: [0.5, 0.5, 0.5]
-        interpolation_order: 3
-        anti_aliasing: true
-        anti_aliasing_sigma: null
+        interpolation: cubic
     - step: discretise
       params:
         method: FBS
@@ -154,8 +145,6 @@ standard_fbs_16:
         include_spatial_intensity: false
         include_local_intensity: false
 ```
-
----
 
 ## Choosing the Right Configuration
 
@@ -196,8 +185,6 @@ for step in config:
 # Add as a new configuration
 pipeline.add_config("fbn_32_with_spatial", config)
 ```
-
----
 
 ## Configuration Files
 
@@ -257,8 +244,6 @@ Configuration files include a `schema_version` field to ensure forward compatibi
 - **Current version**: `1.0`
 - Files without a version are treated as version `1.0`
 - Future versions will include automatic migration when loading older configs
-
----
 
 ## Sharing Configurations
 
@@ -356,8 +341,6 @@ When loading configurations, enable validation to catch potential issues:
 pipeline = RadiomicsPipeline.load_configs("config.yaml", validate=True)
 ```
 
----
-
 ## Template System (Advanced)
 
 For programmatic access to configuration templates, Pictologics provides a template loading API.
@@ -423,8 +406,6 @@ with open("org_configs.yaml", "w") as f:
 pipeline = RadiomicsPipeline.load_configs("org_configs.yaml")
 ```
 
----
-
 ## Best Practices for Reproducibility
 
 ### 1. Version Control Your Configurations
@@ -478,8 +459,6 @@ When publishing radiomics research, report:
 - Configuration file (as supplementary material)
 - Schema version used
 
----
-
 ## End-to-End Example: Multi-Site Radiomics Study
 
 This section provides a complete, real-world workflow demonstrating how to create, save, load, and apply configurations across a multi-site radiomics study. The scenario involves:
@@ -506,8 +485,7 @@ lung_nodule_config = [
         "step": "resample",
         "params": {
             "new_spacing": [0.5, 0.5, 0.5],
-            "interpolation_order": 3,  # Cubic spline for smooth interpolation
-            "anti_aliasing": True,
+            "interpolation": "cubic",  # Cubic spline for smooth interpolation
         }
     },
     # Step 2: Resegment to lung window and remove outliers
@@ -520,7 +498,7 @@ lung_nodule_config = [
     },
     # Step 3: Keep only the largest connected component (remove satellite lesions)
     {
-        "step": "largest_roi",
+        "step": "keep_largest_component",
         "params": {}
     },
     # Step 4: Discretise using Fixed Bin Size (preserves HU meaning)
@@ -570,17 +548,18 @@ mask = load_image("test_data/nodule_segmentation.nii.gz")
 
 # Run the primary configuration
 results = pipeline.run(
-    config_name="lung_nodule_fbs25",
     image=image,
     mask=mask,
-    subject_id="test_case_001"
+    subject_id="test_case_001",
+    config_names=["lung_nodule_fbs25"],
 )
 
 # Inspect results
-print(f"Extracted {len(results.to_dict())} features")
+config_features = results["lung_nodule_fbs25"]
+print(f"Extracted {len(config_features)} features")
 print(f"Sample features:")
-print(f"  - Volume: {results.morphology.get('volume_mesh', 'N/A'):.2f} mm³")
-print(f"  - Mean intensity: {results.intensity.get('mean', 'N/A'):.2f} HU")
+print(f"  - Volume: {config_features.get('volume_mesh_ml_HTUR', 'N/A'):.2f} mm³")
+print(f"  - Mean intensity: {config_features.get('mean_intensity_Q4LE', 'N/A'):.2f} HU")
 
 # Save execution log for audit
 pipeline.save_log("logs/test_run_001.json")
@@ -611,13 +590,12 @@ configs:
     - step: resample
       params:
         new_spacing: [0.5, 0.5, 0.5]
-        interpolation_order: 3
-        anti_aliasing: true
+        interpolation: cubic
     - step: resegment
       params:
         range_min: -1000
         range_max: 400
-    - step: largest_roi
+    - step: keep_largest_component
       params: {}
     - step: discretise
       params:
@@ -638,7 +616,8 @@ Site B receives the configuration file and processes their cohort:
 
 ```python
 from pathlib import Path
-from pictologics import RadiomicsPipeline, load_image, save_results, format_results
+from pictologics import RadiomicsPipeline, load_image
+from pictologics.results import format_results, save_results
 
 # Load the shared configuration (with validation)
 pipeline = RadiomicsPipeline.load_configs(
@@ -665,21 +644,22 @@ for case_folder in sorted(data_dir.glob("patient_*")):
     
     # Run the primary configuration
     results = pipeline.run(
-        config_name="lung_nodule_fbs25",
         image=image,
         mask=mask,
-        subject_id=patient_id
+        subject_id=patient_id,
+        config_names=["lung_nodule_fbs25"],
     )
     
     # Format for CSV export
     row = format_results(
         results,
         fmt="wide",
-        prefix=f"{patient_id}_lung_nodule_fbs25"
+        meta={"subject_id": patient_id},
     )
     all_results.append(row)
     
-    print(f"Processed {patient_id}: {len(results.to_dict())} features")
+    config_features = results["lung_nodule_fbs25"]
+    print(f"Processed {patient_id}: {len(config_features)} features")
 
 # Save all results to CSV
 save_results(all_results, output_dir / "site_b_features.csv")
@@ -780,14 +760,12 @@ This workflow demonstrates several important practices:
     ensuring that any differences in extracted features reflect true biological variation rather than 
     methodological inconsistencies.
 
----
-
 ## Quick Reference
 
 | Task | Method |
 |------|--------|
-| Run standard config | `pipeline.run("standard_fbn_32", image, mask)` |
-| Run all standard configs | `pipeline.run_all_standard_configs(image, mask)` |
+| Run standard config | `pipeline.run(image, mask, config_names=["standard_fbn_32"])` |
+| Run all standard configs | `pipeline.run(image, mask, config_names=["all_standard"])` |
 | List available configs | `pipeline.list_configs()` |
 | Get config details | `pipeline.get_config("config_name")` |
 | Add custom config | `pipeline.add_config("name", steps)` |
@@ -799,9 +777,7 @@ This workflow demonstrates several important practices:
 | Export to string | `pipeline.to_yaml()` / `pipeline.to_json()` |
 | Import from string | `RadiomicsPipeline.from_yaml(s)` / `RadiomicsPipeline.from_json(s)` |
 
----
-
 !!! tip "See Also"
-    - [Pipeline Usage](pipeline.md) – Complete pipeline documentation
-    - [Feature Calculations](feature_calculations.md) – Available feature families
+    - [Pipeline & Preprocessing](pipeline.md) – Complete pipeline documentation
     - [Image Filtering](image_filtering.md) – Adding filters to configurations
+    - [Cookbook](cookbook.md) – End-to-end batch processing examples

@@ -2,13 +2,25 @@
 """Laws kernels filter implementation (IBSI code: JTXT)."""
 
 import math
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, overload
 
 import numpy as np
 from numpy import typing as npt
 from scipy.ndimage import uniform_filter
 
-from .base import BoundaryCondition, ensure_float32, get_scipy_mode
+from .base import (
+    BoundaryCondition,
+    _normalized_separable_convolve_3d,
+    ensure_float32,
+    get_scipy_mode,
+)
+
+# ... (omitted kernels, assume they are there) ...
+# Wait, I cannot replace just the function def and imports in one go if they are far apart.
+# I should do imports first, then function def.
+# But I pressed "replace_file_content" with intention to do both? No, I should use multi_replace.
+# I'll cancel this and use multi_replace.
+
 
 # Normalized Laws kernels (IBSI 2 Table 6)
 _LAWS_KERNELS: Dict[str, npt.NDArray[np.floating[Any]]] = {
@@ -66,7 +78,7 @@ def _separable_convolve_3d(
     # Explicit cast to fix MyPy 'no-any-return'
     from typing import cast
 
-    return cast(npt.NDArray[np.floating[Any]], result.astype(image.dtype))
+    return cast(npt.NDArray[np.floating[Any]], result.astype(image.dtype, copy=False))
 
 
 def _get_rotation_permutations_3d() -> (
@@ -110,6 +122,34 @@ def _perm_parity(perm: Tuple[int, int, int]) -> int:
     return parity % 2
 
 
+@overload
+def laws_filter(
+    image: npt.NDArray[np.floating[Any]],
+    kernels: str,
+    boundary: Union[BoundaryCondition, str] = ...,
+    rotation_invariant: bool = ...,
+    pooling: str = ...,
+    compute_energy: bool = ...,
+    energy_distance: int = ...,
+    use_parallel: Union[bool, None] = ...,
+    source_mask: None = ...,
+) -> npt.NDArray[np.floating[Any]]: ...
+
+
+@overload
+def laws_filter(
+    image: npt.NDArray[np.floating[Any]],
+    kernels: str,
+    boundary: Union[BoundaryCondition, str] = ...,
+    rotation_invariant: bool = ...,
+    pooling: str = ...,
+    compute_energy: bool = ...,
+    energy_distance: int = ...,
+    use_parallel: Union[bool, None] = ...,
+    source_mask: npt.NDArray[np.bool_] = ...,
+) -> Tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]: ...
+
+
 def laws_filter(
     image: npt.NDArray[np.floating[Any]],
     kernels: str,
@@ -119,7 +159,11 @@ def laws_filter(
     compute_energy: bool = False,
     energy_distance: int = 7,
     use_parallel: Union[bool, None] = None,
-) -> npt.NDArray[np.floating[Any]]:
+    source_mask: Optional[npt.NDArray[np.bool_]] = None,
+) -> Union[
+    npt.NDArray[np.floating[Any]],
+    Tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]],
+]:
     """
     Apply 3D Laws kernel filter (IBSI code: JTXT).
 
@@ -138,9 +182,14 @@ def laws_filter(
         use_parallel: If True, use parallel processing for rotation_invariant mode.
             If None (default), auto-enables for images > ~128³ voxels.
             Only affects rotation_invariant mode.
+        source_mask: Optional boolean mask where True = valid voxel.
+            When provided, uses normalized separable convolution to exclude
+            invalid (sentinel) voxels from computation. Only supported in
+            non-rotation-invariant mode.
 
     Returns:
-        Response map (or energy image if compute_energy=True)
+        If source_mask is None: Response map (or energy image if compute_energy=True)
+        If source_mask provided: Tuple of (response_map, output_valid_mask)
 
     Example:
         Apply Laws E5L5S5 kernel with rotation invariance and texture energy:
@@ -294,9 +343,16 @@ def laws_filter(
         # Finalize average pooling
         if pooling == "average" and result is not None:
             result /= len(rotations)
+        valid_mask = None
     else:
         # Non-rotation-invariant: single separable convolution
-        result = _separable_convolve_3d(image, g1, g2, g3, mode)
+        if source_mask is not None:
+            result, valid_mask = _normalized_separable_convolve_3d(
+                image, source_mask, g1, g2, g3, mode
+            )
+        else:
+            result = _separable_convolve_3d(image, g1, g2, g3, mode)
+            valid_mask = None
 
     # Compute energy image if requested
     if compute_energy:
@@ -312,6 +368,8 @@ def laws_filter(
     if result is None:  # pragma: no cover
         raise RuntimeError("Result should not be None")
 
+    if source_mask is not None and valid_mask is not None:
+        return result, valid_mask
     return result  # type: ignore[no-any-return]
 
 

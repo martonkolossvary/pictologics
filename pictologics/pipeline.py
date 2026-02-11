@@ -23,6 +23,7 @@ import datetime
 import json
 import warnings
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -69,6 +70,8 @@ from .filters import (
 from .loader import Image, create_full_mask, load_image
 from .preprocessing import (
     apply_mask,
+    create_source_mask_from_sentinel,
+    detect_sentinel_value,
     discretise_image,
     filter_outliers,
     keep_largest_component,
@@ -82,13 +85,56 @@ from .templates import get_standard_templates
 CONFIG_SCHEMA_VERSION = "1.0"
 
 # Valid schema versions (for backward compatibility)
-_VALID_SCHEMA_VERSIONS = {"1.0"}
+_VALID_SCHEMA_VERSIONS = {"1.0", "1.1"}
+
+
+class SourceMode(Enum):
+    """
+    Determines how voxels outside the ROI mask are treated during spatial operations.
+
+    This setting affects resampling, filtering, and other operations that use
+    neighboring voxels for interpolation or convolution.
+
+    Attributes:
+        FULL_IMAGE: All voxels contain valid data. Use surrounding voxels for
+                    interpolation during resampling and filtering. This is the
+                    traditional behavior when a full CT/MR scan is provided.
+        ROI_ONLY: Only ROI mask voxels contain valid data. Voxels outside the
+                  mask contain sentinel values (-2048, etc.) that must be excluded
+                  from all spatial operations.
+        AUTO: Automatically detect common sentinel values (-2048, -1024, etc.).
+              If detected, behave like ROI_ONLY. Otherwise, behave like FULL_IMAGE.
+              Emits a warning when sentinel values are detected.
+    """
+
+    FULL_IMAGE = "full_image"
+    ROI_ONLY = "roi_only"
+    AUTO = "auto"
 
 
 @dataclass
 class PipelineState:
     """
     Holds the current state of the image and masks during pipeline execution.
+
+    Attributes:
+        image: Current image (may be discretised after discretise step).
+        raw_image: Always the non-discretised image (for intensity/morphology).
+        morph_mask: Morphological mask for shape-based features.
+        intensity_mask: Intensity mask for intensity-based features.
+        is_discretised: Whether the image has been discretised.
+        n_bins: Number of bins if discretised with FBN.
+        bin_width: Bin width if discretised with FBS.
+        discretisation_method: Discretisation method used ('FBN' or 'FBS').
+        discretisation_min: Minimum value used for discretisation.
+        discretisation_max: Maximum value used for discretisation.
+        mask_was_generated: Whether the mask was auto-generated (no mask provided).
+        is_filtered: Whether a filter has been applied.
+        filter_type: Type of filter applied (if any).
+        source_mode: How source voxel validity is handled.
+        source_mask: Computed validity mask (where real data exists).
+        sentinel_detected: True if AUTO mode detected sentinel values.
+        sentinel_value: The detected sentinel value (if any).
     """
 
     image: Image  # May be discretised after discretise step
@@ -104,6 +150,11 @@ class PipelineState:
     mask_was_generated: bool = False
     is_filtered: bool = False
     filter_type: Optional[str] = None
+    # Source tracking for sentinel value handling
+    source_mode: SourceMode = SourceMode.FULL_IMAGE
+    source_mask: Optional[Image] = None
+    sentinel_detected: bool = False
+    sentinel_value: Optional[float] = None
 
 
 class EmptyROIMaskError(ValueError):
@@ -130,6 +181,9 @@ class RadiomicsPipeline:
     ) -> None:
         """Initialize pipeline with empty config registry and load predefined configs."""
         self._configs: dict[str, list[dict[str, Any]]] = {}
+        self._config_metadata: dict[str, dict[str, Any]] = (
+            {}
+        )  # Stores source_mode, etc.
         self._log: list[dict[str, Any]] = []
 
         # Deduplication settings
@@ -138,7 +192,9 @@ class RadiomicsPipeline:
         if deduplication_rules is None:
             self._deduplication_rules = get_default_rules()
         elif isinstance(deduplication_rules, str):
-            self._deduplication_rules = DeduplicationRules.get_version(deduplication_rules)
+            self._deduplication_rules = DeduplicationRules.get_version(
+                deduplication_rules
+            )
         else:
             self._deduplication_rules = deduplication_rules
 
@@ -193,7 +249,9 @@ class RadiomicsPipeline:
 
         Returns names from loaded templates that start with 'standard_'.
         """
-        return sorted([name for name in self._configs.keys() if name.startswith("standard_")])
+        return sorted(
+            [name for name in self._configs.keys() if name.startswith("standard_")]
+        )
 
     # -------------------------------------------------------------------------
     # Deduplication Properties
@@ -262,7 +320,13 @@ class RadiomicsPipeline:
             "cache_hit_rate": self._dedup_reused_count / total,
         }
 
-    def add_config(self, name: str, steps: list[dict[str, Any]]) -> "RadiomicsPipeline":
+    def add_config(
+        self,
+        name: str,
+        steps: list[dict[str, Any]],
+        source_mode: str = "full_image",
+        sentinel_value: Optional[float] = None,
+    ) -> "RadiomicsPipeline":
         """
         Add a processing configuration.
 
@@ -271,21 +335,59 @@ class RadiomicsPipeline:
             steps: List of steps. Each step is a dict with 'step' (name) and 'params' (dict).
                    Supported steps:
                    - 'resample': params: new_spacing (required), interpolation (optional)
-                                     - 'resegment': params: range_min, range_max
-                                     - 'filter_outliers': params: sigma
-                                     - 'binarize_mask': params: threshold (float, default 0.5),
-                                         mask_values (int | list[int] | tuple[int, int]), apply_to ('morph'|'intensity'|'both')
-                                     - 'keep_largest_component': params: None
+                   - 'resegment': params: range_min, range_max
+                   - 'filter_outliers': params: sigma
+                   - 'binarize_mask': params: threshold (float, default 0.5),
+                       mask_values (int | list[int] | tuple[int, int]), apply_to ('morph'|'intensity'|'both')
+                   - 'keep_largest_component': params: None
                    - 'round_intensities': params: None
                    - 'discretise': params: method, n_bins/bin_width, etc.
+                   - 'filter': params: type (required), plus filter-specific params
                    - 'extract_features': params: families (list), etc.
+            source_mode: How to handle source voxel validity for resampling/filtering:
+                - "full_image" (default): All voxels contain real data. Traditional behavior.
+                - "roi_only": Only ROI voxels contain real data; others have sentinel values.
+                - "auto": Auto-detect sentinel values; emit warning if found.
+            sentinel_value: If specified, explicitly set the sentinel value instead
+                of auto-detecting. Only used when source_mode is "roi_only" or "auto".
 
         Note:
             - Texture features require a prior 'discretise' step.
             - IVH features are configured via 'ivh_params' dict.
+            - The source_mode setting affects resampling and filtering operations.
+              In 'roi_only' mode, boundary regions use normalized interpolation to
+              exclude sentinel voxels.
+
+        Example:
+            ```python
+            pipeline = RadiomicsPipeline()
+
+            # Standard configuration (all voxels valid)
+            pipeline.add_config(
+                name="standard",
+                steps=[...],
+            )
+
+            # Configuration for sentinel-masked images
+            pipeline.add_config(
+                name="sentinel_aware",
+                source_mode="roi_only",
+                steps=[
+                    {"step": "resample", "params": {"new_spacing": (1, 1, 1)}},
+                    {"step": "extract_features", "params": {"families": ["all"]}},
+                ],
+            )
+            ```
         """
         if not isinstance(steps, list):
             raise ValueError("Configuration must be a list of steps")
+
+        # Validate source_mode
+        valid_modes = {"full_image", "roi_only", "auto"}
+        if source_mode not in valid_modes:
+            raise ValueError(
+                f"Invalid source_mode '{source_mode}'. Must be one of: {valid_modes}"
+            )
 
         for step in steps:
             if not isinstance(step, dict):
@@ -294,6 +396,10 @@ class RadiomicsPipeline:
                 raise ValueError("Each step must have a 'step' key")
 
         self._configs[name] = steps
+        self._config_metadata[name] = {
+            "source_mode": source_mode,
+            "sentinel_value": sentinel_value,
+        }
         self._configs_modified_since_plan = True
         return self
 
@@ -388,7 +494,9 @@ class RadiomicsPipeline:
         if self._deduplication_enabled and len(target_configs) > 1:
             # Get configs for analysis
             configs_to_analyze = {name: self._configs[name] for name in target_configs}
-            analyzer = ConfigurationAnalyzer(configs_to_analyze, self._deduplication_rules)
+            analyzer = ConfigurationAnalyzer(
+                configs_to_analyze, self._deduplication_rules
+            )
             dedup_plan = analyzer.analyze()
             self._last_deduplication_plan = dedup_plan
             self._configs_modified_since_plan = False
@@ -396,8 +504,60 @@ class RadiomicsPipeline:
         # Run each configuration
         for config_name in target_configs:
             steps = self._configs[config_name]
+            metadata = self._config_metadata.get(config_name, {})
 
-            # Initialize State
+            # Determine source mode for this config
+            source_mode_str = metadata.get("source_mode", "full_image")
+            source_mode = SourceMode(source_mode_str)
+            explicit_sentinel = metadata.get("sentinel_value")
+
+            # Determine source mask based on source_mode
+            source_mask: Optional[Image] = None
+            sentinel_detected = False
+            detected_sentinel_value: Optional[float] = None
+
+            if source_mode == SourceMode.FULL_IMAGE:
+                # Default: all voxels valid, no source_mask needed
+                pass
+
+            elif source_mode == SourceMode.ROI_ONLY:
+                # Use ROI mask as source mask
+                source_mask = Image(
+                    array=(orig_mask.array > 0).astype(np.uint8),
+                    spacing=orig_mask.spacing,
+                    origin=orig_mask.origin,
+                    direction=orig_mask.direction,
+                    modality="SOURCE_MASK",
+                )
+
+            elif source_mode == SourceMode.AUTO:
+                # Auto-detect sentinel values
+                if explicit_sentinel is not None:
+                    # User provided explicit sentinel value
+                    detected_sentinel_value = explicit_sentinel
+                    sentinel_detected = True
+                else:
+                    detected = detect_sentinel_value(orig_img, roi_mask=orig_mask)
+                    if detected is not None:
+                        detected_sentinel_value = detected
+                        sentinel_detected = True
+
+                        # Emit warning to user
+                        warnings.warn(
+                            f"Auto-detected sentinel value {detected} in image. "
+                            f"Using source validity mask for config '{config_name}'. "
+                            f"Voxels with value {detected} will be excluded from "
+                            f"resampling/filtering. To disable, set source_mode='full_image'.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+
+                if sentinel_detected and detected_sentinel_value is not None:
+                    source_mask = create_source_mask_from_sentinel(
+                        orig_img, detected_sentinel_value
+                    )
+
+            # Initialize State with source tracking
             # We start with fresh copies for each config
             state = PipelineState(
                 image=orig_img,
@@ -411,6 +571,10 @@ class RadiomicsPipeline:
                     modality=orig_mask.modality,
                 ),
                 mask_was_generated=mask_was_generated,
+                source_mode=source_mode,
+                source_mask=source_mask,
+                sentinel_detected=sentinel_detected,
+                sentinel_value=detected_sentinel_value,
             )
 
             self._ensure_nonempty_roi(state, context="initialization")
@@ -421,6 +585,9 @@ class RadiomicsPipeline:
                 "config_name": config_name,
                 "image_source": img_source,
                 "mask_source": mask_source,
+                "source_mode": source_mode.value,
+                "sentinel_detected": sentinel_detected,
+                "sentinel_value": detected_sentinel_value,
                 "steps_executed": [],
             }
 
@@ -478,9 +645,14 @@ class RadiomicsPipeline:
         The pipeline uses `mask_values=1` semantics throughout (see `apply_mask`).
         """
         has_intensity_roi = bool(np.any(state.intensity_mask.array == 1))
+        if not has_intensity_roi:
+            raise EmptyROIMaskError(
+                "ROI is empty after preprocessing "
+                f"({context}). Ensure your mask contains at least one voxel with value 1, "
+                "or relax resegmentation/outlier filtering thresholds."
+            )
         has_morph_roi = bool(np.any(state.morph_mask.array == 1))
-
-        if not has_intensity_roi or not has_morph_roi:
+        if not has_morph_roi:
             raise EmptyROIMaskError(
                 "ROI is empty after preprocessing "
                 f"({context}). Ensure your mask contains at least one voxel with value 1, "
@@ -504,16 +676,35 @@ class RadiomicsPipeline:
             mask_thresh = params.get("mask_threshold", 0.5)
             round_intensities_flag = params.get("round_intensities", False)
 
+            # Determine source_mask for resampling (if not FULL_IMAGE mode)
+            source_mask_arg = None
+            if (
+                state.source_mode != SourceMode.FULL_IMAGE
+                and state.source_mask is not None
+            ):
+                source_mask_arg = state.source_mask
+
             # Update Image and raw_image
             state.image = resample_image(
                 state.image,
                 spacing,
                 interpolation=interp_img,
                 round_intensities=round_intensities_flag,
+                source_mask=source_mask_arg,
             )
             state.raw_image = (
                 state.image
             )  # Keep raw_image in sync before discretisation
+
+            # Propagate source_mask from resampled image if it was used
+            if state.image.has_source_mask and state.image.source_mask is not None:
+                state.source_mask = Image(
+                    array=state.image.source_mask.astype(np.uint8),
+                    spacing=state.image.spacing,
+                    origin=state.image.origin,
+                    direction=state.image.direction,
+                    modality="SOURCE_MASK",
+                )
 
             # Update Masks
             thresh_arg = mask_thresh if interp_mask != "nearest" else None
@@ -675,40 +866,116 @@ class RadiomicsPipeline:
 
             if filter_type == "mean":
                 filter_params["boundary"] = boundary
-                filtered_array = mean_filter(state.image.array, **filter_params)
+                # Pass source_mask if not in FULL_IMAGE mode
+                if (
+                    state.source_mode != SourceMode.FULL_IMAGE
+                    and state.source_mask is not None
+                ):
+                    source_arr = state.source_mask.array > 0
+                    result_tuple = mean_filter(
+                        state.image.array, source_mask=source_arr, **filter_params
+                    )
+                    # mean_filter returns tuple[NDArray, NDArray] when source_mask is used
+                    if isinstance(result_tuple, tuple):
+                        filtered_array = result_tuple[0]
+                    else:
+                        filtered_array = result_tuple
+                else:
+                    filtered_array = mean_filter(state.image.array, **filter_params)
 
             elif filter_type == "log":
                 filter_params["boundary"] = boundary
                 # Use image spacing if not provided
                 if "spacing_mm" not in filter_params:
                     filter_params["spacing_mm"] = state.image.spacing
-                filtered_array = laplacian_of_gaussian(
-                    state.image.array, **filter_params
-                )
+                # Pass source_mask if not in FULL_IMAGE mode
+                if (
+                    state.source_mode != SourceMode.FULL_IMAGE
+                    and state.source_mask is not None
+                ):
+                    source_arr = state.source_mask.array > 0
+                    result_tuple_log = laplacian_of_gaussian(
+                        state.image.array, source_mask=source_arr, **filter_params
+                    )
+                    if isinstance(result_tuple_log, tuple):
+                        filtered_array = result_tuple_log[0]
+                    else:
+                        filtered_array = result_tuple_log
+                else:
+                    filtered_array = laplacian_of_gaussian(
+                        state.image.array, **filter_params
+                    )
 
             elif filter_type == "laws":
                 filter_params["boundary"] = boundary
                 # 'kernel' param maps to first positional arg
                 kernel = filter_params.pop("kernel", "L5E5E5")
-                filtered_array = laws_filter(state.image.array, kernel, **filter_params)
+                # Pass source_mask if not in FULL_IMAGE mode
+                if (
+                    state.source_mode != SourceMode.FULL_IMAGE
+                    and state.source_mask is not None
+                ):
+                    source_arr = state.source_mask.array > 0
+                    result_laws = laws_filter(
+                        state.image.array,
+                        kernel,
+                        source_mask=source_arr,
+                        **filter_params,
+                    )
+                    if isinstance(result_laws, tuple):
+                        filtered_array = result_laws[0]
+                    else:
+                        filtered_array = result_laws
+                else:
+                    filtered_array = laws_filter(
+                        state.image.array, kernel, **filter_params
+                    )
 
             elif filter_type == "gabor":
                 filter_params["boundary"] = boundary
                 if "spacing_mm" not in filter_params:
                     filter_params["spacing_mm"] = state.image.spacing
+                # Pass source_mask if not in FULL_IMAGE mode
+                if (
+                    state.source_mode != SourceMode.FULL_IMAGE
+                    and state.source_mask is not None
+                ):
+                    source_arr = state.source_mask.array > 0
+                    filter_params["source_mask"] = source_arr
                 filtered_array = gabor_filter(state.image.array, **filter_params)
 
             elif filter_type == "wavelet":
                 filter_params["boundary"] = boundary
+                # Pass source_mask if not in FULL_IMAGE mode
+                if (
+                    state.source_mode != SourceMode.FULL_IMAGE
+                    and state.source_mask is not None
+                ):
+                    source_arr = state.source_mask.array > 0
+                    filter_params["source_mask"] = source_arr
                 filtered_array = wavelet_transform(state.image.array, **filter_params)
 
             elif filter_type == "simoncelli":
                 # Simoncelli doesn't use boundary param
+                # Pass source_mask if not in FULL_IMAGE mode
+                if (
+                    state.source_mode != SourceMode.FULL_IMAGE
+                    and state.source_mask is not None
+                ):
+                    source_arr = state.source_mask.array > 0
+                    filter_params["source_mask"] = source_arr
                 filtered_array = simoncelli_wavelet(state.image.array, **filter_params)
 
             elif filter_type == "riesz":
                 # Riesz transform variants
                 variant = filter_params.pop("variant", "base")
+                # Pass source_mask if not in FULL_IMAGE mode
+                if (
+                    state.source_mode != SourceMode.FULL_IMAGE
+                    and state.source_mask is not None
+                ):
+                    source_arr = state.source_mask.array > 0
+                    filter_params["source_mask"] = source_arr
                 if variant == "log":
                     if "spacing_mm" not in filter_params:
                         filter_params["spacing_mm"] = state.image.spacing
@@ -1170,7 +1437,13 @@ class RadiomicsPipeline:
         if ivh_disc_min_val is not None:
             ivh_kwargs["min_val"] = ivh_disc_min_val
 
-        for key in ["bin_width", "min_val", "max_val", "target_range_min", "target_range_max"]:
+        for key in [
+            "bin_width",
+            "min_val",
+            "max_val",
+            "target_range_min",
+            "target_range_max",
+        ]:
             if key in ivh_params:
                 ivh_kwargs[key] = ivh_params[key]
 
@@ -1365,9 +1638,7 @@ class RadiomicsPipeline:
         # Convert tuples to lists for serialization
         serializable_configs: dict[str, Any] = {}
         for name, steps in configs_to_export.items():
-            serializable_configs[name] = {
-                "steps": self._make_serializable(steps)
-            }
+            serializable_configs[name] = {"steps": self._make_serializable(steps)}
 
         result: dict[str, Any] = {}
 
@@ -1384,7 +1655,9 @@ class RadiomicsPipeline:
             }
             # Include last plan if available and not stale
             if self._last_deduplication_plan and not self._configs_modified_since_plan:
-                result["deduplication"]["last_plan"] = self._last_deduplication_plan.to_dict()
+                result["deduplication"][
+                    "last_plan"
+                ] = self._last_deduplication_plan.to_dict()
 
         return result
 
@@ -1460,7 +1733,9 @@ class RadiomicsPipeline:
         elif suffix in (".yaml", ".yml"):
             content = self.to_yaml(config_names=config_names)
         else:
-            raise ValueError(f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml")
+            raise ValueError(
+                f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml"
+            )
 
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -1606,7 +1881,9 @@ class RadiomicsPipeline:
         elif suffix in (".yaml", ".yml"):
             return cls.from_yaml(content, validate=validate)
         else:
-            raise ValueError(f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml")
+            raise ValueError(
+                f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml"
+            )
 
     def merge_configs(
         self,
@@ -1680,13 +1957,43 @@ class RadiomicsPipeline:
         "round_intensities": set(),
         "discretise": {"method", "n_bins", "bin_width", "min_value", "max_value"},
         "filter": {
-            "filter_type", "sigma", "cutoff", "compute_response_map", "boundary_condition",
-            "orientation", "kernal_size", "output_type", "alpha", "order", "levels",
-            "wavelet_name", "rotation_invariant", "pool_method", "response_type",
+            # Shared / dispatch
+            "type",
+            "boundary",
+            # Mean filter
+            "support",
+            # LoG filter
+            "sigma_mm",
+            "spacing_mm",
+            "truncate",
+            # Laws filter
+            "kernel",
+            "compute_energy",
+            "energy_distance",
+            # Gabor filter
+            "lambda_mm",
+            "gamma",
+            "theta",
+            "delta_theta",
+            "average_over_planes",
+            # Wavelet filter
+            "wavelet",
+            "decomposition",
+            "level",
+            # Riesz transform
+            "order",
+            "variant",
+            # Shared across filters
+            "rotation_invariant",
+            "pooling",
+            "use_parallel",
         },
         "extract_features": {
-            "families", "include_spatial_intensity", "include_local_intensity",
-            "texture_matrix_params", "ivh_params",
+            "families",
+            "include_spatial_intensity",
+            "include_local_intensity",
+            "texture_matrix_params",
+            "ivh_params",
         },
     }
 
@@ -1755,4 +2062,3 @@ class RadiomicsPipeline:
                         )
 
         return is_valid
-

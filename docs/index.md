@@ -22,7 +22,7 @@ See also the [NOTICE](NOTICE.md) file for attribution and third-party library in
 *   **🚀 High Performance**: Uses `numba` for Just In Time (JIT) compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](benchmarks.md) page for details).
 *   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantoms, and clinical datasets:
     *   **IBSI 1**: Feature extraction ([compliance report](ibsi1_compliance.md))
-    *   **IBSI 2**: Image filters ([filter compliance](ibsi2_compliance.md))
+    *   **IBSI 2**: Image filters ([Phase 1 filter compliance](ibsi2_compliance.md) | [Phase 2 filtered features](ibsi2_phase2_compliance.md) | [Phase 3 reproducibility](ibsi2_phase3_compliance.md))
 *   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, DICOM, DICOM-SEG, DICOM-SR).
 *   **✨ User-Friendly**: Pure Python implementation with a simple installation process and user-friendly pipeline module supporting easy feature extraction and analysis, ensuring a smooth experience from setup to analysis.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
@@ -44,5 +44,5 @@ See also the [NOTICE](NOTICE.md) file for attribution and third-party library in
 ## Getting Started
 
 1.  **Install**: Follow the [Installation](user_guide/installation.md) guide.
-2.  **Learn**: Check the [Feature Calculations](user_guide/feature_calculations.md) guide.
+2.  **Learn**: Check the [Pipeline & Preprocessing](user_guide/pipeline.md) guide.
 3.  **Reference**: Explore the [API Documentation](api/pipeline.md).

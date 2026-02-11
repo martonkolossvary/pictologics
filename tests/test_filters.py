@@ -535,6 +535,11 @@ class TestRieszSimoncelli:
             result = riesz_simoncelli(small_3d_image, level=1, order=order)
             assert result.shape == small_3d_image.shape
 
+    def test_zero_order_raises(self, small_3d_image):
+        """riesz_simoncelli should raise ValueError when all order components are 0."""
+        with pytest.raises(ValueError, match="At least one order component must be > 0"):
+            riesz_simoncelli(small_3d_image, level=1, order=(0, 0, 0))
+
 
 class TestGetRieszOrders:
     """Tests for get_riesz_orders function."""
