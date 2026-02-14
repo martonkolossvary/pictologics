@@ -1452,12 +1452,12 @@
   <a href="#034-2026-02-14" class="md-nav__link">
     <span class="md-ellipsis">
       
-        [0.3.4] - 2026-02-14
+        0.3.4 - 2026-02-14
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="[0.3.4] - 2026-02-14">
+    <nav class="md-nav" aria-label="0.3.4 - 2026-02-14">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1818,12 +1818,12 @@
   <a href="#034-2026-02-14" class="md-nav__link">
     <span class="md-ellipsis">
       
-        [0.3.4] - 2026-02-14
+        0.3.4 - 2026-02-14
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="[0.3.4] - 2026-02-14">
+    <nav class="md-nav" aria-label="0.3.4 - 2026-02-14">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2113,7 +2113,7 @@
 
 
 <h1 id="changelog">Changelog</h1>
-<h2 id="034-2026-02-14">[0.3.4] - 2026-02-14</h2>
+<h2 id="034-2026-02-14"><a href="https://github.com/martonkolossvary/pictologics/compare/v0.3.3...v0.3.4">0.3.4</a> - 2026-02-14</h2>
 <h3 id="fixed">Fixed</h3>
 <ul>
 <li><strong>Memory Exhaustion Issue</strong>: Resolved a critical issue where resampled background voxels (value 0) were included in the ROI if they fell within the <code>resegment</code> range. The pipeline now explicitly applies the <code>source_mask</code> to the <code>intensity_mask</code> after resampling when <code>source_mode="auto"</code> or an explicit source mask is used. This prevents memory explosions for small ROIs in large volumes with sentinel backgrounds.</li>
