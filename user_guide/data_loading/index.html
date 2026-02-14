@@ -755,6 +755,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#decision-guide-when-to-use-source_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision Guide: When to use source_mode?
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2030,6 +2041,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#decision-guide-when-to-use-source_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision Guide: When to use source_mode?
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2487,11 +2509,46 @@ used for feature extraction. Sentinel voxels will still be included in intensity
 texture matrices, and all other computed features unless you also add a <code>resegment</code> step to
 restrict the ROI to a valid intensity range. In practice, you typically need <strong>both</strong>:</p>
 <ul>
-<li><code>source_mode="auto"</code> (or an explicit source mask) to protect preprocessing</li>
-<li><code>resegment</code> to define the correct ROI for feature extraction</li>
+<li><code>source_mode="auto"</code> (or an explicit source mask) to protect preprocessing and <strong>prevent memory exhaustion</strong>.</li>
+<li><code>resegment</code> to define the correct ROI for feature extraction.</li>
 </ul>
+<p><strong>Critical Note:</strong> Without <code>source_mode="auto"</code>, resampled background voxels (often 0) may fall within your <code>resegment</code> range (e.g., -100 to 3000). This causes the <strong>entire image volume</strong> to be included in the ROI, leading to huge memory usage and slow GLCM calculations. <code>source_mode="auto"</code> ensures these background voxels are excluded from the ROI.</p>
 <p>See the <strong><a href="../quick_start/">Quick Start</a></strong> guide for a complete workflow and the
 <strong><a href="../cookbook/">Cookbook</a></strong> for batch processing examples.</p>
+<h4 id="decision-guide-when-to-use-source_mode">Decision Guide: When to use <code>source_mode</code>?</h4>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Image Type</th>
+<th style="text-align: left;">Example</th>
+<th style="text-align: left;">Recommended Mode</th>
+<th style="text-align: left;">Why?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Full FOV Scan</strong></td>
+<td style="text-align: left;">Standard CT/MRI (rectangular, includes air/background)</td>
+<td style="text-align: left;"><code>"full_image"</code> (Default)</td>
+<td style="text-align: left;">Entire image contains valid physical measurements (even air is approx -1000 HU). No artificial edges to protect.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Pre-processed / Cropped</strong></td>
+<td style="text-align: left;">Skull-stripped brain, cardiac ROI crop, or image with applied mask (background = 0 or -2048)</td>
+<td style="text-align: left;"><code>"auto"</code></td>
+<td style="text-align: left;">The background is <em>artificial</em>. Resampling near the tissue edge would blend valid tissue with invalid background (0), corrupting values. <code>auto</code> masking prevents this.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>ROI Mask Provided?</strong></td>
+<td style="text-align: left;">You have a separate segmentation file (e.g., <code>liver_mask.nii.gz</code>)</td>
+<td style="text-align: left;"><strong>Matches Image Type</strong></td>
+<td style="text-align: left;">The <em>ROI mask</em> tells us <em>where</em> to extract features. The <code>source_mode</code> tells us <em>what pixel values are valid</em> for interpolation. Use <code>"auto"</code> if the <em>image itself</em> has invalid background; use <code>"full_image"</code> if it's a raw scan.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Summary</strong>:
+- <strong>Raw Scan + Mask</strong>: Use <code>source_mode="full_image"</code> (default).
+- <strong>Masked/Cropped Image</strong>: Use <code>source_mode="auto"</code>.</p>
 </div>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>

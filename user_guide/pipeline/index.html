@@ -2558,7 +2558,12 @@ scientifically meaningful for all studies.</p>
 </tbody>
 </table>
 <h3 id="2-resegment">2. <code>resegment</code></h3>
-<p>Refines the ROI mask based on intensity thresholds, excluding voxels outside the specified range from feature extraction. This is essential for removing sentinel/NA values (e.g., -1024, -2048) from the ROI. Note that <code>resegment</code> only affects the <strong>ROI</strong> — if your pipeline also includes resampling or filtering, pair it with <code>source_mode="auto"</code> to protect those stages from sentinel contamination (see <a href="../data_loading/#handling-sentinel-na-values">Data Loading → Sentinel Handling</a>).</p>
+<p>Refines the ROI mask based on intensity thresholds, excluding voxels outside the specified range from feature extraction. This is essential for removing sentinel/NA values (e.g., -1024, -2048) from the ROI.</p>
+<div class="admonition warning">
+<p class="admonition-title">Memory Usage Alert</p>
+<p>If your image has a background that resamples to 0, and 0 is within your <code>resegment</code> range, <strong>you must use <code>source_mode="auto"</code></strong>.
+Otherwise, <code>resegment</code> will include the entire background in the ROI, causing memory exhaustion during texture calculation. <code>source_mode="auto"</code> ensures the background remains excluded.</p>
+</div>
 <table>
 <thead>
 <tr>
