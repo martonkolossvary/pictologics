@@ -119,7 +119,11 @@ Resamples the image and mask to a new voxel spacing.
 
 ### 2. `resegment`
 
-Refines the ROI mask based on intensity thresholds, excluding voxels outside the specified range from feature extraction. This is essential for removing sentinel/NA values (e.g., -1024, -2048) from the ROI. Note that `resegment` only affects the **ROI** — if your pipeline also includes resampling or filtering, pair it with `source_mode="auto"` to protect those stages from sentinel contamination (see [Data Loading → Sentinel Handling](data_loading.md#handling-sentinel-na-values)).
+Refines the ROI mask based on intensity thresholds, excluding voxels outside the specified range from feature extraction. This is essential for removing sentinel/NA values (e.g., -1024, -2048) from the ROI.
+
+!!! warning "Memory Usage Alert"
+    If your image has a background that resamples to 0, and 0 is within your `resegment` range, **you must use `source_mode="auto"`**.
+    Otherwise, `resegment` will include the entire background in the ROI, causing memory exhaustion during texture calculation. `source_mode="auto"` ensures the background remains excluded.
 
 | Parameter | Type | Default | Description |
 |:----------|:-----|:--------|:------------|

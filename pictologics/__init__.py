@@ -2,7 +2,7 @@
 Pictologics: IBSI-compliant radiomic feature extraction from medical images.
 """
 
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 from .deduplication import (
     CURRENT_RULES_VERSION,

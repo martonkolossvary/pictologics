@@ -21,6 +21,7 @@ from __future__ import annotations
 import copy
 import datetime
 import json
+import logging
 import warnings
 from dataclasses import dataclass
 from enum import Enum
@@ -110,6 +111,11 @@ class SourceMode(Enum):
     FULL_IMAGE = "full_image"
     ROI_ONLY = "roi_only"
     AUTO = "auto"
+    """
+    Automatically detect sentinel values (e.g., -2048) and exclude them.
+    This mode ensures that background voxels are not included in the ROI after
+    resampling, even if their intensity (e.g., 0) is within the valid range.
+    """
 
 
 @dataclass
@@ -537,19 +543,23 @@ class RadiomicsPipeline:
                     detected_sentinel_value = explicit_sentinel
                     sentinel_detected = True
                 else:
-                    detected = detect_sentinel_value(orig_img, roi_mask=orig_mask)
+                    # If mask was auto-generated (full mask), do not use it for
+                    # "outside-ness" check in detection, as everything is "inside".
+                    mask_for_detection = orig_mask if not mask_was_generated else None
+                    detected = detect_sentinel_value(
+                        orig_img, roi_mask=mask_for_detection
+                    )
                     if detected is not None:
                         detected_sentinel_value = detected
                         sentinel_detected = True
 
-                        # Emit warning to user
-                        warnings.warn(
+                        # Log info instead of warning (user request)
+                        # Changed to DEBUG level to avoid console spam in default logging configuration
+                        logging.debug(
                             f"Auto-detected sentinel value {detected} in image. "
                             f"Using source validity mask for config '{config_name}'. "
                             f"Voxels with value {detected} will be excluded from "
-                            f"resampling/filtering. To disable, set source_mode='full_image'.",
-                            UserWarning,
-                            stacklevel=2,
+                            f"resampling/filtering."
                         )
 
                 if sentinel_detected and detected_sentinel_value is not None:
@@ -720,6 +730,20 @@ class RadiomicsPipeline:
                 interpolation=interp_mask,
                 mask_threshold=thresh_arg,
             )
+
+            # CRITICAL: If valid source mask exists, apply it to intensity mask.
+            # This prevents background (often 0 after resampling) from being
+            # considered part of the ROI if the resegmentation range includes 0.
+            if state.source_mask is not None:
+                # Ensure binary mask semantics
+                valid_mask = state.source_mask.array > 0
+                state.intensity_mask = Image(
+                    array=(state.intensity_mask.array * valid_mask).astype(np.uint8),
+                    spacing=state.intensity_mask.spacing,
+                    origin=state.intensity_mask.origin,
+                    direction=state.intensity_mask.direction,
+                    modality=state.intensity_mask.modality,
+                )
 
             self._ensure_nonempty_roi(state, context="resample")
 
@@ -1638,7 +1662,15 @@ class RadiomicsPipeline:
         # Convert tuples to lists for serialization
         serializable_configs: dict[str, Any] = {}
         for name, steps in configs_to_export.items():
-            serializable_configs[name] = {"steps": self._make_serializable(steps)}
+            conf_data = {"steps": self._make_serializable(steps)}
+            # Include metadata if present
+            if name in self._config_metadata:
+                meta = self._config_metadata[name]
+                if "source_mode" in meta:
+                    conf_data["source_mode"] = meta["source_mode"]
+                if "sentinel_value" in meta and meta["sentinel_value"] is not None:
+                    conf_data["sentinel_value"] = meta["sentinel_value"]
+            serializable_configs[name] = conf_data
 
         result: dict[str, Any] = {}
 
@@ -1785,6 +1817,14 @@ class RadiomicsPipeline:
                 )
                 continue
 
+            # Extract metadata
+            source_mode = "full_image"
+            sentinel_value = None
+
+            if isinstance(config_data, dict):
+                source_mode = config_data.get("source_mode", "full_image")
+                sentinel_value = config_data.get("sentinel_value")
+
             # Convert YAML lists to tuples where needed
             converted_steps = pipeline._convert_yaml_steps(steps)
 
@@ -1792,6 +1832,10 @@ class RadiomicsPipeline:
                 cls._validate_config(name, converted_steps)
 
             pipeline._configs[name] = converted_steps
+            pipeline._config_metadata[name] = {
+                "source_mode": source_mode,
+                "sentinel_value": sentinel_value,
+            }
 
         # Mark configs as loaded (not modified) so dedup plan from serialized data is valid
         pipeline._configs_modified_since_plan = False

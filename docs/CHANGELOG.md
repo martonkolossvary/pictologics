@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.4] - 2026-02-14
+
+### Fixed
+- **Memory Exhaustion Issue**: Resolved a critical issue where resampled background voxels (value 0) were included in the ROI if they fell within the `resegment` range. The pipeline now explicitly applies the `source_mask` to the `intensity_mask` after resampling when `source_mode="auto"` or an explicit source mask is used. This prevents memory explosions for small ROIs in large volumes with sentinel backgrounds.
+- **Pipeline Configuration Serialization**: Fixed a bug where `source_mode` and `sentinel_value` were lost during serialization (`to_dict`/`to_yaml`).
+- **Sentinel Detection**: Fixed detection logic to correctly handle auto-generated full masks.
+
+### Changed
+- **Documentation**: Updated `Data Loading` and `Pipeline` user guides to clarify the usage of `source_mode="auto"` vs `"full_image"` and its impact on memory and correctness.
+
+---
+
 ## [0.3.3] - 2026-02-11
 
 ### Changed

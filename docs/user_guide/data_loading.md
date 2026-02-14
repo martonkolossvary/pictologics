@@ -151,11 +151,25 @@ The source mask enables **masked interpolation** for resampling and **normalized
     texture matrices, and all other computed features unless you also add a `resegment` step to
     restrict the ROI to a valid intensity range. In practice, you typically need **both**:
 
-    - `source_mode="auto"` (or an explicit source mask) to protect preprocessing
-    - `resegment` to define the correct ROI for feature extraction
+    - `source_mode="auto"` (or an explicit source mask) to protect preprocessing and **prevent memory exhaustion**.
+    - `resegment` to define the correct ROI for feature extraction.
+
+    **Critical Note:** Without `source_mode="auto"`, resampled background voxels (often 0) may fall within your `resegment` range (e.g., -100 to 3000). This causes the **entire image volume** to be included in the ROI, leading to huge memory usage and slow GLCM calculations. `source_mode="auto"` ensures these background voxels are excluded from the ROI.
 
     See the **[Quick Start](quick_start.md)** guide for a complete workflow and the
     **[Cookbook](cookbook.md)** for batch processing examples.
+
+    #### Decision Guide: When to use `source_mode`?
+
+    | Image Type | Example | Recommended Mode | Why? |
+    | :--- | :--- | :--- | :--- |
+    | **Full FOV Scan** | Standard CT/MRI (rectangular, includes air/background) | `"full_image"` (Default) | Entire image contains valid physical measurements (even air is approx -1000 HU). No artificial edges to protect. |
+    | **Pre-processed / Cropped** | Skull-stripped brain, cardiac ROI crop, or image with applied mask (background = 0 or -2048) | `"auto"` | The background is *artificial*. Resampling near the tissue edge would blend valid tissue with invalid background (0), corrupting values. `auto` masking prevents this. |
+    | **ROI Mask Provided?** | You have a separate segmentation file (e.g., `liver_mask.nii.gz`) | **Matches Image Type** | The *ROI mask* tells us *where* to extract features. The `source_mode` tells us *what pixel values are valid* for interpolation. Use `"auto"` if the *image itself* has invalid background; use `"full_image"` if it's a raw scan. |
+
+    **Summary**:
+    - **Raw Scan + Mask**: Use `source_mode="full_image"` (default).
+    - **Masked/Cropped Image**: Use `source_mode="auto"`.
 
 !!! tip
     Check your data's minimum value to identify potential sentinels:

@@ -159,12 +159,16 @@ class TestCoverageGapFiller:
 
         pipeline.add_config("auto_config", config_roi, source_mode="auto")
 
-        # Warns about auto-detection
-        with pytest.warns(UserWarning, match="Auto-detected"):
-            results_auto = pipeline.run(
-                img_sent, self.mask, config_names=["auto_config"]
-            )
+        # AUTO detection now logs at debug level (no UserWarning expected)
+        results_auto = pipeline.run(
+            img_sent, self.mask, config_names=["auto_config"]
+        )
         assert "auto_config" in results_auto
+
+        auto_logs = [entry for entry in pipeline._log if entry["config_name"] == "auto_config"]
+        assert auto_logs
+        assert auto_logs[-1]["sentinel_detected"] is True
+        assert auto_logs[-1]["sentinel_value"] == sentinel_val
 
     def test_pipeline_defensive_branches(self):
         # Covers pipeline.py defensive else branches for tuple checks
@@ -211,6 +215,11 @@ class TestCoverageGapFiller:
         results = pipeline.run(img_sent, self.mask, config_names=["explicit_sent"])
         assert "explicit_sent" in results
         # Verify source_mask was used (check log if possible, or assume based on completion)
+
+        exported = pipeline.to_dict(config_names=["explicit_sent"])
+        exported_cfg = exported["configs"]["explicit_sent"]
+        assert exported_cfg["source_mode"] == "auto"
+        assert exported_cfg["sentinel_value"] == -1000
 
     def test_pipeline_filters_with_source_mask_no_resample(self):
         # Covers pipeline.py filter blocks with source_mask (lines 875-973)
