@@ -275,12 +275,12 @@ pipeline.save_configs("study_config.yaml", config_names=["my_study_config"])
 
 ### Importing Configurations
 
-Load configurations from files:
+Load configurations from files. The resulting pipeline contains **only** the configurations defined in the file:
 
 ```python
 from pictologics import RadiomicsPipeline
 
-# Load from YAML file
+# Load from YAML file (only file configs, no standard configs)
 pipeline = RadiomicsPipeline.load_configs("my_configs.yaml")
 
 # Load from JSON file
@@ -288,7 +288,25 @@ pipeline = RadiomicsPipeline.load_configs("my_configs.json")
 
 # Load with validation (logs warnings for unknown parameters)
 pipeline = RadiomicsPipeline.load_configs("my_configs.yaml", validate=True)
+
+# Load file configs AND include standard configs
+pipeline = RadiomicsPipeline.load_configs("my_configs.yaml", load_standard=True)
 ```
+
+!!! note "Standard Configurations"
+    By default, `load_configs()`, `from_yaml()`, `from_json()`, and `from_dict()` create a
+    pipeline with **only** the provided configurations. Standard configurations (e.g.,
+    `standard_fbn_32`) are not included unless you pass `load_standard=True`.
+    
+    If you need both your file configs and standard configs, you have two options:
+    
+    1. Pass `load_standard=True` to any loading method
+    2. Load your file, then merge with a standard pipeline:
+    
+    ```python
+    loaded = RadiomicsPipeline.load_configs("my_configs.yaml")
+    loaded.merge_configs(RadiomicsPipeline())  # Add standard configs
+    ```
 
 ### String-based Export/Import
 
@@ -773,6 +791,7 @@ This workflow demonstrates several important practices:
 | Export to YAML | `pipeline.save_configs("file.yaml")` |
 | Export to JSON | `pipeline.save_configs("file.json")` |
 | Import from file | `RadiomicsPipeline.load_configs("file.yaml")` |
+| Import with standard configs | `RadiomicsPipeline.load_configs("file.yaml", load_standard=True)` |
 | Merge configs | `pipeline.merge_configs(other_pipeline)` |
 | Export to string | `pipeline.to_yaml()` / `pipeline.to_json()` |
 | Import from string | `RadiomicsPipeline.from_yaml(s)` / `RadiomicsPipeline.from_json(s)` |

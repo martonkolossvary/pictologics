@@ -479,6 +479,7 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_033_CT</td><td>stat_min</td><td>Mean</td><td>-307.9</td><td>-200</td><td>107.9</td></tr>
 <tr><td>STS_033_CT</td><td>stat_max</td><td>Gabor</td><td>497.8</td><td>200</td><td>297.8</td></tr>
 <tr><td>STS_033_CT</td><td>stat_range</td><td>Gabor</td><td>497.7</td><td>200</td><td>297.7</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>3.931</td><td>7.624</td><td>3.693</td></tr>
 <tr><td>STS_035_CT</td><td>stat_var</td><td>Laws</td><td>1.275e+04</td><td>2361</td><td>1.039e+04</td></tr>
 <tr><td>STS_035_CT</td><td>stat_var</td><td>Gabor</td><td>2.263e+04</td><td>1404</td><td>2.123e+04</td></tr>
 <tr><td>STS_035_CT</td><td>stat_var</td><td>Simon. L2</td><td>1.69e+04</td><td>3948</td><td>1.295e+04</td></tr>
@@ -502,7 +503,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_035_CT</td><td>stat_medad</td><td>Simon. L2</td><td>88.8</td><td>47.7</td><td>41.1</td></tr>
 <tr><td>STS_035_CT</td><td>stat_rms</td><td>Laws</td><td>166.2</td><td>82.01</td><td>84.23</td></tr>
 <tr><td>STS_035_CT</td><td>stat_rms</td><td>Gabor</td><td>173.4</td><td>65.47</td><td>108</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>3.931</td><td>7.624</td><td>3.693</td></tr>
 <tr><td>STS_034_CT</td><td>stat_mean</td><td>Gabor</td><td>218.1</td><td>102.2</td><td>115.9</td></tr>
 <tr><td>STS_034_CT</td><td>stat_var</td><td>Gabor</td><td>2.749e+04</td><td>2755</td><td>2.474e+04</td></tr>
 <tr><td>STS_034_CT</td><td>stat_median</td><td>Gabor</td><td>177.5</td><td>99</td><td>78.5</td></tr>
@@ -824,6 +824,15 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_003_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>33</td><td>0</td><td>33</td></tr>
 <tr><td>STS_003_CT</td><td>stat_rms</td><td>Laws</td><td>120</td><td>0</td><td>120</td></tr>
 <tr><td>STS_003_CT</td><td>stat_rms</td><td>Gabor</td><td>294</td><td>0</td><td>294</td></tr>
+<tr><td>STS_006_PET</td><td>stat_cov</td><td>LoG</td><td>-4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_006_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-824</td><td>0</td><td>824</td></tr>
+<tr><td>STS_006_PET</td><td>stat_cov</td><td>Simon. L1</td><td>35</td><td>0</td><td>35</td></tr>
+<tr><td>STS_006_PET</td><td>stat_cov</td><td>Simon. L2</td><td>6</td><td>0</td><td>6</td></tr>
+<tr><td>STS_006_PET</td><td>stat_qcod</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_006_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_006_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-31</td><td>0</td><td>31</td></tr>
+<tr><td>STS_006_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>140</td><td>0</td><td>140</td></tr>
+<tr><td>STS_006_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_004_MRI</td><td>stat_mean</td><td>Gabor</td><td>78</td><td>0</td><td>78</td></tr>
 <tr><td>STS_004_MRI</td><td>stat_var</td><td>Gabor</td><td>7387</td><td>0</td><td>7387</td></tr>
 <tr><td>STS_004_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
@@ -865,15 +874,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_004_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>10</td><td>0</td><td>10</td></tr>
 <tr><td>STS_004_MRI</td><td>stat_rms</td><td>Laws</td><td>75</td><td>0</td><td>75</td></tr>
 <tr><td>STS_004_MRI</td><td>stat_rms</td><td>Gabor</td><td>116</td><td>0</td><td>116</td></tr>
-<tr><td>STS_006_PET</td><td>stat_cov</td><td>LoG</td><td>-4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_006_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-824</td><td>0</td><td>824</td></tr>
-<tr><td>STS_006_PET</td><td>stat_cov</td><td>Simon. L1</td><td>35</td><td>0</td><td>35</td></tr>
-<tr><td>STS_006_PET</td><td>stat_cov</td><td>Simon. L2</td><td>6</td><td>0</td><td>6</td></tr>
-<tr><td>STS_006_PET</td><td>stat_qcod</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_006_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_006_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-31</td><td>0</td><td>31</td></tr>
-<tr><td>STS_006_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>140</td><td>0</td><td>140</td></tr>
-<tr><td>STS_006_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_001_MRI</td><td>stat_mean</td><td>Gabor</td><td>112</td><td>0</td><td>112</td></tr>
 <tr><td>STS_001_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_001_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
@@ -1144,6 +1144,14 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_005_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>360</td><td>0</td><td>360</td></tr>
 <tr><td>STS_005_CT</td><td>stat_rms</td><td>Laws</td><td>83</td><td>0</td><td>83</td></tr>
 <tr><td>STS_005_CT</td><td>stat_rms</td><td>Gabor</td><td>323</td><td>0</td><td>323</td></tr>
+<tr><td>STS_010_PET</td><td>stat_cov</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_010_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>507</td><td>0</td><td>507</td></tr>
+<tr><td>STS_010_PET</td><td>stat_cov</td><td>Simon. L1</td><td>17</td><td>0</td><td>17</td></tr>
+<tr><td>STS_010_PET</td><td>stat_cov</td><td>Simon. L2</td><td>5</td><td>0</td><td>5</td></tr>
+<tr><td>STS_010_PET</td><td>stat_qcod</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_010_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>765</td><td>0</td><td>765</td></tr>
+<tr><td>STS_010_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>15</td><td>0</td><td>15</td></tr>
+<tr><td>STS_010_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_008_CT</td><td>stat_mean</td><td>Gabor</td><td>114</td><td>0</td><td>114</td></tr>
 <tr><td>STS_008_CT</td><td>stat_var</td><td>Gabor</td><td>5239</td><td>0</td><td>5239</td></tr>
 <tr><td>STS_008_CT</td><td>stat_skew</td><td>LoG</td><td>3</td><td>0</td><td>3</td></tr>
@@ -1182,14 +1190,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_008_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>45</td><td>0</td><td>45</td></tr>
 <tr><td>STS_008_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>106</td><td>0</td><td>106</td></tr>
 <tr><td>STS_008_CT</td><td>stat_rms</td><td>Gabor</td><td>135</td><td>0</td><td>135</td></tr>
-<tr><td>STS_010_PET</td><td>stat_cov</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_010_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>507</td><td>0</td><td>507</td></tr>
-<tr><td>STS_010_PET</td><td>stat_cov</td><td>Simon. L1</td><td>17</td><td>0</td><td>17</td></tr>
-<tr><td>STS_010_PET</td><td>stat_cov</td><td>Simon. L2</td><td>5</td><td>0</td><td>5</td></tr>
-<tr><td>STS_010_PET</td><td>stat_qcod</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_010_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>765</td><td>0</td><td>765</td></tr>
-<tr><td>STS_010_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>15</td><td>0</td><td>15</td></tr>
-<tr><td>STS_010_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_011_PET</td><td>stat_cov</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_011_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>2554</td><td>0</td><td>2554</td></tr>
 <tr><td>STS_011_PET</td><td>stat_cov</td><td>Simon. L1</td><td>67</td><td>0</td><td>67</td></tr>
@@ -1315,14 +1315,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_007_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-283</td><td>0</td><td>283</td></tr>
 <tr><td>STS_007_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-800</td><td>0</td><td>800</td></tr>
 <tr><td>STS_007_CT</td><td>stat_rms</td><td>Gabor</td><td>265</td><td>0</td><td>265</td></tr>
-<tr><td>STS_013_PET</td><td>stat_cov</td><td>LoG</td><td>-13</td><td>0</td><td>13</td></tr>
-<tr><td>STS_013_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>1772</td><td>0</td><td>1772</td></tr>
-<tr><td>STS_013_PET</td><td>stat_cov</td><td>Simon. L1</td><td>292</td><td>0</td><td>292</td></tr>
-<tr><td>STS_013_PET</td><td>stat_cov</td><td>Simon. L2</td><td>284</td><td>0</td><td>284</td></tr>
-<tr><td>STS_013_PET</td><td>stat_qcod</td><td>LoG</td><td>-28</td><td>0</td><td>28</td></tr>
-<tr><td>STS_013_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-287</td><td>0</td><td>287</td></tr>
-<tr><td>STS_013_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-28</td><td>0</td><td>28</td></tr>
-<tr><td>STS_013_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>-112</td><td>0</td><td>112</td></tr>
 <tr><td>STS_012_CT</td><td>stat_mean</td><td>Gabor</td><td>81</td><td>0</td><td>81</td></tr>
 <tr><td>STS_012_CT</td><td>stat_min</td><td>Simon. L1</td><td>-93</td><td>0</td><td>93</td></tr>
 <tr><td>STS_012_CT</td><td>stat_min</td><td>Simon. L2</td><td>-77</td><td>0</td><td>77</td></tr>
@@ -1344,6 +1336,14 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_012_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-150</td><td>0</td><td>150</td></tr>
 <tr><td>STS_012_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-33</td><td>0</td><td>33</td></tr>
 <tr><td>STS_012_CT</td><td>stat_rms</td><td>Gabor</td><td>96</td><td>0</td><td>96</td></tr>
+<tr><td>STS_013_PET</td><td>stat_cov</td><td>LoG</td><td>-13</td><td>0</td><td>13</td></tr>
+<tr><td>STS_013_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>1772</td><td>0</td><td>1772</td></tr>
+<tr><td>STS_013_PET</td><td>stat_cov</td><td>Simon. L1</td><td>292</td><td>0</td><td>292</td></tr>
+<tr><td>STS_013_PET</td><td>stat_cov</td><td>Simon. L2</td><td>284</td><td>0</td><td>284</td></tr>
+<tr><td>STS_013_PET</td><td>stat_qcod</td><td>LoG</td><td>-28</td><td>0</td><td>28</td></tr>
+<tr><td>STS_013_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-287</td><td>0</td><td>287</td></tr>
+<tr><td>STS_013_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-28</td><td>0</td><td>28</td></tr>
+<tr><td>STS_013_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>-112</td><td>0</td><td>112</td></tr>
 <tr><td>STS_012_MRI</td><td>stat_skew</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_012_MRI</td><td>stat_skew</td><td>Gabor</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_012_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
@@ -1476,46 +1476,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_011_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-40</td><td>0</td><td>40</td></tr>
 <tr><td>STS_011_CT</td><td>stat_rms</td><td>Laws</td><td>79</td><td>0</td><td>79</td></tr>
 <tr><td>STS_011_CT</td><td>stat_rms</td><td>Gabor</td><td>80</td><td>0</td><td>80</td></tr>
-<tr><td>STS_009_CT</td><td>stat_mean</td><td>Laws</td><td>75</td><td>0</td><td>75</td></tr>
-<tr><td>STS_009_CT</td><td>stat_mean</td><td>Gabor</td><td>87</td><td>0</td><td>87</td></tr>
-<tr><td>STS_009_CT</td><td>stat_var</td><td>Gabor</td><td>5810</td><td>0</td><td>5810</td></tr>
-<tr><td>STS_009_CT</td><td>stat_skew</td><td>LoG</td><td>6</td><td>0</td><td>6</td></tr>
-<tr><td>STS_009_CT</td><td>stat_skew</td><td>Laws</td><td>3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_009_CT</td><td>stat_skew</td><td>Gabor</td><td>3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_009_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_009_CT</td><td>stat_kurt</td><td>LoG</td><td>45</td><td>0</td><td>45</td></tr>
-<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Laws</td><td>24</td><td>0</td><td>24</td></tr>
-<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Gabor</td><td>13</td><td>0</td><td>13</td></tr>
-<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>17</td><td>0</td><td>17</td></tr>
-<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>40</td><td>0</td><td>40</td></tr>
-<tr><td>STS_009_CT</td><td>stat_median</td><td>Laws</td><td>76</td><td>0</td><td>76</td></tr>
-<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L1</td><td>-287</td><td>0</td><td>287</td></tr>
-<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L2</td><td>-428</td><td>0</td><td>428</td></tr>
-<tr><td>STS_009_CT</td><td>stat_p90</td><td>Gabor</td><td>174</td><td>0</td><td>174</td></tr>
-<tr><td>STS_009_CT</td><td>stat_max</td><td>Laws</td><td>389</td><td>0</td><td>389</td></tr>
-<tr><td>STS_009_CT</td><td>stat_max</td><td>Gabor</td><td>1509</td><td>0</td><td>1509</td></tr>
-<tr><td>STS_009_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>262</td><td>0</td><td>262</td></tr>
-<tr><td>STS_009_CT</td><td>stat_max</td><td>Simon. L1</td><td>341</td><td>0</td><td>341</td></tr>
-<tr><td>STS_009_CT</td><td>stat_max</td><td>Simon. L2</td><td>327</td><td>0</td><td>327</td></tr>
-<tr><td>STS_009_CT</td><td>stat_iqr</td><td>Gabor</td><td>69</td><td>0</td><td>69</td></tr>
-<tr><td>STS_009_CT</td><td>stat_range</td><td>Laws</td><td>364</td><td>0</td><td>364</td></tr>
-<tr><td>STS_009_CT</td><td>stat_range</td><td>Gabor</td><td>1509</td><td>0</td><td>1509</td></tr>
-<tr><td>STS_009_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>298</td><td>0</td><td>298</td></tr>
-<tr><td>STS_009_CT</td><td>stat_range</td><td>Simon. L1</td><td>627</td><td>0</td><td>627</td></tr>
-<tr><td>STS_009_CT</td><td>stat_range</td><td>Simon. L2</td><td>755</td><td>0</td><td>755</td></tr>
-<tr><td>STS_009_CT</td><td>stat_mad</td><td>Gabor</td><td>52</td><td>0</td><td>52</td></tr>
-<tr><td>STS_009_CT</td><td>stat_rmad</td><td>Gabor</td><td>30</td><td>0</td><td>30</td></tr>
-<tr><td>STS_009_CT</td><td>stat_medad</td><td>Gabor</td><td>49</td><td>0</td><td>49</td></tr>
-<tr><td>STS_009_CT</td><td>stat_cov</td><td>LoG</td><td>7</td><td>0</td><td>7</td></tr>
-<tr><td>STS_009_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-3790</td><td>0</td><td>3790</td></tr>
-<tr><td>STS_009_CT</td><td>stat_cov</td><td>Simon. L1</td><td>92</td><td>0</td><td>92</td></tr>
-<tr><td>STS_009_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-192</td><td>0</td><td>192</td></tr>
-<tr><td>STS_009_CT</td><td>stat_qcod</td><td>LoG</td><td>63</td><td>0</td><td>63</td></tr>
-<tr><td>STS_009_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>3648</td><td>0</td><td>3648</td></tr>
-<tr><td>STS_009_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>181</td><td>0</td><td>181</td></tr>
-<tr><td>STS_009_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>690</td><td>0</td><td>690</td></tr>
-<tr><td>STS_009_CT</td><td>stat_rms</td><td>Laws</td><td>79</td><td>0</td><td>79</td></tr>
-<tr><td>STS_009_CT</td><td>stat_rms</td><td>Gabor</td><td>116</td><td>0</td><td>116</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_mean</td><td>Laws</td><td>84</td><td>0</td><td>84</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_mean</td><td>Gabor</td><td>138</td><td>0</td><td>138</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_var</td><td>Gabor</td><td>3.353e+04</td><td>0</td><td>3.353e+04</td></tr>
@@ -1567,6 +1527,46 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_015_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-16</td><td>0</td><td>16</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_rms</td><td>Laws</td><td>103</td><td>0</td><td>103</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_rms</td><td>Gabor</td><td>229</td><td>0</td><td>229</td></tr>
+<tr><td>STS_009_CT</td><td>stat_mean</td><td>Laws</td><td>75</td><td>0</td><td>75</td></tr>
+<tr><td>STS_009_CT</td><td>stat_mean</td><td>Gabor</td><td>87</td><td>0</td><td>87</td></tr>
+<tr><td>STS_009_CT</td><td>stat_var</td><td>Gabor</td><td>5810</td><td>0</td><td>5810</td></tr>
+<tr><td>STS_009_CT</td><td>stat_skew</td><td>LoG</td><td>6</td><td>0</td><td>6</td></tr>
+<tr><td>STS_009_CT</td><td>stat_skew</td><td>Laws</td><td>3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_009_CT</td><td>stat_skew</td><td>Gabor</td><td>3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_009_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_009_CT</td><td>stat_kurt</td><td>LoG</td><td>45</td><td>0</td><td>45</td></tr>
+<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Laws</td><td>24</td><td>0</td><td>24</td></tr>
+<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Gabor</td><td>13</td><td>0</td><td>13</td></tr>
+<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>17</td><td>0</td><td>17</td></tr>
+<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>40</td><td>0</td><td>40</td></tr>
+<tr><td>STS_009_CT</td><td>stat_median</td><td>Laws</td><td>76</td><td>0</td><td>76</td></tr>
+<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L1</td><td>-287</td><td>0</td><td>287</td></tr>
+<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L2</td><td>-428</td><td>0</td><td>428</td></tr>
+<tr><td>STS_009_CT</td><td>stat_p90</td><td>Gabor</td><td>174</td><td>0</td><td>174</td></tr>
+<tr><td>STS_009_CT</td><td>stat_max</td><td>Laws</td><td>389</td><td>0</td><td>389</td></tr>
+<tr><td>STS_009_CT</td><td>stat_max</td><td>Gabor</td><td>1509</td><td>0</td><td>1509</td></tr>
+<tr><td>STS_009_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>262</td><td>0</td><td>262</td></tr>
+<tr><td>STS_009_CT</td><td>stat_max</td><td>Simon. L1</td><td>341</td><td>0</td><td>341</td></tr>
+<tr><td>STS_009_CT</td><td>stat_max</td><td>Simon. L2</td><td>327</td><td>0</td><td>327</td></tr>
+<tr><td>STS_009_CT</td><td>stat_iqr</td><td>Gabor</td><td>69</td><td>0</td><td>69</td></tr>
+<tr><td>STS_009_CT</td><td>stat_range</td><td>Laws</td><td>364</td><td>0</td><td>364</td></tr>
+<tr><td>STS_009_CT</td><td>stat_range</td><td>Gabor</td><td>1509</td><td>0</td><td>1509</td></tr>
+<tr><td>STS_009_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>298</td><td>0</td><td>298</td></tr>
+<tr><td>STS_009_CT</td><td>stat_range</td><td>Simon. L1</td><td>627</td><td>0</td><td>627</td></tr>
+<tr><td>STS_009_CT</td><td>stat_range</td><td>Simon. L2</td><td>755</td><td>0</td><td>755</td></tr>
+<tr><td>STS_009_CT</td><td>stat_mad</td><td>Gabor</td><td>52</td><td>0</td><td>52</td></tr>
+<tr><td>STS_009_CT</td><td>stat_rmad</td><td>Gabor</td><td>30</td><td>0</td><td>30</td></tr>
+<tr><td>STS_009_CT</td><td>stat_medad</td><td>Gabor</td><td>49</td><td>0</td><td>49</td></tr>
+<tr><td>STS_009_CT</td><td>stat_cov</td><td>LoG</td><td>7</td><td>0</td><td>7</td></tr>
+<tr><td>STS_009_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-3790</td><td>0</td><td>3790</td></tr>
+<tr><td>STS_009_CT</td><td>stat_cov</td><td>Simon. L1</td><td>92</td><td>0</td><td>92</td></tr>
+<tr><td>STS_009_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-192</td><td>0</td><td>192</td></tr>
+<tr><td>STS_009_CT</td><td>stat_qcod</td><td>LoG</td><td>63</td><td>0</td><td>63</td></tr>
+<tr><td>STS_009_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>3648</td><td>0</td><td>3648</td></tr>
+<tr><td>STS_009_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>181</td><td>0</td><td>181</td></tr>
+<tr><td>STS_009_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>690</td><td>0</td><td>690</td></tr>
+<tr><td>STS_009_CT</td><td>stat_rms</td><td>Laws</td><td>79</td><td>0</td><td>79</td></tr>
+<tr><td>STS_009_CT</td><td>stat_rms</td><td>Gabor</td><td>116</td><td>0</td><td>116</td></tr>
 <tr><td>STS_016_PET</td><td>stat_skew</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_016_PET</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_016_PET</td><td>stat_skew</td><td>Simon. L2</td><td>3</td><td>0</td><td>3</td></tr>
@@ -1580,25 +1580,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_016_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-437</td><td>0</td><td>437</td></tr>
 <tr><td>STS_016_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-82</td><td>0</td><td>82</td></tr>
 <tr><td>STS_016_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>16</td><td>0</td><td>16</td></tr>
-<tr><td>STS_015_CT</td><td>stat_mean</td><td>Laws</td><td>73</td><td>0</td><td>73</td></tr>
-<tr><td>STS_015_CT</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_015_CT</td><td>stat_min</td><td>Simon. L1</td><td>-98</td><td>0</td><td>98</td></tr>
-<tr><td>STS_015_CT</td><td>stat_min</td><td>Simon. L2</td><td>-70</td><td>0</td><td>70</td></tr>
-<tr><td>STS_015_CT</td><td>stat_p10</td><td>Laws</td><td>63</td><td>0</td><td>63</td></tr>
-<tr><td>STS_015_CT</td><td>stat_max</td><td>Gabor</td><td>271</td><td>0</td><td>271</td></tr>
-<tr><td>STS_015_CT</td><td>stat_range</td><td>Gabor</td><td>271</td><td>0</td><td>271</td></tr>
-<tr><td>STS_015_CT</td><td>stat_range</td><td>Simon. L1</td><td>192</td><td>0</td><td>192</td></tr>
-<tr><td>STS_015_CT</td><td>stat_range</td><td>Simon. L2</td><td>151</td><td>0</td><td>151</td></tr>
-<tr><td>STS_015_CT</td><td>stat_mad</td><td>Gabor</td><td>22</td><td>0</td><td>22</td></tr>
-<tr><td>STS_015_CT</td><td>stat_medad</td><td>Gabor</td><td>22</td><td>0</td><td>22</td></tr>
-<tr><td>STS_015_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>1.458e+04</td><td>0</td><td>1.458e+04</td></tr>
-<tr><td>STS_015_CT</td><td>stat_cov</td><td>Simon. L1</td><td>171</td><td>0</td><td>171</td></tr>
-<tr><td>STS_015_CT</td><td>stat_cov</td><td>Simon. L2</td><td>11</td><td>0</td><td>11</td></tr>
-<tr><td>STS_015_CT</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_015_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>147</td><td>0</td><td>147</td></tr>
-<tr><td>STS_015_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>122</td><td>0</td><td>122</td></tr>
-<tr><td>STS_015_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>11</td><td>0</td><td>11</td></tr>
-<tr><td>STS_015_CT</td><td>stat_rms</td><td>Laws</td><td>73</td><td>0</td><td>73</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_skew</td><td>LoG</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_skew</td><td>Gabor</td><td>4</td><td>0</td><td>4</td></tr>
@@ -1634,6 +1615,25 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_014_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>1013</td><td>0</td><td>1013</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>211</td><td>0</td><td>211</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_rms</td><td>Gabor</td><td>87</td><td>0</td><td>87</td></tr>
+<tr><td>STS_015_CT</td><td>stat_mean</td><td>Laws</td><td>73</td><td>0</td><td>73</td></tr>
+<tr><td>STS_015_CT</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_015_CT</td><td>stat_min</td><td>Simon. L1</td><td>-98</td><td>0</td><td>98</td></tr>
+<tr><td>STS_015_CT</td><td>stat_min</td><td>Simon. L2</td><td>-70</td><td>0</td><td>70</td></tr>
+<tr><td>STS_015_CT</td><td>stat_p10</td><td>Laws</td><td>63</td><td>0</td><td>63</td></tr>
+<tr><td>STS_015_CT</td><td>stat_max</td><td>Gabor</td><td>271</td><td>0</td><td>271</td></tr>
+<tr><td>STS_015_CT</td><td>stat_range</td><td>Gabor</td><td>271</td><td>0</td><td>271</td></tr>
+<tr><td>STS_015_CT</td><td>stat_range</td><td>Simon. L1</td><td>192</td><td>0</td><td>192</td></tr>
+<tr><td>STS_015_CT</td><td>stat_range</td><td>Simon. L2</td><td>151</td><td>0</td><td>151</td></tr>
+<tr><td>STS_015_CT</td><td>stat_mad</td><td>Gabor</td><td>22</td><td>0</td><td>22</td></tr>
+<tr><td>STS_015_CT</td><td>stat_medad</td><td>Gabor</td><td>22</td><td>0</td><td>22</td></tr>
+<tr><td>STS_015_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>1.458e+04</td><td>0</td><td>1.458e+04</td></tr>
+<tr><td>STS_015_CT</td><td>stat_cov</td><td>Simon. L1</td><td>171</td><td>0</td><td>171</td></tr>
+<tr><td>STS_015_CT</td><td>stat_cov</td><td>Simon. L2</td><td>11</td><td>0</td><td>11</td></tr>
+<tr><td>STS_015_CT</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_015_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>147</td><td>0</td><td>147</td></tr>
+<tr><td>STS_015_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>122</td><td>0</td><td>122</td></tr>
+<tr><td>STS_015_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>11</td><td>0</td><td>11</td></tr>
+<tr><td>STS_015_CT</td><td>stat_rms</td><td>Laws</td><td>73</td><td>0</td><td>73</td></tr>
 <tr><td>STS_014_CT</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_014_CT</td><td>stat_min</td><td>Simon. L1</td><td>-86</td><td>0</td><td>86</td></tr>
 <tr><td>STS_014_CT</td><td>stat_p10</td><td>Laws</td><td>51</td><td>0</td><td>51</td></tr>
@@ -1750,12 +1750,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_018_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>-58</td><td>0</td><td>58</td></tr>
 <tr><td>STS_018_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-8</td><td>0</td><td>8</td></tr>
 <tr><td>STS_018_MRI</td><td>stat_rms</td><td>Laws</td><td>99</td><td>0</td><td>99</td></tr>
-<tr><td>STS_019_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>75</td><td>0</td><td>75</td></tr>
-<tr><td>STS_019_PET</td><td>stat_cov</td><td>Simon. L1</td><td>12</td><td>0</td><td>12</td></tr>
-<tr><td>STS_019_PET</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_019_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>12</td><td>0</td><td>12</td></tr>
-<tr><td>STS_019_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>9</td><td>0</td><td>9</td></tr>
-<tr><td>STS_019_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>1</td><td>0</td><td>1</td></tr>
 <tr><td>STS_019_CT</td><td>stat_var</td><td>Gabor</td><td>5437</td><td>0</td><td>5437</td></tr>
 <tr><td>STS_019_CT</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_019_CT</td><td>stat_skew</td><td>Gabor</td><td>7</td><td>0</td><td>7</td></tr>
@@ -1796,6 +1790,51 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_019_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-31</td><td>0</td><td>31</td></tr>
 <tr><td>STS_019_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-13</td><td>0</td><td>13</td></tr>
 <tr><td>STS_019_CT</td><td>stat_rms</td><td>Gabor</td><td>84</td><td>0</td><td>84</td></tr>
+<tr><td>STS_019_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>75</td><td>0</td><td>75</td></tr>
+<tr><td>STS_019_PET</td><td>stat_cov</td><td>Simon. L1</td><td>12</td><td>0</td><td>12</td></tr>
+<tr><td>STS_019_PET</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_019_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>12</td><td>0</td><td>12</td></tr>
+<tr><td>STS_019_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>9</td><td>0</td><td>9</td></tr>
+<tr><td>STS_019_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_018_CT</td><td>stat_mean</td><td>Gabor</td><td>102</td><td>0</td><td>102</td></tr>
+<tr><td>STS_018_CT</td><td>stat_var</td><td>Gabor</td><td>8261</td><td>0</td><td>8261</td></tr>
+<tr><td>STS_018_CT</td><td>stat_skew</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_018_CT</td><td>stat_skew</td><td>Laws</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_018_CT</td><td>stat_skew</td><td>Gabor</td><td>6</td><td>0</td><td>6</td></tr>
+<tr><td>STS_018_CT</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_018_CT</td><td>stat_kurt</td><td>LoG</td><td>9</td><td>0</td><td>9</td></tr>
+<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
+<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Gabor</td><td>56</td><td>0</td><td>56</td></tr>
+<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>12</td><td>0</td><td>12</td></tr>
+<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>9</td><td>0</td><td>9</td></tr>
+<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>9</td><td>0</td><td>9</td></tr>
+<tr><td>STS_018_CT</td><td>stat_median</td><td>Gabor</td><td>85</td><td>0</td><td>85</td></tr>
+<tr><td>STS_018_CT</td><td>stat_min</td><td>Simon. L1</td><td>-214</td><td>0</td><td>214</td></tr>
+<tr><td>STS_018_CT</td><td>stat_min</td><td>Simon. L2</td><td>-235</td><td>0</td><td>235</td></tr>
+<tr><td>STS_018_CT</td><td>stat_p90</td><td>Gabor</td><td>177</td><td>0</td><td>177</td></tr>
+<tr><td>STS_018_CT</td><td>stat_max</td><td>Laws</td><td>300</td><td>0</td><td>300</td></tr>
+<tr><td>STS_018_CT</td><td>stat_max</td><td>Gabor</td><td>1770</td><td>0</td><td>1770</td></tr>
+<tr><td>STS_018_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>179</td><td>0</td><td>179</td></tr>
+<tr><td>STS_018_CT</td><td>stat_max</td><td>Simon. L1</td><td>191</td><td>0</td><td>191</td></tr>
+<tr><td>STS_018_CT</td><td>stat_max</td><td>Simon. L2</td><td>145</td><td>0</td><td>145</td></tr>
+<tr><td>STS_018_CT</td><td>stat_iqr</td><td>Gabor</td><td>73</td><td>0</td><td>73</td></tr>
+<tr><td>STS_018_CT</td><td>stat_range</td><td>Laws</td><td>266</td><td>0</td><td>266</td></tr>
+<tr><td>STS_018_CT</td><td>stat_range</td><td>Gabor</td><td>1770</td><td>0</td><td>1770</td></tr>
+<tr><td>STS_018_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>195</td><td>0</td><td>195</td></tr>
+<tr><td>STS_018_CT</td><td>stat_range</td><td>Simon. L1</td><td>405</td><td>0</td><td>405</td></tr>
+<tr><td>STS_018_CT</td><td>stat_range</td><td>Simon. L2</td><td>380</td><td>0</td><td>380</td></tr>
+<tr><td>STS_018_CT</td><td>stat_mad</td><td>Gabor</td><td>52</td><td>0</td><td>52</td></tr>
+<tr><td>STS_018_CT</td><td>stat_rmad</td><td>Gabor</td><td>31</td><td>0</td><td>31</td></tr>
+<tr><td>STS_018_CT</td><td>stat_medad</td><td>Gabor</td><td>50</td><td>0</td><td>50</td></tr>
+<tr><td>STS_018_CT</td><td>stat_cov</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_018_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-1147</td><td>0</td><td>1147</td></tr>
+<tr><td>STS_018_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-72</td><td>0</td><td>72</td></tr>
+<tr><td>STS_018_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-41</td><td>0</td><td>41</td></tr>
+<tr><td>STS_018_CT</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_018_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>103</td><td>0</td><td>103</td></tr>
+<tr><td>STS_018_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>144</td><td>0</td><td>144</td></tr>
+<tr><td>STS_018_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>10</td><td>0</td><td>10</td></tr>
+<tr><td>STS_018_CT</td><td>stat_rms</td><td>Gabor</td><td>137</td><td>0</td><td>137</td></tr>
 <tr><td>STS_017_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_017_MRI</td><td>stat_skew</td><td>Gabor</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_017_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>4</td><td>0</td><td>4</td></tr>
@@ -1857,64 +1896,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_016_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>369</td><td>0</td><td>369</td></tr>
 <tr><td>STS_016_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>-610</td><td>0</td><td>610</td></tr>
 <tr><td>STS_016_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>36</td><td>0</td><td>36</td></tr>
-<tr><td>STS_018_CT</td><td>stat_mean</td><td>Gabor</td><td>102</td><td>0</td><td>102</td></tr>
-<tr><td>STS_018_CT</td><td>stat_var</td><td>Gabor</td><td>8261</td><td>0</td><td>8261</td></tr>
-<tr><td>STS_018_CT</td><td>stat_skew</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_018_CT</td><td>stat_skew</td><td>Laws</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_018_CT</td><td>stat_skew</td><td>Gabor</td><td>6</td><td>0</td><td>6</td></tr>
-<tr><td>STS_018_CT</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_018_CT</td><td>stat_kurt</td><td>LoG</td><td>9</td><td>0</td><td>9</td></tr>
-<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
-<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Gabor</td><td>56</td><td>0</td><td>56</td></tr>
-<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>12</td><td>0</td><td>12</td></tr>
-<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>9</td><td>0</td><td>9</td></tr>
-<tr><td>STS_018_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>9</td><td>0</td><td>9</td></tr>
-<tr><td>STS_018_CT</td><td>stat_median</td><td>Gabor</td><td>85</td><td>0</td><td>85</td></tr>
-<tr><td>STS_018_CT</td><td>stat_min</td><td>Simon. L1</td><td>-214</td><td>0</td><td>214</td></tr>
-<tr><td>STS_018_CT</td><td>stat_min</td><td>Simon. L2</td><td>-235</td><td>0</td><td>235</td></tr>
-<tr><td>STS_018_CT</td><td>stat_p90</td><td>Gabor</td><td>177</td><td>0</td><td>177</td></tr>
-<tr><td>STS_018_CT</td><td>stat_max</td><td>Laws</td><td>300</td><td>0</td><td>300</td></tr>
-<tr><td>STS_018_CT</td><td>stat_max</td><td>Gabor</td><td>1770</td><td>0</td><td>1770</td></tr>
-<tr><td>STS_018_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>179</td><td>0</td><td>179</td></tr>
-<tr><td>STS_018_CT</td><td>stat_max</td><td>Simon. L1</td><td>191</td><td>0</td><td>191</td></tr>
-<tr><td>STS_018_CT</td><td>stat_max</td><td>Simon. L2</td><td>145</td><td>0</td><td>145</td></tr>
-<tr><td>STS_018_CT</td><td>stat_iqr</td><td>Gabor</td><td>73</td><td>0</td><td>73</td></tr>
-<tr><td>STS_018_CT</td><td>stat_range</td><td>Laws</td><td>266</td><td>0</td><td>266</td></tr>
-<tr><td>STS_018_CT</td><td>stat_range</td><td>Gabor</td><td>1770</td><td>0</td><td>1770</td></tr>
-<tr><td>STS_018_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>195</td><td>0</td><td>195</td></tr>
-<tr><td>STS_018_CT</td><td>stat_range</td><td>Simon. L1</td><td>405</td><td>0</td><td>405</td></tr>
-<tr><td>STS_018_CT</td><td>stat_range</td><td>Simon. L2</td><td>380</td><td>0</td><td>380</td></tr>
-<tr><td>STS_018_CT</td><td>stat_mad</td><td>Gabor</td><td>52</td><td>0</td><td>52</td></tr>
-<tr><td>STS_018_CT</td><td>stat_rmad</td><td>Gabor</td><td>31</td><td>0</td><td>31</td></tr>
-<tr><td>STS_018_CT</td><td>stat_medad</td><td>Gabor</td><td>50</td><td>0</td><td>50</td></tr>
-<tr><td>STS_018_CT</td><td>stat_cov</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_018_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-1147</td><td>0</td><td>1147</td></tr>
-<tr><td>STS_018_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-72</td><td>0</td><td>72</td></tr>
-<tr><td>STS_018_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-41</td><td>0</td><td>41</td></tr>
-<tr><td>STS_018_CT</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_018_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>103</td><td>0</td><td>103</td></tr>
-<tr><td>STS_018_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>144</td><td>0</td><td>144</td></tr>
-<tr><td>STS_018_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>10</td><td>0</td><td>10</td></tr>
-<tr><td>STS_018_CT</td><td>stat_rms</td><td>Gabor</td><td>137</td><td>0</td><td>137</td></tr>
-<tr><td>STS_020_PET</td><td>stat_skew</td><td>LoG</td><td>-4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_020_PET</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_020_PET</td><td>stat_skew</td><td>Gabor</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_020_PET</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_020_PET</td><td>stat_skew</td><td>Simon. L2</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_020_PET</td><td>stat_kurt</td><td>LoG</td><td>27</td><td>0</td><td>27</td></tr>
-<tr><td>STS_020_PET</td><td>stat_kurt</td><td>Gabor</td><td>25</td><td>0</td><td>25</td></tr>
-<tr><td>STS_020_PET</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>8</td><td>0</td><td>8</td></tr>
-<tr><td>STS_020_PET</td><td>stat_kurt</td><td>Simon. L1</td><td>18</td><td>0</td><td>18</td></tr>
-<tr><td>STS_020_PET</td><td>stat_kurt</td><td>Simon. L2</td><td>21</td><td>0</td><td>21</td></tr>
-<tr><td>STS_020_PET</td><td>stat_cov</td><td>LoG</td><td>-1492</td><td>0</td><td>1492</td></tr>
-<tr><td>STS_020_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>3297</td><td>0</td><td>3297</td></tr>
-<tr><td>STS_020_PET</td><td>stat_cov</td><td>Simon. L1</td><td>1222</td><td>0</td><td>1222</td></tr>
-<tr><td>STS_020_PET</td><td>stat_cov</td><td>Simon. L2</td><td>-264</td><td>0</td><td>264</td></tr>
-<tr><td>STS_020_PET</td><td>stat_qcod</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_020_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_020_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>650</td><td>0</td><td>650</td></tr>
-<tr><td>STS_020_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-23</td><td>0</td><td>23</td></tr>
-<tr><td>STS_020_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>-6</td><td>0</td><td>6</td></tr>
 <tr><td>STS_016_CT</td><td>stat_mean</td><td>Gabor</td><td>94</td><td>0</td><td>94</td></tr>
 <tr><td>STS_016_CT</td><td>stat_kurt</td><td>LoG</td><td>8</td><td>0</td><td>8</td></tr>
 <tr><td>STS_016_CT</td><td>stat_median</td><td>Gabor</td><td>80</td><td>0</td><td>80</td></tr>
@@ -1935,6 +1916,25 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_016_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-251</td><td>0</td><td>251</td></tr>
 <tr><td>STS_016_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-41</td><td>0</td><td>41</td></tr>
 <tr><td>STS_016_CT</td><td>stat_rms</td><td>Gabor</td><td>114</td><td>0</td><td>114</td></tr>
+<tr><td>STS_020_PET</td><td>stat_skew</td><td>LoG</td><td>-4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_020_PET</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_020_PET</td><td>stat_skew</td><td>Gabor</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_020_PET</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_020_PET</td><td>stat_skew</td><td>Simon. L2</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_020_PET</td><td>stat_kurt</td><td>LoG</td><td>27</td><td>0</td><td>27</td></tr>
+<tr><td>STS_020_PET</td><td>stat_kurt</td><td>Gabor</td><td>25</td><td>0</td><td>25</td></tr>
+<tr><td>STS_020_PET</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>8</td><td>0</td><td>8</td></tr>
+<tr><td>STS_020_PET</td><td>stat_kurt</td><td>Simon. L1</td><td>18</td><td>0</td><td>18</td></tr>
+<tr><td>STS_020_PET</td><td>stat_kurt</td><td>Simon. L2</td><td>21</td><td>0</td><td>21</td></tr>
+<tr><td>STS_020_PET</td><td>stat_cov</td><td>LoG</td><td>-1492</td><td>0</td><td>1492</td></tr>
+<tr><td>STS_020_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>3297</td><td>0</td><td>3297</td></tr>
+<tr><td>STS_020_PET</td><td>stat_cov</td><td>Simon. L1</td><td>1222</td><td>0</td><td>1222</td></tr>
+<tr><td>STS_020_PET</td><td>stat_cov</td><td>Simon. L2</td><td>-264</td><td>0</td><td>264</td></tr>
+<tr><td>STS_020_PET</td><td>stat_qcod</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_020_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_020_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>650</td><td>0</td><td>650</td></tr>
+<tr><td>STS_020_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-23</td><td>0</td><td>23</td></tr>
+<tr><td>STS_020_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>-6</td><td>0</td><td>6</td></tr>
 <tr><td>STS_019_MRI</td><td>stat_mean</td><td>Laws</td><td>76</td><td>0</td><td>76</td></tr>
 <tr><td>STS_019_MRI</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_019_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
@@ -2133,15 +2133,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_021_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-4807</td><td>0</td><td>4807</td></tr>
 <tr><td>STS_021_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>-1141</td><td>0</td><td>1141</td></tr>
 <tr><td>STS_021_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>54</td><td>0</td><td>54</td></tr>
-<tr><td>STS_024_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-293</td><td>0</td><td>293</td></tr>
-<tr><td>STS_024_PET</td><td>stat_cov</td><td>Simon. L1</td><td>23</td><td>0</td><td>23</td></tr>
-<tr><td>STS_024_PET</td><td>stat_cov</td><td>Simon. L2</td><td>5</td><td>0</td><td>5</td></tr>
-<tr><td>STS_024_PET</td><td>stat_qcod</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-64</td><td>0</td><td>64</td></tr>
-<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>41</td><td>0</td><td>41</td></tr>
-<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_023_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_023_MRI</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_023_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>3</td><td>0</td><td>3</td></tr>
@@ -2165,6 +2156,15 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_023_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
 <tr><td>STS_023_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>-62</td><td>0</td><td>62</td></tr>
 <tr><td>STS_023_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-12</td><td>0</td><td>12</td></tr>
+<tr><td>STS_024_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-293</td><td>0</td><td>293</td></tr>
+<tr><td>STS_024_PET</td><td>stat_cov</td><td>Simon. L1</td><td>23</td><td>0</td><td>23</td></tr>
+<tr><td>STS_024_PET</td><td>stat_cov</td><td>Simon. L2</td><td>5</td><td>0</td><td>5</td></tr>
+<tr><td>STS_024_PET</td><td>stat_qcod</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-64</td><td>0</td><td>64</td></tr>
+<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>41</td><td>0</td><td>41</td></tr>
+<tr><td>STS_024_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_022_CT</td><td>stat_mean</td><td>Laws</td><td>76</td><td>0</td><td>76</td></tr>
 <tr><td>STS_022_CT</td><td>stat_mean</td><td>Gabor</td><td>307</td><td>0</td><td>307</td></tr>
 <tr><td>STS_022_CT</td><td>stat_var</td><td>Gabor</td><td>2.893e+04</td><td>0</td><td>2.893e+04</td></tr>
@@ -2209,6 +2209,42 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_025_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>27</td><td>0</td><td>27</td></tr>
 <tr><td>STS_025_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_025_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_023_CT</td><td>stat_mean</td><td>Gabor</td><td>166</td><td>0</td><td>166</td></tr>
+<tr><td>STS_023_CT</td><td>stat_var</td><td>Gabor</td><td>9892</td><td>0</td><td>9892</td></tr>
+<tr><td>STS_023_CT</td><td>stat_skew</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_023_CT</td><td>stat_skew</td><td>Laws</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_023_CT</td><td>stat_kurt</td><td>LoG</td><td>13</td><td>0</td><td>13</td></tr>
+<tr><td>STS_023_CT</td><td>stat_kurt</td><td>Laws</td><td>19</td><td>0</td><td>19</td></tr>
+<tr><td>STS_023_CT</td><td>stat_kurt</td><td>Coif3 LHH L1</td><td>8</td><td>0</td><td>8</td></tr>
+<tr><td>STS_023_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>13</td><td>0</td><td>13</td></tr>
+<tr><td>STS_023_CT</td><td>stat_median</td><td>Gabor</td><td>150</td><td>0</td><td>150</td></tr>
+<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L1</td><td>-226</td><td>0</td><td>226</td></tr>
+<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L2</td><td>-347</td><td>0</td><td>347</td></tr>
+<tr><td>STS_023_CT</td><td>stat_p10</td><td>Gabor</td><td>53</td><td>0</td><td>53</td></tr>
+<tr><td>STS_023_CT</td><td>stat_p90</td><td>Gabor</td><td>299</td><td>0</td><td>299</td></tr>
+<tr><td>STS_023_CT</td><td>stat_max</td><td>Laws</td><td>359</td><td>0</td><td>359</td></tr>
+<tr><td>STS_023_CT</td><td>stat_max</td><td>Gabor</td><td>1068</td><td>0</td><td>1068</td></tr>
+<tr><td>STS_023_CT</td><td>stat_max</td><td>Simon. L1</td><td>128</td><td>0</td><td>128</td></tr>
+<tr><td>STS_023_CT</td><td>stat_max</td><td>Simon. L2</td><td>151</td><td>0</td><td>151</td></tr>
+<tr><td>STS_023_CT</td><td>stat_iqr</td><td>Gabor</td><td>134</td><td>0</td><td>134</td></tr>
+<tr><td>STS_023_CT</td><td>stat_range</td><td>Laws</td><td>331</td><td>0</td><td>331</td></tr>
+<tr><td>STS_023_CT</td><td>stat_range</td><td>Gabor</td><td>1068</td><td>0</td><td>1068</td></tr>
+<tr><td>STS_023_CT</td><td>stat_range</td><td>Simon. L1</td><td>354</td><td>0</td><td>354</td></tr>
+<tr><td>STS_023_CT</td><td>stat_range</td><td>Simon. L2</td><td>498</td><td>0</td><td>498</td></tr>
+<tr><td>STS_023_CT</td><td>stat_mad</td><td>Gabor</td><td>79</td><td>0</td><td>79</td></tr>
+<tr><td>STS_023_CT</td><td>stat_mad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
+<tr><td>STS_023_CT</td><td>stat_rmad</td><td>Gabor</td><td>55</td><td>0</td><td>55</td></tr>
+<tr><td>STS_023_CT</td><td>stat_medad</td><td>Gabor</td><td>78</td><td>0</td><td>78</td></tr>
+<tr><td>STS_023_CT</td><td>stat_medad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
+<tr><td>STS_023_CT</td><td>stat_cov</td><td>LoG</td><td>3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_023_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-395</td><td>0</td><td>395</td></tr>
+<tr><td>STS_023_CT</td><td>stat_cov</td><td>Simon. L1</td><td>81</td><td>0</td><td>81</td></tr>
+<tr><td>STS_023_CT</td><td>stat_cov</td><td>Simon. L2</td><td>9</td><td>0</td><td>9</td></tr>
+<tr><td>STS_023_CT</td><td>stat_qcod</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_023_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-247</td><td>0</td><td>247</td></tr>
+<tr><td>STS_023_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-618</td><td>0</td><td>618</td></tr>
+<tr><td>STS_023_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>33</td><td>0</td><td>33</td></tr>
+<tr><td>STS_023_CT</td><td>stat_rms</td><td>Gabor</td><td>194</td><td>0</td><td>194</td></tr>
 <tr><td>STS_025_MRI</td><td>stat_mean</td><td>Laws</td><td>112</td><td>0</td><td>112</td></tr>
 <tr><td>STS_025_MRI</td><td>stat_mean</td><td>Gabor</td><td>258</td><td>0</td><td>258</td></tr>
 <tr><td>STS_025_MRI</td><td>stat_var</td><td>Gabor</td><td>6.212e+04</td><td>0</td><td>6.212e+04</td></tr>
@@ -2299,42 +2335,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_024_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>244</td><td>0</td><td>244</td></tr>
 <tr><td>STS_024_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>333</td><td>0</td><td>333</td></tr>
 <tr><td>STS_024_MRI</td><td>stat_rms</td><td>Gabor</td><td>101</td><td>0</td><td>101</td></tr>
-<tr><td>STS_023_CT</td><td>stat_mean</td><td>Gabor</td><td>166</td><td>0</td><td>166</td></tr>
-<tr><td>STS_023_CT</td><td>stat_var</td><td>Gabor</td><td>9892</td><td>0</td><td>9892</td></tr>
-<tr><td>STS_023_CT</td><td>stat_skew</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_023_CT</td><td>stat_skew</td><td>Laws</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_023_CT</td><td>stat_kurt</td><td>LoG</td><td>13</td><td>0</td><td>13</td></tr>
-<tr><td>STS_023_CT</td><td>stat_kurt</td><td>Laws</td><td>19</td><td>0</td><td>19</td></tr>
-<tr><td>STS_023_CT</td><td>stat_kurt</td><td>Coif3 LHH L1</td><td>8</td><td>0</td><td>8</td></tr>
-<tr><td>STS_023_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>13</td><td>0</td><td>13</td></tr>
-<tr><td>STS_023_CT</td><td>stat_median</td><td>Gabor</td><td>150</td><td>0</td><td>150</td></tr>
-<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L1</td><td>-226</td><td>0</td><td>226</td></tr>
-<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L2</td><td>-347</td><td>0</td><td>347</td></tr>
-<tr><td>STS_023_CT</td><td>stat_p10</td><td>Gabor</td><td>53</td><td>0</td><td>53</td></tr>
-<tr><td>STS_023_CT</td><td>stat_p90</td><td>Gabor</td><td>299</td><td>0</td><td>299</td></tr>
-<tr><td>STS_023_CT</td><td>stat_max</td><td>Laws</td><td>359</td><td>0</td><td>359</td></tr>
-<tr><td>STS_023_CT</td><td>stat_max</td><td>Gabor</td><td>1068</td><td>0</td><td>1068</td></tr>
-<tr><td>STS_023_CT</td><td>stat_max</td><td>Simon. L1</td><td>128</td><td>0</td><td>128</td></tr>
-<tr><td>STS_023_CT</td><td>stat_max</td><td>Simon. L2</td><td>151</td><td>0</td><td>151</td></tr>
-<tr><td>STS_023_CT</td><td>stat_iqr</td><td>Gabor</td><td>134</td><td>0</td><td>134</td></tr>
-<tr><td>STS_023_CT</td><td>stat_range</td><td>Laws</td><td>331</td><td>0</td><td>331</td></tr>
-<tr><td>STS_023_CT</td><td>stat_range</td><td>Gabor</td><td>1068</td><td>0</td><td>1068</td></tr>
-<tr><td>STS_023_CT</td><td>stat_range</td><td>Simon. L1</td><td>354</td><td>0</td><td>354</td></tr>
-<tr><td>STS_023_CT</td><td>stat_range</td><td>Simon. L2</td><td>498</td><td>0</td><td>498</td></tr>
-<tr><td>STS_023_CT</td><td>stat_mad</td><td>Gabor</td><td>79</td><td>0</td><td>79</td></tr>
-<tr><td>STS_023_CT</td><td>stat_mad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
-<tr><td>STS_023_CT</td><td>stat_rmad</td><td>Gabor</td><td>55</td><td>0</td><td>55</td></tr>
-<tr><td>STS_023_CT</td><td>stat_medad</td><td>Gabor</td><td>78</td><td>0</td><td>78</td></tr>
-<tr><td>STS_023_CT</td><td>stat_medad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
-<tr><td>STS_023_CT</td><td>stat_cov</td><td>LoG</td><td>3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_023_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-395</td><td>0</td><td>395</td></tr>
-<tr><td>STS_023_CT</td><td>stat_cov</td><td>Simon. L1</td><td>81</td><td>0</td><td>81</td></tr>
-<tr><td>STS_023_CT</td><td>stat_cov</td><td>Simon. L2</td><td>9</td><td>0</td><td>9</td></tr>
-<tr><td>STS_023_CT</td><td>stat_qcod</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_023_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-247</td><td>0</td><td>247</td></tr>
-<tr><td>STS_023_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-618</td><td>0</td><td>618</td></tr>
-<tr><td>STS_023_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>33</td><td>0</td><td>33</td></tr>
-<tr><td>STS_023_CT</td><td>stat_rms</td><td>Gabor</td><td>194</td><td>0</td><td>194</td></tr>
 <tr><td>STS_026_PET</td><td>stat_cov</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_026_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>1884</td><td>0</td><td>1884</td></tr>
 <tr><td>STS_026_PET</td><td>stat_cov</td><td>Simon. L1</td><td>58</td><td>0</td><td>58</td></tr>
@@ -2369,28 +2369,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_021_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>1.846e+05</td><td>0</td><td>1.846e+05</td></tr>
 <tr><td>STS_021_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>519</td><td>0</td><td>519</td></tr>
 <tr><td>STS_021_CT</td><td>stat_rms</td><td>Gabor</td><td>162</td><td>0</td><td>162</td></tr>
-<tr><td>STS_025_CT</td><td>stat_skew</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_025_CT</td><td>stat_skew</td><td>Laws</td><td>3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_025_CT</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_025_CT</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>9</td><td>0</td><td>9</td></tr>
-<tr><td>STS_025_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>11</td><td>0</td><td>11</td></tr>
-<tr><td>STS_025_CT</td><td>stat_min</td><td>Simon. L1</td><td>-61</td><td>0</td><td>61</td></tr>
-<tr><td>STS_025_CT</td><td>stat_min</td><td>Simon. L2</td><td>-105</td><td>0</td><td>105</td></tr>
-<tr><td>STS_025_CT</td><td>stat_max</td><td>Laws</td><td>155</td><td>0</td><td>155</td></tr>
-<tr><td>STS_025_CT</td><td>stat_max</td><td>Gabor</td><td>353</td><td>0</td><td>353</td></tr>
-<tr><td>STS_025_CT</td><td>stat_range</td><td>Laws</td><td>143</td><td>0</td><td>143</td></tr>
-<tr><td>STS_025_CT</td><td>stat_range</td><td>Gabor</td><td>352</td><td>0</td><td>352</td></tr>
-<tr><td>STS_025_CT</td><td>stat_range</td><td>Simon. L1</td><td>168</td><td>0</td><td>168</td></tr>
-<tr><td>STS_025_CT</td><td>stat_range</td><td>Simon. L2</td><td>211</td><td>0</td><td>211</td></tr>
-<tr><td>STS_025_CT</td><td>stat_mad</td><td>Gabor</td><td>20</td><td>0</td><td>20</td></tr>
-<tr><td>STS_025_CT</td><td>stat_medad</td><td>Gabor</td><td>20</td><td>0</td><td>20</td></tr>
-<tr><td>STS_025_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>289</td><td>0</td><td>289</td></tr>
-<tr><td>STS_025_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-25</td><td>0</td><td>25</td></tr>
-<tr><td>STS_025_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-10</td><td>0</td><td>10</td></tr>
-<tr><td>STS_025_CT</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_025_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>382</td><td>0</td><td>382</td></tr>
-<tr><td>STS_025_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-43</td><td>0</td><td>43</td></tr>
-<tr><td>STS_025_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>28</td><td>0</td><td>28</td></tr>
 <tr><td>STS_024_CT</td><td>stat_mean</td><td>Gabor</td><td>92</td><td>0</td><td>92</td></tr>
 <tr><td>STS_024_CT</td><td>stat_skew</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_024_CT</td><td>stat_skew</td><td>Laws</td><td>5</td><td>0</td><td>5</td></tr>
@@ -2421,6 +2399,28 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_024_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>172</td><td>0</td><td>172</td></tr>
 <tr><td>STS_024_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>21</td><td>0</td><td>21</td></tr>
 <tr><td>STS_024_CT</td><td>stat_rms</td><td>Gabor</td><td>106</td><td>0</td><td>106</td></tr>
+<tr><td>STS_025_CT</td><td>stat_skew</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_025_CT</td><td>stat_skew</td><td>Laws</td><td>3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_025_CT</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_025_CT</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>9</td><td>0</td><td>9</td></tr>
+<tr><td>STS_025_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>11</td><td>0</td><td>11</td></tr>
+<tr><td>STS_025_CT</td><td>stat_min</td><td>Simon. L1</td><td>-61</td><td>0</td><td>61</td></tr>
+<tr><td>STS_025_CT</td><td>stat_min</td><td>Simon. L2</td><td>-105</td><td>0</td><td>105</td></tr>
+<tr><td>STS_025_CT</td><td>stat_max</td><td>Laws</td><td>155</td><td>0</td><td>155</td></tr>
+<tr><td>STS_025_CT</td><td>stat_max</td><td>Gabor</td><td>353</td><td>0</td><td>353</td></tr>
+<tr><td>STS_025_CT</td><td>stat_range</td><td>Laws</td><td>143</td><td>0</td><td>143</td></tr>
+<tr><td>STS_025_CT</td><td>stat_range</td><td>Gabor</td><td>352</td><td>0</td><td>352</td></tr>
+<tr><td>STS_025_CT</td><td>stat_range</td><td>Simon. L1</td><td>168</td><td>0</td><td>168</td></tr>
+<tr><td>STS_025_CT</td><td>stat_range</td><td>Simon. L2</td><td>211</td><td>0</td><td>211</td></tr>
+<tr><td>STS_025_CT</td><td>stat_mad</td><td>Gabor</td><td>20</td><td>0</td><td>20</td></tr>
+<tr><td>STS_025_CT</td><td>stat_medad</td><td>Gabor</td><td>20</td><td>0</td><td>20</td></tr>
+<tr><td>STS_025_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>289</td><td>0</td><td>289</td></tr>
+<tr><td>STS_025_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-25</td><td>0</td><td>25</td></tr>
+<tr><td>STS_025_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-10</td><td>0</td><td>10</td></tr>
+<tr><td>STS_025_CT</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_025_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>382</td><td>0</td><td>382</td></tr>
+<tr><td>STS_025_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-43</td><td>0</td><td>43</td></tr>
+<tr><td>STS_025_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>28</td><td>0</td><td>28</td></tr>
 <tr><td>STS_027_PET</td><td>stat_cov</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_027_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>466</td><td>0</td><td>466</td></tr>
 <tr><td>STS_027_PET</td><td>stat_cov</td><td>Simon. L1</td><td>15</td><td>0</td><td>15</td></tr>
@@ -2505,6 +2505,14 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_026_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>260</td><td>0</td><td>260</td></tr>
 <tr><td>STS_026_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>158</td><td>0</td><td>158</td></tr>
 <tr><td>STS_026_CT</td><td>stat_rms</td><td>Gabor</td><td>249</td><td>0</td><td>249</td></tr>
+<tr><td>STS_029_PET</td><td>stat_cov</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
+<tr><td>STS_029_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>1103</td><td>0</td><td>1103</td></tr>
+<tr><td>STS_029_PET</td><td>stat_cov</td><td>Simon. L1</td><td>98</td><td>0</td><td>98</td></tr>
+<tr><td>STS_029_PET</td><td>stat_cov</td><td>Simon. L2</td><td>19</td><td>0</td><td>19</td></tr>
+<tr><td>STS_029_PET</td><td>stat_qcod</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
+<tr><td>STS_029_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>417</td><td>0</td><td>417</td></tr>
+<tr><td>STS_029_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-25</td><td>0</td><td>25</td></tr>
+<tr><td>STS_029_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>-52</td><td>0</td><td>52</td></tr>
 <tr><td>STS_028_MRI</td><td>stat_skew</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_028_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_028_MRI</td><td>stat_skew</td><td>Gabor</td><td>4</td><td>0</td><td>4</td></tr>
@@ -2537,40 +2545,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_028_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
 <tr><td>STS_028_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>158</td><td>0</td><td>158</td></tr>
 <tr><td>STS_028_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-20</td><td>0</td><td>20</td></tr>
-<tr><td>STS_029_PET</td><td>stat_cov</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
-<tr><td>STS_029_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>1103</td><td>0</td><td>1103</td></tr>
-<tr><td>STS_029_PET</td><td>stat_cov</td><td>Simon. L1</td><td>98</td><td>0</td><td>98</td></tr>
-<tr><td>STS_029_PET</td><td>stat_cov</td><td>Simon. L2</td><td>19</td><td>0</td><td>19</td></tr>
-<tr><td>STS_029_PET</td><td>stat_qcod</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
-<tr><td>STS_029_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>417</td><td>0</td><td>417</td></tr>
-<tr><td>STS_029_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-25</td><td>0</td><td>25</td></tr>
-<tr><td>STS_029_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>-52</td><td>0</td><td>52</td></tr>
-<tr><td>STS_028_CT</td><td>stat_skew</td><td>Laws</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_028_CT</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_028_CT</td><td>stat_kurt</td><td>LoG</td><td>26</td><td>0</td><td>26</td></tr>
-<tr><td>STS_028_CT</td><td>stat_kurt</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
-<tr><td>STS_028_CT</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>27</td><td>0</td><td>27</td></tr>
-<tr><td>STS_028_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>12</td><td>0</td><td>12</td></tr>
-<tr><td>STS_028_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>9</td><td>0</td><td>9</td></tr>
-<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L1</td><td>-93</td><td>0</td><td>93</td></tr>
-<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L2</td><td>-105</td><td>0</td><td>105</td></tr>
-<tr><td>STS_028_CT</td><td>stat_max</td><td>Laws</td><td>131</td><td>0</td><td>131</td></tr>
-<tr><td>STS_028_CT</td><td>stat_max</td><td>Gabor</td><td>256</td><td>0</td><td>256</td></tr>
-<tr><td>STS_028_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>132</td><td>0</td><td>132</td></tr>
-<tr><td>STS_028_CT</td><td>stat_range</td><td>Gabor</td><td>255</td><td>0</td><td>255</td></tr>
-<tr><td>STS_028_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>140</td><td>0</td><td>140</td></tr>
-<tr><td>STS_028_CT</td><td>stat_range</td><td>Simon. L1</td><td>169</td><td>0</td><td>169</td></tr>
-<tr><td>STS_028_CT</td><td>stat_range</td><td>Simon. L2</td><td>226</td><td>0</td><td>226</td></tr>
-<tr><td>STS_028_CT</td><td>stat_mad</td><td>Gabor</td><td>21</td><td>0</td><td>21</td></tr>
-<tr><td>STS_028_CT</td><td>stat_medad</td><td>Gabor</td><td>20</td><td>0</td><td>20</td></tr>
-<tr><td>STS_028_CT</td><td>stat_cov</td><td>LoG</td><td>-10</td><td>0</td><td>10</td></tr>
-<tr><td>STS_028_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>2.898e+04</td><td>0</td><td>2.898e+04</td></tr>
-<tr><td>STS_028_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-44</td><td>0</td><td>44</td></tr>
-<tr><td>STS_028_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-15</td><td>0</td><td>15</td></tr>
-<tr><td>STS_028_CT</td><td>stat_qcod</td><td>LoG</td><td>-16</td><td>0</td><td>16</td></tr>
-<tr><td>STS_028_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-455</td><td>0</td><td>455</td></tr>
-<tr><td>STS_028_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-152</td><td>0</td><td>152</td></tr>
-<tr><td>STS_028_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-9</td><td>0</td><td>9</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_skew</td><td>Laws</td><td>4</td><td>0</td><td>4</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_skew</td><td>Gabor</td><td>5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>6</td><td>0</td><td>6</td></tr>
@@ -2604,6 +2578,32 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_020_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>335</td><td>0</td><td>335</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
+<tr><td>STS_028_CT</td><td>stat_skew</td><td>Laws</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_028_CT</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_028_CT</td><td>stat_kurt</td><td>LoG</td><td>26</td><td>0</td><td>26</td></tr>
+<tr><td>STS_028_CT</td><td>stat_kurt</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
+<tr><td>STS_028_CT</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>27</td><td>0</td><td>27</td></tr>
+<tr><td>STS_028_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>12</td><td>0</td><td>12</td></tr>
+<tr><td>STS_028_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>9</td><td>0</td><td>9</td></tr>
+<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L1</td><td>-93</td><td>0</td><td>93</td></tr>
+<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L2</td><td>-105</td><td>0</td><td>105</td></tr>
+<tr><td>STS_028_CT</td><td>stat_max</td><td>Laws</td><td>131</td><td>0</td><td>131</td></tr>
+<tr><td>STS_028_CT</td><td>stat_max</td><td>Gabor</td><td>256</td><td>0</td><td>256</td></tr>
+<tr><td>STS_028_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>132</td><td>0</td><td>132</td></tr>
+<tr><td>STS_028_CT</td><td>stat_range</td><td>Gabor</td><td>255</td><td>0</td><td>255</td></tr>
+<tr><td>STS_028_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>140</td><td>0</td><td>140</td></tr>
+<tr><td>STS_028_CT</td><td>stat_range</td><td>Simon. L1</td><td>169</td><td>0</td><td>169</td></tr>
+<tr><td>STS_028_CT</td><td>stat_range</td><td>Simon. L2</td><td>226</td><td>0</td><td>226</td></tr>
+<tr><td>STS_028_CT</td><td>stat_mad</td><td>Gabor</td><td>21</td><td>0</td><td>21</td></tr>
+<tr><td>STS_028_CT</td><td>stat_medad</td><td>Gabor</td><td>20</td><td>0</td><td>20</td></tr>
+<tr><td>STS_028_CT</td><td>stat_cov</td><td>LoG</td><td>-10</td><td>0</td><td>10</td></tr>
+<tr><td>STS_028_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>2.898e+04</td><td>0</td><td>2.898e+04</td></tr>
+<tr><td>STS_028_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-44</td><td>0</td><td>44</td></tr>
+<tr><td>STS_028_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-15</td><td>0</td><td>15</td></tr>
+<tr><td>STS_028_CT</td><td>stat_qcod</td><td>LoG</td><td>-16</td><td>0</td><td>16</td></tr>
+<tr><td>STS_028_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-455</td><td>0</td><td>455</td></tr>
+<tr><td>STS_028_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-152</td><td>0</td><td>152</td></tr>
+<tr><td>STS_028_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-9</td><td>0</td><td>9</td></tr>
 <tr><td>STS_029_CT</td><td>stat_mean</td><td>Gabor</td><td>217</td><td>0</td><td>217</td></tr>
 <tr><td>STS_029_CT</td><td>stat_var</td><td>Gabor</td><td>1.63e+04</td><td>0</td><td>1.63e+04</td></tr>
 <tr><td>STS_029_CT</td><td>stat_median</td><td>Gabor</td><td>196</td><td>0</td><td>196</td></tr>
@@ -2680,14 +2680,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_020_CT</td><td>stat_energy</td><td>Gabor</td><td>1.901e+11</td><td>0</td><td>1.901e+11</td></tr>
 <tr><td>STS_020_CT</td><td>stat_rms</td><td>Laws</td><td>75</td><td>0</td><td>75</td></tr>
 <tr><td>STS_020_CT</td><td>stat_rms</td><td>Gabor</td><td>286</td><td>0</td><td>286</td></tr>
-<tr><td>STS_031_PET</td><td>stat_cov</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_031_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>992</td><td>0</td><td>992</td></tr>
-<tr><td>STS_031_PET</td><td>stat_cov</td><td>Simon. L1</td><td>58</td><td>0</td><td>58</td></tr>
-<tr><td>STS_031_PET</td><td>stat_cov</td><td>Simon. L2</td><td>5</td><td>0</td><td>5</td></tr>
-<tr><td>STS_031_PET</td><td>stat_qcod</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_031_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1006</td><td>0</td><td>1006</td></tr>
-<tr><td>STS_031_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-66</td><td>0</td><td>66</td></tr>
-<tr><td>STS_031_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>4</td><td>0</td><td>4</td></tr>
 <tr><td>STS_027_MRI</td><td>stat_skew</td><td>Laws</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_027_MRI</td><td>stat_skew</td><td>Gabor</td><td>4</td><td>0</td><td>4</td></tr>
 <tr><td>STS_027_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>3</td><td>0</td><td>3</td></tr>
@@ -2713,13 +2705,14 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_027_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1264</td><td>0</td><td>1264</td></tr>
 <tr><td>STS_027_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>-190</td><td>0</td><td>190</td></tr>
 <tr><td>STS_027_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-72</td><td>0</td><td>72</td></tr>
-<tr><td>STS_032_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-1547</td><td>0</td><td>1547</td></tr>
-<tr><td>STS_032_PET</td><td>stat_cov</td><td>Simon. L1</td><td>10</td><td>0</td><td>10</td></tr>
-<tr><td>STS_032_PET</td><td>stat_cov</td><td>Simon. L2</td><td>3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_032_PET</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_032_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-175</td><td>0</td><td>175</td></tr>
-<tr><td>STS_032_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>11</td><td>0</td><td>11</td></tr>
-<tr><td>STS_032_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_031_PET</td><td>stat_cov</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_031_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>992</td><td>0</td><td>992</td></tr>
+<tr><td>STS_031_PET</td><td>stat_cov</td><td>Simon. L1</td><td>58</td><td>0</td><td>58</td></tr>
+<tr><td>STS_031_PET</td><td>stat_cov</td><td>Simon. L2</td><td>5</td><td>0</td><td>5</td></tr>
+<tr><td>STS_031_PET</td><td>stat_qcod</td><td>LoG</td><td>-3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_031_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1006</td><td>0</td><td>1006</td></tr>
+<tr><td>STS_031_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-66</td><td>0</td><td>66</td></tr>
+<tr><td>STS_031_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>4</td><td>0</td><td>4</td></tr>
 <tr><td>STS_029_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_029_MRI</td><td>stat_skew</td><td>Gabor</td><td>5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_029_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>3</td><td>0</td><td>3</td></tr>
@@ -2757,47 +2750,13 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_029_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
 <tr><td>STS_029_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>6345</td><td>0</td><td>6345</td></tr>
 <tr><td>STS_029_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>242</td><td>0</td><td>242</td></tr>
-<tr><td>STS_027_CT</td><td>stat_mean</td><td>Laws</td><td>76</td><td>0</td><td>76</td></tr>
-<tr><td>STS_027_CT</td><td>stat_mean</td><td>Gabor</td><td>239</td><td>0</td><td>239</td></tr>
-<tr><td>STS_027_CT</td><td>stat_var</td><td>Gabor</td><td>2.724e+04</td><td>0</td><td>2.724e+04</td></tr>
-<tr><td>STS_027_CT</td><td>stat_skew</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_027_CT</td><td>stat_skew</td><td>Laws</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_027_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_027_CT</td><td>stat_kurt</td><td>LoG</td><td>19</td><td>0</td><td>19</td></tr>
-<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
-<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>11</td><td>0</td><td>11</td></tr>
-<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>29</td><td>0</td><td>29</td></tr>
-<tr><td>STS_027_CT</td><td>stat_median</td><td>Gabor</td><td>201</td><td>0</td><td>201</td></tr>
-<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L1</td><td>-300</td><td>0</td><td>300</td></tr>
-<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L2</td><td>-400</td><td>0</td><td>400</td></tr>
-<tr><td>STS_027_CT</td><td>stat_p10</td><td>Gabor</td><td>69</td><td>0</td><td>69</td></tr>
-<tr><td>STS_027_CT</td><td>stat_p90</td><td>Gabor</td><td>465</td><td>0</td><td>465</td></tr>
-<tr><td>STS_027_CT</td><td>stat_max</td><td>Laws</td><td>484</td><td>0</td><td>484</td></tr>
-<tr><td>STS_027_CT</td><td>stat_max</td><td>Gabor</td><td>2149</td><td>0</td><td>2149</td></tr>
-<tr><td>STS_027_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>186</td><td>0</td><td>186</td></tr>
-<tr><td>STS_027_CT</td><td>stat_max</td><td>Simon. L1</td><td>165</td><td>0</td><td>165</td></tr>
-<tr><td>STS_027_CT</td><td>stat_max</td><td>Simon. L2</td><td>164</td><td>0</td><td>164</td></tr>
-<tr><td>STS_027_CT</td><td>stat_iqr</td><td>Gabor</td><td>203</td><td>0</td><td>203</td></tr>
-<tr><td>STS_027_CT</td><td>stat_range</td><td>Laws</td><td>458</td><td>0</td><td>458</td></tr>
-<tr><td>STS_027_CT</td><td>stat_range</td><td>Gabor</td><td>2149</td><td>0</td><td>2149</td></tr>
-<tr><td>STS_027_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>223</td><td>0</td><td>223</td></tr>
-<tr><td>STS_027_CT</td><td>stat_range</td><td>Simon. L1</td><td>465</td><td>0</td><td>465</td></tr>
-<tr><td>STS_027_CT</td><td>stat_range</td><td>Simon. L2</td><td>564</td><td>0</td><td>564</td></tr>
-<tr><td>STS_027_CT</td><td>stat_mad</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
-<tr><td>STS_027_CT</td><td>stat_mad</td><td>Gabor</td><td>127</td><td>0</td><td>127</td></tr>
-<tr><td>STS_027_CT</td><td>stat_rmad</td><td>Gabor</td><td>86</td><td>0</td><td>86</td></tr>
-<tr><td>STS_027_CT</td><td>stat_medad</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
-<tr><td>STS_027_CT</td><td>stat_medad</td><td>Gabor</td><td>123</td><td>0</td><td>123</td></tr>
-<tr><td>STS_027_CT</td><td>stat_cov</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_027_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>5693</td><td>0</td><td>5693</td></tr>
-<tr><td>STS_027_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-94</td><td>0</td><td>94</td></tr>
-<tr><td>STS_027_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-20</td><td>0</td><td>20</td></tr>
-<tr><td>STS_027_CT</td><td>stat_qcod</td><td>LoG</td><td>6</td><td>0</td><td>6</td></tr>
-<tr><td>STS_027_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1094</td><td>0</td><td>1094</td></tr>
-<tr><td>STS_027_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>410</td><td>0</td><td>410</td></tr>
-<tr><td>STS_027_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-88</td><td>0</td><td>88</td></tr>
-<tr><td>STS_027_CT</td><td>stat_rms</td><td>Laws</td><td>85</td><td>0</td><td>85</td></tr>
-<tr><td>STS_027_CT</td><td>stat_rms</td><td>Gabor</td><td>291</td><td>0</td><td>291</td></tr>
+<tr><td>STS_032_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-1547</td><td>0</td><td>1547</td></tr>
+<tr><td>STS_032_PET</td><td>stat_cov</td><td>Simon. L1</td><td>10</td><td>0</td><td>10</td></tr>
+<tr><td>STS_032_PET</td><td>stat_cov</td><td>Simon. L2</td><td>3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_032_PET</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_032_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-175</td><td>0</td><td>175</td></tr>
+<tr><td>STS_032_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>11</td><td>0</td><td>11</td></tr>
+<tr><td>STS_032_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_mean</td><td>Gabor</td><td>87</td><td>0</td><td>87</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_var</td><td>Gabor</td><td>6702</td><td>0</td><td>6702</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
@@ -2846,6 +2805,47 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_032_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-59</td><td>0</td><td>59</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_rms</td><td>Laws</td><td>94</td><td>0</td><td>94</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_rms</td><td>Gabor</td><td>120</td><td>0</td><td>120</td></tr>
+<tr><td>STS_027_CT</td><td>stat_mean</td><td>Laws</td><td>76</td><td>0</td><td>76</td></tr>
+<tr><td>STS_027_CT</td><td>stat_mean</td><td>Gabor</td><td>239</td><td>0</td><td>239</td></tr>
+<tr><td>STS_027_CT</td><td>stat_var</td><td>Gabor</td><td>2.724e+04</td><td>0</td><td>2.724e+04</td></tr>
+<tr><td>STS_027_CT</td><td>stat_skew</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_027_CT</td><td>stat_skew</td><td>Laws</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_027_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_027_CT</td><td>stat_kurt</td><td>LoG</td><td>19</td><td>0</td><td>19</td></tr>
+<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
+<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>11</td><td>0</td><td>11</td></tr>
+<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>29</td><td>0</td><td>29</td></tr>
+<tr><td>STS_027_CT</td><td>stat_median</td><td>Gabor</td><td>201</td><td>0</td><td>201</td></tr>
+<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L1</td><td>-300</td><td>0</td><td>300</td></tr>
+<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L2</td><td>-400</td><td>0</td><td>400</td></tr>
+<tr><td>STS_027_CT</td><td>stat_p10</td><td>Gabor</td><td>69</td><td>0</td><td>69</td></tr>
+<tr><td>STS_027_CT</td><td>stat_p90</td><td>Gabor</td><td>465</td><td>0</td><td>465</td></tr>
+<tr><td>STS_027_CT</td><td>stat_max</td><td>Laws</td><td>484</td><td>0</td><td>484</td></tr>
+<tr><td>STS_027_CT</td><td>stat_max</td><td>Gabor</td><td>2149</td><td>0</td><td>2149</td></tr>
+<tr><td>STS_027_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>186</td><td>0</td><td>186</td></tr>
+<tr><td>STS_027_CT</td><td>stat_max</td><td>Simon. L1</td><td>165</td><td>0</td><td>165</td></tr>
+<tr><td>STS_027_CT</td><td>stat_max</td><td>Simon. L2</td><td>164</td><td>0</td><td>164</td></tr>
+<tr><td>STS_027_CT</td><td>stat_iqr</td><td>Gabor</td><td>203</td><td>0</td><td>203</td></tr>
+<tr><td>STS_027_CT</td><td>stat_range</td><td>Laws</td><td>458</td><td>0</td><td>458</td></tr>
+<tr><td>STS_027_CT</td><td>stat_range</td><td>Gabor</td><td>2149</td><td>0</td><td>2149</td></tr>
+<tr><td>STS_027_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>223</td><td>0</td><td>223</td></tr>
+<tr><td>STS_027_CT</td><td>stat_range</td><td>Simon. L1</td><td>465</td><td>0</td><td>465</td></tr>
+<tr><td>STS_027_CT</td><td>stat_range</td><td>Simon. L2</td><td>564</td><td>0</td><td>564</td></tr>
+<tr><td>STS_027_CT</td><td>stat_mad</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
+<tr><td>STS_027_CT</td><td>stat_mad</td><td>Gabor</td><td>127</td><td>0</td><td>127</td></tr>
+<tr><td>STS_027_CT</td><td>stat_rmad</td><td>Gabor</td><td>86</td><td>0</td><td>86</td></tr>
+<tr><td>STS_027_CT</td><td>stat_medad</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
+<tr><td>STS_027_CT</td><td>stat_medad</td><td>Gabor</td><td>123</td><td>0</td><td>123</td></tr>
+<tr><td>STS_027_CT</td><td>stat_cov</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_027_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>5693</td><td>0</td><td>5693</td></tr>
+<tr><td>STS_027_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-94</td><td>0</td><td>94</td></tr>
+<tr><td>STS_027_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-20</td><td>0</td><td>20</td></tr>
+<tr><td>STS_027_CT</td><td>stat_qcod</td><td>LoG</td><td>6</td><td>0</td><td>6</td></tr>
+<tr><td>STS_027_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1094</td><td>0</td><td>1094</td></tr>
+<tr><td>STS_027_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>410</td><td>0</td><td>410</td></tr>
+<tr><td>STS_027_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-88</td><td>0</td><td>88</td></tr>
+<tr><td>STS_027_CT</td><td>stat_rms</td><td>Laws</td><td>85</td><td>0</td><td>85</td></tr>
+<tr><td>STS_027_CT</td><td>stat_rms</td><td>Gabor</td><td>291</td><td>0</td><td>291</td></tr>
 <tr><td>STS_033_PET</td><td>stat_cov</td><td>LoG</td><td>-4</td><td>0</td><td>4</td></tr>
 <tr><td>STS_033_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-667</td><td>0</td><td>667</td></tr>
 <tr><td>STS_033_PET</td><td>stat_cov</td><td>Simon. L1</td><td>41</td><td>0</td><td>41</td></tr>
@@ -2888,29 +2888,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_034_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-97</td><td>0</td><td>97</td></tr>
 <tr><td>STS_034_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>41</td><td>0</td><td>41</td></tr>
 <tr><td>STS_034_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>5</td><td>0</td><td>5</td></tr>
-<tr><td>STS_030_CT</td><td>stat_mean</td><td>Laws</td><td>77</td><td>0</td><td>77</td></tr>
-<tr><td>STS_030_CT</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_030_CT</td><td>stat_median</td><td>Laws</td><td>77</td><td>0</td><td>77</td></tr>
-<tr><td>STS_030_CT</td><td>stat_min</td><td>Simon. L1</td><td>-118</td><td>0</td><td>118</td></tr>
-<tr><td>STS_030_CT</td><td>stat_min</td><td>Simon. L2</td><td>-77</td><td>0</td><td>77</td></tr>
-<tr><td>STS_030_CT</td><td>stat_p10</td><td>Laws</td><td>62</td><td>0</td><td>62</td></tr>
-<tr><td>STS_030_CT</td><td>stat_max</td><td>Gabor</td><td>349</td><td>0</td><td>349</td></tr>
-<tr><td>STS_030_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>130</td><td>0</td><td>130</td></tr>
-<tr><td>STS_030_CT</td><td>stat_range</td><td>Gabor</td><td>348</td><td>0</td><td>348</td></tr>
-<tr><td>STS_030_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>170</td><td>0</td><td>170</td></tr>
-<tr><td>STS_030_CT</td><td>stat_range</td><td>Simon. L1</td><td>239</td><td>0</td><td>239</td></tr>
-<tr><td>STS_030_CT</td><td>stat_range</td><td>Simon. L2</td><td>163</td><td>0</td><td>163</td></tr>
-<tr><td>STS_030_CT</td><td>stat_mad</td><td>Gabor</td><td>22</td><td>0</td><td>22</td></tr>
-<tr><td>STS_030_CT</td><td>stat_medad</td><td>Gabor</td><td>22</td><td>0</td><td>22</td></tr>
-<tr><td>STS_030_CT</td><td>stat_cov</td><td>LoG</td><td>-10</td><td>0</td><td>10</td></tr>
-<tr><td>STS_030_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-6102</td><td>0</td><td>6102</td></tr>
-<tr><td>STS_030_CT</td><td>stat_cov</td><td>Simon. L1</td><td>1299</td><td>0</td><td>1299</td></tr>
-<tr><td>STS_030_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-111</td><td>0</td><td>111</td></tr>
-<tr><td>STS_030_CT</td><td>stat_qcod</td><td>LoG</td><td>-4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_030_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1554</td><td>0</td><td>1554</td></tr>
-<tr><td>STS_030_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>643</td><td>0</td><td>643</td></tr>
-<tr><td>STS_030_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-62</td><td>0</td><td>62</td></tr>
-<tr><td>STS_030_CT</td><td>stat_rms</td><td>Laws</td><td>78</td><td>0</td><td>78</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_skew</td><td>Gabor</td><td>5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>4</td><td>0</td><td>4</td></tr>
@@ -2946,6 +2923,29 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_031_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>1896</td><td>0</td><td>1896</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>21</td><td>0</td><td>21</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_rms</td><td>Gabor</td><td>91</td><td>0</td><td>91</td></tr>
+<tr><td>STS_030_CT</td><td>stat_mean</td><td>Laws</td><td>77</td><td>0</td><td>77</td></tr>
+<tr><td>STS_030_CT</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_030_CT</td><td>stat_median</td><td>Laws</td><td>77</td><td>0</td><td>77</td></tr>
+<tr><td>STS_030_CT</td><td>stat_min</td><td>Simon. L1</td><td>-118</td><td>0</td><td>118</td></tr>
+<tr><td>STS_030_CT</td><td>stat_min</td><td>Simon. L2</td><td>-77</td><td>0</td><td>77</td></tr>
+<tr><td>STS_030_CT</td><td>stat_p10</td><td>Laws</td><td>62</td><td>0</td><td>62</td></tr>
+<tr><td>STS_030_CT</td><td>stat_max</td><td>Gabor</td><td>349</td><td>0</td><td>349</td></tr>
+<tr><td>STS_030_CT</td><td>stat_max</td><td>Coif3 HHH L2</td><td>130</td><td>0</td><td>130</td></tr>
+<tr><td>STS_030_CT</td><td>stat_range</td><td>Gabor</td><td>348</td><td>0</td><td>348</td></tr>
+<tr><td>STS_030_CT</td><td>stat_range</td><td>Coif3 HHH L2</td><td>170</td><td>0</td><td>170</td></tr>
+<tr><td>STS_030_CT</td><td>stat_range</td><td>Simon. L1</td><td>239</td><td>0</td><td>239</td></tr>
+<tr><td>STS_030_CT</td><td>stat_range</td><td>Simon. L2</td><td>163</td><td>0</td><td>163</td></tr>
+<tr><td>STS_030_CT</td><td>stat_mad</td><td>Gabor</td><td>22</td><td>0</td><td>22</td></tr>
+<tr><td>STS_030_CT</td><td>stat_medad</td><td>Gabor</td><td>22</td><td>0</td><td>22</td></tr>
+<tr><td>STS_030_CT</td><td>stat_cov</td><td>LoG</td><td>-10</td><td>0</td><td>10</td></tr>
+<tr><td>STS_030_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-6102</td><td>0</td><td>6102</td></tr>
+<tr><td>STS_030_CT</td><td>stat_cov</td><td>Simon. L1</td><td>1299</td><td>0</td><td>1299</td></tr>
+<tr><td>STS_030_CT</td><td>stat_cov</td><td>Simon. L2</td><td>-111</td><td>0</td><td>111</td></tr>
+<tr><td>STS_030_CT</td><td>stat_qcod</td><td>LoG</td><td>-4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_030_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1554</td><td>0</td><td>1554</td></tr>
+<tr><td>STS_030_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>643</td><td>0</td><td>643</td></tr>
+<tr><td>STS_030_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-62</td><td>0</td><td>62</td></tr>
+<tr><td>STS_030_CT</td><td>stat_rms</td><td>Laws</td><td>78</td><td>0</td><td>78</td></tr>
 <tr><td>STS_035_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-114</td><td>0</td><td>114</td></tr>
 <tr><td>STS_035_PET</td><td>stat_cov</td><td>Simon. L1</td><td>9</td><td>0</td><td>9</td></tr>
 <tr><td>STS_035_PET</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
@@ -2988,37 +2988,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_031_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-27</td><td>0</td><td>27</td></tr>
 <tr><td>STS_031_CT</td><td>stat_rms</td><td>Laws</td><td>78</td><td>0</td><td>78</td></tr>
 <tr><td>STS_031_CT</td><td>stat_rms</td><td>Gabor</td><td>311</td><td>0</td><td>311</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_skew</td><td>Gabor</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Gabor</td><td>25</td><td>0</td><td>25</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Coif3 LHH L1</td><td>13</td><td>0</td><td>13</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>16</td><td>0</td><td>16</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>15</td><td>0</td><td>15</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Simon. L2</td><td>8</td><td>0</td><td>8</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-284</td><td>0</td><td>284</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-366</td><td>0</td><td>366</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_max</td><td>Laws</td><td>230</td><td>0</td><td>230</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_max</td><td>Gabor</td><td>480</td><td>0</td><td>480</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_max</td><td>Coif3 HHH L2</td><td>282</td><td>0</td><td>282</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_max</td><td>Simon. L1</td><td>297</td><td>0</td><td>297</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_max</td><td>Simon. L2</td><td>278</td><td>0</td><td>278</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_range</td><td>Laws</td><td>221</td><td>0</td><td>221</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_range</td><td>Gabor</td><td>480</td><td>0</td><td>480</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_range</td><td>Coif3 HHH L2</td><td>318</td><td>0</td><td>318</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_range</td><td>Simon. L1</td><td>581</td><td>0</td><td>581</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_range</td><td>Simon. L2</td><td>644</td><td>0</td><td>644</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_mad</td><td>Laws</td><td>24</td><td>0</td><td>24</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_medad</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_cov</td><td>LoG</td><td>3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-932</td><td>0</td><td>932</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_cov</td><td>Simon. L1</td><td>-73</td><td>0</td><td>73</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_cov</td><td>Simon. L2</td><td>-18</td><td>0</td><td>18</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>LoG</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>614</td><td>0</td><td>614</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>-84</td><td>0</td><td>84</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-80</td><td>0</td><td>80</td></tr>
 <tr><td>STS_030_MRI</td><td>stat_mean</td><td>Laws</td><td>87</td><td>0</td><td>87</td></tr>
 <tr><td>STS_030_MRI</td><td>stat_mean</td><td>Gabor</td><td>99</td><td>0</td><td>99</td></tr>
 <tr><td>STS_030_MRI</td><td>stat_var</td><td>Gabor</td><td>9840</td><td>0</td><td>9840</td></tr>
@@ -3101,6 +3070,37 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_033_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-206</td><td>0</td><td>206</td></tr>
 <tr><td>STS_033_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>91</td><td>0</td><td>91</td></tr>
 <tr><td>STS_033_CT</td><td>stat_rms</td><td>Gabor</td><td>132</td><td>0</td><td>132</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_skew</td><td>Gabor</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Gabor</td><td>25</td><td>0</td><td>25</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Coif3 LHH L1</td><td>13</td><td>0</td><td>13</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>16</td><td>0</td><td>16</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>15</td><td>0</td><td>15</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_kurt</td><td>Simon. L2</td><td>8</td><td>0</td><td>8</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-284</td><td>0</td><td>284</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-366</td><td>0</td><td>366</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_max</td><td>Laws</td><td>230</td><td>0</td><td>230</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_max</td><td>Gabor</td><td>480</td><td>0</td><td>480</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_max</td><td>Coif3 HHH L2</td><td>282</td><td>0</td><td>282</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_max</td><td>Simon. L1</td><td>297</td><td>0</td><td>297</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_max</td><td>Simon. L2</td><td>278</td><td>0</td><td>278</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_range</td><td>Laws</td><td>221</td><td>0</td><td>221</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_range</td><td>Gabor</td><td>480</td><td>0</td><td>480</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_range</td><td>Coif3 HHH L2</td><td>318</td><td>0</td><td>318</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_range</td><td>Simon. L1</td><td>581</td><td>0</td><td>581</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_range</td><td>Simon. L2</td><td>644</td><td>0</td><td>644</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_mad</td><td>Laws</td><td>24</td><td>0</td><td>24</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_medad</td><td>Laws</td><td>21</td><td>0</td><td>21</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_cov</td><td>LoG</td><td>3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-932</td><td>0</td><td>932</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_cov</td><td>Simon. L1</td><td>-73</td><td>0</td><td>73</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_cov</td><td>Simon. L2</td><td>-18</td><td>0</td><td>18</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>LoG</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>614</td><td>0</td><td>614</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>-84</td><td>0</td><td>84</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-80</td><td>0</td><td>80</td></tr>
 <tr><td>STS_036_PET</td><td>stat_cov</td><td>LoG</td><td>-4</td><td>0</td><td>4</td></tr>
 <tr><td>STS_036_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-5828</td><td>0</td><td>5828</td></tr>
 <tr><td>STS_036_PET</td><td>stat_cov</td><td>Simon. L1</td><td>43</td><td>0</td><td>43</td></tr>
@@ -3109,15 +3109,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_036_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-794</td><td>0</td><td>794</td></tr>
 <tr><td>STS_036_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-63</td><td>0</td><td>63</td></tr>
 <tr><td>STS_036_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_037_PET</td><td>stat_cov</td><td>LoG</td><td>-10</td><td>0</td><td>10</td></tr>
-<tr><td>STS_037_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-1127</td><td>0</td><td>1127</td></tr>
-<tr><td>STS_037_PET</td><td>stat_cov</td><td>Simon. L1</td><td>-125</td><td>0</td><td>125</td></tr>
-<tr><td>STS_037_PET</td><td>stat_cov</td><td>Simon. L2</td><td>46</td><td>0</td><td>46</td></tr>
-<tr><td>STS_037_PET</td><td>stat_qcod</td><td>LoG</td><td>17</td><td>0</td><td>17</td></tr>
-<tr><td>STS_037_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_037_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>249</td><td>0</td><td>249</td></tr>
-<tr><td>STS_037_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-20</td><td>0</td><td>20</td></tr>
-<tr><td>STS_037_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>-53</td><td>0</td><td>53</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_mean</td><td>Laws</td><td>94</td><td>0</td><td>94</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_var</td><td>Simon. L2</td><td>5209</td><td>0</td><td>5209</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
@@ -3158,6 +3149,44 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_035_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>-32</td><td>0</td><td>32</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-115</td><td>0</td><td>115</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_rms</td><td>Laws</td><td>106</td><td>0</td><td>106</td></tr>
+<tr><td>STS_037_PET</td><td>stat_cov</td><td>LoG</td><td>-10</td><td>0</td><td>10</td></tr>
+<tr><td>STS_037_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-1127</td><td>0</td><td>1127</td></tr>
+<tr><td>STS_037_PET</td><td>stat_cov</td><td>Simon. L1</td><td>-125</td><td>0</td><td>125</td></tr>
+<tr><td>STS_037_PET</td><td>stat_cov</td><td>Simon. L2</td><td>46</td><td>0</td><td>46</td></tr>
+<tr><td>STS_037_PET</td><td>stat_qcod</td><td>LoG</td><td>17</td><td>0</td><td>17</td></tr>
+<tr><td>STS_037_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_037_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>249</td><td>0</td><td>249</td></tr>
+<tr><td>STS_037_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-20</td><td>0</td><td>20</td></tr>
+<tr><td>STS_037_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>-53</td><td>0</td><td>53</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Gabor</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Simon. L1</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_kurt</td><td>Gabor</td><td>26</td><td>0</td><td>26</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_kurt</td><td>Coif3 LHH L1</td><td>14</td><td>0</td><td>14</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>27</td><td>0</td><td>27</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>15</td><td>0</td><td>15</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-154</td><td>0</td><td>154</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-204</td><td>0</td><td>204</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_max</td><td>Laws</td><td>227</td><td>0</td><td>227</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_max</td><td>Gabor</td><td>178</td><td>0</td><td>178</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_max</td><td>Simon. L1</td><td>222</td><td>0</td><td>222</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_max</td><td>Simon. L2</td><td>275</td><td>0</td><td>275</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_range</td><td>Laws</td><td>223</td><td>0</td><td>223</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_range</td><td>Gabor</td><td>178</td><td>0</td><td>178</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_range</td><td>Simon. L1</td><td>376</td><td>0</td><td>376</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_range</td><td>Simon. L2</td><td>479</td><td>0</td><td>479</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_mad</td><td>Laws</td><td>20</td><td>0</td><td>20</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_cov</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>543</td><td>0</td><td>543</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_cov</td><td>Simon. L1</td><td>25</td><td>0</td><td>25</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_cov</td><td>Simon. L2</td><td>74</td><td>0</td><td>74</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Laws</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-4415</td><td>0</td><td>4415</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>78</td><td>0</td><td>78</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>62</td><td>0</td><td>62</td></tr>
 <tr><td>STS_035_CT</td><td>stat_mean</td><td>Laws</td><td>122</td><td>0</td><td>122</td></tr>
 <tr><td>STS_035_CT</td><td>stat_mean</td><td>Gabor</td><td>86</td><td>0</td><td>86</td></tr>
 <tr><td>STS_035_CT</td><td>stat_var</td><td>Laws</td><td>1.275e+04</td><td>0</td><td>1.275e+04</td></tr>
@@ -3209,35 +3238,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_035_CT</td><td>stat_rms</td><td>Laws</td><td>166</td><td>0</td><td>166</td></tr>
 <tr><td>STS_035_CT</td><td>stat_rms</td><td>Gabor</td><td>173</td><td>0</td><td>173</td></tr>
 <tr><td>STS_035_CT</td><td>stat_rms</td><td>Simon. L2</td><td>134</td><td>0</td><td>134</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Gabor</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Simon. L1</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_kurt</td><td>Gabor</td><td>26</td><td>0</td><td>26</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_kurt</td><td>Coif3 LHH L1</td><td>14</td><td>0</td><td>14</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>27</td><td>0</td><td>27</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>15</td><td>0</td><td>15</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-154</td><td>0</td><td>154</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-204</td><td>0</td><td>204</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_max</td><td>Laws</td><td>227</td><td>0</td><td>227</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_max</td><td>Gabor</td><td>178</td><td>0</td><td>178</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_max</td><td>Simon. L1</td><td>222</td><td>0</td><td>222</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_max</td><td>Simon. L2</td><td>275</td><td>0</td><td>275</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_range</td><td>Laws</td><td>223</td><td>0</td><td>223</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_range</td><td>Gabor</td><td>178</td><td>0</td><td>178</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_range</td><td>Simon. L1</td><td>376</td><td>0</td><td>376</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_range</td><td>Simon. L2</td><td>479</td><td>0</td><td>479</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_mad</td><td>Laws</td><td>20</td><td>0</td><td>20</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_cov</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>543</td><td>0</td><td>543</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_cov</td><td>Simon. L1</td><td>25</td><td>0</td><td>25</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_cov</td><td>Simon. L2</td><td>74</td><td>0</td><td>74</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Laws</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-4415</td><td>0</td><td>4415</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>78</td><td>0</td><td>78</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>62</td><td>0</td><td>62</td></tr>
 <tr><td>STS_038_PET</td><td>stat_cov</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_038_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-508</td><td>0</td><td>508</td></tr>
 <tr><td>STS_038_PET</td><td>stat_cov</td><td>Simon. L1</td><td>198</td><td>0</td><td>198</td></tr>
@@ -3477,6 +3477,48 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_041_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-1339</td><td>0</td><td>1339</td></tr>
 <tr><td>STS_041_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>10</td><td>0</td><td>10</td></tr>
 <tr><td>STS_041_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_mean</td><td>Gabor</td><td>95</td><td>0</td><td>95</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_var</td><td>Gabor</td><td>8436</td><td>0</td><td>8436</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_skew</td><td>Gabor</td><td>3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_kurt</td><td>Gabor</td><td>15</td><td>0</td><td>15</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>9</td><td>0</td><td>9</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-226</td><td>0</td><td>226</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-267</td><td>0</td><td>267</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_p90</td><td>Laws</td><td>131</td><td>0</td><td>131</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_p90</td><td>Gabor</td><td>194</td><td>0</td><td>194</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_max</td><td>Laws</td><td>356</td><td>0</td><td>356</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_max</td><td>Gabor</td><td>1256</td><td>0</td><td>1256</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_max</td><td>Coif3 HHH L2</td><td>297</td><td>0</td><td>297</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_max</td><td>Simon. L1</td><td>234</td><td>0</td><td>234</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_max</td><td>Simon. L2</td><td>233</td><td>0</td><td>233</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_iqr</td><td>Laws</td><td>53</td><td>0</td><td>53</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_iqr</td><td>Gabor</td><td>76</td><td>0</td><td>76</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_range</td><td>Laws</td><td>337</td><td>0</td><td>337</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_range</td><td>Gabor</td><td>1256</td><td>0</td><td>1256</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_range</td><td>Coif3 HHH L2</td><td>317</td><td>0</td><td>317</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_range</td><td>Simon. L1</td><td>460</td><td>0</td><td>460</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_range</td><td>Simon. L2</td><td>499</td><td>0</td><td>499</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_mad</td><td>Laws</td><td>33</td><td>0</td><td>33</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_mad</td><td>Gabor</td><td>60</td><td>0</td><td>60</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_rmad</td><td>Laws</td><td>22</td><td>0</td><td>22</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_rmad</td><td>Gabor</td><td>34</td><td>0</td><td>34</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_medad</td><td>Laws</td><td>31</td><td>0</td><td>31</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_medad</td><td>Gabor</td><td>56</td><td>0</td><td>56</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_cov</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>459</td><td>0</td><td>459</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_cov</td><td>Simon. L1</td><td>248</td><td>0</td><td>248</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_cov</td><td>Simon. L2</td><td>-41</td><td>0</td><td>41</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1564</td><td>0</td><td>1564</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>347</td><td>0</td><td>347</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-25</td><td>0</td><td>25</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_rms</td><td>Laws</td><td>84</td><td>0</td><td>84</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_rms</td><td>Gabor</td><td>132</td><td>0</td><td>132</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_mean</td><td>Gabor</td><td>117</td><td>0</td><td>117</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_var</td><td>Gabor</td><td>1.511e+04</td><td>0</td><td>1.511e+04</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_skew</td><td>Laws</td><td>3</td><td>0</td><td>3</td></tr>
@@ -3520,48 +3562,29 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_039_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>468</td><td>0</td><td>468</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_rms</td><td>Laws</td><td>86</td><td>0</td><td>86</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_rms</td><td>Gabor</td><td>169</td><td>0</td><td>169</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_mean</td><td>Gabor</td><td>95</td><td>0</td><td>95</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_var</td><td>Gabor</td><td>8436</td><td>0</td><td>8436</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_skew</td><td>Laws</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_skew</td><td>Gabor</td><td>3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_kurt</td><td>Gabor</td><td>15</td><td>0</td><td>15</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>9</td><td>0</td><td>9</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-226</td><td>0</td><td>226</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-267</td><td>0</td><td>267</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_p90</td><td>Laws</td><td>131</td><td>0</td><td>131</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_p90</td><td>Gabor</td><td>194</td><td>0</td><td>194</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_max</td><td>Laws</td><td>356</td><td>0</td><td>356</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_max</td><td>Gabor</td><td>1256</td><td>0</td><td>1256</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_max</td><td>Coif3 HHH L2</td><td>297</td><td>0</td><td>297</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_max</td><td>Simon. L1</td><td>234</td><td>0</td><td>234</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_max</td><td>Simon. L2</td><td>233</td><td>0</td><td>233</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_iqr</td><td>Laws</td><td>53</td><td>0</td><td>53</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_iqr</td><td>Gabor</td><td>76</td><td>0</td><td>76</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_range</td><td>Laws</td><td>337</td><td>0</td><td>337</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_range</td><td>Gabor</td><td>1256</td><td>0</td><td>1256</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_range</td><td>Coif3 HHH L2</td><td>317</td><td>0</td><td>317</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_range</td><td>Simon. L1</td><td>460</td><td>0</td><td>460</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_range</td><td>Simon. L2</td><td>499</td><td>0</td><td>499</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_mad</td><td>Laws</td><td>33</td><td>0</td><td>33</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_mad</td><td>Gabor</td><td>60</td><td>0</td><td>60</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_rmad</td><td>Laws</td><td>22</td><td>0</td><td>22</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_rmad</td><td>Gabor</td><td>34</td><td>0</td><td>34</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_medad</td><td>Laws</td><td>31</td><td>0</td><td>31</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_medad</td><td>Gabor</td><td>56</td><td>0</td><td>56</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_cov</td><td>LoG</td><td>4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>459</td><td>0</td><td>459</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_cov</td><td>Simon. L1</td><td>248</td><td>0</td><td>248</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_cov</td><td>Simon. L2</td><td>-41</td><td>0</td><td>41</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1564</td><td>0</td><td>1564</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>Coif3 HHH L2</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>Simon. L1</td><td>347</td><td>0</td><td>347</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>-25</td><td>0</td><td>25</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_rms</td><td>Laws</td><td>84</td><td>0</td><td>84</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_rms</td><td>Gabor</td><td>132</td><td>0</td><td>132</td></tr>
+<tr><td>STS_041_CT</td><td>stat_mean</td><td>Gabor</td><td>162</td><td>0</td><td>162</td></tr>
+<tr><td>STS_041_CT</td><td>stat_var</td><td>Gabor</td><td>9393</td><td>0</td><td>9393</td></tr>
+<tr><td>STS_041_CT</td><td>stat_median</td><td>Gabor</td><td>143</td><td>0</td><td>143</td></tr>
+<tr><td>STS_041_CT</td><td>stat_min</td><td>Simon. L1</td><td>-93</td><td>0</td><td>93</td></tr>
+<tr><td>STS_041_CT</td><td>stat_min</td><td>Simon. L2</td><td>-77</td><td>0</td><td>77</td></tr>
+<tr><td>STS_041_CT</td><td>stat_p10</td><td>Gabor</td><td>54</td><td>0</td><td>54</td></tr>
+<tr><td>STS_041_CT</td><td>stat_p90</td><td>Gabor</td><td>297</td><td>0</td><td>297</td></tr>
+<tr><td>STS_041_CT</td><td>stat_max</td><td>Gabor</td><td>773</td><td>0</td><td>773</td></tr>
+<tr><td>STS_041_CT</td><td>stat_iqr</td><td>Gabor</td><td>123</td><td>0</td><td>123</td></tr>
+<tr><td>STS_041_CT</td><td>stat_range</td><td>Gabor</td><td>772</td><td>0</td><td>772</td></tr>
+<tr><td>STS_041_CT</td><td>stat_range</td><td>Simon. L1</td><td>172</td><td>0</td><td>172</td></tr>
+<tr><td>STS_041_CT</td><td>stat_range</td><td>Simon. L2</td><td>149</td><td>0</td><td>149</td></tr>
+<tr><td>STS_041_CT</td><td>stat_mad</td><td>Gabor</td><td>76</td><td>0</td><td>76</td></tr>
+<tr><td>STS_041_CT</td><td>stat_rmad</td><td>Gabor</td><td>52</td><td>0</td><td>52</td></tr>
+<tr><td>STS_041_CT</td><td>stat_medad</td><td>Gabor</td><td>74</td><td>0</td><td>74</td></tr>
+<tr><td>STS_041_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-754</td><td>0</td><td>754</td></tr>
+<tr><td>STS_041_CT</td><td>stat_cov</td><td>Simon. L1</td><td>105</td><td>0</td><td>105</td></tr>
+<tr><td>STS_041_CT</td><td>stat_cov</td><td>Simon. L2</td><td>9</td><td>0</td><td>9</td></tr>
+<tr><td>STS_041_CT</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_041_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1387</td><td>0</td><td>1387</td></tr>
+<tr><td>STS_041_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>62</td><td>0</td><td>62</td></tr>
+<tr><td>STS_041_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>7</td><td>0</td><td>7</td></tr>
+<tr><td>STS_041_CT</td><td>stat_rms</td><td>Gabor</td><td>188</td><td>0</td><td>188</td></tr>
 <tr><td>STS_037_MRI</td><td>stat_var</td><td>Gabor</td><td>9230</td><td>0</td><td>9230</td></tr>
 <tr><td>STS_037_MRI</td><td>stat_skew</td><td>Laws</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_037_MRI</td><td>stat_skew</td><td>Gabor</td><td>9</td><td>0</td><td>9</td></tr>
@@ -3609,29 +3632,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_042_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-432</td><td>0</td><td>432</td></tr>
 <tr><td>STS_042_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_042_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_041_CT</td><td>stat_mean</td><td>Gabor</td><td>162</td><td>0</td><td>162</td></tr>
-<tr><td>STS_041_CT</td><td>stat_var</td><td>Gabor</td><td>9393</td><td>0</td><td>9393</td></tr>
-<tr><td>STS_041_CT</td><td>stat_median</td><td>Gabor</td><td>143</td><td>0</td><td>143</td></tr>
-<tr><td>STS_041_CT</td><td>stat_min</td><td>Simon. L1</td><td>-93</td><td>0</td><td>93</td></tr>
-<tr><td>STS_041_CT</td><td>stat_min</td><td>Simon. L2</td><td>-77</td><td>0</td><td>77</td></tr>
-<tr><td>STS_041_CT</td><td>stat_p10</td><td>Gabor</td><td>54</td><td>0</td><td>54</td></tr>
-<tr><td>STS_041_CT</td><td>stat_p90</td><td>Gabor</td><td>297</td><td>0</td><td>297</td></tr>
-<tr><td>STS_041_CT</td><td>stat_max</td><td>Gabor</td><td>773</td><td>0</td><td>773</td></tr>
-<tr><td>STS_041_CT</td><td>stat_iqr</td><td>Gabor</td><td>123</td><td>0</td><td>123</td></tr>
-<tr><td>STS_041_CT</td><td>stat_range</td><td>Gabor</td><td>772</td><td>0</td><td>772</td></tr>
-<tr><td>STS_041_CT</td><td>stat_range</td><td>Simon. L1</td><td>172</td><td>0</td><td>172</td></tr>
-<tr><td>STS_041_CT</td><td>stat_range</td><td>Simon. L2</td><td>149</td><td>0</td><td>149</td></tr>
-<tr><td>STS_041_CT</td><td>stat_mad</td><td>Gabor</td><td>76</td><td>0</td><td>76</td></tr>
-<tr><td>STS_041_CT</td><td>stat_rmad</td><td>Gabor</td><td>52</td><td>0</td><td>52</td></tr>
-<tr><td>STS_041_CT</td><td>stat_medad</td><td>Gabor</td><td>74</td><td>0</td><td>74</td></tr>
-<tr><td>STS_041_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-754</td><td>0</td><td>754</td></tr>
-<tr><td>STS_041_CT</td><td>stat_cov</td><td>Simon. L1</td><td>105</td><td>0</td><td>105</td></tr>
-<tr><td>STS_041_CT</td><td>stat_cov</td><td>Simon. L2</td><td>9</td><td>0</td><td>9</td></tr>
-<tr><td>STS_041_CT</td><td>stat_qcod</td><td>LoG</td><td>-1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_041_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1387</td><td>0</td><td>1387</td></tr>
-<tr><td>STS_041_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>62</td><td>0</td><td>62</td></tr>
-<tr><td>STS_041_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>7</td><td>0</td><td>7</td></tr>
-<tr><td>STS_041_CT</td><td>stat_rms</td><td>Gabor</td><td>188</td><td>0</td><td>188</td></tr>
 <tr><td>STS_043_PET</td><td>stat_cov</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_043_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>353</td><td>0</td><td>353</td></tr>
 <tr><td>STS_043_PET</td><td>stat_cov</td><td>Simon. L1</td><td>58</td><td>0</td><td>58</td></tr>
@@ -3722,6 +3722,35 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_037_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-154</td><td>0</td><td>154</td></tr>
 <tr><td>STS_037_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-232</td><td>0</td><td>232</td></tr>
 <tr><td>STS_037_CT</td><td>stat_rms</td><td>Gabor</td><td>209</td><td>0</td><td>209</td></tr>
+<tr><td>STS_039_CT</td><td>stat_mean</td><td>Gabor</td><td>126</td><td>0</td><td>126</td></tr>
+<tr><td>STS_039_CT</td><td>stat_var</td><td>Gabor</td><td>8511</td><td>0</td><td>8511</td></tr>
+<tr><td>STS_039_CT</td><td>stat_skew</td><td>LoG</td><td>7</td><td>0</td><td>7</td></tr>
+<tr><td>STS_039_CT</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_039_CT</td><td>stat_kurt</td><td>LoG</td><td>118</td><td>0</td><td>118</td></tr>
+<tr><td>STS_039_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>10</td><td>0</td><td>10</td></tr>
+<tr><td>STS_039_CT</td><td>stat_median</td><td>Gabor</td><td>103</td><td>0</td><td>103</td></tr>
+<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L1</td><td>-80</td><td>0</td><td>80</td></tr>
+<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L2</td><td>-62</td><td>0</td><td>62</td></tr>
+<tr><td>STS_039_CT</td><td>stat_p90</td><td>Gabor</td><td>251</td><td>0</td><td>251</td></tr>
+<tr><td>STS_039_CT</td><td>stat_max</td><td>Laws</td><td>146</td><td>0</td><td>146</td></tr>
+<tr><td>STS_039_CT</td><td>stat_max</td><td>Gabor</td><td>888</td><td>0</td><td>888</td></tr>
+<tr><td>STS_039_CT</td><td>stat_iqr</td><td>Gabor</td><td>107</td><td>0</td><td>107</td></tr>
+<tr><td>STS_039_CT</td><td>stat_range</td><td>Laws</td><td>128</td><td>0</td><td>128</td></tr>
+<tr><td>STS_039_CT</td><td>stat_range</td><td>Gabor</td><td>888</td><td>0</td><td>888</td></tr>
+<tr><td>STS_039_CT</td><td>stat_range</td><td>Simon. L1</td><td>159</td><td>0</td><td>159</td></tr>
+<tr><td>STS_039_CT</td><td>stat_range</td><td>Simon. L2</td><td>175</td><td>0</td><td>175</td></tr>
+<tr><td>STS_039_CT</td><td>stat_mad</td><td>Gabor</td><td>70</td><td>0</td><td>70</td></tr>
+<tr><td>STS_039_CT</td><td>stat_rmad</td><td>Gabor</td><td>46</td><td>0</td><td>46</td></tr>
+<tr><td>STS_039_CT</td><td>stat_medad</td><td>Gabor</td><td>67</td><td>0</td><td>67</td></tr>
+<tr><td>STS_039_CT</td><td>stat_cov</td><td>LoG</td><td>16</td><td>0</td><td>16</td></tr>
+<tr><td>STS_039_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-7673</td><td>0</td><td>7673</td></tr>
+<tr><td>STS_039_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-670</td><td>0</td><td>670</td></tr>
+<tr><td>STS_039_CT</td><td>stat_cov</td><td>Simon. L2</td><td>189</td><td>0</td><td>189</td></tr>
+<tr><td>STS_039_CT</td><td>stat_qcod</td><td>LoG</td><td>11</td><td>0</td><td>11</td></tr>
+<tr><td>STS_039_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-5701</td><td>0</td><td>5701</td></tr>
+<tr><td>STS_039_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-558</td><td>0</td><td>558</td></tr>
+<tr><td>STS_039_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>162</td><td>0</td><td>162</td></tr>
+<tr><td>STS_039_CT</td><td>stat_rms</td><td>Gabor</td><td>156</td><td>0</td><td>156</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_mean</td><td>Laws</td><td>76</td><td>0</td><td>76</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_mean</td><td>Gabor</td><td>84</td><td>0</td><td>84</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_var</td><td>Gabor</td><td>9215</td><td>0</td><td>9215</td></tr>
@@ -3766,35 +3795,14 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_042_MRI</td><td>stat_qcod</td><td>Simon. L2</td><td>10</td><td>0</td><td>10</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_rms</td><td>Laws</td><td>94</td><td>0</td><td>94</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_rms</td><td>Gabor</td><td>128</td><td>0</td><td>128</td></tr>
-<tr><td>STS_039_CT</td><td>stat_mean</td><td>Gabor</td><td>126</td><td>0</td><td>126</td></tr>
-<tr><td>STS_039_CT</td><td>stat_var</td><td>Gabor</td><td>8511</td><td>0</td><td>8511</td></tr>
-<tr><td>STS_039_CT</td><td>stat_skew</td><td>LoG</td><td>7</td><td>0</td><td>7</td></tr>
-<tr><td>STS_039_CT</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_039_CT</td><td>stat_kurt</td><td>LoG</td><td>118</td><td>0</td><td>118</td></tr>
-<tr><td>STS_039_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>10</td><td>0</td><td>10</td></tr>
-<tr><td>STS_039_CT</td><td>stat_median</td><td>Gabor</td><td>103</td><td>0</td><td>103</td></tr>
-<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L1</td><td>-80</td><td>0</td><td>80</td></tr>
-<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L2</td><td>-62</td><td>0</td><td>62</td></tr>
-<tr><td>STS_039_CT</td><td>stat_p90</td><td>Gabor</td><td>251</td><td>0</td><td>251</td></tr>
-<tr><td>STS_039_CT</td><td>stat_max</td><td>Laws</td><td>146</td><td>0</td><td>146</td></tr>
-<tr><td>STS_039_CT</td><td>stat_max</td><td>Gabor</td><td>888</td><td>0</td><td>888</td></tr>
-<tr><td>STS_039_CT</td><td>stat_iqr</td><td>Gabor</td><td>107</td><td>0</td><td>107</td></tr>
-<tr><td>STS_039_CT</td><td>stat_range</td><td>Laws</td><td>128</td><td>0</td><td>128</td></tr>
-<tr><td>STS_039_CT</td><td>stat_range</td><td>Gabor</td><td>888</td><td>0</td><td>888</td></tr>
-<tr><td>STS_039_CT</td><td>stat_range</td><td>Simon. L1</td><td>159</td><td>0</td><td>159</td></tr>
-<tr><td>STS_039_CT</td><td>stat_range</td><td>Simon. L2</td><td>175</td><td>0</td><td>175</td></tr>
-<tr><td>STS_039_CT</td><td>stat_mad</td><td>Gabor</td><td>70</td><td>0</td><td>70</td></tr>
-<tr><td>STS_039_CT</td><td>stat_rmad</td><td>Gabor</td><td>46</td><td>0</td><td>46</td></tr>
-<tr><td>STS_039_CT</td><td>stat_medad</td><td>Gabor</td><td>67</td><td>0</td><td>67</td></tr>
-<tr><td>STS_039_CT</td><td>stat_cov</td><td>LoG</td><td>16</td><td>0</td><td>16</td></tr>
-<tr><td>STS_039_CT</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-7673</td><td>0</td><td>7673</td></tr>
-<tr><td>STS_039_CT</td><td>stat_cov</td><td>Simon. L1</td><td>-670</td><td>0</td><td>670</td></tr>
-<tr><td>STS_039_CT</td><td>stat_cov</td><td>Simon. L2</td><td>189</td><td>0</td><td>189</td></tr>
-<tr><td>STS_039_CT</td><td>stat_qcod</td><td>LoG</td><td>11</td><td>0</td><td>11</td></tr>
-<tr><td>STS_039_CT</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-5701</td><td>0</td><td>5701</td></tr>
-<tr><td>STS_039_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-558</td><td>0</td><td>558</td></tr>
-<tr><td>STS_039_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>162</td><td>0</td><td>162</td></tr>
-<tr><td>STS_039_CT</td><td>stat_rms</td><td>Gabor</td><td>156</td><td>0</td><td>156</td></tr>
+<tr><td>STS_044_PET</td><td>stat_cov</td><td>LoG</td><td>-8</td><td>0</td><td>8</td></tr>
+<tr><td>STS_044_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>403</td><td>0</td><td>403</td></tr>
+<tr><td>STS_044_PET</td><td>stat_cov</td><td>Simon. L1</td><td>97</td><td>0</td><td>97</td></tr>
+<tr><td>STS_044_PET</td><td>stat_cov</td><td>Simon. L2</td><td>13</td><td>0</td><td>13</td></tr>
+<tr><td>STS_044_PET</td><td>stat_qcod</td><td>LoG</td><td>-7</td><td>0</td><td>7</td></tr>
+<tr><td>STS_044_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>288</td><td>0</td><td>288</td></tr>
+<tr><td>STS_044_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-37</td><td>0</td><td>37</td></tr>
+<tr><td>STS_044_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>11</td><td>0</td><td>11</td></tr>
 <tr><td>STS_040_CT</td><td>stat_mean</td><td>Gabor</td><td>182</td><td>0</td><td>182</td></tr>
 <tr><td>STS_040_CT</td><td>stat_var</td><td>Gabor</td><td>1.226e+04</td><td>0</td><td>1.226e+04</td></tr>
 <tr><td>STS_040_CT</td><td>stat_skew</td><td>Laws</td><td>7</td><td>0</td><td>7</td></tr>
@@ -3830,29 +3838,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_040_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-296</td><td>0</td><td>296</td></tr>
 <tr><td>STS_040_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>-88</td><td>0</td><td>88</td></tr>
 <tr><td>STS_040_CT</td><td>stat_rms</td><td>Gabor</td><td>213</td><td>0</td><td>213</td></tr>
-<tr><td>STS_044_PET</td><td>stat_cov</td><td>LoG</td><td>-8</td><td>0</td><td>8</td></tr>
-<tr><td>STS_044_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>403</td><td>0</td><td>403</td></tr>
-<tr><td>STS_044_PET</td><td>stat_cov</td><td>Simon. L1</td><td>97</td><td>0</td><td>97</td></tr>
-<tr><td>STS_044_PET</td><td>stat_cov</td><td>Simon. L2</td><td>13</td><td>0</td><td>13</td></tr>
-<tr><td>STS_044_PET</td><td>stat_qcod</td><td>LoG</td><td>-7</td><td>0</td><td>7</td></tr>
-<tr><td>STS_044_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>288</td><td>0</td><td>288</td></tr>
-<tr><td>STS_044_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-37</td><td>0</td><td>37</td></tr>
-<tr><td>STS_044_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>11</td><td>0</td><td>11</td></tr>
-<tr><td>STS_045_PET</td><td>stat_skew</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_045_PET</td><td>stat_skew</td><td>Gabor</td><td>3</td><td>0</td><td>3</td></tr>
-<tr><td>STS_045_PET</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_045_PET</td><td>stat_kurt</td><td>LoG</td><td>12</td><td>0</td><td>12</td></tr>
-<tr><td>STS_045_PET</td><td>stat_kurt</td><td>Gabor</td><td>17</td><td>0</td><td>17</td></tr>
-<tr><td>STS_045_PET</td><td>stat_kurt</td><td>Simon. L1</td><td>8</td><td>0</td><td>8</td></tr>
-<tr><td>STS_045_PET</td><td>stat_cov</td><td>LoG</td><td>-11</td><td>0</td><td>11</td></tr>
-<tr><td>STS_045_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-1780</td><td>0</td><td>1780</td></tr>
-<tr><td>STS_045_PET</td><td>stat_cov</td><td>Simon. L1</td><td>648</td><td>0</td><td>648</td></tr>
-<tr><td>STS_045_PET</td><td>stat_cov</td><td>Simon. L2</td><td>14</td><td>0</td><td>14</td></tr>
-<tr><td>STS_045_PET</td><td>stat_qcod</td><td>LoG</td><td>-264</td><td>0</td><td>264</td></tr>
-<tr><td>STS_045_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
-<tr><td>STS_045_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1725</td><td>0</td><td>1725</td></tr>
-<tr><td>STS_045_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-11</td><td>0</td><td>11</td></tr>
-<tr><td>STS_045_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>33</td><td>0</td><td>33</td></tr>
 <tr><td>STS_042_CT</td><td>stat_mean</td><td>Gabor</td><td>83</td><td>0</td><td>83</td></tr>
 <tr><td>STS_042_CT</td><td>stat_skew</td><td>LoG</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_042_CT</td><td>stat_skew</td><td>Laws</td><td>5</td><td>0</td><td>5</td></tr>
@@ -3883,6 +3868,21 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_042_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>-36</td><td>0</td><td>36</td></tr>
 <tr><td>STS_042_CT</td><td>stat_qcod</td><td>Simon. L2</td><td>19</td><td>0</td><td>19</td></tr>
 <tr><td>STS_042_CT</td><td>stat_rms</td><td>Gabor</td><td>95</td><td>0</td><td>95</td></tr>
+<tr><td>STS_045_PET</td><td>stat_skew</td><td>LoG</td><td>-2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_045_PET</td><td>stat_skew</td><td>Gabor</td><td>3</td><td>0</td><td>3</td></tr>
+<tr><td>STS_045_PET</td><td>stat_skew</td><td>Coif3 HHH L2</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_045_PET</td><td>stat_kurt</td><td>LoG</td><td>12</td><td>0</td><td>12</td></tr>
+<tr><td>STS_045_PET</td><td>stat_kurt</td><td>Gabor</td><td>17</td><td>0</td><td>17</td></tr>
+<tr><td>STS_045_PET</td><td>stat_kurt</td><td>Simon. L1</td><td>8</td><td>0</td><td>8</td></tr>
+<tr><td>STS_045_PET</td><td>stat_cov</td><td>LoG</td><td>-11</td><td>0</td><td>11</td></tr>
+<tr><td>STS_045_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>-1780</td><td>0</td><td>1780</td></tr>
+<tr><td>STS_045_PET</td><td>stat_cov</td><td>Simon. L1</td><td>648</td><td>0</td><td>648</td></tr>
+<tr><td>STS_045_PET</td><td>stat_cov</td><td>Simon. L2</td><td>14</td><td>0</td><td>14</td></tr>
+<tr><td>STS_045_PET</td><td>stat_qcod</td><td>LoG</td><td>-264</td><td>0</td><td>264</td></tr>
+<tr><td>STS_045_PET</td><td>stat_qcod</td><td>Gabor</td><td>1</td><td>0</td><td>1</td></tr>
+<tr><td>STS_045_PET</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>1725</td><td>0</td><td>1725</td></tr>
+<tr><td>STS_045_PET</td><td>stat_qcod</td><td>Simon. L1</td><td>-11</td><td>0</td><td>11</td></tr>
+<tr><td>STS_045_PET</td><td>stat_qcod</td><td>Simon. L2</td><td>33</td><td>0</td><td>33</td></tr>
 <tr><td>STS_046_PET</td><td>stat_skew</td><td>Gabor</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_046_PET</td><td>stat_cov</td><td>LoG</td><td>-5</td><td>0</td><td>5</td></tr>
 <tr><td>STS_046_PET</td><td>stat_cov</td><td>Coif3 LHH L1</td><td>2039</td><td>0</td><td>2039</td></tr>
@@ -4674,15 +4674,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_009_MRI</td><td>stat_range</td><td>Simon. L2</td><td>696</td><td>0</td><td>696</td></tr>
 <tr><td>STS_011_CT</td><td>stat_min</td><td>Simon. L1</td><td>-105</td><td>0</td><td>105</td></tr>
 <tr><td>STS_011_CT</td><td>stat_min</td><td>Simon. L2</td><td>-73</td><td>0</td><td>73</td></tr>
-<tr><td>STS_009_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>17</td><td>0</td><td>17</td></tr>
-<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>40</td><td>0</td><td>40</td></tr>
-<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L1</td><td>-287</td><td>0</td><td>287</td></tr>
-<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L2</td><td>-428</td><td>0</td><td>428</td></tr>
-<tr><td>STS_009_CT</td><td>stat_max</td><td>Simon. L1</td><td>341</td><td>0</td><td>341</td></tr>
-<tr><td>STS_009_CT</td><td>stat_max</td><td>Simon. L2</td><td>327</td><td>0</td><td>327</td></tr>
-<tr><td>STS_009_CT</td><td>stat_range</td><td>Simon. L1</td><td>627</td><td>0</td><td>627</td></tr>
-<tr><td>STS_009_CT</td><td>stat_range</td><td>Simon. L2</td><td>755</td><td>0</td><td>755</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-243</td><td>0</td><td>243</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-244</td><td>0</td><td>244</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_p10</td><td>Simon. L2</td><td>-80</td><td>0</td><td>80</td></tr>
@@ -4696,15 +4687,24 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_015_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>24</td><td>0</td><td>24</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_medad</td><td>Simon. L1</td><td>23</td><td>0</td><td>23</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>41</td><td>0</td><td>41</td></tr>
+<tr><td>STS_009_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>17</td><td>0</td><td>17</td></tr>
+<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>40</td><td>0</td><td>40</td></tr>
+<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L1</td><td>-287</td><td>0</td><td>287</td></tr>
+<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L2</td><td>-428</td><td>0</td><td>428</td></tr>
+<tr><td>STS_009_CT</td><td>stat_max</td><td>Simon. L1</td><td>341</td><td>0</td><td>341</td></tr>
+<tr><td>STS_009_CT</td><td>stat_max</td><td>Simon. L2</td><td>327</td><td>0</td><td>327</td></tr>
+<tr><td>STS_009_CT</td><td>stat_range</td><td>Simon. L1</td><td>627</td><td>0</td><td>627</td></tr>
+<tr><td>STS_009_CT</td><td>stat_range</td><td>Simon. L2</td><td>755</td><td>0</td><td>755</td></tr>
 <tr><td>STS_016_PET</td><td>stat_skew</td><td>Simon. L2</td><td>3</td><td>0</td><td>3</td></tr>
 <tr><td>STS_016_PET</td><td>stat_kurt</td><td>Simon. L2</td><td>20</td><td>0</td><td>20</td></tr>
-<tr><td>STS_015_CT</td><td>stat_min</td><td>Simon. L1</td><td>-98</td><td>0</td><td>98</td></tr>
-<tr><td>STS_015_CT</td><td>stat_min</td><td>Simon. L2</td><td>-70</td><td>0</td><td>70</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>16</td><td>0</td><td>16</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-184</td><td>0</td><td>184</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-166</td><td>0</td><td>166</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_range</td><td>Simon. L1</td><td>352</td><td>0</td><td>352</td></tr>
 <tr><td>STS_014_MRI</td><td>stat_range</td><td>Simon. L2</td><td>348</td><td>0</td><td>348</td></tr>
+<tr><td>STS_015_CT</td><td>stat_min</td><td>Simon. L1</td><td>-98</td><td>0</td><td>98</td></tr>
+<tr><td>STS_015_CT</td><td>stat_min</td><td>Simon. L2</td><td>-70</td><td>0</td><td>70</td></tr>
 <tr><td>STS_014_CT</td><td>stat_min</td><td>Simon. L1</td><td>-86</td><td>0</td><td>86</td></tr>
 <tr><td>STS_013_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-296</td><td>0</td><td>296</td></tr>
 <tr><td>STS_013_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-351</td><td>0</td><td>351</td></tr>
@@ -4740,6 +4740,10 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_019_CT</td><td>stat_mad</td><td>Simon. L2</td><td>33</td><td>0</td><td>33</td></tr>
 <tr><td>STS_019_CT</td><td>stat_rmad</td><td>Simon. L2</td><td>21</td><td>0</td><td>21</td></tr>
 <tr><td>STS_019_CT</td><td>stat_medad</td><td>Simon. L2</td><td>33</td><td>0</td><td>33</td></tr>
+<tr><td>STS_018_CT</td><td>stat_min</td><td>Simon. L1</td><td>-214</td><td>0</td><td>214</td></tr>
+<tr><td>STS_018_CT</td><td>stat_min</td><td>Simon. L2</td><td>-235</td><td>0</td><td>235</td></tr>
+<tr><td>STS_018_CT</td><td>stat_range</td><td>Simon. L1</td><td>405</td><td>0</td><td>405</td></tr>
+<tr><td>STS_018_CT</td><td>stat_range</td><td>Simon. L2</td><td>380</td><td>0</td><td>380</td></tr>
 <tr><td>STS_017_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-256</td><td>0</td><td>256</td></tr>
 <tr><td>STS_017_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-238</td><td>0</td><td>238</td></tr>
 <tr><td>STS_017_MRI</td><td>stat_max</td><td>Simon. L1</td><td>283</td><td>0</td><td>283</td></tr>
@@ -4752,15 +4756,11 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_016_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-198</td><td>0</td><td>198</td></tr>
 <tr><td>STS_016_MRI</td><td>stat_range</td><td>Simon. L1</td><td>390</td><td>0</td><td>390</td></tr>
 <tr><td>STS_016_MRI</td><td>stat_range</td><td>Simon. L2</td><td>370</td><td>0</td><td>370</td></tr>
-<tr><td>STS_018_CT</td><td>stat_min</td><td>Simon. L1</td><td>-214</td><td>0</td><td>214</td></tr>
-<tr><td>STS_018_CT</td><td>stat_min</td><td>Simon. L2</td><td>-235</td><td>0</td><td>235</td></tr>
-<tr><td>STS_018_CT</td><td>stat_range</td><td>Simon. L1</td><td>405</td><td>0</td><td>405</td></tr>
-<tr><td>STS_018_CT</td><td>stat_range</td><td>Simon. L2</td><td>380</td><td>0</td><td>380</td></tr>
+<tr><td>STS_016_CT</td><td>stat_min</td><td>Simon. L2</td><td>-71</td><td>0</td><td>71</td></tr>
 <tr><td>STS_020_PET</td><td>stat_skew</td><td>Simon. L2</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_020_PET</td><td>stat_kurt</td><td>Simon. L1</td><td>18</td><td>0</td><td>18</td></tr>
 <tr><td>STS_020_PET</td><td>stat_kurt</td><td>Simon. L2</td><td>21</td><td>0</td><td>21</td></tr>
 <tr><td>STS_020_PET</td><td>stat_cov</td><td>LoG</td><td>-1492</td><td>-1.592e+05</td><td>1.578e+05</td></tr>
-<tr><td>STS_016_CT</td><td>stat_min</td><td>Simon. L2</td><td>-71</td><td>0</td><td>71</td></tr>
 <tr><td>STS_019_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-133</td><td>0</td><td>133</td></tr>
 <tr><td>STS_019_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-243</td><td>0</td><td>243</td></tr>
 <tr><td>STS_019_MRI</td><td>stat_p10</td><td>Simon. L2</td><td>-89</td><td>0</td><td>89</td></tr>
@@ -4804,6 +4804,12 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_022_CT</td><td>stat_max</td><td>Simon. L2</td><td>319</td><td>0</td><td>319</td></tr>
 <tr><td>STS_022_CT</td><td>stat_range</td><td>Simon. L1</td><td>529</td><td>0</td><td>529</td></tr>
 <tr><td>STS_022_CT</td><td>stat_range</td><td>Simon. L2</td><td>543</td><td>0</td><td>543</td></tr>
+<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L1</td><td>-226</td><td>0</td><td>226</td></tr>
+<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L2</td><td>-347</td><td>0</td><td>347</td></tr>
+<tr><td>STS_023_CT</td><td>stat_range</td><td>Simon. L1</td><td>354</td><td>0</td><td>354</td></tr>
+<tr><td>STS_023_CT</td><td>stat_range</td><td>Simon. L2</td><td>498</td><td>0</td><td>498</td></tr>
+<tr><td>STS_023_CT</td><td>stat_mad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
+<tr><td>STS_023_CT</td><td>stat_medad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
 <tr><td>STS_025_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-291</td><td>0</td><td>291</td></tr>
 <tr><td>STS_025_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-324</td><td>0</td><td>324</td></tr>
 <tr><td>STS_025_MRI</td><td>stat_p10</td><td>Simon. L2</td><td>-75</td><td>0</td><td>75</td></tr>
@@ -4822,18 +4828,12 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_024_MRI</td><td>stat_range</td><td>Simon. L2</td><td>429</td><td>0</td><td>429</td></tr>
 <tr><td>STS_024_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>25</td><td>0</td><td>25</td></tr>
 <tr><td>STS_024_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>25</td><td>0</td><td>25</td></tr>
-<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L1</td><td>-226</td><td>0</td><td>226</td></tr>
-<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L2</td><td>-347</td><td>0</td><td>347</td></tr>
-<tr><td>STS_023_CT</td><td>stat_range</td><td>Simon. L1</td><td>354</td><td>0</td><td>354</td></tr>
-<tr><td>STS_023_CT</td><td>stat_range</td><td>Simon. L2</td><td>498</td><td>0</td><td>498</td></tr>
-<tr><td>STS_023_CT</td><td>stat_mad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
-<tr><td>STS_023_CT</td><td>stat_medad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
 <tr><td>STS_021_CT</td><td>stat_min</td><td>Simon. L1</td><td>-124</td><td>0</td><td>124</td></tr>
 <tr><td>STS_021_CT</td><td>stat_min</td><td>Simon. L2</td><td>-84</td><td>0</td><td>84</td></tr>
 <tr><td>STS_021_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>1.846e+05</td><td>0</td><td>1.846e+05</td></tr>
+<tr><td>STS_024_CT</td><td>stat_min</td><td>Simon. L2</td><td>-128</td><td>0</td><td>128</td></tr>
 <tr><td>STS_025_CT</td><td>stat_min</td><td>Simon. L1</td><td>-61</td><td>0</td><td>61</td></tr>
 <tr><td>STS_025_CT</td><td>stat_min</td><td>Simon. L2</td><td>-105</td><td>0</td><td>105</td></tr>
-<tr><td>STS_024_CT</td><td>stat_min</td><td>Simon. L2</td><td>-128</td><td>0</td><td>128</td></tr>
 <tr><td>STS_026_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-211</td><td>0</td><td>211</td></tr>
 <tr><td>STS_026_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-246</td><td>0</td><td>246</td></tr>
 <tr><td>STS_026_MRI</td><td>stat_range</td><td>Simon. L1</td><td>376</td><td>0</td><td>376</td></tr>
@@ -4857,8 +4857,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_028_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-184</td><td>0</td><td>184</td></tr>
 <tr><td>STS_028_MRI</td><td>stat_range</td><td>Simon. L1</td><td>344</td><td>0</td><td>344</td></tr>
 <tr><td>STS_028_MRI</td><td>stat_range</td><td>Simon. L2</td><td>373</td><td>0</td><td>373</td></tr>
-<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L1</td><td>-93</td><td>0</td><td>93</td></tr>
-<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L2</td><td>-105</td><td>0</td><td>105</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_skew</td><td>Simon. L1</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>39</td><td>0</td><td>39</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_kurt</td><td>Simon. L2</td><td>20</td><td>0</td><td>20</td></tr>
@@ -4867,6 +4865,8 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_020_MRI</td><td>stat_max</td><td>Simon. L2</td><td>329</td><td>0</td><td>329</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_range</td><td>Simon. L1</td><td>385</td><td>0</td><td>385</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_range</td><td>Simon. L2</td><td>609</td><td>0</td><td>609</td></tr>
+<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L1</td><td>-93</td><td>0</td><td>93</td></tr>
+<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L2</td><td>-105</td><td>0</td><td>105</td></tr>
 <tr><td>STS_029_CT</td><td>stat_min</td><td>Simon. L1</td><td>-82</td><td>0</td><td>82</td></tr>
 <tr><td>STS_029_CT</td><td>stat_min</td><td>Simon. L2</td><td>-69</td><td>0</td><td>69</td></tr>
 <tr><td>STS_020_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-2</td><td>0</td><td>2</td></tr>
@@ -4886,12 +4886,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_029_MRI</td><td>stat_range</td><td>Simon. L2</td><td>497</td><td>0</td><td>497</td></tr>
 <tr><td>STS_029_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
 <tr><td>STS_029_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>22</td><td>0</td><td>22</td></tr>
-<tr><td>STS_027_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-4</td><td>0</td><td>4</td></tr>
-<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>29</td><td>0</td><td>29</td></tr>
-<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L1</td><td>-300</td><td>0</td><td>300</td></tr>
-<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L2</td><td>-400</td><td>0</td><td>400</td></tr>
-<tr><td>STS_027_CT</td><td>stat_range</td><td>Simon. L1</td><td>465</td><td>0</td><td>465</td></tr>
-<tr><td>STS_027_CT</td><td>stat_range</td><td>Simon. L2</td><td>564</td><td>0</td><td>564</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_skew</td><td>Simon. L1</td><td>-2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_skew</td><td>Simon. L2</td><td>-2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>22</td><td>0</td><td>22</td></tr>
@@ -4903,24 +4897,25 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_032_MRI</td><td>stat_range</td><td>Simon. L2</td><td>726</td><td>0</td><td>726</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>29</td><td>0</td><td>29</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>29</td><td>0</td><td>29</td></tr>
+<tr><td>STS_027_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-4</td><td>0</td><td>4</td></tr>
+<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>29</td><td>0</td><td>29</td></tr>
+<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L1</td><td>-300</td><td>0</td><td>300</td></tr>
+<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L2</td><td>-400</td><td>0</td><td>400</td></tr>
+<tr><td>STS_027_CT</td><td>stat_range</td><td>Simon. L1</td><td>465</td><td>0</td><td>465</td></tr>
+<tr><td>STS_027_CT</td><td>stat_range</td><td>Simon. L2</td><td>564</td><td>0</td><td>564</td></tr>
 <tr><td>STS_032_CT</td><td>stat_min</td><td>Simon. L2</td><td>-154</td><td>0</td><td>154</td></tr>
-<tr><td>STS_030_CT</td><td>stat_min</td><td>Simon. L1</td><td>-118</td><td>0</td><td>118</td></tr>
-<tr><td>STS_030_CT</td><td>stat_min</td><td>Simon. L2</td><td>-77</td><td>0</td><td>77</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>18</td><td>0</td><td>18</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-271</td><td>0</td><td>271</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-204</td><td>0</td><td>204</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_range</td><td>Simon. L1</td><td>526</td><td>0</td><td>526</td></tr>
 <tr><td>STS_031_MRI</td><td>stat_range</td><td>Simon. L2</td><td>471</td><td>0</td><td>471</td></tr>
+<tr><td>STS_030_CT</td><td>stat_min</td><td>Simon. L1</td><td>-118</td><td>0</td><td>118</td></tr>
+<tr><td>STS_030_CT</td><td>stat_min</td><td>Simon. L2</td><td>-77</td><td>0</td><td>77</td></tr>
 <tr><td>STS_031_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>16</td><td>0</td><td>16</td></tr>
 <tr><td>STS_031_CT</td><td>stat_min</td><td>Simon. L1</td><td>-177</td><td>0</td><td>177</td></tr>
 <tr><td>STS_031_CT</td><td>stat_min</td><td>Simon. L2</td><td>-198</td><td>0</td><td>198</td></tr>
 <tr><td>STS_031_CT</td><td>stat_range</td><td>Simon. L1</td><td>286</td><td>0</td><td>286</td></tr>
 <tr><td>STS_031_CT</td><td>stat_range</td><td>Simon. L2</td><td>333</td><td>0</td><td>333</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-284</td><td>0</td><td>284</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-366</td><td>0</td><td>366</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_max</td><td>Simon. L1</td><td>297</td><td>0</td><td>297</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_range</td><td>Simon. L1</td><td>581</td><td>0</td><td>581</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_range</td><td>Simon. L2</td><td>644</td><td>0</td><td>644</td></tr>
 <tr><td>STS_030_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-257</td><td>0</td><td>257</td></tr>
 <tr><td>STS_030_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-358</td><td>0</td><td>358</td></tr>
 <tr><td>STS_030_MRI</td><td>stat_p10</td><td>Simon. L2</td><td>-56</td><td>0</td><td>56</td></tr>
@@ -4938,6 +4933,11 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_033_CT</td><td>stat_min</td><td>Simon. L1</td><td>-108</td><td>0</td><td>108</td></tr>
 <tr><td>STS_033_CT</td><td>stat_min</td><td>Simon. L2</td><td>-148</td><td>0</td><td>148</td></tr>
 <tr><td>STS_033_CT</td><td>stat_range</td><td>Simon. L2</td><td>374</td><td>0</td><td>374</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-284</td><td>0</td><td>284</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-366</td><td>0</td><td>366</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_max</td><td>Simon. L1</td><td>297</td><td>0</td><td>297</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_range</td><td>Simon. L1</td><td>581</td><td>0</td><td>581</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_range</td><td>Simon. L2</td><td>644</td><td>0</td><td>644</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-155</td><td>0</td><td>155</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-251</td><td>0</td><td>251</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_p10</td><td>Simon. L2</td><td>-107</td><td>0</td><td>107</td></tr>
@@ -4950,6 +4950,12 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_035_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>36</td><td>0</td><td>36</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_medad</td><td>Simon. L1</td><td>24</td><td>0</td><td>24</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>55</td><td>0</td><td>55</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Simon. L1</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-154</td><td>0</td><td>154</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-204</td><td>0</td><td>204</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_range</td><td>Simon. L1</td><td>376</td><td>0</td><td>376</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_range</td><td>Simon. L2</td><td>479</td><td>0</td><td>479</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-4415</td><td>3.407e+04</td><td>3.849e+04</td></tr>
 <tr><td>STS_035_CT</td><td>stat_var</td><td>Simon. L2</td><td>1.69e+04</td><td>0</td><td>1.69e+04</td></tr>
 <tr><td>STS_035_CT</td><td>stat_skew</td><td>Simon. L1</td><td>-2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_035_CT</td><td>stat_min</td><td>Simon. L1</td><td>-386</td><td>0</td><td>386</td></tr>
@@ -4965,12 +4971,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_035_CT</td><td>stat_medad</td><td>Simon. L1</td><td>37</td><td>0</td><td>37</td></tr>
 <tr><td>STS_035_CT</td><td>stat_medad</td><td>Simon. L2</td><td>89</td><td>0</td><td>89</td></tr>
 <tr><td>STS_035_CT</td><td>stat_rms</td><td>Simon. L2</td><td>134</td><td>0</td><td>134</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Simon. L1</td><td>2</td><td>0</td><td>2</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-154</td><td>0</td><td>154</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-204</td><td>0</td><td>204</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_range</td><td>Simon. L1</td><td>376</td><td>0</td><td>376</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_range</td><td>Simon. L2</td><td>479</td><td>0</td><td>479</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_qcod</td><td>Coif3 LHH L1</td><td>-4415</td><td>3.407e+04</td><td>3.849e+04</td></tr>
 <tr><td>STS_034_CT</td><td>stat_skew</td><td>Simon. L1</td><td>2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_034_CT</td><td>stat_skew</td><td>Simon. L2</td><td>4</td><td>0</td><td>4</td></tr>
 <tr><td>STS_034_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>18</td><td>0</td><td>18</td></tr>
@@ -5022,6 +5022,12 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_038_CT</td><td>stat_range</td><td>Simon. L2</td><td>640</td><td>0</td><td>640</td></tr>
 <tr><td>STS_038_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>1.217e+05</td><td>0</td><td>1.217e+05</td></tr>
 <tr><td>STS_041_PET</td><td>stat_skew</td><td>Simon. L2</td><td>2</td><td>0</td><td>2</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-226</td><td>0</td><td>226</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-267</td><td>0</td><td>267</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_range</td><td>Simon. L1</td><td>460</td><td>0</td><td>460</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_range</td><td>Simon. L2</td><td>499</td><td>0</td><td>499</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
+<tr><td>STS_040_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-330</td><td>0</td><td>330</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-294</td><td>0</td><td>294</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_max</td><td>Simon. L1</td><td>304</td><td>0</td><td>304</td></tr>
@@ -5030,12 +5036,8 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_039_MRI</td><td>stat_range</td><td>Simon. L2</td><td>589</td><td>0</td><td>589</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
 <tr><td>STS_039_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-226</td><td>0</td><td>226</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-267</td><td>0</td><td>267</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_range</td><td>Simon. L1</td><td>460</td><td>0</td><td>460</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_range</td><td>Simon. L2</td><td>499</td><td>0</td><td>499</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
-<tr><td>STS_040_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>27</td><td>0</td><td>27</td></tr>
+<tr><td>STS_041_CT</td><td>stat_min</td><td>Simon. L1</td><td>-93</td><td>0</td><td>93</td></tr>
+<tr><td>STS_041_CT</td><td>stat_min</td><td>Simon. L2</td><td>-77</td><td>0</td><td>77</td></tr>
 <tr><td>STS_037_MRI</td><td>stat_skew</td><td>Simon. L2</td><td>-2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_037_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>19</td><td>0</td><td>19</td></tr>
 <tr><td>STS_037_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-228</td><td>0</td><td>228</td></tr>
@@ -5044,8 +5046,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_037_MRI</td><td>stat_range</td><td>Simon. L2</td><td>545</td><td>0</td><td>545</td></tr>
 <tr><td>STS_037_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>21</td><td>0</td><td>21</td></tr>
 <tr><td>STS_037_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>21</td><td>0</td><td>21</td></tr>
-<tr><td>STS_041_CT</td><td>stat_min</td><td>Simon. L1</td><td>-93</td><td>0</td><td>93</td></tr>
-<tr><td>STS_041_CT</td><td>stat_min</td><td>Simon. L2</td><td>-77</td><td>0</td><td>77</td></tr>
 <tr><td>STS_041_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-245</td><td>0</td><td>245</td></tr>
 <tr><td>STS_041_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-323</td><td>0</td><td>323</td></tr>
 <tr><td>STS_041_MRI</td><td>stat_p10</td><td>Simon. L2</td><td>-100</td><td>0</td><td>100</td></tr>
@@ -5062,6 +5062,8 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_037_CT</td><td>stat_min</td><td>Simon. L2</td><td>-292</td><td>0</td><td>292</td></tr>
 <tr><td>STS_037_CT</td><td>stat_range</td><td>Simon. L1</td><td>307</td><td>0</td><td>307</td></tr>
 <tr><td>STS_037_CT</td><td>stat_range</td><td>Simon. L2</td><td>440</td><td>0</td><td>440</td></tr>
+<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L1</td><td>-80</td><td>0</td><td>80</td></tr>
+<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L2</td><td>-62</td><td>0</td><td>62</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-148</td><td>0</td><td>148</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-250</td><td>0</td><td>250</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_p10</td><td>Simon. L2</td><td>-71</td><td>0</td><td>71</td></tr>
@@ -5072,8 +5074,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_042_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>44</td><td>0</td><td>44</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>28</td><td>0</td><td>28</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>44</td><td>0</td><td>44</td></tr>
-<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L1</td><td>-80</td><td>0</td><td>80</td></tr>
-<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L2</td><td>-62</td><td>0</td><td>62</td></tr>
 <tr><td>STS_040_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-2</td><td>0</td><td>2</td></tr>
 <tr><td>STS_040_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>19</td><td>0</td><td>19</td></tr>
 <tr><td>STS_040_CT</td><td>stat_min</td><td>Simon. L1</td><td>-188</td><td>0</td><td>188</td></tr>
@@ -5246,10 +5246,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_007_CT</td><td>stat_min</td><td>Simon. L2</td><td>-258.7</td><td>-109.5</td><td>149.2</td></tr>
 <tr><td>STS_011_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-219.7</td><td>-326.6</td><td>106.9</td></tr>
 <tr><td>STS_011_CT</td><td>stat_min</td><td>Simon. L2</td><td>-72.74</td><td>-183.5</td><td>110.8</td></tr>
-<tr><td>STS_009_CT</td><td>stat_skew</td><td>Simon. L1</td><td>0.9229</td><td>-5.181</td><td>6.104</td></tr>
-<tr><td>STS_009_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-2.12</td><td>-4.949</td><td>2.829</td></tr>
-<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>17.26</td><td>54.59</td><td>37.33</td></tr>
-<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L1</td><td>-286.6</td><td>-428.3</td><td>141.7</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_var</td><td>Simon. L2</td><td>3309</td><td>1.08e+04</td><td>7491</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-244.1</td><td>-400.9</td><td>156.9</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_p10</td><td>Simon. L2</td><td>-80.22</td><td>-176.6</td><td>96.41</td></tr>
@@ -5257,6 +5253,10 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_015_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>40.84</td><td>86.42</td><td>45.58</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>24</td><td>64.59</td><td>40.59</td></tr>
 <tr><td>STS_015_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>40.53</td><td>85.95</td><td>45.43</td></tr>
+<tr><td>STS_009_CT</td><td>stat_skew</td><td>Simon. L1</td><td>0.9229</td><td>-5.181</td><td>6.104</td></tr>
+<tr><td>STS_009_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-2.12</td><td>-4.949</td><td>2.829</td></tr>
+<tr><td>STS_009_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>17.26</td><td>54.59</td><td>37.33</td></tr>
+<tr><td>STS_009_CT</td><td>stat_min</td><td>Simon. L1</td><td>-286.6</td><td>-428.3</td><td>141.7</td></tr>
 <tr><td>STS_016_PET</td><td>stat_skew</td><td>Simon. L1</td><td>0.4491</td><td>2.492</td><td>2.043</td></tr>
 <tr><td>STS_016_PET</td><td>stat_skew</td><td>Simon. L2</td><td>2.532</td><td>0.628</td><td>1.904</td></tr>
 <tr><td>STS_016_PET</td><td>stat_kurt</td><td>Simon. L1</td><td>2.389</td><td>19.31</td><td>16.92</td></tr>
@@ -5286,10 +5286,10 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_019_CT</td><td>stat_rmad</td><td>Simon. L2</td><td>21.05</td><td>52.28</td><td>31.23</td></tr>
 <tr><td>STS_019_CT</td><td>stat_medad</td><td>Simon. L1</td><td>10.18</td><td>33.34</td><td>23.16</td></tr>
 <tr><td>STS_019_CT</td><td>stat_medad</td><td>Simon. L2</td><td>33.13</td><td>74.55</td><td>41.42</td></tr>
-<tr><td>STS_017_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>22.02</td><td>42.54</td><td>20.51</td></tr>
-<tr><td>STS_017_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>22.02</td><td>42.52</td><td>20.5</td></tr>
 <tr><td>STS_018_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-1.144</td><td>0.9582</td><td>2.103</td></tr>
 <tr><td>STS_018_CT</td><td>stat_min</td><td>Simon. L2</td><td>-234.9</td><td>-102.5</td><td>132.4</td></tr>
+<tr><td>STS_017_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>22.02</td><td>42.54</td><td>20.51</td></tr>
+<tr><td>STS_017_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>22.02</td><td>42.52</td><td>20.5</td></tr>
 <tr><td>STS_019_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-133.2</td><td>-244.6</td><td>111.4</td></tr>
 <tr><td>STS_019_MRI</td><td>stat_iqr</td><td>Simon. L1</td><td>23.12</td><td>66.63</td><td>43.51</td></tr>
 <tr><td>STS_019_MRI</td><td>stat_iqr</td><td>Simon. L2</td><td>67.11</td><td>138.1</td><td>71</td></tr>
@@ -5318,6 +5318,9 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_022_CT</td><td>stat_min</td><td>Simon. L1</td><td>-221.9</td><td>-84.75</td><td>137.1</td></tr>
 <tr><td>STS_022_CT</td><td>stat_range</td><td>Simon. L1</td><td>529.4</td><td>207.5</td><td>321.9</td></tr>
 <tr><td>STS_022_CT</td><td>stat_range</td><td>Simon. L2</td><td>542.8</td><td>244.8</td><td>298</td></tr>
+<tr><td>STS_023_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-0.7073</td><td>-2.7</td><td>1.992</td></tr>
+<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L1</td><td>-226.5</td><td>-345.7</td><td>119.2</td></tr>
+<tr><td>STS_023_CT</td><td>stat_mad</td><td>Simon. L2</td><td>21.98</td><td>44.44</td><td>22.46</td></tr>
 <tr><td>STS_025_MRI</td><td>stat_iqr</td><td>Simon. L2</td><td>53.23</td><td>125.3</td><td>72.08</td></tr>
 <tr><td>STS_025_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>39.83</td><td>71.64</td><td>31.81</td></tr>
 <tr><td>STS_025_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>23.55</td><td>50.95</td><td>27.39</td></tr>
@@ -5328,15 +5331,12 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_024_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>25.48</td><td>67.66</td><td>42.18</td></tr>
 <tr><td>STS_024_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>13.14</td><td>45.91</td><td>32.77</td></tr>
 <tr><td>STS_024_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>25.18</td><td>66.8</td><td>41.62</td></tr>
-<tr><td>STS_023_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-0.7073</td><td>-2.7</td><td>1.992</td></tr>
-<tr><td>STS_023_CT</td><td>stat_min</td><td>Simon. L1</td><td>-226.5</td><td>-345.7</td><td>119.2</td></tr>
-<tr><td>STS_023_CT</td><td>stat_mad</td><td>Simon. L2</td><td>21.98</td><td>44.44</td><td>22.46</td></tr>
 <tr><td>STS_021_CT</td><td>stat_qcod</td><td>Simon. L1</td><td>1.846e+05</td><td>572.2</td><td>1.84e+05</td></tr>
+<tr><td>STS_024_CT</td><td>stat_min</td><td>Simon. L1</td><td>-44.84</td><td>-126.4</td><td>81.6</td></tr>
 <tr><td>STS_025_CT</td><td>stat_iqr</td><td>Simon. L2</td><td>21.78</td><td>71.19</td><td>49.42</td></tr>
 <tr><td>STS_025_CT</td><td>stat_mad</td><td>Simon. L2</td><td>16.13</td><td>43.28</td><td>27.15</td></tr>
 <tr><td>STS_025_CT</td><td>stat_rmad</td><td>Simon. L2</td><td>9.759</td><td>28.89</td><td>19.13</td></tr>
 <tr><td>STS_025_CT</td><td>stat_medad</td><td>Simon. L2</td><td>16.05</td><td>42.82</td><td>26.77</td></tr>
-<tr><td>STS_024_CT</td><td>stat_min</td><td>Simon. L1</td><td>-44.84</td><td>-126.4</td><td>81.6</td></tr>
 <tr><td>STS_026_CT</td><td>stat_skew</td><td>Simon. L2</td><td>4.569</td><td>-1.598</td><td>6.167</td></tr>
 <tr><td>STS_026_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>24.72</td><td>6.264</td><td>18.45</td></tr>
 <tr><td>STS_026_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>48.53</td><td>26.83</td><td>21.7</td></tr>
@@ -5348,34 +5348,30 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_028_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>18.29</td><td>59.53</td><td>41.23</td></tr>
 <tr><td>STS_028_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>9.594</td><td>39.59</td><td>29.99</td></tr>
 <tr><td>STS_028_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>18.27</td><td>59.3</td><td>41.03</td></tr>
-<tr><td>STS_028_CT</td><td>stat_skew</td><td>Simon. L2</td><td>0.7936</td><td>-1.065</td><td>1.859</td></tr>
-<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L2</td><td>-105.1</td><td>-220.1</td><td>115.1</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_skew</td><td>Simon. L1</td><td>1.619</td><td>-0.1341</td><td>1.754</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_kurt</td><td>Simon. L1</td><td>39.28</td><td>21.19</td><td>18.09</td></tr>
 <tr><td>STS_020_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-167</td><td>-280.4</td><td>113.4</td></tr>
+<tr><td>STS_028_CT</td><td>stat_skew</td><td>Simon. L2</td><td>0.7936</td><td>-1.065</td><td>1.859</td></tr>
+<tr><td>STS_028_CT</td><td>stat_min</td><td>Simon. L2</td><td>-105.1</td><td>-220.1</td><td>115.1</td></tr>
 <tr><td>STS_020_CT</td><td>stat_skew</td><td>Simon. L1</td><td>0.5691</td><td>-3.734</td><td>4.303</td></tr>
 <tr><td>STS_020_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>12.1</td><td>37.5</td><td>25.4</td></tr>
 <tr><td>STS_020_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>35.76</td><td>18.87</td><td>16.89</td></tr>
 <tr><td>STS_020_CT</td><td>stat_min</td><td>Simon. L2</td><td>-470.2</td><td>-383.3</td><td>86.85</td></tr>
 <tr><td>STS_027_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-133.3</td><td>-208.9</td><td>75.64</td></tr>
-<tr><td>STS_027_CT</td><td>stat_skew</td><td>Simon. L1</td><td>-1.224</td><td>-4.046</td><td>2.822</td></tr>
-<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>11.11</td><td>28.98</td><td>17.87</td></tr>
-<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L1</td><td>-300</td><td>-401.4</td><td>101.4</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-386.9</td><td>-281.6</td><td>105.3</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_p10</td><td>Simon. L2</td><td>-44.43</td><td>-130.5</td><td>86.11</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>29.48</td><td>54.35</td><td>24.86</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>15</td><td>34.35</td><td>19.35</td></tr>
 <tr><td>STS_032_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>29.03</td><td>52.97</td><td>23.94</td></tr>
+<tr><td>STS_027_CT</td><td>stat_skew</td><td>Simon. L1</td><td>-1.224</td><td>-4.046</td><td>2.822</td></tr>
+<tr><td>STS_027_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>11.11</td><td>28.98</td><td>17.87</td></tr>
+<tr><td>STS_027_CT</td><td>stat_min</td><td>Simon. L1</td><td>-300</td><td>-401.4</td><td>101.4</td></tr>
 <tr><td>STS_032_CT</td><td>stat_min</td><td>Simon. L1</td><td>-50.07</td><td>-154.4</td><td>104.4</td></tr>
 <tr><td>STS_032_CT</td><td>stat_iqr</td><td>Simon. L2</td><td>14.12</td><td>61.29</td><td>47.17</td></tr>
 <tr><td>STS_032_CT</td><td>stat_mad</td><td>Simon. L2</td><td>10.36</td><td>34.83</td><td>24.47</td></tr>
 <tr><td>STS_032_CT</td><td>stat_rmad</td><td>Simon. L2</td><td>5.986</td><td>25.29</td><td>19.31</td></tr>
 <tr><td>STS_032_CT</td><td>stat_medad</td><td>Simon. L2</td><td>10.36</td><td>34.66</td><td>24.3</td></tr>
 <tr><td>STS_031_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>0.2898</td><td>16.27</td><td>15.98</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-283.9</td><td>-365</td><td>81.1</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>18.8</td><td>42.3</td><td>23.5</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>9.217</td><td>25.29</td><td>16.07</td></tr>
-<tr><td>STS_033_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>18.73</td><td>41.95</td><td>23.23</td></tr>
 <tr><td>STS_030_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-257.3</td><td>-355.8</td><td>98.53</td></tr>
 <tr><td>STS_030_MRI</td><td>stat_iqr</td><td>Simon. L2</td><td>50.62</td><td>92.55</td><td>41.94</td></tr>
 <tr><td>STS_030_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>34.6</td><td>58.2</td><td>23.59</td></tr>
@@ -5383,6 +5379,10 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_030_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>34.6</td><td>58.2</td><td>23.59</td></tr>
 <tr><td>STS_033_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>10</td><td>31.83</td><td>21.83</td></tr>
 <tr><td>STS_033_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>33.02</td><td>10.47</td><td>22.54</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-283.9</td><td>-365</td><td>81.1</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>18.8</td><td>42.3</td><td>23.5</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>9.217</td><td>25.29</td><td>16.07</td></tr>
+<tr><td>STS_033_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>18.73</td><td>41.95</td><td>23.23</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_var</td><td>Simon. L2</td><td>5209</td><td>1.164e+04</td><td>6435</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-154.6</td><td>-247.4</td><td>92.8</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-251.3</td><td>-382.6</td><td>131.2</td></tr>
@@ -5395,6 +5395,10 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_035_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>36.01</td><td>64.85</td><td>28.84</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_medad</td><td>Simon. L1</td><td>24.06</td><td>54.13</td><td>30.08</td></tr>
 <tr><td>STS_035_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>54.78</td><td>87.44</td><td>32.66</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Simon. L1</td><td>1.504</td><td>-0.4444</td><td>1.948</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-204.1</td><td>-282.3</td><td>78.23</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>18.73</td><td>38.54</td><td>19.8</td></tr>
+<tr><td>STS_034_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>18.73</td><td>38.51</td><td>19.78</td></tr>
 <tr><td>STS_035_CT</td><td>stat_var</td><td>Simon. L1</td><td>3909</td><td>1.691e+04</td><td>1.3e+04</td></tr>
 <tr><td>STS_035_CT</td><td>stat_p10</td><td>Simon. L1</td><td>-38.56</td><td>-274.7</td><td>236.1</td></tr>
 <tr><td>STS_035_CT</td><td>stat_iqr</td><td>Simon. L1</td><td>35.16</td><td>94.86</td><td>59.69</td></tr>
@@ -5403,10 +5407,6 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_035_CT</td><td>stat_rmad</td><td>Simon. L1</td><td>16.78</td><td>59.44</td><td>42.66</td></tr>
 <tr><td>STS_035_CT</td><td>stat_rmad</td><td>Simon. L2</td><td>59.64</td><td>86.16</td><td>26.52</td></tr>
 <tr><td>STS_035_CT</td><td>stat_medad</td><td>Simon. L1</td><td>36.78</td><td>89.02</td><td>52.24</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_skew</td><td>Simon. L1</td><td>1.504</td><td>-0.4444</td><td>1.948</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-204.1</td><td>-282.3</td><td>78.23</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>18.73</td><td>38.54</td><td>19.8</td></tr>
-<tr><td>STS_034_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>18.73</td><td>38.51</td><td>19.78</td></tr>
 <tr><td>STS_034_CT</td><td>stat_skew</td><td>Simon. L2</td><td>3.757</td><td>-4.132</td><td>7.888</td></tr>
 <tr><td>STS_034_CT</td><td>stat_min</td><td>Simon. L2</td><td>-196.6</td><td>-356.3</td><td>159.7</td></tr>
 <tr><td>STS_038_MRI</td><td>stat_kurt</td><td>Coif3 HHH L2</td><td>65.92</td><td>32.21</td><td>33.71</td></tr>
@@ -5436,6 +5436,7 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_041_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>44.4</td><td>83.07</td><td>38.68</td></tr>
 <tr><td>STS_037_CT</td><td>stat_min</td><td>Simon. L1</td><td>-194.7</td><td>-293.3</td><td>98.58</td></tr>
 <tr><td>STS_037_CT</td><td>stat_min</td><td>Simon. L2</td><td>-291.9</td><td>-191.9</td><td>100</td></tr>
+<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L2</td><td>-62.47</td><td>-219.8</td><td>157.3</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_var</td><td>Simon. L2</td><td>3434</td><td>1.767e+04</td><td>1.424e+04</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_min</td><td>Simon. L1</td><td>-148</td><td>-258.1</td><td>110.1</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-249.7</td><td>-396.2</td><td>146.5</td></tr>
@@ -5448,18 +5449,17 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's f
 <tr><td>STS_042_MRI</td><td>stat_medad</td><td>Simon. L1</td><td>18.57</td><td>41.34</td><td>22.77</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_medad</td><td>Simon. L2</td><td>43.75</td><td>114.1</td><td>70.37</td></tr>
 <tr><td>STS_042_MRI</td><td>stat_rms</td><td>Simon. L2</td><td>58.6</td><td>140.6</td><td>82.03</td></tr>
-<tr><td>STS_039_CT</td><td>stat_min</td><td>Simon. L2</td><td>-62.47</td><td>-219.8</td><td>157.3</td></tr>
 <tr><td>STS_040_CT</td><td>stat_skew</td><td>Simon. L1</td><td>-0.2984</td><td>-2.147</td><td>1.849</td></tr>
 <tr><td>STS_040_CT</td><td>stat_skew</td><td>Simon. L2</td><td>-2.17</td><td>-0.3362</td><td>1.834</td></tr>
 <tr><td>STS_040_CT</td><td>stat_kurt</td><td>Simon. L1</td><td>2.084</td><td>18.84</td><td>16.76</td></tr>
 <tr><td>STS_040_CT</td><td>stat_kurt</td><td>Simon. L2</td><td>19.09</td><td>2.717</td><td>16.37</td></tr>
 <tr><td>STS_040_CT</td><td>stat_min</td><td>Simon. L2</td><td>-230.7</td><td>-147.6</td><td>83.14</td></tr>
-<tr><td>STS_045_PET</td><td>stat_skew</td><td>Simon. L2</td><td>0.801</td><td>2.941</td><td>2.14</td></tr>
 <tr><td>STS_042_CT</td><td>stat_min</td><td>Simon. L1</td><td>-83.35</td><td>-186.7</td><td>103.4</td></tr>
 <tr><td>STS_042_CT</td><td>stat_iqr</td><td>Simon. L2</td><td>25.8</td><td>74.89</td><td>49.09</td></tr>
 <tr><td>STS_042_CT</td><td>stat_mad</td><td>Simon. L2</td><td>17.73</td><td>38.44</td><td>20.71</td></tr>
 <tr><td>STS_042_CT</td><td>stat_rmad</td><td>Simon. L2</td><td>11.38</td><td>29.38</td><td>18</td></tr>
 <tr><td>STS_042_CT</td><td>stat_medad</td><td>Simon. L2</td><td>17.59</td><td>38.21</td><td>20.62</td></tr>
+<tr><td>STS_045_PET</td><td>stat_skew</td><td>Simon. L2</td><td>0.801</td><td>2.941</td><td>2.14</td></tr>
 <tr><td>STS_043_MRI</td><td>stat_min</td><td>Simon. L2</td><td>-150.6</td><td>-242.8</td><td>92.12</td></tr>
 <tr><td>STS_043_MRI</td><td>stat_mad</td><td>Simon. L2</td><td>14.22</td><td>36.67</td><td>22.44</td></tr>
 <tr><td>STS_043_MRI</td><td>stat_rmad</td><td>Simon. L2</td><td>7.808</td><td>23.9</td><td>16.09</td></tr>

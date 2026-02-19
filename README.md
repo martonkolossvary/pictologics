@@ -90,7 +90,7 @@ Comparisons between **Pictologics** and **PyRadiomics** (single-thread parity).
 ### HARDWARE USED FOR CALCULATIONS
 
 - **Hardware**: Apple M4 Pro, 14 cores, 48 GB
-- **OS**: macOS 26.2 (arm64)
+- **OS**: macOS 26.3 (arm64)
 - **Python**: 3.12.10
 - **Core deps**: pictologics 0.3.4, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
 - **PyRadiomics stack (parity runs)**: pyradiomics 3.1.1.dev111+g8ed579383, SimpleITK 2.5.3

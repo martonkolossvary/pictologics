@@ -46,9 +46,15 @@ def pipeline() -> RadiomicsPipeline:
 def custom_config() -> list[dict]:
     """A custom configuration for testing."""
     return [
-        {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "linear"}},
+        {
+            "step": "resample",
+            "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "linear"},
+        },
         {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
-        {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
+        {
+            "step": "extract_features",
+            "params": {"families": ["intensity", "morphology"]},
+        },
     ]
 
 
@@ -137,7 +143,9 @@ class TestStandardConfigs:
         assert config[2]["step"] == "extract_features"
         assert "families" in config[2]["params"]
 
-    def test_standard_config_new_spacing_is_tuple(self, pipeline: RadiomicsPipeline) -> None:
+    def test_standard_config_new_spacing_is_tuple(
+        self, pipeline: RadiomicsPipeline
+    ) -> None:
         """Test that new_spacing is converted from YAML list to tuple."""
         config = pipeline.get_config("standard_fbn_32")
         new_spacing = config[0]["params"]["new_spacing"]
@@ -170,7 +178,9 @@ class TestConfigManagement:
         with pytest.raises(KeyError, match="not found"):
             pipeline.get_config("nonexistent")
 
-    def test_remove_config(self, pipeline: RadiomicsPipeline, custom_config: list) -> None:
+    def test_remove_config(
+        self, pipeline: RadiomicsPipeline, custom_config: list
+    ) -> None:
         """Test removing a config."""
         pipeline.add_config("to_remove", custom_config)
         assert "to_remove" in pipeline.list_configs()
@@ -182,7 +192,9 @@ class TestConfigManagement:
         with pytest.raises(KeyError, match="not found"):
             pipeline.remove_config("nonexistent")
 
-    def test_remove_config_returns_self(self, pipeline: RadiomicsPipeline, custom_config: list) -> None:
+    def test_remove_config_returns_self(
+        self, pipeline: RadiomicsPipeline, custom_config: list
+    ) -> None:
         """Test that remove_config returns self for chaining."""
         pipeline.add_config("temp", custom_config)
         result = pipeline.remove_config("temp")
@@ -273,43 +285,42 @@ class TestImportMethods:
     """Tests for from_dict, from_json, from_yaml, and load_configs."""
 
     def test_from_dict(self, custom_config: list) -> None:
-        """Test creating pipeline from dict."""
+        """Test creating pipeline from dict (only file configs, no standard)."""
         data = {
             "schema_version": "1.0",
-            "configs": {
-                "my_config": {"steps": custom_config}
-            }
+            "configs": {"my_config": {"steps": custom_config}},
         }
         pipeline = RadiomicsPipeline.from_dict(data)
         assert "my_config" in pipeline.list_configs()
         config = pipeline.get_config("my_config")
         assert len(config) == 3
+        # Standard configs should NOT be loaded
+        assert not any(c.startswith("standard_") for c in pipeline.list_configs())
+        assert len(pipeline.list_configs()) == 1
 
     def test_from_dict_with_validation(self, custom_config: list) -> None:
         """Test creating pipeline with validation enabled."""
         data = {
             "schema_version": "1.0",
-            "configs": {
-                "my_config": {"steps": custom_config}
-            }
+            "configs": {"my_config": {"steps": custom_config}},
         }
         pipeline = RadiomicsPipeline.from_dict(data, validate=True)
         assert "my_config" in pipeline.list_configs()
 
     def test_from_json(self, custom_config: list) -> None:
-        """Test creating pipeline from JSON string."""
+        """Test creating pipeline from JSON string (only file configs, no standard)."""
         data = {
             "schema_version": "1.0",
-            "configs": {
-                "my_config": {"steps": custom_config}
-            }
+            "configs": {"my_config": {"steps": custom_config}},
         }
         json_str = json.dumps(data)
         pipeline = RadiomicsPipeline.from_json(json_str)
         assert "my_config" in pipeline.list_configs()
+        # Standard configs should NOT be loaded
+        assert not any(c.startswith("standard_") for c in pipeline.list_configs())
 
     def test_from_yaml(self, custom_config: list) -> None:
-        """Test creating pipeline from YAML string."""
+        """Test creating pipeline from YAML string (only file configs, no standard)."""
         yaml_str = """
 schema_version: "1.0"
 configs:
@@ -325,27 +336,33 @@ configs:
 """
         pipeline = RadiomicsPipeline.from_yaml(yaml_str)
         assert "my_config" in pipeline.list_configs()
+        # Standard configs should NOT be loaded
+        assert not any(c.startswith("standard_") for c in pipeline.list_configs())
         # Verify tuple conversion
         config = pipeline.get_config("my_config")
         assert config[0]["params"]["new_spacing"] == (1.0, 1.0, 1.0)
 
     def test_load_configs_json(self, pipeline: RadiomicsPipeline) -> None:
-        """Test loading configs from JSON file."""
+        """Test loading configs from JSON file (only file configs, no standard)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "configs.json"
             pipeline.save_configs(path, config_names=["standard_fbn_32"])
 
             loaded = RadiomicsPipeline.load_configs(path)
             assert "standard_fbn_32" in loaded.list_configs()
+            # Only the saved config should be present, no extra standard configs
+            assert len(loaded.list_configs()) == 1
 
     def test_load_configs_yaml(self, pipeline: RadiomicsPipeline) -> None:
-        """Test loading configs from YAML file."""
+        """Test loading configs from YAML file (only file configs, no standard)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "configs.yaml"
             pipeline.save_configs(path, config_names=["standard_fbn_32"])
 
             loaded = RadiomicsPipeline.load_configs(path)
             assert "standard_fbn_32" in loaded.list_configs()
+            # Only the saved config should be present
+            assert len(loaded.list_configs()) == 1
 
     def test_load_configs_not_found(self) -> None:
         """Test error handling for missing file."""
@@ -359,6 +376,76 @@ configs:
             path.write_text("content")
             with pytest.raises(ValueError, match="Unsupported file extension"):
                 RadiomicsPipeline.load_configs(path)
+
+
+# --- Load Standard Parameter Tests ---
+
+
+class TestLoadStandardParameter:
+    """Tests for the load_standard parameter across all loading methods."""
+
+    def test_init_load_standard_true_by_default(self) -> None:
+        """Test that RadiomicsPipeline() loads standard configs by default."""
+        pipeline = RadiomicsPipeline()
+        standard_names = pipeline.get_all_standard_config_names()
+        assert len(standard_names) == 6
+
+    def test_init_load_standard_false(self) -> None:
+        """Test that RadiomicsPipeline(load_standard=False) creates empty pipeline."""
+        pipeline = RadiomicsPipeline(load_standard=False)
+        assert len(pipeline.list_configs()) == 0
+        assert len(pipeline.get_all_standard_config_names()) == 0
+
+    def test_from_dict_with_load_standard_true(self, custom_config: list) -> None:
+        """Test from_dict with load_standard=True includes standard configs."""
+        data = {
+            "schema_version": "1.0",
+            "configs": {"my_config": {"steps": custom_config}},
+        }
+        pipeline = RadiomicsPipeline.from_dict(data, load_standard=True)
+        assert "my_config" in pipeline.list_configs()
+        # Standard configs should also be present
+        assert any(c.startswith("standard_") for c in pipeline.list_configs())
+        assert len(pipeline.list_configs()) > 1
+
+    def test_from_json_with_load_standard_true(self, custom_config: list) -> None:
+        """Test from_json with load_standard=True includes standard configs."""
+        data = {
+            "schema_version": "1.0",
+            "configs": {"my_config": {"steps": custom_config}},
+        }
+        json_str = json.dumps(data)
+        pipeline = RadiomicsPipeline.from_json(json_str, load_standard=True)
+        assert "my_config" in pipeline.list_configs()
+        assert any(c.startswith("standard_") for c in pipeline.list_configs())
+
+    def test_from_yaml_with_load_standard_true(self) -> None:
+        """Test from_yaml with load_standard=True includes standard configs."""
+        yaml_str = """
+schema_version: "1.0"
+configs:
+  my_config:
+    steps:
+      - step: resample
+        params:
+          new_spacing: [1.0, 1.0, 1.0]
+"""
+        pipeline = RadiomicsPipeline.from_yaml(yaml_str, load_standard=True)
+        assert "my_config" in pipeline.list_configs()
+        assert any(c.startswith("standard_") for c in pipeline.list_configs())
+
+    def test_load_configs_with_load_standard_true(
+        self, pipeline: RadiomicsPipeline
+    ) -> None:
+        """Test load_configs with load_standard=True includes standard configs."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "configs.yaml"
+            pipeline.save_configs(path, config_names=["standard_fbn_32"])
+
+            loaded = RadiomicsPipeline.load_configs(path, load_standard=True)
+            assert "standard_fbn_32" in loaded.list_configs()
+            # All 6 standard configs should be present (the loaded one overlaps)
+            assert len(loaded.get_all_standard_config_names()) == 6
 
 
 # --- Roundtrip Tests ---
@@ -382,7 +469,10 @@ class TestRoundtrip:
             assert orig_step["step"] == rt_step["step"]
             # new_spacing should be tuple in both
             if "new_spacing" in orig_step.get("params", {}):
-                assert orig_step["params"]["new_spacing"] == rt_step["params"]["new_spacing"]
+                assert (
+                    orig_step["params"]["new_spacing"]
+                    == rt_step["params"]["new_spacing"]
+                )
 
     def test_roundtrip_yaml(self, pipeline: RadiomicsPipeline) -> None:
         """Test YAML roundtrip preserves config."""
@@ -402,7 +492,9 @@ class TestRoundtrip:
         """Test file save/load roundtrip."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "test.yaml"
-            pipeline.save_configs(path, config_names=["standard_fbn_32", "standard_fbs_16"])
+            pipeline.save_configs(
+                path, config_names=["standard_fbn_32", "standard_fbs_16"]
+            )
 
             loaded = RadiomicsPipeline.load_configs(path)
             assert "standard_fbn_32" in loaded.list_configs()
@@ -415,7 +507,9 @@ class TestRoundtrip:
 class TestMergeConfigs:
     """Tests for merging configurations from another pipeline."""
 
-    def test_merge_configs_basic(self, pipeline: RadiomicsPipeline, custom_config: list) -> None:
+    def test_merge_configs_basic(
+        self, pipeline: RadiomicsPipeline, custom_config: list
+    ) -> None:
         """Test basic config merging."""
         import warnings
 
@@ -424,13 +518,17 @@ class TestMergeConfigs:
 
         initial_count = len(pipeline.list_configs())
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # Suppress expected "already exists" warnings
+            warnings.simplefilter(
+                "ignore"
+            )  # Suppress expected "already exists" warnings
             pipeline.merge_configs(other)
 
         assert len(pipeline.list_configs()) == initial_count + 1
         assert "custom_merge" in pipeline.list_configs()
 
-    def test_merge_configs_no_overwrite(self, pipeline: RadiomicsPipeline, custom_config: list) -> None:
+    def test_merge_configs_no_overwrite(
+        self, pipeline: RadiomicsPipeline, custom_config: list
+    ) -> None:
         """Test that merge doesn't overwrite by default."""
         import warnings
 
@@ -442,7 +540,9 @@ class TestMergeConfigs:
         other._configs["standard_fbn_32"][0]["params"]["new_spacing"] = (2.0, 2.0, 2.0)
 
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # Suppress expected "already exists" warnings
+            warnings.simplefilter(
+                "ignore"
+            )  # Suppress expected "already exists" warnings
             pipeline.merge_configs(other)
 
         # Original should be unchanged
@@ -461,9 +561,15 @@ class TestMergeConfigs:
         pipeline.merge_configs(other, overwrite=True)
 
         # Should have the modified version
-        assert pipeline.get_config("standard_fbn_32")[0]["params"]["new_spacing"] == (2.0, 2.0, 2.0)
+        assert pipeline.get_config("standard_fbn_32")[0]["params"]["new_spacing"] == (
+            2.0,
+            2.0,
+            2.0,
+        )
 
-    def test_merge_configs_returns_self(self, pipeline: RadiomicsPipeline, custom_config: list) -> None:
+    def test_merge_configs_returns_self(
+        self, pipeline: RadiomicsPipeline, custom_config: list
+    ) -> None:
         """Test that merge_configs returns self for chaining."""
         import warnings
 
@@ -471,7 +577,9 @@ class TestMergeConfigs:
         other.add_config("chain_test", custom_config)
 
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # Suppress expected "already exists" warnings
+            warnings.simplefilter(
+                "ignore"
+            )  # Suppress expected "already exists" warnings
             result = pipeline.merge_configs(other)
         assert result is pipeline
 
@@ -496,18 +604,27 @@ class TestValidation:
             warnings.simplefilter("always")
             RadiomicsPipeline._validate_config("test", config)
             assert len(w) >= 1
-            assert any("unknown step type" in str(warning.message).lower() for warning in w)
+            assert any(
+                "unknown step type" in str(warning.message).lower() for warning in w
+            )
 
     def test_validate_unknown_parameter(self) -> None:
         """Test validation warns for unknown parameter."""
         import warnings
 
-        config = [{"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "unknown_param": 123}}]
+        config = [
+            {
+                "step": "resample",
+                "params": {"new_spacing": (1.0, 1.0, 1.0), "unknown_param": 123},
+            }
+        ]
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             RadiomicsPipeline._validate_config("test", config)
             assert len(w) >= 1
-            assert any("unknown parameter" in str(warning.message).lower() for warning in w)
+            assert any(
+                "unknown parameter" in str(warning.message).lower() for warning in w
+            )
 
     def test_validate_missing_step_key(self) -> None:
         """Test validation warns for missing step key."""
@@ -520,7 +637,9 @@ class TestValidation:
 
             assert is_valid is False
             assert len(w) >= 1
-            assert any("missing 'step' key" in str(warning.message).lower() for warning in w)
+            assert any(
+                "missing 'step' key" in str(warning.message).lower() for warning in w
+            )
 
     def test_validate_invalid_structure(self) -> None:
         """Test validation fails for non-list config."""
@@ -542,7 +661,9 @@ class TestValidation:
 
             assert is_valid is False
             assert len(w) >= 1
-            assert any("must be a dictionary" in str(warning.message).lower() for warning in w)
+            assert any(
+                "must be a dictionary" in str(warning.message).lower() for warning in w
+            )
 
 
 # --- Schema Version Tests ---
@@ -586,8 +707,12 @@ class TestEdgeCases:
             "schema_version": "1.0",
             "configs": {
                 "invalid_config": "not a dict or list",  # Invalid format
-                "valid_config": {"steps": [{"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}}]}
-            }
+                "valid_config": {
+                    "steps": [
+                        {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}}
+                    ]
+                },
+            },
         }
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -598,7 +723,9 @@ class TestEdgeCases:
             # Invalid config should be skipped
             assert "invalid_config" not in pipeline.list_configs()
             assert len(w) >= 1
-            assert any("invalid config format" in str(warning.message).lower() for warning in w)
+            assert any(
+                "invalid config format" in str(warning.message).lower() for warning in w
+            )
 
     def test_from_dict_direct_list_format(self) -> None:
         """Test that direct list format (without 'steps' key) works."""
@@ -607,9 +734,9 @@ class TestEdgeCases:
             "configs": {
                 "direct_list": [
                     {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}},
-                    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}}
+                    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
                 ]
-            }
+            },
         }
         pipeline = RadiomicsPipeline.from_dict(data)
 
@@ -622,9 +749,15 @@ class TestEdgeCases:
         import numpy as np
 
         # Add a config with numpy array
-        pipeline.add_config("numpy_test", [
-            {"step": "resample", "params": {"new_spacing": np.array([1.0, 1.0, 1.0])}}
-        ])
+        pipeline.add_config(
+            "numpy_test",
+            [
+                {
+                    "step": "resample",
+                    "params": {"new_spacing": np.array([1.0, 1.0, 1.0])},
+                }
+            ],
+        )
 
         # Export should convert array to list
         data = pipeline.to_dict(config_names=["numpy_test"])
@@ -636,14 +769,21 @@ class TestEdgeCases:
         import numpy as np
 
         # Add a config with numpy scalar
-        pipeline.add_config("scalar_test", [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": np.int64(32)}}
-        ])
+        pipeline.add_config(
+            "scalar_test",
+            [
+                {
+                    "step": "discretise",
+                    "params": {"method": "FBN", "n_bins": np.int64(32)},
+                }
+            ],
+        )
 
         # Export should convert scalar to Python int
         json_str = pipeline.to_json(config_names=["scalar_test"])
         # Should not raise - numpy types are serializable now
         import json
+
         data = json.loads(json_str)
         assert data["configs"]["scalar_test"]["steps"][0]["params"]["n_bins"] == 32
 
@@ -654,7 +794,9 @@ class TestEdgeCases:
 class TestTemplateEdgeCases:
     """Tests for template loading edge cases."""
 
-    def test_get_all_templates_with_direct_list_format(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_all_templates_with_direct_list_format(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test get_all_templates handles direct list format."""
         from pictologics import templates
 
@@ -683,7 +825,9 @@ configs:
         result = templates.get_all_templates()
         assert "direct_format" in result
 
-    def test_get_all_templates_non_dict_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_all_templates_non_dict_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test get_all_templates warns for non-dict template file."""
         import warnings
 
@@ -704,9 +848,13 @@ configs:
             result = templates.get_all_templates()
             assert result == {}
             assert len(w) >= 1
-            assert any("does not contain a dictionary" in str(warning.message) for warning in w)
+            assert any(
+                "does not contain a dictionary" in str(warning.message) for warning in w
+            )
 
-    def test_get_all_templates_exception_handling(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_all_templates_exception_handling(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test get_all_templates handles exceptions gracefully."""
         import warnings
 
@@ -726,9 +874,14 @@ configs:
             result = templates.get_all_templates()
             assert result == {}
             assert len(w) >= 1
-            assert any("failed to load template file" in str(warning.message).lower() for warning in w)
+            assert any(
+                "failed to load template file" in str(warning.message).lower()
+                for warning in w
+            )
 
-    def test_get_standard_templates_file_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_standard_templates_file_not_found(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test get_standard_templates handles missing file."""
         import warnings
 
@@ -746,7 +899,9 @@ configs:
             assert len(w) >= 1
             assert any("not found" in str(warning.message).lower() for warning in w)
 
-    def test_get_standard_templates_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_standard_templates_exception(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test get_standard_templates handles generic exceptions."""
         import warnings
 
@@ -762,9 +917,14 @@ configs:
             result = templates.get_standard_templates()
             assert result == {}
             assert len(w) >= 1
-            assert any("failed to load standard templates" in str(warning.message).lower() for warning in w)
+            assert any(
+                "failed to load standard templates" in str(warning.message).lower()
+                for warning in w
+            )
 
-    def test_get_standard_templates_direct_list_format(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_standard_templates_direct_list_format(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test get_standard_templates handles direct list format."""
         from pictologics import templates
 
@@ -775,7 +935,7 @@ configs:
                     "direct_config": [
                         {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}}
                     ]
-                }
+                },
             }
 
         monkeypatch.setattr(templates, "load_template_file", mock_load_file)
@@ -790,7 +950,9 @@ configs:
 class TestPipelineLoadingErrors:
     """Tests for pipeline template loading error handling."""
 
-    def test_load_predefined_configs_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_load_predefined_configs_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test _load_predefined_configs handles template loading failure."""
         import warnings
 
@@ -800,7 +962,9 @@ class TestPipelineLoadingErrors:
             raise RuntimeError("Simulated template loading error")
 
         # Patch at the pipeline module level where it's imported
-        monkeypatch.setattr(pipeline_module, "get_standard_templates", mock_get_standard)
+        monkeypatch.setattr(
+            pipeline_module, "get_standard_templates", mock_get_standard
+        )
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -809,4 +973,7 @@ class TestPipelineLoadingErrors:
 
             # Pipeline should still be usable, just without standard configs
             assert len(w) >= 1
-            assert any("failed to load standard templates" in str(warning.message).lower() for warning in w)
+            assert any(
+                "failed to load standard templates" in str(warning.message).lower()
+                for warning in w
+            )

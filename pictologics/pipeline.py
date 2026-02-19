@@ -184,8 +184,20 @@ class RadiomicsPipeline:
         self,
         deduplicate: bool = True,
         deduplication_rules: DeduplicationRules | str | None = None,
+        load_standard: bool = True,
     ) -> None:
-        """Initialize pipeline with empty config registry and load predefined configs."""
+        """Initialize pipeline with empty config registry.
+
+        Args:
+            deduplicate: Whether to enable feature deduplication across configurations.
+            deduplication_rules: Specific DeduplicationRules to use, or a version
+                string to look up from the registry. If None, uses current default.
+            load_standard: Whether to load standard predefined configurations
+                (e.g., ``standard_fbn_32``, ``standard_fbs_16``). Defaults to True
+                for direct instantiation. Set to False when loading configurations
+                from files or strings to avoid mixing standard configs with
+                user-defined ones.
+        """
         self._configs: dict[str, list[dict[str, Any]]] = {}
         self._config_metadata: dict[str, dict[str, Any]] = (
             {}
@@ -211,7 +223,8 @@ class RadiomicsPipeline:
         self._dedup_reused_count: int = 0
         self._dedup_computed_count: int = 0
 
-        self._load_predefined_configs()
+        if load_standard:
+            self._load_predefined_configs()
 
     def _load_predefined_configs(self) -> None:
         """
@@ -1777,13 +1790,20 @@ class RadiomicsPipeline:
         cls,
         data: dict[str, Any],
         validate: bool = False,
+        load_standard: bool = False,
     ) -> "RadiomicsPipeline":
         """
         Create a new pipeline instance from a configuration dictionary.
 
+        The resulting pipeline contains only the configurations defined in the
+        dictionary by default. Standard configurations are not loaded unless
+        explicitly requested.
+
         Args:
             data: Configuration dictionary with 'configs' key.
             validate: Whether to validate parameters (logs warnings for issues).
+            load_standard: Whether to also load standard predefined configurations.
+                Defaults to False so that only the provided configs are loaded.
 
         Returns:
             New RadiomicsPipeline instance with loaded configs.
@@ -1797,10 +1817,11 @@ class RadiomicsPipeline:
         deduplicate = dedup_settings.get("enabled", True)
         dedup_rules_version = dedup_settings.get("rules_version", None)
 
-        # Create pipeline with deduplication settings
+        # Create pipeline with deduplication settings (no standard configs by default)
         pipeline = cls(
             deduplicate=deduplicate,
             deduplication_rules=dedup_rules_version,
+            load_standard=load_standard,
         )
 
         configs = migrated_data.get("configs", {})
@@ -1860,51 +1881,71 @@ class RadiomicsPipeline:
         cls,
         json_string: str,
         validate: bool = False,
+        load_standard: bool = False,
     ) -> "RadiomicsPipeline":
         """
         Create a new pipeline instance from a JSON string.
 
+        The resulting pipeline contains only the configurations defined in the
+        JSON string by default.
+
         Args:
             json_string: JSON configuration string.
             validate: Whether to validate parameters.
+            load_standard: Whether to also load standard predefined configurations.
+                Defaults to False so that only the provided configs are loaded.
 
         Returns:
             New RadiomicsPipeline instance.
         """
         data = json.loads(json_string)
-        return cls.from_dict(data, validate=validate)
+        return cls.from_dict(data, validate=validate, load_standard=load_standard)
 
     @classmethod
     def from_yaml(
         cls,
         yaml_string: str,
         validate: bool = False,
+        load_standard: bool = False,
     ) -> "RadiomicsPipeline":
         """
         Create a new pipeline instance from a YAML string.
 
+        The resulting pipeline contains only the configurations defined in the
+        YAML string by default.
+
         Args:
             yaml_string: YAML configuration string.
             validate: Whether to validate parameters.
+            load_standard: Whether to also load standard predefined configurations.
+                Defaults to False so that only the provided configs are loaded.
 
         Returns:
             New RadiomicsPipeline instance.
         """
         data = yaml.safe_load(yaml_string)
-        return cls.from_dict(data, validate=validate)
+        return cls.from_dict(data, validate=validate, load_standard=load_standard)
 
     @classmethod
     def load_configs(
         cls,
         file_path: str | Path,
         validate: bool = False,
+        load_standard: bool = False,
     ) -> "RadiomicsPipeline":
         """
         Load configurations from a file (JSON or YAML).
 
+        The resulting pipeline contains only the configurations defined in the
+        file by default. Standard configurations (e.g., ``standard_fbn_32``) are
+        not loaded unless ``load_standard=True`` is passed.
+
         Args:
             file_path: Path to configuration file.
             validate: Whether to validate parameters.
+            load_standard: Whether to also load standard predefined configurations.
+                Defaults to False so that only the file's configs are loaded.
+                Pass True to include standard configs alongside the loaded ones.
 
         Returns:
             New RadiomicsPipeline instance.
@@ -1921,9 +1962,13 @@ class RadiomicsPipeline:
         content = path.read_text(encoding="utf-8")
 
         if suffix == ".json":
-            return cls.from_json(content, validate=validate)
+            return cls.from_json(
+                content, validate=validate, load_standard=load_standard
+            )
         elif suffix in (".yaml", ".yml"):
-            return cls.from_yaml(content, validate=validate)
+            return cls.from_yaml(
+                content, validate=validate, load_standard=load_standard
+            )
         else:
             raise ValueError(
                 f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml"

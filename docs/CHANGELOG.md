@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5] - 2026-02-19
+
+### Changed
+- **Configuration Loading Behavior**: `load_configs()`, `from_yaml()`, `from_json()`, and `from_dict()` now default to loading **only** the provided configurations, without including standard predefined configs. Pass `load_standard=True` to include standard configs alongside loaded ones. `RadiomicsPipeline()` default constructor behavior is unchanged.
+
+---
+
 ## [0.3.4] - 2026-02-14
 
 ### Fixed
@@ -128,6 +135,7 @@
 
 ---
 
+[0.3.5]: https://github.com/martonkolossvary/pictologics/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/martonkolossvary/pictologics/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/martonkolossvary/pictologics/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/martonkolossvary/pictologics/compare/v0.3.1...v0.3.2
