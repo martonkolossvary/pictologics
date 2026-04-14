@@ -73,36 +73,36 @@ print(results["ibsi2_gabor_demo"])
 | 1.a.3 | Mean | checkerboard | 0.00% | 2ms | 1.0MB | ✅ PASS |
 | 1.a.4 | Mean | checkerboard | 0.00% | 2ms | 1.0MB | ✅ PASS |
 | 1.b.1 | Mean (2D) | impulse_response | - | - | - | ⏭ SKIP |
-| 2.a | LoG | impulse_response | 0.00% | 9ms | 3.0MB | ✅ PASS |
-| 2.b | LoG | checkerboard | 0.03% | 11ms | 3.0MB | ✅ PASS |
+| 2.a | LoG | impulse_response | 0.00% | 10ms | 3.0MB | ✅ PASS |
+| 2.b | LoG | checkerboard | 0.03% | 13ms | 3.0MB | ✅ PASS |
 | 2.c | LoG (2D) | checkerboard | - | - | - | ⏭ SKIP |
-| 3.a.1 | Laws | impulse_response | 0.00% | 2ms | 2.0MB | ✅ PASS |
-| 3.a.2 | Laws | impulse_response | 0.00% | 54ms | 4.0MB | ✅ PASS |
-| 3.a.3 | Laws | impulse_response | 0.00% | 54ms | 4.0MB | ✅ PASS |
+| 3.a.1 | Laws | impulse_response | 0.00% | 3ms | 2.0MB | ✅ PASS |
+| 3.a.2 | Laws | impulse_response | 0.00% | 56ms | 4.0MB | ✅ PASS |
+| 3.a.3 | Laws | impulse_response | 0.00% | 58ms | 4.0MB | ✅ PASS |
 | 3.b.1 | Laws | checkerboard | 0.00% | 2ms | 2.0MB | ✅ PASS |
-| 3.b.2 | Laws | checkerboard | 0.00% | 50ms | 4.0MB | ✅ PASS |
-| 3.b.3 | Laws | checkerboard | 0.00% | 53ms | 4.0MB | ✅ PASS |
+| 3.b.2 | Laws | checkerboard | 0.00% | 56ms | 4.0MB | ✅ PASS |
+| 3.b.3 | Laws | checkerboard | 0.00% | 56ms | 4.0MB | ✅ PASS |
 | 3.c.1 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
 | 3.c.2 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
 | 3.c.3 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
-| 4.a.1 | Gabor | impulse_response | 0.27% | 26ms | 16.5MB | ✅ PASS |
-| 4.a.2 | Gabor | impulse_response | 0.14% | 394ms | 20.6MB | ✅ PASS |
-| 4.b.1 | Gabor | sphere | 0.01% | 31ms | 34.8MB | ✅ PASS |
-| 4.b.2 | Gabor | sphere | 0.09% | 956ms | 49.3MB | ✅ PASS |
-| 5.a.1 | Daubechies 2 | impulse_response | 0.00% | 3ms | 3.0MB | ✅ PASS |
-| 5.a.2 | Daubechies 2 | impulse_response | 0.00% | 68ms | 6.0MB | ✅ PASS |
-| 6.a.1 | Coiflet 1 | sphere | 0.00% | 3ms | 3.0MB | ✅ PASS |
-| 6.a.2 | Coiflet 1 | sphere | 0.00% | 76ms | 6.0MB | ✅ PASS |
-| 7.a.1 | Haar | checkerboard | 0.00% | 114ms | 6.0MB | ✅ PASS |
-| 7.a.2 | Haar | checkerboard | 0.00% | 117ms | 6.0MB | ✅ PASS |
+| 4.a.1 | Gabor | impulse_response | 0.27% | 27ms | 14.6MB | ✅ PASS |
+| 4.a.2 | Gabor | impulse_response | 0.14% | 400ms | 21.1MB | ✅ PASS |
+| 4.b.1 | Gabor | sphere | 0.01% | 30ms | 40.5MB | ✅ PASS |
+| 4.b.2 | Gabor | sphere | 0.09% | 940ms | 46.1MB | ✅ PASS |
+| 5.a.1 | Daubechies 2 | impulse_response | 0.00% | 4ms | 3.0MB | ✅ PASS |
+| 5.a.2 | Daubechies 2 | impulse_response | 0.00% | 76ms | 6.0MB | ✅ PASS |
+| 6.a.1 | Coiflet 1 | sphere | 0.00% | 4ms | 3.0MB | ✅ PASS |
+| 6.a.2 | Coiflet 1 | sphere | 0.00% | 83ms | 6.0MB | ✅ PASS |
+| 7.a.1 | Haar | checkerboard | 0.00% | 123ms | 6.0MB | ✅ PASS |
+| 7.a.2 | Haar | checkerboard | 0.00% | 121ms | 6.0MB | ✅ PASS |
 | 8.a.1 | Simoncelli | checkerboard | 0.38% | 10ms | 24.3MB | ✅ PASS |
-| 8.a.2 | Simoncelli | checkerboard | 0.00% | 11ms | 24.3MB | ✅ PASS |
-| 8.a.3 | Simoncelli | checkerboard | 0.00% | 10ms | 24.3MB | ✅ PASS |
-| 9.a | Riesz-LoG | impulse_response | 0.05% | 14ms | 14.4MB | ✅ PASS |
-| 9.b.1 | Riesz-LoG | sphere | 0.64% | 13ms | 14.4MB | ✅ PASS |
+| 8.a.2 | Simoncelli | checkerboard | 0.00% | 10ms | 24.3MB | ✅ PASS |
+| 8.a.3 | Simoncelli | checkerboard | 0.00% | 9ms | 24.3MB | ✅ PASS |
+| 9.a | Riesz-LoG | impulse_response | 0.05% | 15ms | 14.4MB | ✅ PASS |
+| 9.b.1 | Riesz-LoG | sphere | 0.64% | 15ms | 14.4MB | ✅ PASS |
 | 9.b.2 | Riesz-LoG (aligned) | sphere | - | - | - | ❗ REF. |
 | 10.a | Riesz-Simoncelli | impulse_response | - | - | - | ❗ REF. |
-| 10.b.1 | Riesz-Simoncelli | pattern_1 | 0.79% | 13ms | 24.3MB | ✅ PASS |
+| 10.b.1 | Riesz-Simoncelli | pattern_1 | 0.79% | 14ms | 24.3MB | ✅ PASS |
 | 10.b.2 | Riesz-Simoncelli (aligned) | pattern_1 | - | - | - | ❗ REF. |
 
 ### Tolerance Criteria

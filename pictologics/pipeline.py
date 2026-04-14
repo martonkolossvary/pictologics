@@ -22,6 +22,7 @@ import copy
 import datetime
 import json
 import logging
+import re
 import warnings
 from dataclasses import dataclass
 from enum import Enum
@@ -39,6 +40,7 @@ from .deduplication import (
     DeduplicationRules,
     get_default_rules,
 )
+from .features import FEATURE_NAMES
 from .features.intensity import (
     calculate_intensity_features,
     calculate_intensity_histogram_features,
@@ -87,6 +89,45 @@ CONFIG_SCHEMA_VERSION = "1.0"
 
 # Valid schema versions (for backward compatibility)
 _VALID_SCHEMA_VERSIONS = {"1.0", "1.1"}
+
+# ---------------------------------------------------------------------------
+# Feature metadata for describe_features()
+# ---------------------------------------------------------------------------
+
+_FAMILY_GROUP: dict[str, str] = {
+    "intensity": "Intensity",
+    "histogram": "Intensity",
+    "ivh": "Intensity",
+    "morphology": "Morphology",
+    "local_intensity": "Morphology",
+    "spatial_intensity": "Morphology",
+    "glcm": "Texture",
+    "glrlm": "Texture",
+    "glszm": "Texture",
+    "gldzm": "Texture",
+    "ngtdm": "Texture",
+    "ngldm": "Texture",
+}
+
+_REQUIRES_DISCRETISATION: dict[str, bool] = {
+    "intensity": False,
+    "histogram": True,
+    "ivh": True,
+    "morphology": False,
+    "local_intensity": False,
+    "spatial_intensity": False,
+    "glcm": True,
+    "glrlm": True,
+    "glszm": True,
+    "gldzm": True,
+    "ngtdm": True,
+    "ngldm": True,
+}
+
+# Regex to extract the IBSI alphanumeric code from a feature key.
+# Most codes are 4 characters; a small number (e.g. ``1PR``) are 3.
+# An optional trailing ``_\d+`` suffix covers IVH keys like ``_BC2M_10``.
+_IBSI_CODE_RE = re.compile(r"_([A-Z0-9]{3,4})(?:_\d+)?$")
 
 
 class SourceMode(Enum):
@@ -164,7 +205,20 @@ class PipelineState:
 
 
 class EmptyROIMaskError(ValueError):
-    """Raised when preprocessing yields an empty ROI mask."""
+    """Raised internally when preprocessing yields an empty ROI mask.
+
+    When this error occurs during ``run()``, the affected configuration is
+    **not** propagated as an exception.  Instead, the pipeline returns a
+    ``pandas.Series`` of ``NaN`` values whose index matches the feature names
+    that would have been produced by a successful extraction.  Other
+    configurations in the same ``run()`` call continue normally.
+
+    This is one of three mechanisms that guarantee a complete feature set for
+    every configuration.  The other two are the partial-failure backfill (for
+    individual features that cannot be computed) and the general exception
+    handler (for unexpected runtime errors).  See the ``run()`` docstring and
+    the *Result Guarantees* section of the user guide for details.
+    """
 
 
 class RadiomicsPipeline:
@@ -438,13 +492,22 @@ class RadiomicsPipeline:
                 If omitted (or passed as `None` / empty string), the pipeline will
                 treat the **entire image** as the ROI by generating a full (all-ones)
                 mask matching the input image geometry.
-            subject_id: Optional identifier for the subject.
+            subject_id: Optional identifier for the subject (used in the
+                processing log only; not included in the returned feature Series).
             config_names: List of specific configuration names to run.
                           If None, runs all registered configurations.
                           Supports "all_standard" to run all 6 standard configs.
 
         Returns:
             Dictionary mapping config names to pandas Series of features.
+            Every Series contains the **complete set of expected feature names**
+            for its configuration, regardless of whether extraction succeeded:
+
+            - If extraction succeeds, values are the computed feature values.
+            - If individual features fail (e.g., mesh error, PCA with ≤3 voxels),
+                those features are ``NaN``; successfully computed features are preserved.
+            - If the entire configuration fails (empty ROI or unexpected error),
+                all values are ``NaN``.
 
         Example:
             Run standard pipeline components:
@@ -600,8 +663,6 @@ class RadiomicsPipeline:
                 sentinel_value=detected_sentinel_value,
             )
 
-            self._ensure_nonempty_roi(state, context="initialization")
-
             config_log: dict[str, Any] = {
                 "timestamp": datetime.datetime.now().isoformat(),
                 "subject_id": subject_id,
@@ -614,10 +675,14 @@ class RadiomicsPipeline:
                 "steps_executed": [],
             }
 
-            config_features = {}
+            config_features: dict[str, Any] = {}
+            current_step: dict[str, Any] | None = None
 
             try:
+                self._ensure_nonempty_roi(state, context="initialization")
+
                 for step_def in steps:
+                    current_step = step_def
                     step_name = step_def["step"]
                     params = step_def.get("params", {})
 
@@ -639,21 +704,42 @@ class RadiomicsPipeline:
                         {"step": step_name, "params": params, "status": "completed"}
                     )
 
+            except EmptyROIMaskError as e:
+                config_log["error"] = str(e)
+                config_log["failed_step"] = (
+                    current_step if current_step is not None else "initialization"
+                )
+                self._log.append(config_log)
+
+                # Build a NaN-filled Series with the expected feature names so
+                # that downstream formatting/concatenation always sees a
+                # complete, predictable set of columns.
+                nan_names = self._get_expected_feature_names(steps)
+                all_results[config_name] = pd.Series(
+                    {name: float("nan") for name in nan_names}
+                )
+                logging.debug(
+                    "Config '%s' produced an empty ROI: %s. "
+                    "Returning NaN for %d features.",
+                    config_name,
+                    e,
+                    len(nan_names),
+                )
+                continue
+
             except Exception as e:
                 config_log["error"] = str(e)
-                config_log["failed_step"] = step_def
-
-                # For empty ROI, fail fast (do not silently return empty/partial features).
-                if isinstance(e, EmptyROIMaskError):
-                    self._log.append(config_log)
-                    raise
+                config_log["failed_step"] = current_step
+                # Backfill with NaN so the result always has a complete set of
+                # feature columns, even when extraction was interrupted.
+                nan_names = self._get_expected_feature_names(steps)
+                for name in nan_names:
+                    config_features.setdefault(name, float("nan"))
 
             self._log.append(config_log)
 
             # Create Series
             series = pd.Series(config_features)
-            if subject_id:
-                series["subject_id"] = subject_id
             all_results[config_name] = series
 
         return all_results
@@ -1045,6 +1131,94 @@ class RadiomicsPipeline:
         else:
             raise ValueError(f"Unknown preprocessing step: {step_name}")
 
+    @staticmethod
+    def _get_expected_feature_names(
+        steps: list[dict[str, Any]],
+    ) -> list[str]:
+        """Return the ordered list of feature names a config would produce.
+
+        Inspects all ``extract_features`` steps in *steps*, expanding family
+        names via :data:`FEATURE_NAMES`.  The result is used to build a
+        NaN-filled Series when a configuration fails entirely (empty ROI or
+        unexpected error), guaranteeing that the returned Series always has the
+        same set of feature names as a successful extraction.
+        """
+        names: list[str] = []
+        seen: set[str] = set()
+
+        for step_def in steps:
+            if step_def.get("step") != "extract_features":
+                continue
+            params = step_def.get("params", {})
+            families: list[str] = params.get(
+                "families",
+                ["intensity", "morphology", "texture", "histogram", "ivh"],
+            )
+
+            for family in families:
+                # "texture" expands to the 6 individual matrix families
+                if family == "texture":
+                    sub = ["glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm"]
+                else:
+                    sub = [family]
+
+                for fam in sub:
+                    if fam in FEATURE_NAMES and fam not in seen:
+                        names.extend(FEATURE_NAMES[fam])
+                        seen.add(fam)
+
+            # intensity family may include spatial/local sub-families
+            if "intensity" in families:
+                if params.get("include_spatial_intensity", False):
+                    if "spatial_intensity" not in seen:
+                        names.extend(FEATURE_NAMES["spatial_intensity"])
+                        seen.add("spatial_intensity")
+                if params.get("include_local_intensity", False):
+                    if "local_intensity" not in seen:
+                        names.extend(FEATURE_NAMES["local_intensity"])
+                        seen.add("local_intensity")
+
+        return names
+
+    @staticmethod
+    def _fill_missing_features(
+        results: dict[str, Any],
+        families: list[str],
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        """Backfill any missing feature keys with ``NaN``.
+
+        After a ``calculate_*`` function returns, some keys may be absent due
+        to partial failures (e.g. mesh generation failure in morphology, or an
+        empty texture matrix).  This method ensures every expected key is
+        present – computed values are preserved and only truly missing keys are
+        set to ``NaN``.
+        """
+        if params is None:
+            params = {}
+        nan = float("nan")
+        for family in families:
+            if family == "texture":
+                subs = ["glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm"]
+            else:
+                subs = [family]
+            for fam in subs:
+                if fam in FEATURE_NAMES:
+                    for key in FEATURE_NAMES[fam]:
+                        if key not in results:
+                            results[key] = nan
+
+        # spatial/local intensity sub-families that are gated by params
+        if "intensity" in families:
+            if params.get("include_spatial_intensity", False):
+                for key in FEATURE_NAMES.get("spatial_intensity", ()):
+                    if key not in results:
+                        results[key] = nan
+            if params.get("include_local_intensity", False):
+                for key in FEATURE_NAMES.get("local_intensity", ()):
+                    if key not in results:
+                        results[key] = nan
+
     def _extract_features(
         self, state: PipelineState, params: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1296,6 +1470,8 @@ class RadiomicsPipeline:
                 )
             )
 
+        # Ensure every expected feature key is present (NaN for partial failures)
+        self._fill_missing_features(results, families, params)
         return results
 
     def _extract_features_with_dedup(
@@ -1351,6 +1527,8 @@ class RadiomicsPipeline:
                     family_cache[sig.hash] = family_results
                 self._dedup_computed_count += 1
 
+        # Ensure every expected feature key is present (NaN for partial failures)
+        self._fill_missing_features(results, families, params)
         return results
 
     def _extract_single_family(
@@ -1645,6 +1823,189 @@ class RadiomicsPipeline:
         del self._configs[name]
         self._configs_modified_since_plan = True
         return self
+
+    # ------------------------------------------------------------------
+    # Feature catalog
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_feature_key(key: str) -> tuple[str, str]:
+        """Extract the human-readable name and IBSI code from a feature key.
+
+        Feature keys follow the pattern ``descriptive_name_CODE`` where
+        ``CODE`` is a 3–4 character uppercase-alphanumeric IBSI identifier.
+        Some IVH features carry an additional numeric suffix (e.g.
+        ``volume_at_intensity_fraction_0.10_BC2M_10``).
+
+        Returns:
+            ``(stripped_name, ibsi_code)`` — e.g. ``("joint_entropy", "TU9B")``.
+        """
+        m = _IBSI_CODE_RE.search(key)
+        if m is None:
+            return key, ""
+        code = m.group(1)
+        # Strip the code (and optional trailing _digits) from the key
+        name = key[: m.start()]
+        return name, code
+
+    @staticmethod
+    def _extract_config_metadata(
+        steps: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Parse a config’s step list into preprocessing metadata.
+
+        Returns a flat dict with keys used by :meth:`describe_features`.
+        """
+        meta: dict[str, Any] = {
+            "is_resampled": False,
+            "resampling_spacing": None,
+            "interpolation": None,
+            "is_discretised": False,
+            "discretisation_method": None,
+            "discretisation_param": None,
+            "is_filtered": False,
+            "filter_type": None,
+            "filter_params": None,
+        }
+        for step_def in steps:
+            step_name = step_def.get("step", "")
+            params = step_def.get("params", {})
+
+            if step_name == "resample":
+                meta["is_resampled"] = True
+                spacing = params.get("new_spacing")
+                meta["resampling_spacing"] = (
+                    str(tuple(spacing)) if spacing is not None else None
+                )
+                meta["interpolation"] = params.get("interpolation", "linear")
+
+            elif step_name == "discretise":
+                meta["is_discretised"] = True
+                method = params.get("method")
+                meta["discretisation_method"] = method
+                if method == "FBN":
+                    meta["discretisation_param"] = params.get("n_bins")
+                elif method == "FBS":
+                    meta["discretisation_param"] = params.get("bin_width")
+
+            elif step_name == "filter":
+                meta["is_filtered"] = True
+                meta["filter_type"] = params.get("type")
+                # Store filter-specific params (exclude 'type' and 'boundary')
+                fparams = {
+                    k: v
+                    for k, v in params.items()
+                    if k not in ("type", "boundary")
+                }
+                meta["filter_params"] = str(fparams) if fparams else None
+
+        return meta
+
+    def describe_features(self) -> pd.DataFrame:
+        """Return a DataFrame cataloguing every feature the pipeline will produce.
+
+        Each row represents one (configuration, feature) pair.  The columns
+        describe the feature identity, its family membership, and the
+        preprocessing parameters of the configuration that produces it.
+
+        This is useful for:
+
+        * Inspecting the full set of features before running the pipeline.
+        * Filtering or subsetting features by family, discretisation method,
+          filter type, etc.
+        * Exporting a data dictionary (``describe_features().to_csv(...)``)
+          alongside study results for documentation and reproducibility.
+
+        Returns:
+            A `pandas.DataFrame` with columns:
+
+            - **config** – Configuration name.
+            - **feature_key** – Full feature key as it appears in the output Series.
+            - **feature_name** – Human-readable name (IBSI code stripped).
+            - **ibsi_code** – 3–4 character IBSI identifier.
+            - **family** – Granular feature family (e.g. ``glcm``, ``ivh``).
+            - **family_group** – Broad category: *Intensity*, *Morphology*, or
+                *Texture*.
+            - **requires_discretisation** – Whether the family needs discretised
+                input.
+            - **is_discretised** – Whether the configuration includes a
+                ``discretise`` step.
+            - **discretisation_method** – ``FBN``, ``FBS``, or ``None``.
+            - **discretisation_param** – Bin count (FBN) or bin width (FBS).
+            - **is_resampled** – Whether the configuration includes a ``resample``
+                step.
+            - **resampling_spacing** – Target spacing as a string, e.g.
+                ``"(0.5, 0.5, 0.5)"``.
+            - **interpolation** – Resampling interpolation method.
+            - **is_filtered** – Whether a ``filter`` step is present.
+            - **filter_type** – Filter type (``log``, ``gabor``, …) or ``None``.
+            - **filter_params** – Filter-specific parameters as a string, or
+                ``None``.
+
+        Example:
+            ```python
+            pipeline = RadiomicsPipeline()
+            catalog = pipeline.describe_features()
+
+            # Export as CSV data dictionary
+            catalog.to_csv("feature_catalog.csv", index=False)
+
+            # Filter: only texture features from FBN configs
+            texture_fbn = catalog[
+                (catalog["family_group"] == "Texture")
+                & (catalog["discretisation_method"] == "FBN")
+            ]
+            ```
+        """
+        # Build reverse lookup: feature_key -> family
+        key_to_family: dict[str, str] = {}
+        for family, keys in FEATURE_NAMES.items():
+            for key in keys:
+                key_to_family[key] = family
+
+        rows: list[dict[str, Any]] = []
+
+        for config_name, steps in self._configs.items():
+            feature_keys = self._get_expected_feature_names(steps)
+            config_meta = self._extract_config_metadata(steps)
+
+            for fkey in feature_keys:
+                fname, code = self._parse_feature_key(fkey)
+                family = key_to_family.get(fkey, "unknown")
+
+                row: dict[str, Any] = {
+                    "config": config_name,
+                    "feature_key": fkey,
+                    "feature_name": fname,
+                    "ibsi_code": code,
+                    "family": family,
+                    "family_group": _FAMILY_GROUP.get(family, "Unknown"),
+                    "requires_discretisation": _REQUIRES_DISCRETISATION.get(
+                        family, False
+                    ),
+                }
+                row.update(config_meta)
+                rows.append(row)
+
+        columns = [
+            "config",
+            "feature_key",
+            "feature_name",
+            "ibsi_code",
+            "family",
+            "family_group",
+            "requires_discretisation",
+            "is_discretised",
+            "discretisation_method",
+            "discretisation_param",
+            "is_resampled",
+            "resampling_spacing",
+            "interpolation",
+            "is_filtered",
+            "filter_type",
+            "filter_params",
+        ]
+        return pd.DataFrame(rows, columns=columns) if rows else pd.DataFrame(columns=columns)
 
     def to_dict(
         self,

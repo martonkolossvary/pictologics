@@ -37,8 +37,13 @@ You want to:
 !!! note
     - **Maskless pipeline runs**: `RadiomicsPipeline.run(...)` accepts `mask=None`, `mask=""`, or an omitted mask argument.
       In that case, Pictologics generates a full (all-ones) ROI mask internally (whole-image ROI).
-    - **Empty ROI is an error**: If your preprocessing removes all voxels (e.g., a too-tight HU range), the pipeline raises
-      a clear error instead of silently returning empty outputs.
+    - **Complete feature sets guaranteed**: Every configuration always returns a `pandas.Series` with the full set of
+      expected feature names.  If preprocessing removes all voxels (empty ROI), all features are `NaN`.  If individual
+      features cannot be computed (e.g., mesh generation failure, PCA with too few voxels), only those features are
+      `NaN` and successfully computed features retain their values.  Other configurations in the same run continue
+      normally.  This guarantees that `format_results()` and `save_results()` always produce a table with identical
+      columns across subjects — no missing columns, no ragged rows, no unexpected exceptions.  The processing log
+      records which configurations encountered errors.
     - **Morphology on whole-image ROI**: Shape features describe the shape of the ROI mask.
       With a maskless run, the ROI starts as the full image volume. The `resegment` step then restricts
       the ROI to voxels within a valid intensity range, removing sentinel-valued voxels. After resegmentation
@@ -206,6 +211,8 @@ You want to:
   - `subject_id`
   - `file`
   - Feature columns prefixed by configuration name (e.g., `case1_fbn_8__mean_intensity_Q4LE`).
+- Every row has the **same set of columns**, even if some images trigger empty ROIs or
+  partial feature failures.  Failed features appear as `NaN`.
 
 !!! tip "Alternative: Explicit Sentinel Value"
     If you know the sentinel value in advance, use `source_mode="roi_only"` with `sentinel_value` for deterministic behavior:
@@ -1500,3 +1507,44 @@ for n_bins in (16, 32):
     - Simple discretization-only scenarios (automatic dedup handles this well)
     - When you want all features in each result dictionary
     - Rapid prototyping
+
+## Case 9: Feature Catalog & Data Dictionary
+
+### Scenario
+
+Before running extraction you want to know **exactly** which features and
+preprocessing steps each configuration produces.  You may also need to
+export a data dictionary for a study protocol or filter features by family.
+
+### Full example
+
+```python
+from pictologics import RadiomicsPipeline
+
+pipeline = RadiomicsPipeline()
+catalog = pipeline.describe_features()
+
+# 1. Export a CSV data dictionary
+catalog.to_csv("feature_catalog.csv", index=False)
+
+# 2. How many features per configuration?
+print(catalog.groupby("config").size())
+
+# 3. Only texture features from FBN configurations
+texture_fbn = catalog[
+    (catalog["family_group"] == "Texture")
+    & (catalog["discretisation_method"] == "FBN")
+]
+print(texture_fbn[["config", "feature_name", "ibsi_code"]].head())
+
+# 4. Which families require discretisation?
+print(
+    catalog[["family", "requires_discretisation"]]
+    .drop_duplicates()
+    .sort_values("family")
+)
+
+# 5. Filter-aware: show only features from filtered configs
+filtered = catalog[catalog["is_filtered"]]
+print(filtered[["config", "filter_type", "filter_params"]].drop_duplicates())
+```

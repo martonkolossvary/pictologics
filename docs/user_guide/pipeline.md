@@ -38,8 +38,30 @@ save_results([row], "results.csv")
 - Pass a mask path or `Image` object → used as the ROI (standard workflow).
 - Omit `mask` (or pass `mask=None` / `mask=""`) → Pictologics generates a full (all-ones) ROI mask, treating the **entire image** as the initial ROI.
 
-!!! warning "Empty ROI is an Error"
-    If preprocessing removes all ROI voxels (e.g., too strict `resegment` thresholds), the pipeline raises a clear `EmptyROIMaskError` rather than returning empty/partial feature sets.
+!!! info "Complete Feature Sets Guaranteed"
+    Every configuration always returns a `pandas.Series` with the **full set of expected
+    feature names** — even when extraction fails partially or entirely.
+
+    - **Empty ROI** (e.g., too strict `resegment` thresholds): all features are `NaN`.
+    - **Partial failures** (e.g., mesh generation error, PCA with ≤3 voxels):
+      successfully computed features retain their values; only the missing features are `NaN`.
+    - **Unexpected errors**: all features are `NaN`.
+
+    Other configurations in the same `run()` call continue normally.  The processing log
+    records errors and the step that caused them.
+
+    This design ensures that multi-configuration batch runs always produce a complete,
+    predictable result dictionary — downstream formatting, concatenation, and CSV export
+    work without missing columns or unexpected exceptions.
+
+    See [Result Guarantees](#result-guarantees) for details.
+
+    ```python
+    results = pipeline.run(image, mask, config_names=["strict", "lenient"])
+    # If "strict" empties the ROI:
+    #   results["strict"]  -> Series of NaN (all expected feature names present)
+    #   results["lenient"] -> Series of computed values
+    ```
 
 !!! note "Morphology with Whole-Image ROI"
     With a maskless run, morphology features describe the ROI mask after mask-refining steps
@@ -266,6 +288,129 @@ for file in image_files:
 save_results(all_rows, "full_study_results.csv")
 ```
 
+### Result Guarantees
+
+Every configuration in a `run()` call **always** returns a `pandas.Series` with a
+complete, predictable set of feature names — regardless of whether extraction
+succeeded, partially succeeded, or failed entirely.  This guarantee holds at three
+levels:
+
+| Failure Level | Example | Behaviour |
+|:---|:---|:---|
+| **Whole-configuration failure** | Empty ROI after `resegment` | All features set to `NaN` |
+| **Partial feature failure** | Mesh generation error in morphology, PCA with ≤3 voxels, empty texture matrix | Successfully computed features retain their values; only the missing features are set to `NaN` |
+| **Unexpected runtime error** | Uncaught exception during extraction | All features set to `NaN` |
+
+In every case:
+
+- **No missing columns.** The feature names in the returned Series are identical to
+  those a fully successful extraction would have produced.
+- **Other configurations continue.** A failure in one configuration does not prevent
+  subsequent configurations from running.
+- **Errors are logged.** The processing log records the error message and the step that
+  caused the failure, accessible via `pipeline.save_log()`.
+
+This design makes batch processing safe: when you collect rows from many subjects with
+`format_results()` and merge them with `save_results()`, every row has the same columns.
+There are no ragged rows, no missing columns, and no unexpected exceptions.
+
+!!! note "Name-Based Merging"
+    `format_results()` and `save_results()` always merge results by **column name**,
+    never by position.  Even though all configurations now produce the same set of
+    feature names, the merging logic is inherently name-based — columns are identified
+    by their `{config}__{feature}` key (wide format) or `feature_name` value (long
+    format), so results are always aligned correctly.
+
+#### How It Works Internally
+
+The pipeline uses a static `FEATURE_NAMES` registry (in `pictologics.features`) that
+enumerates every feature name produced by each family.  Three mechanisms ensure
+completeness:
+
+1. **Empty ROI**: When `EmptyROIMaskError` is raised during preprocessing, the pipeline
+   builds a full NaN Series directly from the registry without attempting extraction.
+2. **Partial failures**: After each `extract_features` call, a backfill step compares
+   the returned feature keys against the registry and inserts `NaN` for any missing
+   keys.  This catches edge cases where individual features cannot be computed (e.g.,
+   mesh fails → surface-based morphology features are `NaN`, but volume from voxel
+   counting is preserved).
+3. **Unexpected errors**: If an unhandled exception interrupts extraction, the general
+   error handler backfills all expected feature names with `NaN` using the same
+   registry.
+
+#### Example: Empty ROI in a Multi-Configuration Run
+
+```python
+pipeline.add_config("strict", [
+    {"step": "resegment", "params": {"range_min": 100, "range_max": 200}},
+    {"step": "extract_features", "params": {"families": ["intensity"]}},
+])
+pipeline.add_config("lenient", [
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 3000}},
+    {"step": "extract_features", "params": {"families": ["intensity"]}},
+])
+
+results = pipeline.run(image, mask, config_names=["strict", "lenient"])
+
+# If the strict range empties the ROI:
+#   results["strict"]  -> 18 intensity features, all NaN
+#   results["lenient"] -> 18 intensity features, computed values
+#
+# format_results() works normally — the NaN row merges cleanly with other rows:
+row = format_results(results, fmt="wide", meta={"subject_id": "case1"})
+```
+
+!!! tip "Detecting Failed Configurations"
+    After a batch run, inspect the processing log to find which configurations
+    failed or produced partial results:
+
+    ```python
+    for entry in pipeline._log:
+        if "error" in entry:
+            print(f"{entry['config_name']}: {entry['error']}")
+    ```
+
+## Feature Catalog
+
+The [`describe_features()`][pictologics.pipeline.RadiomicsPipeline.describe_features] method returns a DataFrame cataloguing every feature the pipeline will produce **before** you run it.  Each row is one *(configuration, feature)* pair with columns describing the feature identity, family membership, and preprocessing parameters.
+
+```python
+pipeline = RadiomicsPipeline()
+catalog = pipeline.describe_features()
+catalog.head()
+```
+
+| Column | Description |
+|---|---|
+| `config` | Configuration name |
+| `feature_key` | Full feature key as it appears in the output |
+| `feature_name` | Human-readable name (IBSI code stripped) |
+| `ibsi_code` | 3–4 character IBSI identifier |
+| `family` | Granular family (e.g. `glcm`, `ivh`) |
+| `family_group` | Broad category: *Intensity*, *Morphology*, or *Texture* |
+| `requires_discretisation` | Whether the family needs discretised input |
+| `is_discretised` / `discretisation_method` / `discretisation_param` | Discretisation details |
+| `is_resampled` / `resampling_spacing` / `interpolation` | Resampling details |
+| `is_filtered` / `filter_type` / `filter_params` | Response-map filter details |
+
+### Typical Use Cases
+
+**Export a data dictionary** alongside study results:
+
+```python
+catalog.to_csv("feature_catalog.csv", index=False)
+```
+
+**Filter features** for downstream analysis:
+
+```python
+# Only texture features from FBN configs
+texture_fbn = catalog[
+    (catalog["family_group"] == "Texture")
+    & (catalog["discretisation_method"] == "FBN")
+]
+```
+
 ## Deduplication (Performance Optimization)
 
 When running multiple configurations that share preprocessing steps, the pipeline **automatically avoids redundant computation**.
@@ -298,7 +443,9 @@ print(f"Computed: {stats['computed_families']} families")
 ```
 
 !!! note "Results Are Always Complete"
-    When deduplication reuses features, they are **deep copied** into each configuration's results. Every config returns a complete feature set — no missing values.
+    Deduplication does not affect the completeness guarantee.  Reused features are
+    **deep copied** into each configuration's results, and every config returns a
+    complete feature set — no missing values.
 
 ### Configuration
 

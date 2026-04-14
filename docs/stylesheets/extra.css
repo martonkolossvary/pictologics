@@ -425,3 +425,8 @@ input,
   text-shadow: none !important;
   font-weight: normal !important;
 }
+
+/* Force compliance tables to use full width so all tables match */
+.md-typeset table {
+  width: 100%;
+}

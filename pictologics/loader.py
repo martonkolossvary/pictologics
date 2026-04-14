@@ -376,7 +376,7 @@ def load_image(
     The resulting image array is always 3D with dimensions (x, y, z).
 
     Note:
-        For DICOM SEG files, this function uses :func:`pictologics.loaders.load_seg`
+        For DICOM SEG files, this function uses ``pictologics.loaders.load_seg()``
         internally. For more control over segment extraction (e.g., selecting specific
         segments or extracting them separately), use ``load_seg()`` directly.
 
@@ -389,7 +389,7 @@ def load_image(
             - **4D NIfTI files**: Selects which time point/volume to load.
             - **Multi-phase DICOM series**: Selects which phase to load (e.g., cardiac
               phases, temporal positions, echo numbers). Use
-              :func:`pictologics.utilities.get_dicom_phases` to discover available phases.
+              ``pictologics.utilities.get_dicom_phases()`` to discover available phases.
 
             Defaults to 0 (the first volume/phase).
         recursive (bool, optional): If True and `path` is a directory, recursively searches
@@ -581,7 +581,7 @@ def load_and_merge_images(
             - **4D NIfTI files**: Selects which time point/volume to load.
             - **Multi-phase DICOM series**: Selects which phase to load (e.g., cardiac
               phases, temporal positions, echo numbers). Use
-              :func:`pictologics.utilities.get_dicom_phases` to discover available phases.
+              ``pictologics.utilities.get_dicom_phases()`` to discover available phases.
 
             Defaults to 0 (the first volume/phase).
         recursive (bool, optional): If True, recursively searches subdirectories
@@ -974,7 +974,7 @@ def _load_dicom_series(
 
     **Multi-Phase Detection:**
     The function automatically detects multi-phase series using the same logic
-    as :class:`DicomDatabase`. Detection is based on:
+    as ``DicomDatabase``. Detection is based on:
     - Cardiac phase percentage
     - Temporal position
     - Trigger time
@@ -1004,7 +1004,7 @@ def _load_dicom_series(
             or if dataset_index is out of range for the available phases.
 
     See Also:
-        :func:`pictologics.utilities.get_dicom_phases`: Discover available phases.
+        ``pictologics.utilities.get_dicom_phases()``: Discover available phases.
     """
     from pictologics.utilities.dicom_utils import MULTI_PHASE_TAGS, split_dicom_phases
 

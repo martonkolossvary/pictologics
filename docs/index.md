@@ -25,6 +25,7 @@ See also the [NOTICE](NOTICE.md) file for attribution and third-party library in
     *   **IBSI 2**: Image filters ([Phase 1 filter compliance](ibsi2_compliance.md) | [Phase 2 filtered features](ibsi2_phase2_compliance.md) | [Phase 3 reproducibility](ibsi2_phase3_compliance.md))
 *   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, DICOM, DICOM-SEG, DICOM-SR).
 *   **✨ User-Friendly**: Pure Python implementation with a simple installation process and user-friendly pipeline module supporting easy feature extraction and analysis, ensuring a smooth experience from setup to analysis.
+*   **🛡️ Predictable Results**: Every pipeline run returns a complete, fixed set of feature columns — even when individual features or entire configurations fail (values are `NaN`). Batch processing never produces missing columns or ragged rows.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
 
 

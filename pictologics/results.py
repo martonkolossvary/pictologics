@@ -31,6 +31,12 @@ def format_results(
     """
     Format the output of RadiomicsPipeline.run() into a structured format.
 
+    Merging is always **name-based** (by feature name / column key), never
+    positional.  Because ``run()`` guarantees that every configuration returns
+    the complete set of expected feature names, the formatted output always has
+    a predictable, consistent set of columns — even when some features are
+    ``NaN`` due to partial or complete extraction failure.
+
     Args:
         results: Dictionary mapping configuration names to pandas Series of features
                  (the standard output of RadiomicsPipeline.run).
@@ -155,6 +161,11 @@ def save_results(
 ) -> None:
     """
     Save results to a file (CSV, JSON, etc.), automatically handling merging of lists.
+
+    When saving a list of results (one per subject), rows are merged by
+    **column name**.  Because ``RadiomicsPipeline.run()`` guarantees that every
+    configuration returns a complete set of feature names, all rows share the
+    same columns and the resulting file has no missing columns or ragged rows.
 
     Args:
         data: The data to save. Supported types:

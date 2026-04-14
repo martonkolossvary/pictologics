@@ -1,5 +1,19 @@
 # Changelog
 
+<!-- towncrier release notes start -->
+
+## [0.4.0] - 2026-04-14
+
+### Added
+
+- Added `describe_features()` method to `RadiomicsPipeline` that returns a DataFrame cataloguing every feature the pipeline will produce, with columns for configuration name, feature identity (name, IBSI code, family, broad family group), discretisation/resampling/filter metadata. Useful for exporting data dictionaries and filtering features before extraction.
+
+### Changed
+
+- Pipeline runs now always return a complete, predictable set of feature columns for every configuration. When the ROI is empty after preprocessing (`EmptyROIMaskError`), a full NaN-valued Series is returned instead of raising an error, and processing continues to the next configuration. Partial extraction failures (e.g., PCA with ≤3 voxels, mesh computation errors, empty texture matrices) are backfilled with NaN so that no feature keys are silently dropped. A new `FEATURE_NAMES` registry in `pictologics.features` enumerates all 174 expected feature names by family.
+- pipeline.run(subject_id=...) no longer injects subject_id into each configuration's feature Series. The parameter is now used exclusively for the processing log. To include subject identifiers in formatted output, pass them via format_results(meta={"subject_id": ...}).
+
+
 ## [0.3.5] - 2026-02-19
 
 ### Changed

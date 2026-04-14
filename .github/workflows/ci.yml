@@ -49,6 +49,11 @@ jobs:
         run: |
           poetry run mypy pictologics
 
+      - name: Towncrier Check
+        if: github.event_name == 'pull_request'
+        run: |
+          poetry run towncrier check --compare-with origin/${{ github.base_ref }}
+
       - name: Pytest
         run: |
           poetry run pytest -q --cov=pictologics --cov-report=xml --cov-report=term-missing

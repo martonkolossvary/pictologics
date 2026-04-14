@@ -43,12 +43,15 @@ pipeline.add_config("my_analysis", [
 
 # Step 3: Run the pipeline
 # The pipeline applies each step in order: resample → discretise → extract.
-# "subject_id" is an optional label used to identify this case in the output.
+# "subject_id" is an optional label recorded in the processing log.
 results = pipeline.run(image=image, mask=mask, subject_id="patient_001")
 
 # Step 4: Save the extracted features to a CSV file
 # Each feature becomes a column; each subject becomes a row.
-formatted = format_results(results, fmt="wide", output_type="dict")
+# Use `meta` to prepend identifying columns (e.g., subject ID) to the output.
+formatted = format_results(
+    results, fmt="wide", meta={"subject_id": "patient_001"}, output_type="dict"
+)
 save_results(formatted, "features.csv")
 ```
 
@@ -71,6 +74,10 @@ save_results(formatted, "features.csv")
     — for example, `mean_intensity_Q4LE` corresponds to IBSI feature **Q4LE** ("Mean intensity").
 
     Saving to CSV produces a table where each row is one subject and each column is one feature.
+    Every row is guaranteed to have the **same set of columns**: if a feature cannot be computed
+    (e.g., because the ROI is empty after preprocessing, or a specific calculation fails), the
+    value is `NaN` rather than missing.  This makes it safe to concatenate results from many
+    subjects without worrying about ragged rows or missing columns.
 
 ## Two Input Modes
 
