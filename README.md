@@ -8,13 +8,13 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://martonkolossvary.github.io/pictologics/)
 [![PyPI](https://img.shields.io/pypi/v/pictologics)](https://pypi.org/project/pictologics/)
 [![Python](https://img.shields.io/pypi/pyversions/pictologics)](https://pypi.org/project/pictologics/)
-[![Downloads](https://img.shields.io/pypi/dm/pictologics)](https://pypi.org/project/pictologics/)
+[![Downloads](https://img.shields.io/pepy/dt/pictologics)](https://pypi.org/project/pictologics/)
 [![License](https://img.shields.io/github/license/martonkolossvary/pictologics)](https://github.com/martonkolossvary/pictologics/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/martonkolossvary/pictologics/graph/badge.svg)](https://codecov.io/gh/martonkolossvary/pictologics)
 [![Ruff](https://img.shields.io/badge/ruff-0%20issues-261230.svg)](https://github.com/astral-sh/ruff)
 [![Mypy](https://img.shields.io/badge/mypy-0%20errors-blue.svg)](https://mypy-lang.org/)
 
-**Pictologics** is a high-performance, IBSI-compliant Python library for radiomic feature extraction from medical images (NIfTI, DICOM).
+**Pictologics** is a pure python, IBSI 1 and 2 compliant library for radiomic feature extraction from medical images.
 
 Documentation (User Guide, API, Benchmarks): https://martonkolossvary.github.io/pictologics/
 
@@ -26,7 +26,21 @@ Documentation (User Guide, API, Benchmarks): https://martonkolossvary.github.io/
     *   **IBSI 2**: Image filters ([Phase 1](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/)), filtered features ([Phase 2](https://martonkolossvary.github.io/pictologics/ibsi2_phase2_compliance/)), reproducibility ([Phase 3](https://martonkolossvary.github.io/pictologics/ibsi2_phase3_compliance/))
 *   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, DICOM, DICOM-SEG, DICOM-SR).
 *   **✨ User-Friendly**: Pure Python implementation with a simple installation process and user-friendly pipeline module supporting easy feature extraction and analysis, ensuring a smooth experience from setup to analysis.
-*   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
+*   **�️ Predictable Results**: Every pipeline run returns a complete, fixed set of feature columns — even when individual features or entire configurations fail (values are `NaN`). Batch processing never produces missing columns or ragged rows.
+*   **�🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
+
+## Key Features
+
+*   **Loaders**: Support for NIfTI and DICOM image, segmentation (DICOM-SEG), and report (DICOM-SR) formats.
+*   **Preprocessing**: Resampling, resegmentation, outlier filtering, discretisation and others.
+*   **Features**:
+    *   **Morphology**: Volume, Surface Area, Compactness, etc.
+    *   **Intensity**: Mean, Median, Skewness, Kurtosis, etc.
+    *   **Texture**: GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM.
+*   **Filters**: IBSI 2-compliant convolutional filters including Mean, LoG, Laws, Gabor, Wavelets, Simoncelli and others.
+*   **Intelligent Deduplication**: Automatically avoids redundant computation when multiple configurations share preprocessing but differ only in discretization. Feature families like morphology and intensity are computed once and reused.
+*   **Configuration Management**: Export/import pipeline configurations in YAML/JSON. Share reproducible workflows, version control settings, and ensure consistent multi-site processing.
+*   **Utilities**: Built-in DICOM database parsing, organization and viewing tools.
 
 ## Installation
 
