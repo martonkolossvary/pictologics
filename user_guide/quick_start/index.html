@@ -1784,13 +1784,16 @@
 <a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>
 <a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="c1"># Step 3: Run the pipeline</span>
 <a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="c1"># The pipeline applies each step in order: resample → discretise → extract.</span>
-<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="c1"># &quot;subject_id&quot; is an optional label used to identify this case in the output.</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="c1"># &quot;subject_id&quot; is an optional label recorded in the processing log.</span>
 <a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">image</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">,</span> <span class="n">subject_id</span><span class="o">=</span><span class="s2">&quot;patient_001&quot;</span><span class="p">)</span>
 <a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>
 <a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="c1"># Step 4: Save the extracted features to a CSV file</span>
 <a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="c1"># Each feature becomes a column; each subject becomes a row.</span>
-<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="n">formatted</span> <span class="o">=</span> <span class="n">format_results</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;wide&quot;</span><span class="p">,</span> <span class="n">output_type</span><span class="o">=</span><span class="s2">&quot;dict&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="n">save_results</span><span class="p">(</span><span class="n">formatted</span><span class="p">,</span> <span class="s2">&quot;features.csv&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="c1"># Use `meta` to prepend identifying columns (e.g., subject ID) to the output.</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="n">formatted</span> <span class="o">=</span> <span class="n">format_results</span><span class="p">(</span>
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>    <span class="n">results</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;wide&quot;</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;subject_id&quot;</span><span class="p">:</span> <span class="s2">&quot;patient_001&quot;</span><span class="p">},</span> <span class="n">output_type</span><span class="o">=</span><span class="s2">&quot;dict&quot;</span>
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="p">)</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="n">save_results</span><span class="p">(</span><span class="n">formatted</span><span class="p">,</span> <span class="s2">&quot;features.csv&quot;</span><span class="p">)</span>
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">What does the output look like?</p>
@@ -1833,7 +1836,11 @@
 unique alphanumeric code to every standardised radiomic feature. Pictologics appends this
 code to every feature name so you can always trace a result back to its exact IBSI definition
 — for example, <code>mean_intensity_Q4LE</code> corresponds to IBSI feature <strong>Q4LE</strong> ("Mean intensity").</p>
-<p>Saving to CSV produces a table where each row is one subject and each column is one feature.</p>
+<p>Saving to CSV produces a table where each row is one subject and each column is one feature.
+Every row is guaranteed to have the <strong>same set of columns</strong>: if a feature cannot be computed
+(e.g., because the ROI is empty after preprocessing, or a specific calculation fails), the
+value is <code>NaN</code> rather than missing.  This makes it safe to concatenate results from many
+subjects without worrying about ragged rows or missing columns.</p>
 </div>
 <h2 id="two-input-modes">Two Input Modes</h2>
 <p>Pictologics supports two approaches for defining which voxels to analyze. The right choice depends on how your data is structured.</p>

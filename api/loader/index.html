@@ -2592,7 +2592,7 @@ a DICOM Segmentation (SEG) object and standardizes it into an <code>Image</code>
 
 <details class="note" open>
   <summary>Note</summary>
-  <p>For DICOM SEG files, this function uses :func:<code>pictologics.loaders.load_seg</code>
+  <p>For DICOM SEG files, this function uses <code>pictologics.loaders.load_seg()</code>
 internally. For more control over segment extraction (e.g., selecting specific
 segments or extracting them separately), use <code>load_seg()</code> directly.</p>
 </details>
@@ -2640,7 +2640,7 @@ volume to extract (0-indexed). This works for:</p>
 <li><strong>4D NIfTI files</strong>: Selects which time point/volume to load.</li>
 <li><strong>Multi-phase DICOM series</strong>: Selects which phase to load (e.g., cardiac
   phases, temporal positions, echo numbers). Use
-  :func:<code>pictologics.utilities.get_dicom_phases</code> to discover available phases.</li>
+  <code>pictologics.utilities.get_dicom_phases()</code> to discover available phases.</li>
 </ul>
 <p>Defaults to 0 (the first volume/phase).</p>
               </div>
@@ -3047,7 +3047,7 @@ or the file is corrupt/unreadable.</p>
 <a id="__codelineno-0-376" name="__codelineno-0-376"></a><span class="sd">    The resulting image array is always 3D with dimensions (x, y, z).</span>
 <a id="__codelineno-0-377" name="__codelineno-0-377"></a>
 <a id="__codelineno-0-378" name="__codelineno-0-378"></a><span class="sd">    Note:</span>
-<a id="__codelineno-0-379" name="__codelineno-0-379"></a><span class="sd">        For DICOM SEG files, this function uses :func:`pictologics.loaders.load_seg`</span>
+<a id="__codelineno-0-379" name="__codelineno-0-379"></a><span class="sd">        For DICOM SEG files, this function uses ``pictologics.loaders.load_seg()``</span>
 <a id="__codelineno-0-380" name="__codelineno-0-380"></a><span class="sd">        internally. For more control over segment extraction (e.g., selecting specific</span>
 <a id="__codelineno-0-381" name="__codelineno-0-381"></a><span class="sd">        segments or extracting them separately), use ``load_seg()`` directly.</span>
 <a id="__codelineno-0-382" name="__codelineno-0-382"></a>
@@ -3060,7 +3060,7 @@ or the file is corrupt/unreadable.</p>
 <a id="__codelineno-0-389" name="__codelineno-0-389"></a><span class="sd">            - **4D NIfTI files**: Selects which time point/volume to load.</span>
 <a id="__codelineno-0-390" name="__codelineno-0-390"></a><span class="sd">            - **Multi-phase DICOM series**: Selects which phase to load (e.g., cardiac</span>
 <a id="__codelineno-0-391" name="__codelineno-0-391"></a><span class="sd">              phases, temporal positions, echo numbers). Use</span>
-<a id="__codelineno-0-392" name="__codelineno-0-392"></a><span class="sd">              :func:`pictologics.utilities.get_dicom_phases` to discover available phases.</span>
+<a id="__codelineno-0-392" name="__codelineno-0-392"></a><span class="sd">              ``pictologics.utilities.get_dicom_phases()`` to discover available phases.</span>
 <a id="__codelineno-0-393" name="__codelineno-0-393"></a>
 <a id="__codelineno-0-394" name="__codelineno-0-394"></a><span class="sd">            Defaults to 0 (the first volume/phase).</span>
 <a id="__codelineno-0-395" name="__codelineno-0-395"></a><span class="sd">        recursive (bool, optional): If True and `path` is a directory, recursively searches</span>
@@ -3320,7 +3320,7 @@ volume to extract for all images (0-indexed). This works for:</p>
 <li><strong>4D NIfTI files</strong>: Selects which time point/volume to load.</li>
 <li><strong>Multi-phase DICOM series</strong>: Selects which phase to load (e.g., cardiac
   phases, temporal positions, echo numbers). Use
-  :func:<code>pictologics.utilities.get_dicom_phases</code> to discover available phases.</li>
+  <code>pictologics.utilities.get_dicom_phases()</code> to discover available phases.</li>
 </ul>
 <p>Defaults to 0 (the first volume/phase).</p>
               </div>
@@ -3928,7 +3928,7 @@ or if the images (or reference) have mismatched geometries.</p>
 <a id="__codelineno-0-581" name="__codelineno-0-581"></a><span class="sd">            - **4D NIfTI files**: Selects which time point/volume to load.</span>
 <a id="__codelineno-0-582" name="__codelineno-0-582"></a><span class="sd">            - **Multi-phase DICOM series**: Selects which phase to load (e.g., cardiac</span>
 <a id="__codelineno-0-583" name="__codelineno-0-583"></a><span class="sd">              phases, temporal positions, echo numbers). Use</span>
-<a id="__codelineno-0-584" name="__codelineno-0-584"></a><span class="sd">              :func:`pictologics.utilities.get_dicom_phases` to discover available phases.</span>
+<a id="__codelineno-0-584" name="__codelineno-0-584"></a><span class="sd">              ``pictologics.utilities.get_dicom_phases()`` to discover available phases.</span>
 <a id="__codelineno-0-585" name="__codelineno-0-585"></a>
 <a id="__codelineno-0-586" name="__codelineno-0-586"></a><span class="sd">            Defaults to 0 (the first volume/phase).</span>
 <a id="__codelineno-0-587" name="__codelineno-0-587"></a><span class="sd">        recursive (bool, optional): If True, recursively searches subdirectories</span>

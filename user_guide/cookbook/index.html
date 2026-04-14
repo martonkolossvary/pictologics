@@ -1309,6 +1309,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#case-9-feature-catalog-data-dictionary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Case 9: Feature Catalog &amp; Data Dictionary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Case 9: Feature Catalog &amp; Data Dictionary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scenario_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2627,6 +2666,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#case-9-feature-catalog-data-dictionary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Case 9: Feature Catalog &amp; Data Dictionary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Case 9: Feature Catalog &amp; Data Dictionary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scenario_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2683,8 +2761,13 @@ See the <strong><a href="../configurations/">Configuration &amp; Reproducibility
 <ul>
 <li><strong>Maskless pipeline runs</strong>: <code>RadiomicsPipeline.run(...)</code> accepts <code>mask=None</code>, <code>mask=""</code>, or an omitted mask argument.
   In that case, Pictologics generates a full (all-ones) ROI mask internally (whole-image ROI).</li>
-<li><strong>Empty ROI is an error</strong>: If your preprocessing removes all voxels (e.g., a too-tight HU range), the pipeline raises
-  a clear error instead of silently returning empty outputs.</li>
+<li><strong>Complete feature sets guaranteed</strong>: Every configuration always returns a <code>pandas.Series</code> with the full set of
+  expected feature names.  If preprocessing removes all voxels (empty ROI), all features are <code>NaN</code>.  If individual
+  features cannot be computed (e.g., mesh generation failure, PCA with too few voxels), only those features are
+  <code>NaN</code> and successfully computed features retain their values.  Other configurations in the same run continue
+  normally.  This guarantees that <code>format_results()</code> and <code>save_results()</code> always produce a table with identical
+  columns across subjects — no missing columns, no ragged rows, no unexpected exceptions.  The processing log
+  records which configurations encountered errors.</li>
 <li><strong>Morphology on whole-image ROI</strong>: Shape features describe the shape of the ROI mask.
   With a maskless run, the ROI starts as the full image volume. The <code>resegment</code> step then restricts
   the ROI to voxels within a valid intensity range, removing sentinel-valued voxels. After resegmentation
@@ -2856,6 +2939,8 @@ demonstrated in <a href="#case-7-multi-configuration-batch-with-deduplication">C
 <li><code>subject_id</code></li>
 <li><code>file</code></li>
 <li>Feature columns prefixed by configuration name (e.g., <code>case1_fbn_8__mean_intensity_Q4LE</code>).</li>
+<li>Every row has the <strong>same set of columns</strong>, even if some images trigger empty ROIs or
+  partial feature failures.  Failed features appear as <code>NaN</code>.</li>
 </ul>
 <div class="admonition tip">
 <p class="admonition-title">Alternative: Explicit Sentinel Value</p>
@@ -4207,6 +4292,41 @@ for a detailed explanation of this technique.</p>
 <li>Rapid prototyping</li>
 </ul>
 </div>
+<h2 id="case-9-feature-catalog-data-dictionary">Case 9: Feature Catalog &amp; Data Dictionary</h2>
+<h3 id="scenario_8">Scenario</h3>
+<p>Before running extraction you want to know <strong>exactly</strong> which features and
+preprocessing steps each configuration produces.  You may also need to
+export a data dictionary for a study protocol or filter features by family.</p>
+<h3 id="full-example">Full example</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">describe_features</span><span class="p">()</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="c1"># 1. Export a CSV data dictionary</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="n">catalog</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="s2">&quot;feature_catalog.csv&quot;</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="c1"># 2. How many features per configuration?</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">catalog</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;config&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">())</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="c1"># 3. Only texture features from FBN configurations</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="n">texture_fbn</span> <span class="o">=</span> <span class="n">catalog</span><span class="p">[</span>
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>    <span class="p">(</span><span class="n">catalog</span><span class="p">[</span><span class="s2">&quot;family_group&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Texture&quot;</span><span class="p">)</span>
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a>    <span class="o">&amp;</span> <span class="p">(</span><span class="n">catalog</span><span class="p">[</span><span class="s2">&quot;discretisation_method&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;FBN&quot;</span><span class="p">)</span>
+<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a><span class="p">]</span>
+<a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a><span class="nb">print</span><span class="p">(</span><span class="n">texture_fbn</span><span class="p">[[</span><span class="s2">&quot;config&quot;</span><span class="p">,</span> <span class="s2">&quot;feature_name&quot;</span><span class="p">,</span> <span class="s2">&quot;ibsi_code&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
+<a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a>
+<a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a><span class="c1"># 4. Which families require discretisation?</span>
+<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a><span class="nb">print</span><span class="p">(</span>
+<a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a>    <span class="n">catalog</span><span class="p">[[</span><span class="s2">&quot;family&quot;</span><span class="p">,</span> <span class="s2">&quot;requires_discretisation&quot;</span><span class="p">]]</span>
+<a id="__codelineno-17-22" name="__codelineno-17-22" href="#__codelineno-17-22"></a>    <span class="o">.</span><span class="n">drop_duplicates</span><span class="p">()</span>
+<a id="__codelineno-17-23" name="__codelineno-17-23" href="#__codelineno-17-23"></a>    <span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;family&quot;</span><span class="p">)</span>
+<a id="__codelineno-17-24" name="__codelineno-17-24" href="#__codelineno-17-24"></a><span class="p">)</span>
+<a id="__codelineno-17-25" name="__codelineno-17-25" href="#__codelineno-17-25"></a>
+<a id="__codelineno-17-26" name="__codelineno-17-26" href="#__codelineno-17-26"></a><span class="c1"># 5. Filter-aware: show only features from filtered configs</span>
+<a id="__codelineno-17-27" name="__codelineno-17-27" href="#__codelineno-17-27"></a><span class="n">filtered</span> <span class="o">=</span> <span class="n">catalog</span><span class="p">[</span><span class="n">catalog</span><span class="p">[</span><span class="s2">&quot;is_filtered&quot;</span><span class="p">]]</span>
+<a id="__codelineno-17-28" name="__codelineno-17-28" href="#__codelineno-17-28"></a><span class="nb">print</span><span class="p">(</span><span class="n">filtered</span><span class="p">[[</span><span class="s2">&quot;config&quot;</span><span class="p">,</span> <span class="s2">&quot;filter_type&quot;</span><span class="p">,</span> <span class="s2">&quot;filter_params&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">())</span>
+</code></pre></div>
 
 
 
