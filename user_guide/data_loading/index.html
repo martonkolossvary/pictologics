@@ -1005,6 +1005,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#sub-voxel-alignment-and-overlap-safeguards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sub-Voxel Alignment and Overlap Safeguards
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#error-handling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2291,6 +2302,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#sub-voxel-alignment-and-overlap-safeguards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sub-Voxel Alignment and Overlap Safeguards
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#error-handling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2376,6 +2398,10 @@
 <p class="admonition-title">Note</p>
 <p>Pictologics uses <strong>(X, Y, Z)</strong> axis ordering to match ITK/SimpleITK conventions. This differs from raw DICOM (which uses Rows, Columns = Y, X) and matplotlib (which expects height, width = Y, X). All loaders handle these transformations automatically.</p>
 </div>
+<div class="admonition note">
+<p class="admonition-title">Physical Geometry</p>
+<p><code>Image.direction</code> stores unit direction cosines, while voxel sizes are stored separately in <code>Image.spacing</code>. NIfTI affine columns are normalized on load, and DICOM row/column orientation is converted to the same <code>(X, Y, Z)</code> convention.</p>
+</div>
 <h2 id="basic-loading-with-load_image">Basic Loading with <code>load_image()</code></h2>
 <p>The <code>load_image()</code> function is the primary entry point for loading data. It automatically detects the file format and handles the appropriate loading strategy.</p>
 <h3 id="loading-nifti-files">Loading NIfTI Files</h3>
@@ -2406,7 +2432,7 @@
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/image.dcm&quot;</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="dicom-intensity-rescaling">DICOM Intensity Rescaling</h3>
-<p>By default, <code>load_image()</code> applies <strong>RescaleSlope</strong> and <strong>RescaleIntercept</strong> transformations to DICOM data, converting stored pixel values to real-world values (e.g., Hounsfield Units for CT). This matches the behavior of NIfTI loading, which always applies its scaling factors.</p>
+<p>By default, <code>load_image()</code> applies <strong>RescaleSlope</strong> and <strong>RescaleIntercept</strong> transformations to DICOM data, converting stored pixel values to real-world values (e.g., Hounsfield Units for CT). For DICOM series this is applied <strong>per slice</strong>, so series with slice-specific rescale metadata are handled correctly. This matches the behavior of NIfTI loading, which always applies its scaling factors.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Default: values are converted (e.g., to Hounsfield Units)</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;ct_scan/&quot;</span><span class="p">)</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">ct</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span> <span class="n">ct</span><span class="o">.</span><span class="n">array</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>  <span class="c1"># e.g., -1024.0 to 3000.0</span>
@@ -2429,7 +2455,7 @@
 </tr>
 <tr>
 <td><strong>DICOM</strong></td>
-<td>Applies <code>RescaleSlope</code> and <code>RescaleIntercept</code> when <code>apply_rescale=True</code> (default)</td>
+<td>Applies each slice's <code>RescaleSlope</code> and <code>RescaleIntercept</code> when <code>apply_rescale=True</code> (default)</td>
 </tr>
 </tbody>
 </table>
@@ -2631,6 +2657,13 @@ restrict the ROI to a valid intensity range. In practice, you typically need <st
 <h3 id="auto-detection-in-load_image">Auto-Detection in load_image()</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># load_image() automatically detects DICOM SEG files</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">)</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># When loading a SEG as a pipeline mask path, RadiomicsPipeline.run()</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="c1"># passes the image as reference_image automatically.</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">RadiomicsPipeline</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;path/to/ct_series/&quot;</span><span class="p">,</span> <span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="detailed-control-with-load_seg">Detailed Control with load_seg()</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_seg</span>
@@ -2765,6 +2798,51 @@ restrict the ROI to a valid intensity range. In practice, you typically need <st
 <a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>    <span class="n">transpose_axes</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># Swap X and Y axes</span>
 <a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="p">)</span>
 </code></pre></div>
+<h3 id="sub-voxel-alignment-and-overlap-safeguards">Sub-Voxel Alignment and Overlap Safeguards</h3>
+<p>DICOM software from different vendors sometimes stores mask origins with small floating-point imprecision, resulting in fractional-voxel offsets relative to the reference image grid. Pictologics handles this gracefully with two configurable thresholds:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>subvoxel_warning_threshold</code></td>
+<td><code>0.01</code></td>
+<td>Drift above this (~1% of a voxel) emits a <code>UserWarning</code> but snaps to the nearest voxel and continues.</td>
+</tr>
+<tr>
+<td><code>subvoxel_tolerance</code></td>
+<td><code>0.5</code></td>
+<td>Drift above this raises a <code>ValueError</code>. At the default of 0.5 (the mathematical maximum for rounding), valid masks never error. Lower this to detect suspiciously imprecise coordinates.</td>
+</tr>
+<tr>
+<td><code>min_overlap_fraction</code></td>
+<td><code>0.5</code></td>
+<td>At least 50% of the mask's voxel volume must lie within the reference image space, otherwise a <code>ValueError</code> is raised. This prevents silently loading masks from the wrong patient. Set to <code>0.0</code> to disable.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1"># Dataset with known DICOM precision quirks — suppress sub-voxel warnings</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="c1"># by keeping the default tolerance (0.5) but raising the warning threshold:</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>    <span class="n">mask_paths</span><span class="p">,</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>    <span class="n">subvoxel_warning_threshold</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span>   <span class="c1"># only warn if drift &gt; 10% of a voxel</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="p">)</span>
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="c1"># Stricter project — flag any drift above 5% of a voxel as an error:</span>
+<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a>    <span class="n">mask_paths</span><span class="p">,</span>
+<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
+<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a>    <span class="n">subvoxel_tolerance</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>
+<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a><span class="p">)</span>
+</code></pre></div>
 <h3 id="error-handling">Error Handling</h3>
 <table>
 <thead>
@@ -2780,11 +2858,23 @@ restrict the ROI to a valid intensity range. In practice, you typically need <st
 </tr>
 <tr>
 <td>Orientation mismatch</td>
-<td>Warning emitted, positioning continues</td>
+<td><code>ValueError</code> raised; reorientation or nearest-neighbor resampling is required</td>
 </tr>
 <tr>
-<td>Mask outside reference bounds</td>
-<td>Warning emitted, empty volume returned</td>
+<td>Sub-voxel drift &gt; <code>subvoxel_warning_threshold</code></td>
+<td><code>UserWarning</code> emitted, nearest-voxel snapping applied</td>
+</tr>
+<tr>
+<td>Sub-voxel drift &gt; <code>subvoxel_tolerance</code></td>
+<td><code>ValueError</code> raised</td>
+</tr>
+<tr>
+<td>Overlap fraction &lt; <code>min_overlap_fraction</code></td>
+<td><code>ValueError</code> raised to prevent wrong-patient mask loading</td>
+</tr>
+<tr>
+<td>Mask outside reference bounds (<code>min_overlap_fraction=0.0</code>)</td>
+<td><code>UserWarning</code> emitted, empty volume returned</td>
 </tr>
 <tr>
 <td>Partial overlap</td>
@@ -2798,13 +2888,13 @@ restrict the ROI to a valid intensity range. In practice, you typically need <st
 </div>
 <h2 id="creating-a-full-mask">Creating a Full Mask</h2>
 <p>When you don't have a segmentation mask and want to analyze the entire image:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_full_mask</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="c1"># Create a mask of all ones matching the image geometry</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;scan.nii.gz&quot;</span><span class="p">)</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="n">full_mask</span> <span class="o">=</span> <span class="n">create_full_mask</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="c1"># Now use full_mask for whole-image analysis</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_full_mask</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="c1"># Create a mask of all ones matching the image geometry</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;scan.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="n">full_mask</span> <span class="o">=</span> <span class="n">create_full_mask</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="c1"># Now use full_mask for whole-image analysis</span>
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>

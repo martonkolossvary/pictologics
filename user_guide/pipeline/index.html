@@ -2527,6 +2527,10 @@
 <li>Pass a mask path or <code>Image</code> object → used as the ROI (standard workflow).</li>
 <li>Omit <code>mask</code> (or pass <code>mask=None</code> / <code>mask=""</code>) → Pictologics generates a full (all-ones) ROI mask, treating the <strong>entire image</strong> as the initial ROI.</li>
 </ul>
+<p>When you pass a <strong>mask path</strong>, the mask is loaded with the already-loaded image as
+<code>reference_image</code>, so DICOM SEG objects and cropped masks can be aligned to image
+geometry before extraction. When you pass an in-memory <code>Image</code> mask, Pictologics
+validates that shape, spacing, origin, and direction already match the image.</p>
 <div class="admonition info">
 <p class="admonition-title">Complete Feature Sets Guaranteed</p>
 <p>Every configuration always returns a <code>pandas.Series</code> with the <strong>full set of expected
@@ -2558,7 +2562,7 @@ scientifically meaningful for all studies.</p>
 <h2 id="predefined-configurations">Predefined Configurations</h2>
 <p>Pictologics includes <strong>6 standard configurations</strong> designed for common radiomics workflows. All share:</p>
 <ul>
-<li><strong>Resampling</strong>: 0.5mm × 0.5mm × 0.5mm isotropic spacing</li>
+<li><strong>Resampling</strong>: 0.5mm × 0.5mm × 0.5mm isotropic spacing with linear image interpolation</li>
 <li><strong>Feature Families</strong>: intensity, morphology, texture, histogram, and IVH</li>
 <li><strong>Performance</strong>: Spatial/local intensity disabled by default</li>
 </ul>
@@ -3010,6 +3014,14 @@ Otherwise, <code>resegment</code> will include the entire background in the ROI,
 <td style="text-align: left;">GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM</td>
 </tr>
 <tr>
+<td style="text-align: left;"><code>"glcm"</code>, <code>"glrlm"</code>, <code>"glszm"</code>, <code>"gldzm"</code>, <code>"ngtdm"</code>, <code>"ngldm"</code></td>
+<td style="text-align: left;">Individual texture subfamilies</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>"texture_glcm"</code>, <code>"texture_glrlm"</code>, etc.</td>
+<td style="text-align: left;">Explicit texture-subfamily aliases</td>
+</tr>
+<tr>
 <td style="text-align: left;"><code>"histogram"</code></td>
 <td style="text-align: left;">Intensity histogram features</td>
 </tr>
@@ -3166,7 +3178,8 @@ failed or produced partial results:</p>
 </code></pre></div>
 </div>
 <h2 id="feature-catalog">Feature Catalog</h2>
-<p>The <a class="autorefs autorefs-internal" title="describe_features()" href="../../api/pipeline/#pictologics.pipeline.RadiomicsPipeline.describe_features"><code>describe_features()</code></a> method returns a DataFrame cataloguing every feature the pipeline will produce <strong>before</strong> you run it.  Each row is one <em>(configuration, feature)</em> pair with columns describing the feature identity, family membership, and preprocessing parameters.</p>
+<p>The <a class="autorefs autorefs-internal" title="describe_features()" href="../../api/pipeline/#pictologics.pipeline.RadiomicsPipeline.describe_features"><code>describe_features()</code></a> method returns a DataFrame cataloguing every feature the pipeline will produce <strong>before</strong> you run it.  Each row is one <em>(configuration, feature)</em> pair with columns describing the feature identity, family membership, and the preprocessing state at the <code>extract_features</code> step that produces that feature.</p>
+<p>The catalog follows the same ordered step model as configuration files. If a configuration repeats a preprocessing step, the corresponding <code>*_params</code> cell contains a compact JSON array with one entry per occurrence, including the original 1-based <code>step_index</code>. This keeps CSV exports readable while preserving a machine-readable audit trail.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">RadiomicsPipeline</span><span class="p">()</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">describe_features</span><span class="p">()</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">catalog</span><span class="o">.</span><span class="n">head</span><span class="p">()</span>
@@ -3208,6 +3221,22 @@ failed or produced partial results:</p>
 <td>Whether the family needs discretised input</td>
 </tr>
 <tr>
+<td><code>source_mode</code> / <code>sentinel_value</code></td>
+<td>Source-mask configuration metadata</td>
+</tr>
+<tr>
+<td><code>feature_extraction_step_index</code> / <code>feature_extraction_params</code></td>
+<td>Which <code>extract_features</code> step produced the row and its parameters</td>
+</tr>
+<tr>
+<td><code>preprocessing_sequence</code></td>
+<td>Ordered preprocessing steps before extraction, e.g. <code>1:resample &gt; 2:resegment &gt; 3:discretise</code></td>
+</tr>
+<tr>
+<td><code>preprocessing_steps</code></td>
+<td>Full ordered preprocessing step records as compact JSON</td>
+</tr>
+<tr>
 <td><code>is_discretised</code> / <code>discretisation_method</code> / <code>discretisation_param</code></td>
 <td>Discretisation details</td>
 </tr>
@@ -3216,11 +3245,32 @@ failed or produced partial results:</p>
 <td>Resampling details</td>
 </tr>
 <tr>
+<td><code>is_resegmented</code> / <code>resegment_params</code></td>
+<td>Resegmentation details</td>
+</tr>
+<tr>
+<td><code>is_outlier_filtered</code> / <code>filter_outliers_params</code></td>
+<td>Outlier filtering details</td>
+</tr>
+<tr>
+<td><code>is_intensity_rounded</code> / <code>round_intensities_params</code></td>
+<td>Intensity rounding details</td>
+</tr>
+<tr>
+<td><code>keeps_largest_component</code> / <code>keep_largest_component_params</code></td>
+<td>Largest-component mask processing details</td>
+</tr>
+<tr>
+<td><code>is_mask_binarized</code> / <code>binarize_mask_params</code></td>
+<td>Mask binarization details</td>
+</tr>
+<tr>
 <td><code>is_filtered</code> / <code>filter_type</code> / <code>filter_params</code></td>
 <td>Response-map filter details</td>
 </tr>
 </tbody>
 </table>
+<p>The step-parameter columns (<code>resample_params</code>, <code>resegment_params</code>, <code>discretise_params</code>, <code>filter_params</code>, etc.) contain only parameters explicitly present in the configuration. Effective summary columns such as <code>interpolation</code> and <code>discretisation_method</code> include runtime defaults when a step omits them.</p>
 <h3 id="typical-use-cases">Typical Use Cases</h3>
 <p><strong>Export a data dictionary</strong> alongside study results:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">catalog</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="s2">&quot;feature_catalog.csv&quot;</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
@@ -3270,6 +3320,7 @@ failed or produced partial results:</p>
 <ul>
 <li><strong>Morphology</strong> and <strong>intensity</strong> are computed <strong>once</strong> and reused</li>
 <li><strong>Texture</strong> and <strong>histogram</strong> are computed per configuration</li>
+<li>Cache reuse is scoped by feature family as well as preprocessing signature; texture, histogram, and IVH do not reuse each other's cached values.</li>
 </ul>
 <h3 id="checking-statistics">Checking Statistics</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">stats</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">deduplication_stats</span>
