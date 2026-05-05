@@ -6,6 +6,7 @@ import warnings
 # Suppress "NumPy module was reloaded" warning
 warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
+import json
 import os
 
 os.environ["NUMBA_DISABLE_JIT"] = "1"
@@ -98,6 +99,11 @@ def test_run_loading_variations(
     pipeline.add_config("t1", [])
     pipeline.run("img.nii", "mask.nii", config_names=["t1"])
     assert mock_load.call_count == 2
+    image_call, mask_call = mock_load.call_args_list
+    assert image_call.args == ("img.nii",)
+    assert image_call.kwargs == {}
+    assert mask_call.args == ("mask.nii",)
+    assert mask_call.kwargs["reference_image"] is mock_image
 
     # 2. Image obj, Mask obj
     mock_load.reset_mock()
@@ -114,6 +120,49 @@ def test_run_loading_variations(
     mock_load.reset_mock()
     pipeline.run(mock_image, mask="", config_names=["t1"])
     assert pipeline._log[-1]["mask_source"] == "GeneratedFullMask"
+
+
+def test_run_rejects_mask_origin_mismatch(
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    pipeline.add_config("t1", [])
+    shifted_mask = Image(
+        array=mock_mask.array.copy(),
+        spacing=mock_mask.spacing,
+        origin=(100.0, 0.0, 0.0),
+        direction=mock_mask.direction,
+        modality=mock_mask.modality,
+    )
+
+    with pytest.raises(ValueError, match="Origin mismatch"):
+        pipeline.run(mock_image, shifted_mask, config_names=["t1"])
+
+
+def test_run_rejects_mask_direction_mismatch(
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    pipeline.add_config("t1", [])
+    rotated = np.array(
+        [
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    rotated_mask = Image(
+        array=mock_mask.array.copy(),
+        spacing=mock_mask.spacing,
+        origin=mock_mask.origin,
+        direction=rotated,
+        modality=mock_mask.modality,
+    )
+
+    with pytest.raises(ValueError, match="Direction mismatch"):
+        pipeline.run(mock_image, rotated_mask, config_names=["t1"])
 
 
 def test_run_config_selection(
@@ -296,8 +345,9 @@ def test_step_binarize_mask(
 ) -> None:
     """Test binarize_mask preprocessing step with various parameter modes."""
     # Create a mask with varying values
+    varied_array = np.tile(np.arange(10, dtype=np.uint8), (10, 10, 1))
     varied_mask = Image(
-        array=np.array([[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]]] * 10).swapaxes(0, 2),
+        array=varied_array,
         spacing=(1.0, 1.0, 1.0),
         origin=(0.0, 0.0, 0.0),
         direction=np.eye(3),
@@ -686,6 +736,70 @@ def test_extract_texture_success(
         mock_glcm.assert_called()
 
 
+def test_texture_family_aliases_match_single_and_dedup_paths() -> None:
+    """Raw texture subfamilies and texture_* aliases compute the same features."""
+    from pictologics.features import FEATURE_NAMES
+
+    image = Image(
+        array=np.arange(125, dtype=float).reshape((5, 5, 5)),
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="CT",
+    )
+    mask = Image(
+        array=np.ones((5, 5, 5), dtype=np.uint8),
+        spacing=image.spacing,
+        origin=image.origin,
+        direction=image.direction,
+        modality="mask",
+    )
+    config = [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["glcm"]}},
+    ]
+    alias_config = [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["texture_glcm"]}},
+    ]
+
+    for family, steps in {"glcm": config, "texture_glcm": alias_config}.items():
+        pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+        pipeline.add_config(family, steps)
+        series = pipeline.run(image, mask, config_names=[family])[family]
+
+        assert list(series.index) == list(FEATURE_NAMES["glcm"])
+        assert not series.isna().any()
+        assert series[FEATURE_NAMES["glcm"][0]] > 0
+
+        described = pipeline.describe_features()
+        assert described["feature_key"].tolist() == list(FEATURE_NAMES["glcm"])
+
+    dedup_pipeline = RadiomicsPipeline(load_standard=False, deduplicate=True)
+    dedup_pipeline.add_config("raw_glcm", config)
+    dedup_pipeline.add_config("alias_glcm", alias_config)
+    dedup = dedup_pipeline.run(image, mask, config_names=["raw_glcm", "alias_glcm"])
+
+    no_dedup_pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    no_dedup_pipeline.add_config("raw_glcm", config)
+    no_dedup_pipeline.add_config("alias_glcm", alias_config)
+    no_dedup = no_dedup_pipeline.run(
+        image, mask, config_names=["raw_glcm", "alias_glcm"]
+    )
+
+    for config_name in ["raw_glcm", "alias_glcm"]:
+        expected = no_dedup[config_name].reindex(FEATURE_NAMES["glcm"])
+        observed = dedup[config_name].reindex(FEATURE_NAMES["glcm"])
+        assert not observed.isna().any()
+        np.testing.assert_allclose(observed.to_numpy(float), expected.to_numpy(float))
+
+    assert dedup_pipeline.deduplication_stats == {
+        "computed_families": 1,
+        "reused_families": 1,
+        "cache_hit_rate": 0.5,
+    }
+
+
 def test_save_log(pipeline: RadiomicsPipeline, tmp_path: Any) -> None:
     pipeline._log.append({"test": "entry"})
     p = tmp_path / "log.json"
@@ -759,17 +873,8 @@ def test_empty_roi_continues_other_configs(
     pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image,
 ) -> None:
     """When one config fails with empty ROI, other configs still execute."""
-    empty_mask = Image(
-        array=np.zeros_like(mock_image.array, dtype=np.uint8),
-        spacing=mock_image.spacing,
-        origin=mock_image.origin,
-        direction=mock_image.direction,
-    )
     # Config that will work (empty steps = no preprocessing = no ROI check issues
     # ... unless the mask starts empty)
-    # Use mock_mask for a working config, then empty_mask triggers failure
-    # We need two separate run() calls since mask is shared.
-    # Instead, test with resegment causing empty ROI for one config.
     pipeline.add_config("ok_config", [])
     pipeline.add_config(
         "fail_config",
@@ -2591,12 +2696,30 @@ _DESCRIBE_COLUMNS = [
     "family",
     "family_group",
     "requires_discretisation",
+    "source_mode",
+    "sentinel_value",
+    "feature_extraction_step_index",
+    "feature_extraction_params",
+    "preprocessing_sequence",
+    "preprocessing_steps",
     "is_discretised",
     "discretisation_method",
     "discretisation_param",
+    "discretise_params",
     "is_resampled",
     "resampling_spacing",
     "interpolation",
+    "resample_params",
+    "is_resegmented",
+    "resegment_params",
+    "is_outlier_filtered",
+    "filter_outliers_params",
+    "is_intensity_rounded",
+    "round_intensities_params",
+    "keeps_largest_component",
+    "keep_largest_component_params",
+    "is_mask_binarized",
+    "binarize_mask_params",
     "is_filtered",
     "filter_type",
     "filter_params",
@@ -2660,6 +2783,173 @@ def test_describe_features_custom_config_with_filter() -> None:
     # All texture features require discretisation
     assert df["requires_discretisation"].all()
     assert set(df["family_group"].unique()) == {"Texture"}
+
+
+def test_describe_features_records_all_preprocessing_steps() -> None:
+    """Catalog rows include ordered, repeated preprocessing metadata."""
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "all_preproc",
+        [
+            {
+                "step": "resample",
+                "params": {
+                    "new_spacing": (1.0, 1.0, 1.0),
+                    "interpolation": "linear",
+                },
+            },
+            {"step": "resegment", "params": {"range_min": -100.0}},
+            {"step": "filter_outliers", "params": {"sigma": 2.0}},
+            {"step": "round_intensities", "params": {}},
+            {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
+            {
+                "step": "binarize_mask",
+                "params": {"mask_values": [1, 2], "apply_to": "intensity"},
+            },
+            {"step": "filter", "params": {"type": "mean", "support": 3}},
+            {
+                "step": "resample",
+                "params": {
+                    "new_spacing": (0.5, 0.5, 0.5),
+                    "mask_interpolation": "linear",
+                    "mask_threshold": 0.25,
+                },
+            },
+            {"step": "resegment", "params": {"range_max": 300.0}},
+            {
+                "step": "discretise",
+                "params": {"method": "FBN", "n_bins": 8, "min_val": -100.0},
+            },
+            {"step": "extract_features", "params": {"families": ["histogram"]}},
+        ],
+        source_mode="auto",
+        sentinel_value=-2048.0,
+    )
+
+    row = pipeline.describe_features().iloc[0]
+
+    assert row["source_mode"] == "auto"
+    assert row["sentinel_value"] == -2048.0
+    assert row["feature_extraction_step_index"] == 11
+    assert json.loads(row["feature_extraction_params"]) == {"families": ["histogram"]}
+    assert row["preprocessing_sequence"] == (
+        "1:resample > 2:resegment > 3:filter_outliers > "
+        "4:round_intensities > 5:keep_largest_component > 6:binarize_mask > "
+        "7:filter > 8:resample > 9:resegment > 10:discretise"
+    )
+
+    preprocessing_steps = json.loads(row["preprocessing_steps"])
+    assert [record["step"] for record in preprocessing_steps] == [
+        "resample",
+        "resegment",
+        "filter_outliers",
+        "round_intensities",
+        "keep_largest_component",
+        "binarize_mask",
+        "filter",
+        "resample",
+        "resegment",
+        "discretise",
+    ]
+
+    assert row["is_resampled"]
+    assert json.loads(row["resampling_spacing"]) == [
+        [1.0, 1.0, 1.0],
+        [0.5, 0.5, 0.5],
+    ]
+    assert json.loads(row["interpolation"]) == ["linear", "linear"]
+    assert len(json.loads(row["resample_params"])) == 2
+
+    assert row["is_resegmented"]
+    assert len(json.loads(row["resegment_params"])) == 2
+    assert row["is_outlier_filtered"]
+    assert json.loads(row["filter_outliers_params"]) == [
+        {"params": {"sigma": 2.0}, "step_index": 3}
+    ]
+    assert row["is_intensity_rounded"]
+    assert json.loads(row["round_intensities_params"]) == [
+        {"params": {}, "step_index": 4}
+    ]
+    assert row["keeps_largest_component"]
+    assert row["is_mask_binarized"]
+
+    assert row["is_filtered"]
+    assert row["filter_type"] == "mean"
+    assert json.loads(row["filter_params"]) == [
+        {"params": {"support": 3, "type": "mean"}, "step_index": 7}
+    ]
+
+    assert row["is_discretised"]
+    assert row["discretisation_method"] == "FBN"
+    assert row["discretisation_param"] == 8
+    assert json.loads(row["discretise_params"]) == [
+        {
+            "params": {"method": "FBN", "min_val": -100.0, "n_bins": 8},
+            "step_index": 10,
+        }
+    ]
+
+
+def test_describe_features_uses_preprocessing_at_extraction_point() -> None:
+    """Later preprocessing steps are not attached to earlier feature rows."""
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "two_extracts",
+        [
+            {
+                "step": "extract_features",
+                "params": {"families": ["intensity"]},
+            },
+            {"step": "resegment", "params": {"range_min": 0.0}},
+            {"step": "extract_features", "params": {"families": ["morphology"]}},
+        ],
+    )
+
+    catalog = pipeline.describe_features()
+    intensity = catalog[catalog["family"] == "intensity"].iloc[0]
+    morphology = catalog[catalog["family"] == "morphology"].iloc[0]
+
+    assert intensity["feature_extraction_step_index"] == 1
+    assert intensity["preprocessing_sequence"] is None
+    assert not intensity["is_resegmented"]
+    assert morphology["feature_extraction_step_index"] == 3
+    assert morphology["preprocessing_sequence"] == "2:resegment"
+    assert morphology["is_resegmented"]
+
+
+def test_describe_features_catalog_serialization_helpers() -> None:
+    """Structured catalog helpers should serialize uncommon supported values."""
+    encoded = RadiomicsPipeline._catalog_json(
+        {
+            "array": np.array([1, 2]),
+            "int": np.int64(3),
+            "float": np.float64(4.5),
+            "bool": np.bool_(True),
+        }
+    )
+    assert json.loads(encoded) == {
+        "array": [1, 2],
+        "bool": True,
+        "float": 4.5,
+        "int": 3,
+    }
+    assert json.loads(RadiomicsPipeline._catalog_value([{"a": 1}])) == {"a": 1}
+
+    metadata = RadiomicsPipeline._extract_config_metadata(
+        [
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+            {
+                "step": "discretise",
+                "params": {"method": "FIXED_CUTOFFS", "cutoffs": [0, 10, 20]},
+            },
+            {"step": "discretise", "params": {"method": "CUSTOM"}},
+        ]
+    )
+    assert json.loads(metadata["discretisation_method"]) == [
+        "FIXED_CUTOFFS",
+        "CUSTOM",
+    ]
+    assert json.loads(metadata["discretisation_param"]) == [[0, 10, 20], None]
 
 
 def test_describe_features_ibsi_code_parsing() -> None:

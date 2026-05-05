@@ -20,6 +20,9 @@ from pictologics import Image
 !!! note
     Pictologics uses **(X, Y, Z)** axis ordering to match ITK/SimpleITK conventions. This differs from raw DICOM (which uses Rows, Columns = Y, X) and matplotlib (which expects height, width = Y, X). All loaders handle these transformations automatically.
 
+!!! note "Physical Geometry"
+    `Image.direction` stores unit direction cosines, while voxel sizes are stored separately in `Image.spacing`. NIfTI affine columns are normalized on load, and DICOM row/column orientation is converted to the same `(X, Y, Z)` convention.
+
 ## Basic Loading with `load_image()`
 
 The `load_image()` function is the primary entry point for loading data. It automatically detects the file format and handles the appropriate loading strategy.
@@ -64,7 +67,7 @@ image = load_image("path/to/image.dcm")
 
 ### DICOM Intensity Rescaling
 
-By default, `load_image()` applies **RescaleSlope** and **RescaleIntercept** transformations to DICOM data, converting stored pixel values to real-world values (e.g., Hounsfield Units for CT). This matches the behavior of NIfTI loading, which always applies its scaling factors.
+By default, `load_image()` applies **RescaleSlope** and **RescaleIntercept** transformations to DICOM data, converting stored pixel values to real-world values (e.g., Hounsfield Units for CT). For DICOM series this is applied **per slice**, so series with slice-specific rescale metadata are handled correctly. This matches the behavior of NIfTI loading, which always applies its scaling factors.
 
 ```python
 # Default: values are converted (e.g., to Hounsfield Units)
@@ -79,7 +82,7 @@ print(ct_raw.array.min(), ct_raw.array.max())  # e.g., 0 to 4095
 | Format | Rescaling Behavior |
 |--------|-------------------|
 | **NIfTI** | Always applies `scl_slope` and `scl_inter` from header |
-| **DICOM** | Applies `RescaleSlope` and `RescaleIntercept` when `apply_rescale=True` (default) |
+| **DICOM** | Applies each slice's `RescaleSlope` and `RescaleIntercept` when `apply_rescale=True` (default) |
 
 ### Handling Sentinel (NA) Values
 
@@ -274,6 +277,13 @@ DICOM SEG files are specialized objects containing segmentation masks. Use `load
 ```python
 # load_image() automatically detects DICOM SEG files
 mask = load_image("path/to/segmentation.dcm")
+
+# When loading a SEG as a pipeline mask path, RadiomicsPipeline.run()
+# passes the image as reference_image automatically.
+from pictologics import RadiomicsPipeline
+
+pipeline = RadiomicsPipeline()
+results = pipeline.run("path/to/ct_series/", "path/to/segmentation.dcm")
 ```
 
 ### Detailed Control with load_seg()
@@ -451,13 +461,45 @@ combined = load_and_merge_images(
 )
 ```
 
+### Sub-Voxel Alignment and Overlap Safeguards
+
+DICOM software from different vendors sometimes stores mask origins with small floating-point imprecision, resulting in fractional-voxel offsets relative to the reference image grid. Pictologics handles this gracefully with two configurable thresholds:
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `subvoxel_warning_threshold` | `0.01` | Drift above this (~1% of a voxel) emits a `UserWarning` but snaps to the nearest voxel and continues. |
+| `subvoxel_tolerance` | `0.5` | Drift above this raises a `ValueError`. At the default of 0.5 (the mathematical maximum for rounding), valid masks never error. Lower this to detect suspiciously imprecise coordinates. |
+| `min_overlap_fraction` | `0.5` | At least 50% of the mask's voxel volume must lie within the reference image space, otherwise a `ValueError` is raised. This prevents silently loading masks from the wrong patient. Set to `0.0` to disable. |
+
+```python
+# Dataset with known DICOM precision quirks — suppress sub-voxel warnings
+# by keeping the default tolerance (0.5) but raising the warning threshold:
+combined = load_and_merge_images(
+    mask_paths,
+    reference_image=ct,
+    reposition_to_reference=True,
+    subvoxel_warning_threshold=0.1,   # only warn if drift > 10% of a voxel
+)
+
+# Stricter project — flag any drift above 5% of a voxel as an error:
+combined = load_and_merge_images(
+    mask_paths,
+    reference_image=ct,
+    reposition_to_reference=True,
+    subvoxel_tolerance=0.05,
+)
+```
+
 ### Error Handling
 
 | Issue | Behavior |
 |-------|----------|
 | Spacing mismatch | `ValueError` raised (resampling not yet supported) |
-| Orientation mismatch | Warning emitted, positioning continues |
-| Mask outside reference bounds | Warning emitted, empty volume returned |
+| Orientation mismatch | `ValueError` raised; reorientation or nearest-neighbor resampling is required |
+| Sub-voxel drift > `subvoxel_warning_threshold` | `UserWarning` emitted, nearest-voxel snapping applied |
+| Sub-voxel drift > `subvoxel_tolerance` | `ValueError` raised |
+| Overlap fraction < `min_overlap_fraction` | `ValueError` raised to prevent wrong-patient mask loading |
+| Mask outside reference bounds (`min_overlap_fraction=0.0`) | `UserWarning` emitted, empty volume returned |
 | Partial overlap | Valid region is positioned, rest is clipped |
 
 !!! tip

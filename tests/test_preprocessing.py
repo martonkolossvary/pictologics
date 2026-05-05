@@ -75,6 +75,31 @@ def test_resample_image_linear(mock_image: Image) -> None:
     assert np.allclose(resampled.origin, mock_image.origin)
 
 
+def test_resample_image_origin_shift_uses_direction() -> None:
+    direction = np.array(
+        [
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    image = Image(
+        array=np.arange(9, dtype=float).reshape((3, 3, 1)),
+        spacing=(2.0, 2.0, 1.0),
+        origin=(10.0, 20.0, 30.0),
+        direction=direction,
+        modality="CT",
+    )
+
+    resampled = resample_image(image, (1.0, 1.0, 1.0), interpolation="nearest")
+
+    origin_shift = np.array([-0.5, -0.5, 0.0])
+    expected_origin = np.array(image.origin) + direction @ origin_shift
+    assert resampled.array.shape == (6, 6, 1)
+    assert np.allclose(resampled.origin, expected_origin)
+    assert not np.allclose(resampled.origin, np.array(image.origin) + origin_shift)
+
+
 def test_resample_image_nearest(mock_image: Image) -> None:
     new_spacing = (0.5, 0.5, 0.5)
     resampled = resample_image(mock_image, new_spacing, interpolation="nearest")
@@ -114,6 +139,36 @@ def test_resample_round_intensities(mock_image: Image) -> None:
         mock_image, new_spacing, interpolation="linear", round_intensities=True
     )
     assert np.all(resampled.array == np.round(resampled.array))
+
+
+def test_resample_image_source_mask_geometry_mismatch_raises(
+    mock_image: Image,
+) -> None:
+    shifted_source_mask = Image(
+        array=np.ones(mock_image.array.shape, dtype=np.uint8),
+        spacing=mock_image.spacing,
+        origin=(10.0, 0.0, 0.0),
+        direction=mock_image.direction,
+        modality="SOURCE_MASK",
+    )
+
+    with pytest.raises(ValueError, match="Origin mismatch"):
+        resample_image(
+            mock_image,
+            (1.0, 1.0, 1.0),
+            source_mask=shifted_source_mask,
+        )
+
+
+def test_resample_image_source_mask_array_shape_mismatch_raises(
+    mock_image: Image,
+) -> None:
+    with pytest.raises(ValueError, match="Source mask shape"):
+        resample_image(
+            mock_image,
+            (1.0, 1.0, 1.0),
+            source_mask=np.ones((2, 2, 2), dtype=bool),
+        )
 
 
 # --- Discretisation Tests ---
@@ -209,6 +264,15 @@ def test_discretise_errors(mock_image: Image) -> None:
     with pytest.raises(ValueError, match="Shape mismatch"):
         discretise_image(mock_image, method="FBN", n_bins=5, roi_mask=bad_mask)
 
+    shifted_mask = Image(
+        array=np.ones(mock_image.array.shape, dtype=np.uint8),
+        spacing=mock_image.spacing,
+        origin=(5.0, 0.0, 0.0),
+        direction=mock_image.direction,
+    )
+    with pytest.raises(ValueError, match="Origin mismatch"):
+        discretise_image(mock_image, method="FBN", n_bins=5, roi_mask=shifted_mask)
+
 
 def test_discretise_empty_roi(mock_image: Image) -> None:
     empty_mask = np.zeros(mock_image.array.shape)
@@ -243,6 +307,15 @@ def test_apply_mask_errors(mock_image: Image) -> None:
     with pytest.raises(ValueError):
         apply_mask(mock_image, np.zeros((2, 2, 2)))
 
+    shifted_mask = Image(
+        array=np.ones(mock_image.array.shape, dtype=np.uint8),
+        spacing=mock_image.spacing,
+        origin=(5.0, 0.0, 0.0),
+        direction=mock_image.direction,
+    )
+    with pytest.raises(ValueError, match="Origin mismatch"):
+        apply_mask(mock_image, shifted_mask)
+
     # Empty result
     empty_mask = np.zeros(mock_image.array.shape)
     values_empty = apply_mask(mock_image, empty_mask)
@@ -262,6 +335,15 @@ def test_extract_roi(mock_image: Image, mock_mask: Image) -> None:
     # Error
     with pytest.raises(ValueError):
         extract_roi(mock_image, Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0)))
+
+    shifted_mask = Image(
+        np.ones(mock_image.array.shape, dtype=np.uint8),
+        mock_image.spacing,
+        (5.0, 0.0, 0.0),
+        mock_image.direction,
+    )
+    with pytest.raises(ValueError, match="Origin mismatch"):
+        extract_roi(mock_image, shifted_mask)
 
 
 def test_extract_roi_none_values(mock_image: Image, mock_mask: Image) -> None:
@@ -295,6 +377,15 @@ def test_resegment_mask_logic(mock_image: Image, mock_mask: Image) -> None:
 
     with pytest.raises(ValueError):
         resegment_mask(mock_image, Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0)))
+
+    shifted_mask = Image(
+        np.ones(mock_image.array.shape, dtype=np.uint8),
+        mock_image.spacing,
+        (5.0, 0.0, 0.0),
+        mock_image.direction,
+    )
+    with pytest.raises(ValueError, match="Origin mismatch"):
+        resegment_mask(mock_image, shifted_mask)
 
 
 # --- filter_outliers Tests ---

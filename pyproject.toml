@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pictologics"
-version = "0.4.0"
+version = "0.4.1"
 description = "IBSI-compliant radiomic feature extraction package"
 authors = ["Márton Kolossváry <marton.kolossvary@gmail.com>"]
 readme = "README.md"
@@ -28,7 +28,7 @@ exclude = ["tests", "docs", "scripts", "site", "coverage.xml", "junit.xml"]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.15"
-numpy = ">=2.0,<2.3"
+numpy = ">=2.0"
 scipy = "^1.16.3"
 nibabel = ">=3.2.0"
 pydicom = ">=2.2.0"
@@ -80,7 +80,13 @@ python_version = "3.12"
 strict = true
 ignore_missing_imports = true
 warn_unused_ignores = false
-exclude = ["tests", "dev"]
+files = ["pictologics"]
+exclude = "^(tests|dev|docs|site|htmlcov|brain|\\.agent)/"
+exclude_gitignore = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*", "dev.*"]
+ignore_errors = true
 
 [tool.ruff]
 line-length = 100

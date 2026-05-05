@@ -22,7 +22,7 @@ import numpy as np
 from numpy import typing as npt
 from scipy.ndimage import affine_transform, label
 
-from .loader import Image
+from .loader import Image, _direction_matrix, _validate_geometry
 
 # Common sentinel values used in medical imaging to denote "no data" or "background"
 COMMON_SENTINEL_VALUES: tuple[float, ...] = (-2048.0, -1024.0, -1000.0, 0.0, -32768.0)
@@ -70,6 +70,8 @@ def detect_sentinel_value(
     """
     array = image.array
     total_voxels = array.size
+    if roi_mask is not None:
+        _validate_geometry(roi_mask, image, "ROI mask", "image")
 
     for candidate in candidate_values:
         count = np.sum(array == candidate)
@@ -293,11 +295,18 @@ def resample_image(
 
     if source_mask is not None:
         if isinstance(source_mask, Image):
+            _validate_geometry(source_mask, image, "source mask", "image")
             effective_source = source_mask.array > 0
         else:
             effective_source = source_mask.astype(bool)
     elif image.has_source_mask:
         effective_source = image.source_mask
+
+    if effective_source is not None and effective_source.shape != image.array.shape:
+        raise ValueError(
+            f"Source mask shape {effective_source.shape} must match image shape "
+            f"{image.array.shape}"
+        )
 
     # Map interpolation string to spline order
     interpolation_map = {
@@ -378,7 +387,9 @@ def resample_image(
     extent_orig = (np.array(image.array.shape) - 1) * original_spacing
     extent_new = (new_shape - 1) * target_spacing
     origin_shift = 0.5 * (extent_orig - extent_new)
-    new_origin = tuple(np.array(image.origin) + origin_shift)
+    new_origin = tuple(
+        np.array(image.origin) + _direction_matrix(image.direction) @ origin_shift
+    )
 
     return Image(
         array=resampled_array,
@@ -447,6 +458,8 @@ def discretise_image(
     # Determine ROI values for default min/max
     if roi_mask is not None:
         if isinstance(roi_mask, Image):
+            if isinstance(image, Image):
+                _validate_geometry(roi_mask, image, "ROI mask", "image")
             mask_arr = roi_mask.array
         else:
             mask_arr = roi_mask
@@ -571,6 +584,9 @@ def apply_mask(
     img_arr = image.array if isinstance(image, Image) else image
     mask_arr = mask.array if isinstance(mask, Image) else mask
 
+    if isinstance(image, Image) and isinstance(mask, Image):
+        _validate_geometry(mask, image, "mask", "image")
+
     # Ensure shapes match
     if img_arr.shape != mask_arr.shape:
         raise ValueError(
@@ -610,8 +626,12 @@ def extract_roi(
     Returns:
         New Image object with non-ROI voxels set to NaN.
     """
-    if image.array.shape != mask.array.shape:
-        raise ValueError("Image and mask must have the same shape.")
+    try:
+        _validate_geometry(mask, image, "mask", "image")
+    except ValueError as exc:
+        if "Dimension mismatch" in str(exc):
+            raise ValueError("Image and mask must have the same shape.") from exc
+        raise
 
     # Handle mask values
     if mask_values is None:
@@ -667,8 +687,14 @@ def resegment_mask(
         )
         ```
     """
-    if image.array.shape != mask.array.shape:
-        raise ValueError("Image and mask must have the same shape for re-segmentation.")
+    try:
+        _validate_geometry(mask, image, "mask", "image")
+    except ValueError as exc:
+        if "Dimension mismatch" in str(exc):
+            raise ValueError(
+                "Image and mask must have the same shape for re-segmentation."
+            ) from exc
+        raise
 
     new_mask_array = mask.array.copy()
 

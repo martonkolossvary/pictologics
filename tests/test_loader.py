@@ -85,6 +85,29 @@ class TestLoader(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be 3D"):
             create_full_mask(bad_img)
 
+    def test_with_source_mask_rejects_geometry_mismatch(self) -> None:
+        image = Image(
+            array=np.zeros((4, 4, 4)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+        shifted_mask = Image(
+            array=np.ones((4, 4, 4), dtype=np.uint8),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(10.0, 0.0, 0.0),
+            direction=np.eye(3),
+        )
+
+        with self.assertRaisesRegex(ValueError, "Origin mismatch"):
+            image.with_source_mask(shifted_mask)
+
+    def test_direction_matrix_rejects_invalid_shape(self) -> None:
+        from pictologics.loader import _direction_matrix
+
+        with self.assertRaisesRegex(ValueError, "Direction must be a 3x3 matrix"):
+            _direction_matrix([1.0, 0.0, 0.0])
+
     # --- _find_best_dicom_series_dir Tests ---
     @patch("pictologics.loader.pydicom.misc.is_dicom")
     def test_find_best_dicom_series_dir_success(self, mock_is_dicom: MagicMock) -> None:
@@ -299,6 +322,30 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(img.modality, "Nifti")
 
     @patch("pictologics.loader.nib.load")
+    def test_load_nifti_normalizes_affine_direction(
+        self, mock_nib_load: MagicMock
+    ) -> None:
+        mock_img = MagicMock()
+        mock_img.get_fdata.return_value = np.zeros((10, 10, 5))
+        mock_img.header.get_zooms.return_value = (2.0, 3.0, 4.0)
+        direction = np.array(
+            [
+                [0.0, -1.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        affine = np.eye(4)
+        affine[:3, :3] = direction @ np.diag([2.0, 3.0, 4.0])
+        mock_img.affine = affine
+        mock_nib_load.return_value = mock_img
+
+        img = _load_nifti("test.nii")
+
+        self.assertEqual(img.spacing, (2.0, 3.0, 4.0))
+        np.testing.assert_allclose(img.direction, direction)
+
+    @patch("pictologics.loader.nib.load")
     def test_load_nifti_2d_zooms(self, mock_nib_load: MagicMock) -> None:
         mock_img = MagicMock()
         mock_img.get_fdata.return_value = np.zeros((10, 10))  # 2D data
@@ -374,6 +421,57 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(img.origin, (0.0, 0.0, 0.0))
         self.assertEqual(img.modality, "CT")
         self.assertEqual(img.array[0, 0, 0], -1024.0)
+
+    @patch("pictologics.loader.Path")
+    @patch("pictologics.loader.pydicom.misc.is_dicom")
+    @patch("pictologics.loader.pydicom.dcmread")
+    @patch("pictologics.utilities.dicom_utils.split_dicom_phases")
+    def test_load_dicom_series_rescales_each_slice(
+        self,
+        mock_split_phases: MagicMock,
+        mock_dcmread: MagicMock,
+        mock_is_dicom: MagicMock,
+        mock_Path_cls: MagicMock,
+    ) -> None:
+        file1 = MagicMock()
+        file1.is_file.return_value = True
+        file2 = MagicMock()
+        file2.is_file.return_value = True
+
+        mock_path_obj = mock_Path_cls.return_value
+        mock_path_obj.iterdir.return_value = [file1, file2]
+        mock_is_dicom.return_value = True
+        mock_split_phases.return_value = [[{"file_path": file1}, {"file_path": file2}]]
+
+        slice1 = MagicMock()
+        slice1.pixel_array = np.array([[10]], dtype=np.uint16)
+        slice1.ImagePositionPatient = [0.0, 0.0, 0.0]
+        slice1.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        slice1.PixelSpacing = [1.0, 1.0]
+        slice1.SliceThickness = 1.0
+        slice1.RescaleSlope = 1.0
+        slice1.RescaleIntercept = 0.0
+        slice1.Modality = "CT"
+        del slice1.SpacingBetweenSlices
+
+        slice2 = MagicMock()
+        slice2.pixel_array = np.array([[10]], dtype=np.uint16)
+        slice2.ImagePositionPatient = [0.0, 0.0, 1.0]
+        slice2.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        slice2.PixelSpacing = [1.0, 1.0]
+        slice2.SliceThickness = 1.0
+        slice2.RescaleSlope = 1.0
+        slice2.RescaleIntercept = 100.0
+        slice2.Modality = "CT"
+        del slice2.SpacingBetweenSlices
+
+        mock_dcmread.side_effect = [slice1, slice2, slice1, slice2]
+
+        img = _load_dicom_series("dicom_dir")
+
+        self.assertEqual(img.array.shape, (1, 1, 2))
+        self.assertEqual(img.array[0, 0, 0], 10.0)
+        self.assertEqual(img.array[0, 0, 1], 110.0)
 
     @patch("pictologics.loader.Path")
     def test_load_dicom_series_no_files(self, mock_Path_cls: MagicMock) -> None:
@@ -993,6 +1091,66 @@ class TestRepositioning(unittest.TestCase):
         self.assertEqual(result.spacing, reference.spacing)
         self.assertEqual(result.origin, reference.origin)
 
+    def test_position_in_reference_uses_direction_for_offset(self) -> None:
+        """World offsets should be converted through reference direction."""
+        from pictologics.loader import _position_in_reference
+
+        direction = np.array(
+            [
+                [0.0, -1.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        reference = Image(
+            array=np.zeros((3, 3, 1)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=direction,
+            modality="CT",
+        )
+        cropped = Image(
+            array=np.ones((1, 1, 1)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=tuple(direction[:, 0]),
+            direction=direction,
+            modality="mask",
+        )
+
+        result = _position_in_reference(cropped, reference)
+
+        self.assertEqual(result.array[1, 0, 0], 1.0)
+        self.assertEqual(result.array[0, 1, 0], 0.0)
+
+    def test_position_in_reference_rejects_fractional_voxel_offset(self) -> None:
+        """sub-voxel offset exceeding subvoxel_tolerance raises ValueError."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        # origin=(2.5, ...) gives max_offset_diff=0.5 (banker's rounding: round(2.5)=2)
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(2.5, 3.0, 4.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        # Default tolerance=0.5: 0.5 is NOT > 0.5, so it snaps with a warning
+        with self.assertWarns(UserWarning):
+            result = _position_in_reference(cropped, reference)
+        self.assertEqual(result.array.shape, (10, 10, 10))
+
+        # With a stricter tolerance=0.3, 0.5 > 0.3 raises ValueError
+        with self.assertRaisesRegex(ValueError, "subvoxel_tolerance"):
+            _position_in_reference(cropped, reference, subvoxel_tolerance=0.3)
+
     def test_position_in_reference_boundary_clipping(self) -> None:
         """Test that cropped images extending beyond reference are clipped."""
         from pictologics.loader import _position_in_reference
@@ -1014,7 +1172,7 @@ class TestRepositioning(unittest.TestCase):
             modality="mask",
         )
 
-        result = _position_in_reference(cropped, reference)
+        result = _position_in_reference(cropped, reference, min_overlap_fraction=0.0)
 
         # Should be clipped to fit within reference
         self.assertEqual(result.array.shape, (10, 10, 10))
@@ -1024,7 +1182,7 @@ class TestRepositioning(unittest.TestCase):
         self.assertEqual(result.array[7, 7, 7], 0.0)
 
     def test_position_in_reference_no_overlap_warning(self) -> None:
-        """Test warning when cropped image doesn't overlap reference."""
+        """With min_overlap_fraction=0.0, a fully disjoint mask warns and returns empty."""
         from pictologics.loader import _position_in_reference
 
         reference = Image(
@@ -1044,12 +1202,202 @@ class TestRepositioning(unittest.TestCase):
             modality="mask",
         )
 
+        # With min_overlap_fraction=0.0, preserves old warn+empty-array behaviour.
         with self.assertWarns(UserWarning):
-            result = _position_in_reference(cropped, reference)
+            result = _position_in_reference(cropped, reference, min_overlap_fraction=0.0)
 
-        # Should return empty array
         self.assertEqual(result.array.shape, (10, 10, 10))
         self.assertEqual(result.array.sum(), 0.0)
+
+    def test_position_in_reference_no_overlap_raises_by_default(self) -> None:
+        """By default a fully disjoint mask raises ValueError."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(100.0, 100.0, 100.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with self.assertRaisesRegex(ValueError, "min_overlap_fraction"):
+            _position_in_reference(cropped, reference)
+
+    def test_position_in_reference_partial_overlap_below_fraction_raises(self) -> None:
+        """A mask with partial but insufficient overlap raises ValueError."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        # Mask is 4x4x4=64 voxels; only 1x1x1=1 voxel overlaps (1/64 ≈ 1.6%)
+        cropped = Image(
+            array=np.ones((4, 4, 4)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(9.0, 9.0, 9.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with self.assertRaisesRegex(ValueError, "min_overlap_fraction"):
+            _position_in_reference(cropped, reference, min_overlap_fraction=0.5)
+
+    def test_position_in_reference_partial_overlap_above_fraction_succeeds(self) -> None:
+        """A mask with sufficient overlap repositions without error."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        # Mask is 4x4x4=64 voxels; 2x2x2=8 voxels overlap (8/64=12.5% > 0.05)
+        cropped = Image(
+            array=np.ones((4, 4, 4)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(8.0, 8.0, 8.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+        result = _position_in_reference(cropped, reference, min_overlap_fraction=0.05)
+        self.assertEqual(result.array.shape, (10, 10, 10))
+        self.assertGreater(result.array.sum(), 0)
+
+    def test_position_in_reference_subvoxel_warning_threshold(self) -> None:
+        """Drift above warning threshold but below tolerance emits UserWarning."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        # offset 0.05 voxels — above default warning threshold 0.01, below tolerance 0.5
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(2.05, 3.0, 4.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with self.assertWarns(UserWarning):
+            result = _position_in_reference(cropped, reference)
+        self.assertEqual(result.array.shape, (10, 10, 10))
+
+    def test_position_in_reference_tiny_drift_is_silent(self) -> None:
+        """Drift below warning threshold produces no warning."""
+        from pictologics.loader import _position_in_reference
+        import warnings as _warnings
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        # origin has floating-point noise below the 0.01 warning threshold
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(2.001, 3.0, 4.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("error")
+            result = _position_in_reference(cropped, reference)
+        self.assertEqual(result.array.shape, (10, 10, 10))
+
+    def test_position_in_reference_rejects_invalid_min_overlap_fraction(self) -> None:
+        """min_overlap_fraction outside [0, 1] raises ValueError immediately."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(2.0, 3.0, 4.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with self.assertRaisesRegex(ValueError, "min_overlap_fraction must be in"):
+            _position_in_reference(cropped, reference, min_overlap_fraction=2.0)
+        with self.assertRaisesRegex(ValueError, "min_overlap_fraction must be in"):
+            _position_in_reference(cropped, reference, min_overlap_fraction=-0.1)
+
+    def test_position_in_reference_rejects_negative_tolerance(self) -> None:
+        """Negative subvoxel_tolerance or subvoxel_warning_threshold raises ValueError."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(2.0, 3.0, 4.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with self.assertRaisesRegex(ValueError, "subvoxel_tolerance must be"):
+            _position_in_reference(cropped, reference, subvoxel_tolerance=-0.1)
+        with self.assertRaisesRegex(ValueError, "subvoxel_warning_threshold must be"):
+            _position_in_reference(cropped, reference, subvoxel_warning_threshold=-0.1)
+
+    def test_position_in_reference_rejects_threshold_above_tolerance(self) -> None:
+        """subvoxel_warning_threshold > subvoxel_tolerance raises ValueError."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(2.0, 3.0, 4.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with self.assertRaisesRegex(ValueError, "subvoxel_warning_threshold"):
+            _position_in_reference(
+                cropped, reference, subvoxel_tolerance=0.1, subvoxel_warning_threshold=0.4
+            )
 
     def test_position_in_reference_transpose_axes(self) -> None:
         """Test axis transposition during repositioning."""
@@ -1070,7 +1418,13 @@ class TestRepositioning(unittest.TestCase):
             array=cropped_data,
             spacing=(1.0, 1.0, 1.0),
             origin=(0.0, 0.0, 0.0),
-            direction=np.eye(3),
+            direction=np.array(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [0.0, 1.0, 0.0],
+                ]
+            ),
             modality="mask",
         )
 
@@ -1080,6 +1434,41 @@ class TestRepositioning(unittest.TestCase):
         # After transposition, shape should work with reference
         self.assertEqual(result.array.shape, (10, 10, 5))
         self.assertEqual(result.array[0, 0, 0], 1.0)
+
+    def test_position_in_reference_transpose_axes_updates_geometry(self) -> None:
+        """Axis transposition must permute spacing and direction metadata too."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((5, 5, 5)),
+            spacing=(1.0, 2.0, 3.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        # The voxel data will be transposed from (X, Z, Y) to (X, Y, Z).
+        # Its spacing and direction columns must follow the same axis permutation.
+        cropped_data = np.zeros((2, 3, 4))
+        cropped_data[1, 2, 3] = 7.0
+        cropped = Image(
+            array=cropped_data,
+            spacing=(1.0, 3.0, 2.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.array(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [0.0, 1.0, 0.0],
+                ]
+            ),
+            modality="mask",
+        )
+
+        result = _position_in_reference(cropped, reference, transpose_axes=(0, 2, 1))
+
+        self.assertEqual(result.array.shape, reference.array.shape)
+        self.assertEqual(result.array[1, 3, 2], 7.0)
 
     def test_position_in_reference_spacing_mismatch(self) -> None:
         """Test error when spacing is incompatible."""
@@ -1104,8 +1493,30 @@ class TestRepositioning(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Spacing mismatch"):
             _position_in_reference(cropped, reference)
 
-    def test_position_in_reference_orientation_warning(self) -> None:
-        """Test warning when orientations don't match."""
+    def test_position_in_reference_invalid_transpose_axes(self) -> None:
+        """Invalid axis permutations should be rejected before repositioning."""
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        cropped = Image(
+            array=np.ones((3, 3, 3)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+
+        with self.assertRaisesRegex(ValueError, "transpose_axes"):
+            _position_in_reference(cropped, reference, transpose_axes=(0, 0, 1))
+
+    def test_position_in_reference_orientation_mismatch_error(self) -> None:
+        """Mismatched orientations require real reorientation/resampling."""
         from pictologics.loader import _position_in_reference
 
         reference = Image(
@@ -1125,7 +1536,7 @@ class TestRepositioning(unittest.TestCase):
             modality="mask",
         )
 
-        with self.assertWarns(UserWarning):
+        with self.assertRaisesRegex(ValueError, "Orientation mismatch"):
             _position_in_reference(cropped, reference)
 
     def test_position_in_reference_fill_value(self) -> None:
@@ -1189,6 +1600,34 @@ class TestRepositioning(unittest.TestCase):
         self.assertEqual(result.array.shape, (10, 10, 10))
         # Data should be at correct position
         self.assertEqual(result.array[2, 2, 2], 1.0)
+
+    @patch("pictologics.loader._load_dicom_file")
+    @patch("pictologics.loader.Path")
+    def test_load_image_with_reference_same_shape_validates_geometry(
+        self, mock_Path: MagicMock, mock_load_dcm: MagicMock
+    ) -> None:
+        """Same-shaped images still need physical geometry validation."""
+        mock_Path.return_value.exists.return_value = True
+        mock_Path.return_value.is_dir.return_value = False
+
+        shifted_img = Image(
+            array=np.ones((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(5.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="mask",
+        )
+        mock_load_dcm.return_value = shifted_img
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Origin mismatch"):
+            load_image("mask.dcm", reference_image=reference)
 
     @patch("pictologics.loader.load_image")
     def test_load_and_merge_reposition_to_reference(self, mock_load: MagicMock) -> None:

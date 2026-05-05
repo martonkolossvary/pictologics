@@ -70,7 +70,7 @@ from .filters import (
     simoncelli_wavelet,
     wavelet_transform,
 )
-from .loader import Image, create_full_mask, load_image
+from .loader import Image, _validate_geometry, create_full_mask, load_image
 from .preprocessing import (
     apply_mask,
     create_source_mask_from_sentinel,
@@ -123,6 +123,51 @@ _REQUIRES_DISCRETISATION: dict[str, bool] = {
     "ngtdm": True,
     "ngldm": True,
 }
+
+_TEXTURE_FAMILIES = ("glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm")
+_DEFAULT_FEATURE_FAMILIES = ["intensity", "morphology", "texture", "histogram", "ivh"]
+_PREPROCESSING_STEPS = (
+    "resample",
+    "resegment",
+    "filter_outliers",
+    "round_intensities",
+    "keep_largest_component",
+    "binarize_mask",
+    "discretise",
+    "filter",
+)
+_PREPROCESSING_PARAM_COLUMNS = {
+    "resample": "resample_params",
+    "resegment": "resegment_params",
+    "filter_outliers": "filter_outliers_params",
+    "round_intensities": "round_intensities_params",
+    "keep_largest_component": "keep_largest_component_params",
+    "binarize_mask": "binarize_mask_params",
+    "discretise": "discretise_params",
+    "filter": "filter_params",
+}
+
+
+def _normalize_texture_family(family: str) -> str | None:
+    """Map texture aliases to their canonical texture family name."""
+    if family == "texture":
+        return family
+    if family in _TEXTURE_FAMILIES:
+        return family
+    if family.startswith("texture_"):
+        suffix = family.removeprefix("texture_")
+        if suffix in _TEXTURE_FAMILIES:
+            return suffix
+    return None
+
+
+def _feature_name_families(family: str) -> list[str]:
+    """Expand a requested feature family into FEATURE_NAMES registry keys."""
+    if family == "texture":
+        return list(_TEXTURE_FAMILIES)
+    texture_family = _normalize_texture_family(family)
+    return [texture_family if texture_family is not None else family]
+
 
 # Regex to extract the IBSI alphanumeric code from a feature key.
 # Most codes are 4 characters; a small number (e.g. ``1PR``) are 3.
@@ -445,11 +490,22 @@ class RadiomicsPipeline:
             pipeline.add_config(
                 name="sentinel_aware",
                 source_mode="roi_only",
-                steps=[
-                    {"step": "resample", "params": {"new_spacing": (1, 1, 1)}},
-                    {"step": "extract_features", "params": {"families": ["all"]}},
-                ],
-            )
+                    steps=[
+                        {"step": "resample", "params": {"new_spacing": (1, 1, 1)}},
+                        {
+                            "step": "extract_features",
+                            "params": {
+                                "families": [
+                                    "intensity",
+                                    "morphology",
+                                    "texture",
+                                    "histogram",
+                                    "ivh",
+                                ]
+                            },
+                        },
+                    ],
+                )
             ```
         """
         if not isinstance(steps, list):
@@ -482,6 +538,9 @@ class RadiomicsPipeline:
         mask: str | Image | None = None,
         subject_id: Optional[str] = None,
         config_names: Optional[list[str]] = None,
+        mask_subvoxel_tolerance: float = 0.5,
+        mask_subvoxel_warning_threshold: float = 0.01,
+        mask_min_overlap_fraction: float = 0.5,
     ) -> dict[str, pd.Series]:
         """
         Run configurations on the provided image and mask.
@@ -497,6 +556,15 @@ class RadiomicsPipeline:
             config_names: List of specific configuration names to run.
                           If None, runs all registered configurations.
                           Supports "all_standard" to run all 6 standard configs.
+            mask_subvoxel_tolerance: Maximum permitted fractional-voxel offset when
+                repositioning a mask path (default: 0.5). Has no effect when mask is
+                a pre-loaded Image object. See ``load_image`` for full description.
+            mask_subvoxel_warning_threshold: Fractional-voxel drift above which a
+                ``UserWarning`` is emitted during mask repositioning (default: 0.01).
+                Has no effect when mask is a pre-loaded Image object.
+            mask_min_overlap_fraction: Minimum fraction of the mask volume that must
+                intersect with the image space when loading from a path (default: 0.5).
+                Has no effect when mask is a pre-loaded Image object.
 
         Returns:
             Dictionary mapping config names to pandas Series of features.
@@ -544,11 +612,19 @@ class RadiomicsPipeline:
             mask_source = "GeneratedFullMask"
             mask_was_generated = True
         elif isinstance(mask, str):
-            orig_mask = load_image(mask)
+            orig_mask = load_image(
+                mask,
+                reference_image=orig_img,
+                subvoxel_tolerance=mask_subvoxel_tolerance,
+                subvoxel_warning_threshold=mask_subvoxel_warning_threshold,
+                min_overlap_fraction=mask_min_overlap_fraction,
+            )
             mask_source = mask
         else:
             orig_mask = mask
             mask_source = "InMemory"
+
+        _validate_geometry(orig_mask, orig_img, "mask", "image")
 
         all_results = {}
 
@@ -567,7 +643,7 @@ class RadiomicsPipeline:
 
         # Create or regenerate deduplication plan if enabled
         dedup_plan: DeduplicationPlan | None = None
-        family_cache: dict[str, dict[str, Any]] = {}  # sig_hash -> family_features
+        family_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
         # Reset deduplication statistics for this run
         self._dedup_reused_count = 0
@@ -672,6 +748,11 @@ class RadiomicsPipeline:
                 "source_mode": source_mode.value,
                 "sentinel_detected": sentinel_detected,
                 "sentinel_value": detected_sentinel_value,
+                "mask_repositioning_settings": {
+                    "subvoxel_tolerance": mask_subvoxel_tolerance,
+                    "subvoxel_warning_threshold": mask_subvoxel_warning_threshold,
+                    "min_overlap_fraction": mask_min_overlap_fraction,
+                },
                 "steps_executed": [],
             }
 
@@ -1152,17 +1233,11 @@ class RadiomicsPipeline:
             params = step_def.get("params", {})
             families: list[str] = params.get(
                 "families",
-                ["intensity", "morphology", "texture", "histogram", "ivh"],
+                _DEFAULT_FEATURE_FAMILIES,
             )
 
             for family in families:
-                # "texture" expands to the 6 individual matrix families
-                if family == "texture":
-                    sub = ["glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm"]
-                else:
-                    sub = [family]
-
-                for fam in sub:
+                for fam in _feature_name_families(family):
                     if fam in FEATURE_NAMES and fam not in seen:
                         names.extend(FEATURE_NAMES[fam])
                         seen.add(fam)
@@ -1198,11 +1273,7 @@ class RadiomicsPipeline:
             params = {}
         nan = float("nan")
         for family in families:
-            if family == "texture":
-                subs = ["glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm"]
-            else:
-                subs = [family]
-            for fam in subs:
+            for fam in _feature_name_families(family):
                 if fam in FEATURE_NAMES:
                     for key in FEATURE_NAMES[fam]:
                         if key not in results:
@@ -1226,9 +1297,7 @@ class RadiomicsPipeline:
         Extract features based on current state.
         """
         results = {}
-        families = params.get(
-            "families", ["intensity", "morphology", "texture", "histogram", "ivh"]
-        )
+        families = params.get("families", _DEFAULT_FEATURE_FAMILIES)
 
         # Optional kwargs pass-through (advanced usage)
         spatial_intensity_params = params.get("spatial_intensity_params", {})
@@ -1254,221 +1323,8 @@ class RadiomicsPipeline:
         if not isinstance(texture_matrix_params, dict):
             raise ValueError("texture_matrix_params must be a dict")
 
-        # Morphology - uses raw_image (non-discretised) for intensity-based features
-        if "morphology" in families:
-            results.update(
-                calculate_morphology_features(
-                    state.morph_mask,
-                    state.raw_image,
-                    intensity_mask=state.intensity_mask,
-                )
-            )
-
-        # Intensity - uses raw_image (non-discretised)
-        if "intensity" in families:
-            masked_values = apply_mask(state.raw_image, state.intensity_mask)
-            results.update(calculate_intensity_features(masked_values))
-
-            include_spatial = bool(params.get("include_spatial_intensity", False))
-            include_local = bool(params.get("include_local_intensity", False))
-
-            if include_spatial:
-                results.update(
-                    calculate_spatial_intensity_features(
-                        state.raw_image,
-                        state.intensity_mask,
-                        **spatial_intensity_params,
-                    )
-                )
-            if include_local:
-                results.update(
-                    calculate_local_intensity_features(
-                        state.raw_image, state.intensity_mask, **local_intensity_params
-                    )
-                )
-
-        # Optional explicit families (no-op unless requested)
-        if "spatial_intensity" in families and "intensity" not in families:
-            results.update(
-                calculate_spatial_intensity_features(
-                    state.raw_image, state.intensity_mask, **spatial_intensity_params
-                )
-            )
-
-        if "local_intensity" in families and "intensity" not in families:
-            results.update(
-                calculate_local_intensity_features(
-                    state.raw_image, state.intensity_mask, **local_intensity_params
-                )
-            )
-
-        # Histogram / IVH
-        if "histogram" in families:
-            # Usually on discretised image
-            if not state.is_discretised:
-                warnings.warn(
-                    "Histogram features requested but image is not discretised. "
-                    "Features may be unreliable or fail if integer bins are expected.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-
-            masked_values = apply_mask(state.image, state.intensity_mask)
-            results.update(calculate_intensity_histogram_features(masked_values))
-
-        if "ivh" in families:
-            # IVH computation supports three modes:
-            # 1. ivh_use_continuous=True: Use raw (pre-discretised) intensity values
-            # 2. ivh_discretisation={...}: Apply temporary discretisation just for IVH
-            # 3. Default: Use the pipeline's discretised image (if discretised)
-
-            ivh_use_continuous = params.get("ivh_use_continuous", False)
-            ivh_discretisation = params.get("ivh_discretisation", None)
-
-            # Track discretisation params for IVH calculation
-            ivh_disc_bin_width: Optional[float] = None
-            ivh_disc_min_val: Optional[float] = None
-
-            if ivh_use_continuous:
-                # Use raw intensity values (non-discretised)
-                # This is used for continuous IVH (e.g., IBSI Config D)
-                ivh_values = apply_mask(state.raw_image, state.intensity_mask)
-            elif ivh_discretisation:
-                # Apply temporary discretisation for IVH only
-                # This allows different binning for IVH vs texture features
-                # Uses raw_image as the base to discretise from raw values
-                ivh_disc_params = ivh_discretisation.copy()
-                ivh_method = ivh_disc_params.pop("method", "FBS")
-                # Save bin_width and min_val for passing to calculate_ivh_features
-                ivh_disc_bin_width = ivh_disc_params.get("bin_width")
-                ivh_disc_min_val = ivh_disc_params.get("min_val")
-                temp_ivh_disc = discretise_image(
-                    state.raw_image,
-                    method=ivh_method,
-                    roi_mask=state.intensity_mask,
-                    **ivh_disc_params,
-                )
-                ivh_values = apply_mask(temp_ivh_disc, state.intensity_mask)
-            else:
-                # Default: use the current image (which may be discretised)
-                ivh_values = apply_mask(state.image, state.intensity_mask)
-
-            # IVH accepts several optional arguments; support both explicit top-level
-            # keys and an "ivh_params" dict for full control.
-            ivh_kwargs: dict[str, Any] = {}
-
-            # If ivh_discretisation was used, pass its bin_width and min_val
-            if ivh_disc_bin_width is not None:
-                ivh_kwargs["bin_width"] = ivh_disc_bin_width
-            if ivh_disc_min_val is not None:
-                ivh_kwargs["min_val"] = ivh_disc_min_val
-
-            # Dict-based params (preferred) - these override discretisation defaults
-            if "bin_width" in ivh_params:
-                ivh_kwargs["bin_width"] = ivh_params.get("bin_width")
-            if "min_val" in ivh_params:
-                ivh_kwargs["min_val"] = ivh_params.get("min_val")
-            if "max_val" in ivh_params:
-                ivh_kwargs["max_val"] = ivh_params.get("max_val")
-            if "target_range_min" in ivh_params:
-                ivh_kwargs["target_range_min"] = ivh_params.get("target_range_min")
-            if "target_range_max" in ivh_params:
-                ivh_kwargs["target_range_max"] = ivh_params.get("target_range_max")
-
-            # If not provided, and we are discretised (and not using continuous mode),
-            # default bin_width to 1.0 (bin indices)
-            if (
-                not ivh_use_continuous
-                and state.is_discretised
-                and ivh_kwargs.get("bin_width") is None
-                and not ivh_discretisation
-            ):
-                ivh_kwargs["bin_width"] = 1.0
-
-            # Only pass non-None arguments
-            ivh_kwargs = {k: v for k, v in ivh_kwargs.items() if v is not None}
-
-            results.update(calculate_ivh_features(ivh_values, **ivh_kwargs))
-
-        # Texture
-        if "texture" in families:
-            if not state.is_discretised:
-                raise ValueError(
-                    "Texture features requested but image is not discretised. "
-                    "You must include a 'discretise' step before extracting texture features."
-                )
-
-            disc_image = state.image
-            n_bins = state.n_bins if state.n_bins else 32  # Fallback
-
-            # Calculate Matrices
-            # Use morphological mask for distance map (GLDZM)
-            # Advanced: allow overriding matrix computation parameters via texture_matrix_params.
-            matrix_kwargs: dict[str, Any] = {}
-            if "ngldm_alpha" in texture_matrix_params:
-                matrix_kwargs["ngldm_alpha"] = texture_matrix_params.get("ngldm_alpha")
-            matrix_kwargs = {k: v for k, v in matrix_kwargs.items() if v is not None}
-
-            texture_matrices = calculate_all_texture_matrices(
-                disc_image.array,
-                state.intensity_mask.array,
-                n_bins,
-                distance_mask=state.morph_mask.array,
-                **matrix_kwargs,
-            )
-
-            results.update(
-                calculate_glcm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
-                    n_bins,
-                    glcm_matrix=texture_matrices["glcm"],
-                )
-            )
-            results.update(
-                calculate_glrlm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
-                    n_bins,
-                    glrlm_matrix=texture_matrices["glrlm"],
-                )
-            )
-            results.update(
-                calculate_glszm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
-                    n_bins,
-                    glszm_matrix=texture_matrices["glszm"],
-                )
-            )
-            results.update(
-                calculate_gldzm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
-                    n_bins,
-                    gldzm_matrix=texture_matrices["gldzm"],
-                    distance_mask=state.morph_mask.array,
-                )
-            )
-            results.update(
-                calculate_ngtdm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
-                    n_bins,
-                    ngtdm_matrices=(
-                        texture_matrices["ngtdm_s"],
-                        texture_matrices["ngtdm_n"],
-                    ),
-                )
-            )
-            results.update(
-                calculate_ngldm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
-                    n_bins,
-                    ngldm_matrix=texture_matrices["ngldm"],
-                )
-            )
+        for family in families:
+            results.update(self._extract_single_family(state, family, params))
 
         # Ensure every expected feature key is present (NaN for partial failures)
         self._fill_missing_features(results, families, params)
@@ -1480,7 +1336,7 @@ class RadiomicsPipeline:
         params: dict[str, Any],
         config_name: str,
         plan: DeduplicationPlan,
-        family_cache: dict[str, dict[str, Any]],
+        family_cache: dict[tuple[str, str], dict[str, Any]],
     ) -> dict[str, Any]:
         """
         Extract features using deduplication plan to avoid redundant computation.
@@ -1494,27 +1350,26 @@ class RadiomicsPipeline:
             params: Feature extraction parameters.
             config_name: Name of the current configuration.
             plan: Deduplication plan mapping families to signatures.
-            family_cache: Cache of computed family features by signature hash.
+            family_cache: Cache of computed family features by family and signature hash.
 
         Returns:
             Dictionary of all extracted features.
         """
         results: dict[str, Any] = {}
-        families = params.get(
-            "families", ["intensity", "morphology", "texture", "histogram", "ivh"]
-        )
+        families = params.get("families", _DEFAULT_FEATURE_FAMILIES)
 
         for family in families:
-            # Normalize family name for signature lookup
-            # texture_* families use the base "texture" signature
-            sig_family = "texture" if family.startswith("texture_") else family
+            # Normalize texture aliases so raw subfamily and texture_* requests
+            # share the same signature/cache behavior.
+            sig_family = _normalize_texture_family(family) or family
 
             # Get signature from plan using (config_name, family) tuple key
             sig = plan.signatures.get((config_name, sig_family))
+            cache_key = (sig_family, sig.hash) if sig else None
 
-            if sig and sig.hash in family_cache:
+            if cache_key is not None and cache_key in family_cache:
                 # Reuse cached results
-                cached = family_cache[sig.hash]
+                cached = family_cache[cache_key]
                 results.update(cached)
                 self._dedup_reused_count += 1
             else:
@@ -1523,8 +1378,8 @@ class RadiomicsPipeline:
                 results.update(family_results)
 
                 # Cache if we have a signature
-                if sig:
-                    family_cache[sig.hash] = family_results
+                if cache_key is not None:
+                    family_cache[cache_key] = family_results
                 self._dedup_computed_count += 1
 
         # Ensure every expected feature key is present (NaN for partial failures)
@@ -1609,9 +1464,11 @@ class RadiomicsPipeline:
         elif family == "ivh":
             results.update(self._compute_ivh_features(state, params, ivh_params))
 
-        elif family == "texture" or family.startswith("texture_"):
+        elif (texture_family := _normalize_texture_family(family)) is not None:
             results.update(
-                self._compute_texture_features(state, family, texture_matrix_params)
+                self._compute_texture_features(
+                    state, texture_family, texture_matrix_params
+                )
             )
 
         return results
@@ -1856,57 +1713,183 @@ class RadiomicsPipeline:
 
         Returns a flat dict with keys used by :meth:`describe_features`.
         """
+        records: list[dict[str, Any]] = []
+        for i, step_def in enumerate(steps, start=1):
+            step_name = step_def.get("step", "")
+            if step_name not in _PREPROCESSING_STEPS:
+                continue
+            step_index = step_def.get("step_index", i)
+            records.append(
+                {
+                    "step_index": step_index,
+                    "step": step_name,
+                    "params": copy.deepcopy(step_def.get("params", {})),
+                }
+            )
+
         meta: dict[str, Any] = {
+            "preprocessing_sequence": None,
+            "preprocessing_steps": None,
             "is_resampled": False,
             "resampling_spacing": None,
             "interpolation": None,
+            "resample_params": None,
+            "is_resegmented": False,
+            "resegment_params": None,
+            "is_outlier_filtered": False,
+            "filter_outliers_params": None,
+            "is_intensity_rounded": False,
+            "round_intensities_params": None,
+            "keeps_largest_component": False,
+            "keep_largest_component_params": None,
+            "is_mask_binarized": False,
+            "binarize_mask_params": None,
             "is_discretised": False,
             "discretisation_method": None,
             "discretisation_param": None,
+            "discretise_params": None,
             "is_filtered": False,
             "filter_type": None,
             "filter_params": None,
         }
-        for step_def in steps:
-            step_name = step_def.get("step", "")
-            params = step_def.get("params", {})
 
-            if step_name == "resample":
-                meta["is_resampled"] = True
-                spacing = params.get("new_spacing")
-                meta["resampling_spacing"] = (
-                    str(tuple(spacing)) if spacing is not None else None
+        if not records:
+            return meta
+
+        meta["preprocessing_sequence"] = " > ".join(
+            f"{record['step_index']}:{record['step']}" for record in records
+        )
+        meta["preprocessing_steps"] = RadiomicsPipeline._catalog_json(records)
+
+        records_by_step: dict[str, list[dict[str, Any]]] = {
+            step_name: [
+                record for record in records if record.get("step") == step_name
+            ]
+            for step_name in _PREPROCESSING_STEPS
+        }
+
+        for step_name, column in _PREPROCESSING_PARAM_COLUMNS.items():
+            step_records = records_by_step[step_name]
+            if step_records:
+                meta[column] = RadiomicsPipeline._catalog_json(
+                    [
+                        {
+                            "step_index": record["step_index"],
+                            "params": record["params"],
+                        }
+                        for record in step_records
+                    ]
                 )
-                meta["interpolation"] = params.get("interpolation", "linear")
 
-            elif step_name == "discretise":
-                meta["is_discretised"] = True
-                method = params.get("method")
-                meta["discretisation_method"] = method
+        resample_records = records_by_step["resample"]
+        if resample_records:
+            meta["is_resampled"] = True
+            spacings = [
+                record["params"].get("new_spacing") for record in resample_records
+            ]
+            meta["resampling_spacing"] = RadiomicsPipeline._catalog_value(spacings)
+            interpolations = [
+                record["params"].get("interpolation", "linear")
+                for record in resample_records
+            ]
+            meta["interpolation"] = RadiomicsPipeline._catalog_value(interpolations)
+
+        resegment_records = records_by_step["resegment"]
+        if resegment_records:
+            meta["is_resegmented"] = True
+
+        filter_outlier_records = records_by_step["filter_outliers"]
+        if filter_outlier_records:
+            meta["is_outlier_filtered"] = True
+
+        round_records = records_by_step["round_intensities"]
+        if round_records:
+            meta["is_intensity_rounded"] = True
+
+        largest_component_records = records_by_step["keep_largest_component"]
+        if largest_component_records:
+            meta["keeps_largest_component"] = True
+
+        binarize_records = records_by_step["binarize_mask"]
+        if binarize_records:
+            meta["is_mask_binarized"] = True
+
+        discretise_records = records_by_step["discretise"]
+        if discretise_records:
+            meta["is_discretised"] = True
+            methods = [
+                record["params"].get("method", "FBN") for record in discretise_records
+            ]
+            meta["discretisation_method"] = RadiomicsPipeline._catalog_value(methods)
+            disc_params: list[Any] = []
+            for method, record in zip(methods, discretise_records, strict=True):
+                params = record["params"]
                 if method == "FBN":
-                    meta["discretisation_param"] = params.get("n_bins")
+                    disc_params.append(params.get("n_bins"))
                 elif method == "FBS":
-                    meta["discretisation_param"] = params.get("bin_width")
+                    disc_params.append(params.get("bin_width"))
+                elif method == "FIXED_CUTOFFS":
+                    disc_params.append(params.get("cutoffs"))
+                else:
+                    disc_params.append(None)
+            meta["discretisation_param"] = RadiomicsPipeline._catalog_value(disc_params)
 
-            elif step_name == "filter":
-                meta["is_filtered"] = True
-                meta["filter_type"] = params.get("type")
-                # Store filter-specific params (exclude 'type' and 'boundary')
-                fparams = {
-                    k: v
-                    for k, v in params.items()
-                    if k not in ("type", "boundary")
-                }
-                meta["filter_params"] = str(fparams) if fparams else None
+        filter_records = records_by_step["filter"]
+        if filter_records:
+            meta["is_filtered"] = True
+            filter_types = [record["params"].get("type") for record in filter_records]
+            meta["filter_type"] = RadiomicsPipeline._catalog_value(filter_types)
 
         return meta
+
+    @staticmethod
+    def _catalog_serializable(obj: Any) -> Any:
+        """Convert catalog metadata values to JSON-serializable objects."""
+        if isinstance(obj, tuple):
+            return [RadiomicsPipeline._catalog_serializable(item) for item in obj]
+        if isinstance(obj, dict):
+            return {
+                str(key): RadiomicsPipeline._catalog_serializable(value)
+                for key, value in obj.items()
+            }
+        if isinstance(obj, list):
+            return [RadiomicsPipeline._catalog_serializable(item) for item in obj]
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (np.integer, np.floating, np.bool_)):
+            return obj.item()
+        return obj
+
+    @staticmethod
+    def _catalog_json(obj: Any) -> str:
+        """Encode structured catalog metadata as compact JSON."""
+        return json.dumps(
+            RadiomicsPipeline._catalog_serializable(obj),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _catalog_value(values: list[Any]) -> Any:
+        """Return one scalar value or a JSON list for repeated preprocessing steps."""
+        serializable = cast(list[Any], RadiomicsPipeline._catalog_serializable(values))
+        if len(serializable) == 1:
+            value = serializable[0]
+            if isinstance(value, list):
+                return str(tuple(value))
+            if isinstance(value, dict):
+                return RadiomicsPipeline._catalog_json(value)
+            return value
+        return RadiomicsPipeline._catalog_json(serializable)
 
     def describe_features(self) -> pd.DataFrame:
         """Return a DataFrame cataloguing every feature the pipeline will produce.
 
-        Each row represents one (configuration, feature) pair.  The columns
+        Each row represents one (configuration, feature) pair. The columns
         describe the feature identity, its family membership, and the
-        preprocessing parameters of the configuration that produces it.
+        preprocessing state at the ``extract_features`` step that produces it.
+        Repeated preprocessing steps are represented as compact JSON arrays in
+        the corresponding ``*_params`` cells.
 
         This is useful for:
 
@@ -1928,6 +1911,16 @@ class RadiomicsPipeline:
                 *Texture*.
             - **requires_discretisation** – Whether the family needs discretised
                 input.
+            - **source_mode** – Source voxel handling mode for the configuration.
+            - **sentinel_value** – Explicit sentinel value, if configured.
+            - **feature_extraction_step_index** – 1-based position of the
+                ``extract_features`` step that produced the row.
+            - **feature_extraction_params** – Parameters on that
+                ``extract_features`` step as compact JSON.
+            - **preprocessing_sequence** – Ordered preprocessing step sequence
+                applied before feature extraction.
+            - **preprocessing_steps** – Full ordered preprocessing step records
+                as compact JSON.
             - **is_discretised** – Whether the configuration includes a
                 ``discretise`` step.
             - **discretisation_method** – ``FBN``, ``FBS``, or ``None``.
@@ -1939,8 +1932,8 @@ class RadiomicsPipeline:
             - **interpolation** – Resampling interpolation method.
             - **is_filtered** – Whether a ``filter`` step is present.
             - **filter_type** – Filter type (``log``, ``gabor``, …) or ``None``.
-            - **filter_params** – Filter-specific parameters as a string, or
-                ``None``.
+            - **filter_params** – Ordered filter step parameters as compact JSON,
+                or ``None``.
 
         Example:
             ```python
@@ -1966,26 +1959,58 @@ class RadiomicsPipeline:
         rows: list[dict[str, Any]] = []
 
         for config_name, steps in self._configs.items():
-            feature_keys = self._get_expected_feature_names(steps)
-            config_meta = self._extract_config_metadata(steps)
+            active_preprocessing: list[dict[str, Any]] = []
+            row_by_key: dict[str, dict[str, Any]] = {}
+            key_order: list[str] = []
+            config_metadata = self._config_metadata.get(config_name, {})
+            source_mode = config_metadata.get("source_mode", "full_image")
+            sentinel_value = config_metadata.get("sentinel_value")
 
-            for fkey in feature_keys:
-                fname, code = self._parse_feature_key(fkey)
-                family = key_to_family.get(fkey, "unknown")
+            for step_index, step_def in enumerate(steps, start=1):
+                step_name = step_def.get("step", "")
+                params = step_def.get("params", {})
 
-                row: dict[str, Any] = {
-                    "config": config_name,
-                    "feature_key": fkey,
-                    "feature_name": fname,
-                    "ibsi_code": code,
-                    "family": family,
-                    "family_group": _FAMILY_GROUP.get(family, "Unknown"),
-                    "requires_discretisation": _REQUIRES_DISCRETISATION.get(
-                        family, False
-                    ),
-                }
-                row.update(config_meta)
-                rows.append(row)
+                if step_name == "extract_features":
+                    feature_keys = self._get_expected_feature_names([step_def])
+                    config_meta = self._extract_config_metadata(active_preprocessing)
+                    extraction_params = (
+                        self._catalog_json(params) if params else None
+                    )
+
+                    for fkey in feature_keys:
+                        fname, code = self._parse_feature_key(fkey)
+                        family = key_to_family.get(fkey, "unknown")
+
+                        row: dict[str, Any] = {
+                            "config": config_name,
+                            "feature_key": fkey,
+                            "feature_name": fname,
+                            "ibsi_code": code,
+                            "family": family,
+                            "family_group": _FAMILY_GROUP.get(family, "Unknown"),
+                            "requires_discretisation": _REQUIRES_DISCRETISATION.get(
+                                family, False
+                            ),
+                            "source_mode": source_mode,
+                            "sentinel_value": sentinel_value,
+                            "feature_extraction_step_index": step_index,
+                            "feature_extraction_params": extraction_params,
+                        }
+                        row.update(config_meta)
+                        if fkey not in row_by_key:
+                            key_order.append(fkey)
+                        row_by_key[fkey] = row
+
+                elif step_name in _PREPROCESSING_STEPS:
+                    active_preprocessing.append(
+                        {
+                            "step_index": step_index,
+                            "step": step_name,
+                            "params": copy.deepcopy(params),
+                        }
+                    )
+
+            rows.extend(row_by_key[fkey] for fkey in key_order)
 
         columns = [
             "config",
@@ -1995,17 +2020,39 @@ class RadiomicsPipeline:
             "family",
             "family_group",
             "requires_discretisation",
+            "source_mode",
+            "sentinel_value",
+            "feature_extraction_step_index",
+            "feature_extraction_params",
+            "preprocessing_sequence",
+            "preprocessing_steps",
             "is_discretised",
             "discretisation_method",
             "discretisation_param",
+            "discretise_params",
             "is_resampled",
             "resampling_spacing",
             "interpolation",
+            "resample_params",
+            "is_resegmented",
+            "resegment_params",
+            "is_outlier_filtered",
+            "filter_outliers_params",
+            "is_intensity_rounded",
+            "round_intensities_params",
+            "keeps_largest_component",
+            "keep_largest_component_params",
+            "is_mask_binarized",
+            "binarize_mask_params",
             "is_filtered",
             "filter_type",
             "filter_params",
         ]
-        return pd.DataFrame(rows, columns=columns) if rows else pd.DataFrame(columns=columns)
+        return (
+            pd.DataFrame(rows, columns=columns)
+            if rows
+            else pd.DataFrame(columns=columns)
+        )
 
     def to_dict(
         self,
@@ -2399,13 +2446,26 @@ class RadiomicsPipeline:
 
     # Known step types and their valid parameters
     _VALID_STEPS: dict[str, set[str]] = {
-        "resample": {"new_spacing", "interpolation"},
+        "resample": {
+            "new_spacing",
+            "interpolation",
+            "mask_interpolation",
+            "mask_threshold",
+            "round_intensities",
+        },
         "resegment": {"range_min", "range_max"},
         "filter_outliers": {"sigma"},
         "binarize_mask": {"threshold", "mask_values", "apply_to"},
         "keep_largest_component": set(),
         "round_intensities": set(),
-        "discretise": {"method", "n_bins", "bin_width", "min_value", "max_value"},
+        "discretise": {
+            "method",
+            "n_bins",
+            "bin_width",
+            "min_val",
+            "max_val",
+            "cutoffs",
+        },
         "filter": {
             # Shared / dispatch
             "type",
@@ -2444,6 +2504,8 @@ class RadiomicsPipeline:
             "include_local_intensity",
             "texture_matrix_params",
             "ivh_params",
+            "ivh_use_continuous",
+            "ivh_discretisation",
         },
     }
 

@@ -38,6 +38,11 @@ save_results([row], "results.csv")
 - Pass a mask path or `Image` object → used as the ROI (standard workflow).
 - Omit `mask` (or pass `mask=None` / `mask=""`) → Pictologics generates a full (all-ones) ROI mask, treating the **entire image** as the initial ROI.
 
+When you pass a **mask path**, the mask is loaded with the already-loaded image as
+`reference_image`, so DICOM SEG objects and cropped masks can be aligned to image
+geometry before extraction. When you pass an in-memory `Image` mask, Pictologics
+validates that shape, spacing, origin, and direction already match the image.
+
 !!! info "Complete Feature Sets Guaranteed"
     Every configuration always returns a `pandas.Series` with the **full set of expected
     feature names** — even when extraction fails partially or entirely.
@@ -72,7 +77,7 @@ save_results([row], "results.csv")
 
 Pictologics includes **6 standard configurations** designed for common radiomics workflows. All share:
 
-- **Resampling**: 0.5mm × 0.5mm × 0.5mm isotropic spacing
+- **Resampling**: 0.5mm × 0.5mm × 0.5mm isotropic spacing with linear image interpolation
 - **Feature Families**: intensity, morphology, texture, histogram, and IVH
 - **Performance**: Spatial/local intensity disabled by default
 
@@ -241,6 +246,8 @@ Calculates radiomic features from the current state.
 | `"local_intensity"` | Local/global intensity peak features only |
 | `"morphology"` | Shape and size features (Volume, Sphericity, etc.) |
 | `"texture"` | GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM |
+| `"glcm"`, `"glrlm"`, `"glszm"`, `"gldzm"`, `"ngtdm"`, `"ngldm"` | Individual texture subfamilies |
+| `"texture_glcm"`, `"texture_glrlm"`, etc. | Explicit texture-subfamily aliases |
 | `"histogram"` | Intensity histogram features |
 | `"ivh"` | Intensity-Volume Histogram features |
 
@@ -372,7 +379,9 @@ row = format_results(results, fmt="wide", meta={"subject_id": "case1"})
 
 ## Feature Catalog
 
-The [`describe_features()`][pictologics.pipeline.RadiomicsPipeline.describe_features] method returns a DataFrame cataloguing every feature the pipeline will produce **before** you run it.  Each row is one *(configuration, feature)* pair with columns describing the feature identity, family membership, and preprocessing parameters.
+The [`describe_features()`][pictologics.pipeline.RadiomicsPipeline.describe_features] method returns a DataFrame cataloguing every feature the pipeline will produce **before** you run it.  Each row is one *(configuration, feature)* pair with columns describing the feature identity, family membership, and the preprocessing state at the `extract_features` step that produces that feature.
+
+The catalog follows the same ordered step model as configuration files. If a configuration repeats a preprocessing step, the corresponding `*_params` cell contains a compact JSON array with one entry per occurrence, including the original 1-based `step_index`. This keeps CSV exports readable while preserving a machine-readable audit trail.
 
 ```python
 pipeline = RadiomicsPipeline()
@@ -389,9 +398,20 @@ catalog.head()
 | `family` | Granular family (e.g. `glcm`, `ivh`) |
 | `family_group` | Broad category: *Intensity*, *Morphology*, or *Texture* |
 | `requires_discretisation` | Whether the family needs discretised input |
+| `source_mode` / `sentinel_value` | Source-mask configuration metadata |
+| `feature_extraction_step_index` / `feature_extraction_params` | Which `extract_features` step produced the row and its parameters |
+| `preprocessing_sequence` | Ordered preprocessing steps before extraction, e.g. `1:resample > 2:resegment > 3:discretise` |
+| `preprocessing_steps` | Full ordered preprocessing step records as compact JSON |
 | `is_discretised` / `discretisation_method` / `discretisation_param` | Discretisation details |
 | `is_resampled` / `resampling_spacing` / `interpolation` | Resampling details |
+| `is_resegmented` / `resegment_params` | Resegmentation details |
+| `is_outlier_filtered` / `filter_outliers_params` | Outlier filtering details |
+| `is_intensity_rounded` / `round_intensities_params` | Intensity rounding details |
+| `keeps_largest_component` / `keep_largest_component_params` | Largest-component mask processing details |
+| `is_mask_binarized` / `binarize_mask_params` | Mask binarization details |
 | `is_filtered` / `filter_type` / `filter_params` | Response-map filter details |
+
+The step-parameter columns (`resample_params`, `resegment_params`, `discretise_params`, `filter_params`, etc.) contain only parameters explicitly present in the configuration. Effective summary columns such as `interpolation` and `discretisation_method` include runtime defaults when a step omits them.
 
 ### Typical Use Cases
 
@@ -432,6 +452,7 @@ When configs share preprocessing but differ only in discretization:
 
 - **Morphology** and **intensity** are computed **once** and reused
 - **Texture** and **histogram** are computed per configuration
+- Cache reuse is scoped by feature family as well as preprocessing signature; texture, histogram, and IVH do not reuse each other's cached values.
 
 ### Checking Statistics
 

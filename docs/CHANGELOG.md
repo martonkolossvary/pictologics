@@ -2,6 +2,22 @@
 
 <!-- towncrier release notes start -->
 
+## [0.4.1] - 2026-05-05
+
+### Changed
+
+- load_image and load_and_merge_images now accept subvoxel_tolerance, subvoxel_warning_threshold, and min_overlap_fraction parameters for configurable sub-voxel alignment handling when repositioning cropped masks. RadiomicsPipeline.run() exposes the same controls via mask_subvoxel_tolerance, mask_subvoxel_warning_threshold, and mask_min_overlap_fraction. Repositioning settings are recorded in the pipeline run log.
+
+### Fixed
+
+- Expanded describe_features() so feature catalog rows record ordered preprocessing metadata, repeated step parameters, source-mode context, and extraction-step parameters in machine-readable columns.
+- Fixed multi-configuration deduplication so texture, histogram, and IVH families no longer reuse each other's cached results when they share the same preprocessing signature.
+- Fixed physical geometry validation for masks and source masks, including direction-aware cropped repositioning and axis-transpose metadata handling.
+- Fixed silent empty-array return when a repositioned mask has no overlap with the reference image. This now raises a ValueError by default (controlled by min_overlap_fraction) to prevent undetected wrong-patient mask loading. Set min_overlap_fraction=0.0 to restore the previous warn-and-continue behaviour.
+- Fixed texture subfamily aliases, NIfTI direction normalization, direction-aware geometry updates, and per-slice DICOM rescale handling.
+- Updated configuration validation so serialized configs using current resampling, discretisation, and IVH runtime parameters no longer emit false unknown-parameter warnings.
+
+
 ## [0.4.0] - 2026-04-14
 
 ### Added
@@ -157,3 +173,4 @@
 [0.3.0]: https://github.com/martonkolossvary/pictologics/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/martonkolossvary/pictologics/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/martonkolossvary/pictologics/releases/tag/v0.1.0
+[0.4.1]: https://github.com/martonkolossvary/pictologics/compare/v0.3.5...v0.4.1

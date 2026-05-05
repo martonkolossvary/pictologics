@@ -16,7 +16,7 @@ The configuration system enables you to:
 Pictologics includes **6 standard configurations** optimized for radiomics feature extraction. All standard configurations share these characteristics:
 
 - Isotropic resampling to **0.5mm × 0.5mm × 0.5mm**
-- Cubic interpolation for images, nearest-neighbor for masks
+- Linear interpolation for images, nearest-neighbor for masks
 - Complete feature extraction: **intensity**, **morphology**, **texture**, **histogram**, and **IVH**
 - Performance-optimized: spatial and local intensity features disabled by default
 
@@ -93,7 +93,7 @@ standard_fbn_32:
     - step: resample
       params:
         new_spacing: [0.5, 0.5, 0.5]
-        interpolation: cubic
+        interpolation: linear
     - step: discretise
       params:
         method: FBN
@@ -129,7 +129,7 @@ standard_fbs_16:
     - step: resample
       params:
         new_spacing: [0.5, 0.5, 0.5]
-        interpolation: cubic
+        interpolation: linear
     - step: discretise
       params:
         method: FBS
@@ -190,6 +190,13 @@ pipeline.add_config("fbn_32_with_spatial", config)
 
 Pictologics supports **YAML** and **JSON** formats for configuration files. YAML is recommended for human readability.
 
+Configuration files are ordered step lists. The pipeline applies each step in
+the order shown, and repeated preprocessing steps are allowed. The feature
+catalog returned by `describe_features()` mirrors this model: for every output
+feature it records the preprocessing steps that occurred before the
+`extract_features` step, including repeated-step parameters as compact JSON
+arrays.
+
 ### YAML Format Specification
 
 ```yaml
@@ -197,19 +204,21 @@ schema_version: "1.0"
 exported_at: "2026-01-31T12:00:00.000000"
 configs:
   my_custom_config:
-    - step: resample
-      params:
-        new_spacing: [1.0, 1.0, 1.0]
-    - step: discretise
-      params:
-        method: FBN
-        n_bins: 32
-    - step: extract_features
-      params:
-        families:
-          - intensity
-          - morphology
-          - texture
+    source_mode: full_image
+    steps:
+      - step: resample
+        params:
+          new_spacing: [1.0, 1.0, 1.0]
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+            - texture
 ```
 
 ### JSON Format Specification
@@ -219,23 +228,31 @@ configs:
   "schema_version": "1.0",
   "exported_at": "2026-01-31T12:00:00.000000",
   "configs": {
-    "my_custom_config": [
-      {
-        "step": "resample",
-        "params": {"new_spacing": [1.0, 1.0, 1.0]}
-      },
-      {
-        "step": "discretise",
-        "params": {"method": "FBN", "n_bins": 32}
-      },
-      {
-        "step": "extract_features",
-        "params": {"families": ["intensity", "morphology", "texture"]}
-      }
-    ]
+    "my_custom_config": {
+      "source_mode": "full_image",
+      "steps": [
+        {
+          "step": "resample",
+          "params": {"new_spacing": [1.0, 1.0, 1.0]}
+        },
+        {
+          "step": "discretise",
+          "params": {"method": "FBN", "n_bins": 32}
+        },
+        {
+          "step": "extract_features",
+          "params": {"families": ["intensity", "morphology", "texture"]}
+        }
+      ]
+    }
   }
 }
 ```
+
+For backward compatibility, loaders also accept the older shorthand where a
+configuration value is directly a list of steps. New exports use the explicit
+`steps` form so configuration-level metadata such as `source_mode` and
+`sentinel_value` can round-trip.
 
 ### Schema Versioning
 
@@ -605,25 +622,27 @@ schema_version: "1.0"
 exported_at: "2026-01-31T10:30:00.000000"
 configs:
   lung_nodule_fbs25:
-    - step: resample
-      params:
-        new_spacing: [0.5, 0.5, 0.5]
-        interpolation: cubic
-    - step: resegment
-      params:
-        range_min: -1000
-        range_max: 400
-    - step: keep_largest_component
-      params: {}
-    - step: discretise
-      params:
-        method: FBS
-        bin_width: 25.0
-    - step: extract_features
-      params:
-        families: [intensity, morphology, texture, histogram, ivh]
-        include_spatial_intensity: false
-        include_local_intensity: false
+    source_mode: full_image
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+          interpolation: cubic
+      - step: resegment
+        params:
+          range_min: -1000
+          range_max: 400
+      - step: keep_largest_component
+        params: {}
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 25.0
+      - step: extract_features
+        params:
+          families: [intensity, morphology, texture, histogram, ivh]
+          include_spatial_intensity: false
+          include_local_intensity: false
   lung_nodule_fbs50:
     # ... similar structure with bin_width: 50.0
 ```

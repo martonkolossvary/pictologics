@@ -36,15 +36,82 @@ transposed for correct display.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import nibabel as nib
 import numpy as np
 import pydicom
 from numpy import typing as npt
 from numpy.typing import DTypeLike
+
+
+def _direction_matrix(direction: Any) -> npt.NDArray[np.float64]:
+    """Return a 3x3 world direction matrix, defaulting to identity."""
+    if direction is None:
+        return np.eye(3, dtype=np.float64)
+    matrix = np.asarray(direction, dtype=np.float64)
+    if matrix.shape == (9,):
+        matrix = matrix.reshape((3, 3))
+    if matrix.shape != (3, 3):
+        raise ValueError(f"Direction must be a 3x3 matrix, got shape {matrix.shape}.")
+    return matrix
+
+
+def _validate_geometry(
+    target: Image,
+    reference: Image,
+    target_name: str = "target image",
+    reference_name: str = "reference image",
+    *,
+    check_shape: bool = True,
+    check_spacing: bool = True,
+    check_origin: bool = True,
+    check_direction: bool = True,
+    atol: float = 1e-5,
+    rtol: float = 1e-5,
+) -> None:
+    """Validate that two images occupy the same voxel grid in physical space."""
+    if check_shape and target.array.shape != reference.array.shape:
+        raise ValueError(
+            f"Dimension mismatch between {target_name} {target.array.shape} "
+            f"and {reference_name} {reference.array.shape}."
+        )
+    if check_spacing and not np.allclose(
+        target.spacing, reference.spacing, atol=atol, rtol=rtol
+    ):
+        raise ValueError(
+            f"Spacing mismatch between {target_name} {target.spacing} "
+            f"and {reference_name} {reference.spacing}."
+        )
+    if check_origin and not np.allclose(
+        target.origin, reference.origin, atol=atol, rtol=rtol
+    ):
+        raise ValueError(
+            f"Origin mismatch between {target_name} {target.origin} "
+            f"and {reference_name} {reference.origin}."
+        )
+    if check_direction and not np.allclose(
+        _direction_matrix(target.direction),
+        _direction_matrix(reference.direction),
+        atol=atol,
+        rtol=rtol,
+    ):
+        raise ValueError(f"Direction mismatch between {target_name} and {reference_name}.")
+
+
+def _normalize_direction_columns(
+    matrix: npt.NDArray[np.floating[Any]],
+) -> npt.NDArray[np.float64]:
+    """Convert affine columns with voxel scaling into unit direction cosines."""
+    direction = np.asarray(matrix, dtype=np.float64).copy()
+    norms = np.linalg.norm(direction, axis=0)
+    safe_norms = np.where(norms > 0.0, norms, 1.0)
+    direction = direction / safe_norms
+    direction[:, norms == 0.0] = np.eye(3)[:, norms == 0.0]
+    return cast(npt.NDArray[np.float64], direction)
 
 
 @dataclass
@@ -103,7 +170,7 @@ class Image:
             New Image with source_mask set.
 
         Raises:
-            ValueError: If mask shape doesn't match image shape.
+            ValueError: If mask shape or physical geometry doesn't match image geometry.
 
         Example:
             ```python
@@ -121,6 +188,7 @@ class Image:
             ```
         """
         if isinstance(mask, Image):
+            _validate_geometry(mask, self, "source mask", "image")
             # Explicit cast to bool to satisfy type checker
             mask_arr = (mask.array > 0).astype(bool)
         else:
@@ -180,6 +248,9 @@ def _position_in_reference(
     reference: Image,
     fill_value: float = 0.0,
     transpose_axes: tuple[int, int, int] | None = None,
+    subvoxel_tolerance: float = 0.5,
+    subvoxel_warning_threshold: float = 0.01,
+    min_overlap_fraction: float = 0.5,
 ) -> Image:
     """
     Position a smaller (cropped) image within a larger reference volume.
@@ -196,57 +267,115 @@ def _position_in_reference(
         transpose_axes: Optional tuple to transpose the image axes before positioning.
             Use this if the cropped image has a different axis order than expected.
             E.g., (0, 2, 1) swaps Y and Z axes.
+        subvoxel_tolerance: Maximum permitted fractional-voxel offset before raising
+            a ``ValueError`` (default: 0.5). At the default of 0.5 — the mathematical
+            maximum achievable by rounding — valid masks always succeed without error.
+            Lower this (e.g. 0.1) to catch suspiciously imprecise coordinates.
+        subvoxel_warning_threshold: Fractional-voxel offset above which a
+            ``UserWarning`` is emitted even though processing continues (default:
+            0.01, roughly 1 % of a voxel). Offsets below this value are treated as
+            floating-point noise and are snapped silently.
+        min_overlap_fraction: Minimum fraction of the mask's voxel volume that must
+            lie within the reference image space (default: 0.5). If the intersection
+            volume is less than this fraction of the mask volume, a ``ValueError`` is
+            raised to prevent silently loading a completely wrong mask. Set to 0.0
+            to disable this check.
 
     Returns:
         Image: A new Image with the same shape as reference, containing the
             repositioned data from the input image.
 
     Raises:
-        ValueError: If spacing is incompatible between image and reference.
+        ValueError: If spacing, direction, sub-voxel tolerance, or minimum overlap
+            fraction checks fail.
     """
-    import warnings
 
-    # 1. Apply optional axis transposition
+    # 0. Validate parameters
+    if not 0.0 <= min_overlap_fraction <= 1.0:
+        raise ValueError(
+            f"min_overlap_fraction must be in [0.0, 1.0], got {min_overlap_fraction}."
+        )
+    if subvoxel_tolerance < 0.0:
+        raise ValueError(
+            f"subvoxel_tolerance must be >= 0.0, got {subvoxel_tolerance}."
+        )
+    if subvoxel_warning_threshold < 0.0:
+        raise ValueError(
+            f"subvoxel_warning_threshold must be >= 0.0, got {subvoxel_warning_threshold}."
+        )
+    if subvoxel_warning_threshold > subvoxel_tolerance:
+        raise ValueError(
+            f"subvoxel_warning_threshold ({subvoxel_warning_threshold}) must be <= "
+            f"subvoxel_tolerance ({subvoxel_tolerance}). "
+            "Offsets above the tolerance raise an error before a warning is emitted, "
+            "so a threshold above the tolerance would never trigger a warning."
+        )
+
+    # 1. Apply optional axis transposition and keep voxel-axis metadata in sync.
     data = image.array
+    img_spacing = np.asarray(image.spacing, dtype=np.float64)
+    img_direction_arr = _direction_matrix(image.direction)
     if transpose_axes is not None:
-        data = np.transpose(data, transpose_axes)
+        axes = tuple(transpose_axes)
+        if sorted(axes) != [0, 1, 2]:
+            raise ValueError(
+                f"transpose_axes must be a permutation of (0, 1, 2), got {transpose_axes}."
+            )
+        data = np.transpose(data, axes)
+        img_spacing = img_spacing[list(axes)]
+        img_direction_arr = img_direction_arr[:, list(axes)]
 
     # 2. Validate spacing compatibility (allow 1% tolerance)
-    img_spacing = np.array(image.spacing)
-    ref_spacing = np.array(reference.spacing)
+    ref_spacing = np.asarray(reference.spacing, dtype=np.float64)
     if not np.allclose(img_spacing, ref_spacing, rtol=0.01):
         raise ValueError(
-            f"Spacing mismatch: image {image.spacing} vs reference {reference.spacing}. "
+            f"Spacing mismatch: image {tuple(img_spacing)} vs reference {reference.spacing}. "
             "Resampling would be required but is not yet supported."
         )
 
     # 3. Get spatial parameters
-    ref_origin = np.array(reference.origin)
+    ref_origin = np.asarray(reference.origin, dtype=np.float64)
 
-    img_origin = np.array(image.origin)
-    img_direction_arr = np.array(
-        image.direction if image.direction is not None else np.eye(3)
-    )
-    ref_direction_arr = np.array(
-        reference.direction if reference.direction is not None else np.eye(3)
-    )
+    img_origin = np.asarray(image.origin, dtype=np.float64)
+    ref_direction_arr = _direction_matrix(reference.direction)
 
     # 4. Check orientation compatibility
     # Use np.max(np.abs(...)) for robustness
     orientation_diff = np.max(np.abs(img_direction_arr - ref_direction_arr))
     if orientation_diff > 0.01:
-        warnings.warn(
+        raise ValueError(
             f"Orientation mismatch detected (max diff={orientation_diff:.4f}). "
-            "Repositioning may not be accurate for rotated images.",
-            UserWarning,
-            stacklevel=2,
+            "Reorientation or nearest-neighbor resampling is required before "
+            "translation-only repositioning."
         )
 
     # 5. Calculate voxel offset
-    # Convert image origin (world coords) to reference voxel indices
-    # For aligned directions: offset = (img_origin - ref_origin) / spacing
+    # Convert image origin (world coords) to reference local voxel indices.
     world_offset = img_origin - ref_origin
-    voxel_offset = np.round(world_offset / ref_spacing).astype(int)
+    local_offset = np.linalg.pinv(ref_direction_arr) @ world_offset
+    voxel_offset_float = local_offset / ref_spacing
+    voxel_offset_rounded = np.round(voxel_offset_float)
+
+    max_offset_diff = float(np.max(np.abs(voxel_offset_float - voxel_offset_rounded)))
+    if max_offset_diff > subvoxel_tolerance:
+        raise ValueError(
+            f"Sub-voxel offset {max_offset_diff:.4f} voxels exceeds the configured "
+            f"subvoxel_tolerance={subvoxel_tolerance}. "
+            f"Computed per-axis offset: {tuple(np.round(voxel_offset_float, 4))}. "
+            "Use a higher subvoxel_tolerance to allow nearest-voxel snapping, or "
+            "resample the mask to the reference grid for precise alignment."
+        )
+    if max_offset_diff > subvoxel_warning_threshold:
+        warnings.warn(
+            f"Sub-voxel misalignment detected during repositioning "
+            f"({max_offset_diff:.4f} voxels max drift). "
+            f"Computed per-axis offset: {tuple(np.round(voxel_offset_float, 3))}. "
+            "Snapping to nearest voxel. For precise sub-voxel alignment, "
+            "resampling should be used.",
+            UserWarning,
+            stacklevel=2,
+        )
+    voxel_offset = voxel_offset_rounded.astype(int)
 
     # 6. Create output array with reference shape, filled with fill_value
     output = np.full(reference.array.shape, fill_value, dtype=data.dtype)
@@ -265,15 +394,28 @@ def _position_in_reference(
     dst_start = np.array([max(0, voxel_offset[i]) for i in range(3)])
     dst_end = dst_start + (src_end - src_start)
 
-    # 8. Validate ranges are valid (image overlaps with reference)
-    if np.any(src_end <= src_start) or np.any(dst_end <= dst_start):
+    # 8. Validate overlap fraction between mask and reference image
+    intersection_vol = int(np.prod(np.maximum(0, src_end - src_start)))
+    mask_vol = int(np.prod(data.shape))
+    overlap_fraction = intersection_vol / mask_vol if mask_vol > 0 else 0.0
+    if overlap_fraction < min_overlap_fraction:
+        raise ValueError(
+            f"Mask overlaps only {overlap_fraction:.1%} of its own volume with the "
+            f"reference image (required: {min_overlap_fraction:.1%}). "
+            f"Mask origin: {image.origin}, Reference origin: {reference.origin}. "
+            "Check that the correct mask is being loaded for this image. "
+            "Set min_overlap_fraction=0.0 to disable this check."
+        )
+
+    if intersection_vol == 0:
+        # Reached only when min_overlap_fraction=0.0 — preserve backward-compatible
+        # warning behaviour (return empty volume rather than raising).
         warnings.warn(
-            f"Cropped image does not overlap with reference volume. "
+            "Cropped image does not overlap with reference volume. "
             f"Image origin: {image.origin}, Reference origin: {reference.origin}",
             UserWarning,
             stacklevel=2,
         )
-        # Return empty volume with reference geometry
         return Image(
             array=output,
             spacing=reference.spacing,
@@ -365,6 +507,9 @@ def load_image(
     transpose_axes: tuple[int, int, int] | None = None,
     fill_value: float = 0.0,
     apply_rescale: bool = True,
+    subvoxel_tolerance: float = 0.5,
+    subvoxel_warning_threshold: float = 0.01,
+    min_overlap_fraction: float = 0.5,
 ) -> Image:
     """
     Load a medical image from a file path or directory.
@@ -408,6 +553,15 @@ def load_image(
             transformation for DICOM files to convert stored pixel values to real-world
             values (e.g., Hounsfield Units for CT). NIfTI files always apply their scaling
             factors via nibabel's get_fdata(). Set to False if you need raw stored values.
+        subvoxel_tolerance (float): Maximum permitted fractional-voxel offset when
+            repositioning (default: 0.5). Only used when reference_image is provided.
+            See ``_position_in_reference`` for full description.
+        subvoxel_warning_threshold (float): Fractional-voxel drift above which a
+            ``UserWarning`` is emitted during repositioning (default: 0.01). Only used
+            when reference_image is provided.
+        min_overlap_fraction (float): Minimum fraction of the mask volume that must
+            intersect with the reference image space (default: 0.5). Only used when
+            reference_image is provided.
 
     Returns:
         Image: An `Image` object containing the 3D numpy array and metadata (spacing, origin, etc.).
@@ -525,7 +679,17 @@ def load_image(
     if reference_image is not None:
         if loaded_image.array.shape != reference_image.array.shape:
             loaded_image = _position_in_reference(
-                loaded_image, reference_image, fill_value, transpose_axes
+                loaded_image,
+                reference_image,
+                fill_value,
+                transpose_axes,
+                subvoxel_tolerance,
+                subvoxel_warning_threshold,
+                min_overlap_fraction,
+            )
+        else:
+            _validate_geometry(
+                loaded_image, reference_image, "loaded image", "reference image"
             )
 
     return loaded_image
@@ -543,6 +707,9 @@ def load_and_merge_images(
     fill_value: float = 0.0,
     relabel_masks: bool = False,
     apply_rescale: bool = True,
+    subvoxel_tolerance: float = 0.5,
+    subvoxel_warning_threshold: float = 0.01,
+    min_overlap_fraction: float = 0.5,
 ) -> Image:
     """
     Load multiple images (e.g., masks or partial scans) and merge them into a single image.
@@ -611,6 +778,15 @@ def load_and_merge_images(
         apply_rescale (bool): If True (default), apply RescaleSlope and RescaleIntercept
             transformation for DICOM files to convert stored pixel values to real-world
             values (e.g., Hounsfield Units for CT). Set to False if you need raw stored values.
+        subvoxel_tolerance (float): Maximum permitted fractional-voxel offset when
+            repositioning (default: 0.5). Only used when ``reposition_to_reference=True``.
+            See ``_position_in_reference`` for full description.
+        subvoxel_warning_threshold (float): Fractional-voxel drift above which a
+            ``UserWarning`` is emitted during repositioning (default: 0.01). Only used
+            when ``reposition_to_reference=True``.
+        min_overlap_fraction (float): Minimum fraction of each mask volume that must
+            intersect with the reference image space (default: 0.5). Only used when
+            ``reposition_to_reference=True``.
 
     Note:
         The `binarize` parameter is intended for **mask filtering** (e.g., selecting specific ROI labels).
@@ -654,27 +830,6 @@ def load_and_merge_images(
             "reference_image must be provided when reposition_to_reference=True."
         )
 
-    # Geometry validation helper
-    def _validate_geometry(target: Image, ref: Image, name: str, ref_name: str) -> None:
-        if target.array.shape != ref.array.shape:
-            raise ValueError(
-                f"Dimension mismatch between {name} {target.array.shape} "
-                f"and {ref_name} {ref.array.shape}."
-            )
-        if not np.allclose(target.spacing, ref.spacing, atol=1e-5):
-            raise ValueError(
-                f"Spacing mismatch between {name} {target.spacing} "
-                f"and {ref_name} {ref.spacing}."
-            )
-        if not np.allclose(target.origin, ref.origin, atol=1e-5):
-            raise ValueError(
-                f"Origin mismatch between {name} {target.origin} "
-                f"and {ref_name} {ref.origin}."
-            )
-        if target.direction is not None and ref.direction is not None:
-            if not np.allclose(target.direction, ref.direction, atol=1e-5):
-                raise ValueError(f"Direction mismatch between {name} and {ref_name}.")
-
     if reposition_to_reference:
         # Mode: Reposition each image to reference space, then merge
         assert reference_image is not None  # Already validated above
@@ -697,7 +852,13 @@ def load_and_merge_images(
 
             # Reposition to reference space
             repositioned = _position_in_reference(
-                current_image, reference_image, fill_value, transpose_axes
+                current_image,
+                reference_image,
+                fill_value,
+                transpose_axes,
+                subvoxel_tolerance,
+                subvoxel_warning_threshold,
+                min_overlap_fraction,
             )
 
             # Validate geometry after repositioning
@@ -951,7 +1112,7 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
     # Extract affine for origin and direction
     affine = nii_img.affine  # type: ignore
     origin = (float(affine[0, 3]), float(affine[1, 3]), float(affine[2, 3]))
-    direction = affine[:3, :3]
+    direction = _normalize_direction_columns(affine[:3, :3])
 
     return Image(
         array=array,
@@ -1094,7 +1255,15 @@ def _load_dicom_series(
     # pydicom pixel_array is (Rows, Columns) -> (Y, X)
     # We want (X, Y, Z)
     try:
-        pixel_data = [s.pixel_array for s in slices]
+        pixel_data = []
+        for s in slices:
+            pixels = s.pixel_array
+            if apply_rescale:
+                slope = float(getattr(s, "RescaleSlope", 1.0))
+                intercept = float(getattr(s, "RescaleIntercept", 0.0))
+                if slope != 1.0 or intercept != 0.0:
+                    pixels = pixels.astype(np.float64) * slope + intercept
+            pixel_data.append(pixels)
     except Exception as e:
         raise ValueError("Failed to extract pixel arrays from DICOM slices.") from e
 
@@ -1148,14 +1317,6 @@ def _load_dicom_series(
         direction = np.stack([row_cosines, col_cosines, slice_cosine], axis=1)
     except (AttributeError, ValueError):
         direction = np.eye(3)
-
-    # Apply Rescale Slope and Intercept (Hounsfield Units conversion)
-    if apply_rescale:
-        slope = getattr(ref, "RescaleSlope", 1.0)
-        intercept = getattr(ref, "RescaleIntercept", 0.0)
-
-        if slope != 1.0 or intercept != 0.0:
-            volume = volume.astype(np.float64) * float(slope) + float(intercept)
 
     return Image(
         array=volume,

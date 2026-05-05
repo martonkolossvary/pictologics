@@ -452,6 +452,56 @@ class TestPipelineDeduplicationIntegration:
         assert "simple" in results
         assert len(results["simple"]) > 0
 
+    def test_deduplication_cache_is_scoped_by_feature_family(self):
+        """Families with identical signatures must not reuse each other's cached values."""
+        array = np.arange(1, 126, dtype=np.float32).reshape(5, 5, 5)
+        image = Image(
+            array=array,
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+            modality="CT",
+        )
+        mask = Image(
+            array=np.ones_like(array, dtype=np.uint8),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+            modality="SEG",
+        )
+        steps = [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
+            {
+                "step": "extract_features",
+                "params": {"families": ["texture", "histogram", "ivh"]},
+            },
+        ]
+        feature_keys = [
+            "angular_second_moment_8ZQL",
+            "mean_discretised_intensity_X6K6",
+            "volume_at_intensity_fraction_0.10_BC2M_10",
+        ]
+
+        dedup_pipeline = RadiomicsPipeline(deduplicate=True, load_standard=False)
+        no_dedup_pipeline = RadiomicsPipeline(deduplicate=False, load_standard=False)
+        for pipeline in (dedup_pipeline, no_dedup_pipeline):
+            pipeline.add_config("cfg1", steps)
+            pipeline.add_config("cfg2", steps)
+
+        dedup_results = dedup_pipeline.run(image, mask, config_names=["cfg1", "cfg2"])
+        no_dedup_results = no_dedup_pipeline.run(image, mask, config_names=["cfg1", "cfg2"])
+
+        assert dedup_pipeline.deduplication_stats == {
+            "reused_families": 3,
+            "computed_families": 3,
+            "cache_hit_rate": 0.5,
+        }
+        for config_name in ("cfg1", "cfg2"):
+            for key in feature_keys:
+                value = dedup_results[config_name][key]
+                assert not np.isnan(value), f"{config_name}:{key} should not be NaN"
+                assert value == pytest.approx(no_dedup_results[config_name][key])
+
     def test_deduplication_stats_empty_before_run(self):
         """deduplication_stats should return empty dict with warning before run()."""
         import warnings
@@ -727,7 +777,16 @@ class TestConfigurationAnalyzerEdgeCases:
         # This tests line 575: unknown family skip
         configs = {
             "test": [
-                {"step": "extract_features", "params": {"families": ["unknown_family", "intensity"]}}
+                {
+                    "step": "extract_features",
+                    "params": {
+                        "families": [
+                            "unknown_family",
+                            "texture_unknown",
+                            "intensity",
+                        ]
+                    },
+                }
             ]
         }
         analyzer = ConfigurationAnalyzer(configs)
@@ -735,6 +794,7 @@ class TestConfigurationAnalyzerEdgeCases:
         # Should have signature for intensity but not unknown_family
         assert ("test", "intensity") in plan.signatures
         assert ("test", "unknown_family") not in plan.signatures
+        assert ("test", "texture_unknown") not in plan.signatures
 
     def test_analyzer_handles_spatial_intensity_flag(self):
         """Analyzer should add spatial_intensity when include_spatial_intensity=True."""
@@ -778,3 +838,23 @@ class TestConfigurationAnalyzerEdgeCases:
         # Should have signatures for all texture sub-families
         for subfam in ["glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm"]:
             assert ("test", subfam) in plan.signatures
+
+    def test_analyzer_normalizes_texture_aliases(self):
+        """Analyzer should map texture_* aliases onto raw texture subfamilies."""
+        configs = {
+            "raw": [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+                {"step": "extract_features", "params": {"families": ["glcm"]}},
+            ],
+            "alias": [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+                {"step": "extract_features", "params": {"families": ["texture_glcm"]}},
+            ],
+        }
+        analyzer = ConfigurationAnalyzer(configs)
+        plan = analyzer.analyze()
+
+        assert ("raw", "glcm") in plan.signatures
+        assert ("alias", "glcm") in plan.signatures
+        assert ("alias", "texture_glcm") not in plan.signatures
+        assert plan.sources[("alias", "glcm")] == "raw"

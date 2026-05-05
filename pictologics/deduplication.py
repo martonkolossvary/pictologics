@@ -31,6 +31,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+_TEXTURE_FAMILIES = {"glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm"}
+
 # =============================================================================
 # Deduplication Rules
 # =============================================================================
@@ -597,14 +599,23 @@ class ConfigurationAnalyzer:
                 params = step.get("params", {})
                 # Get explicitly listed families
                 family_list = params.get(
-                    "families", ["intensity", "morphology", "texture", "histogram", "ivh"]
+                    "families",
+                    ["intensity", "morphology", "texture", "histogram", "ivh"],
                 )
-                families.update(family_list)
+                for family in family_list:
+                    if family.startswith("texture_"):
+                        texture_family = family.removeprefix("texture_")
+                        if texture_family in _TEXTURE_FAMILIES:
+                            families.add(texture_family)
+                        else:
+                            families.add(family)
+                    else:
+                        families.add(family)
 
                 # Check for texture sub-families
                 if "texture" in families:
                     # Texture expands to all texture families
-                    families.update(["glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm"])
+                    families.update(_TEXTURE_FAMILIES)
 
                 # Check optional intensity features
                 if params.get("include_spatial_intensity", False):

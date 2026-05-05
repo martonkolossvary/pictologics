@@ -595,6 +595,45 @@ class TestValidation:
         is_valid = RadiomicsPipeline._validate_config("test", custom_config)
         assert is_valid is True
 
+    def test_validate_accepts_supported_runtime_parameters(self) -> None:
+        """Validation schema should match supported pipeline parameters."""
+        import warnings
+
+        config = [
+            {
+                "step": "resample",
+                "params": {
+                    "new_spacing": (1.0, 1.0, 1.0),
+                    "mask_interpolation": "linear",
+                    "mask_threshold": 0.25,
+                    "round_intensities": True,
+                },
+            },
+            {
+                "step": "discretise",
+                "params": {"method": "FBN", "n_bins": 8, "min_val": 0, "max_val": 100},
+            },
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["ivh"],
+                    "ivh_use_continuous": True,
+                    "ivh_discretisation": {"method": "FBS", "bin_width": 5},
+                },
+            },
+        ]
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            is_valid = RadiomicsPipeline._validate_config("test", config)
+
+        assert is_valid is True
+        assert not [
+            warning
+            for warning in w
+            if "unknown parameter" in str(warning.message).lower()
+        ]
+
     def test_validate_unknown_step_type(self) -> None:
         """Test validation warns for unknown step type."""
         import warnings

@@ -1,20 +1,20 @@
+from unittest.mock import patch
+
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch
 
-from pictologics.loader import Image
-from pictologics.pipeline import RadiomicsPipeline, SourceMode
 from pictologics.filters import (
     gabor_filter,
-    laws_filter,
     laplacian_of_gaussian,
+    laws_filter,
     mean_filter,
     riesz_log,
     riesz_simoncelli,
-    wavelet_transform,
     simoncelli_wavelet,
-    BoundaryCondition,
+    wavelet_transform,
 )
+from pictologics.loader import Image
+from pictologics.pipeline import RadiomicsPipeline
 from pictologics.preprocessing import resample_image
 
 

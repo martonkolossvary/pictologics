@@ -65,8 +65,8 @@ You want to:
         You typically need both: `source_mode="auto"` to protect preprocessing, and `resegment` to
         define the correct ROI for analysis.
     - **Automatic sentinel detection**: With `source_mode="auto"`, the pipeline scans for common sentinel values
-      (-2048, -1024, -1000, 0, -32768) and emits a `UserWarning` if one is found, so you can verify which value
-      was detected in each image.
+      (-2048, -1024, -1000, 0, -32768) and records detected values in the processing log so you can verify which
+      value was detected in each image.
     - **Mask generation**: When `mask` is omitted, the pipeline generates a full ROI mask. The `resegment` step
       then removes sentinel voxels from the ROI, effectively deriving the correct analysis mask automatically
       from the non-sentinel voxels.
@@ -743,6 +743,27 @@ You want to:
         main()
     ```
 
+!!! tip "DICOM masks with sub-voxel coordinate offsets"
+    Some DICOM vendors store segmentation origins with minor floating-point imprecision,
+    causing sub-voxel misalignment with the reference image. If you see `UserWarning`
+    messages about sub-voxel drift during loading, this is handled automatically via
+    nearest-voxel snapping. To suppress these warnings for a known-good dataset,
+    raise `subvoxel_warning_threshold`:
+
+    ```python
+    mask = load_and_merge_images(
+        seg_paths,
+        reference_image=image,
+        reposition_to_reference=True,
+        subvoxel_warning_threshold=0.1,  # warn only for > 10% voxel drift
+    )
+    ```
+
+    To prevent loading masks from the wrong patient, the default `min_overlap_fraction=0.5`
+    ensures at least 50% of each mask's volume must lie within the reference scan space.
+    A `ValueError` is raised if this threshold is not met. Lower it if masks legitimately
+    extend beyond the scan boundary (e.g. whole-organ segmentations near the scan edge).
+
 ## Case 5: Batch radiomics from DICOM SEG files with multiple segments
 
 ### Scenario
@@ -1103,6 +1124,7 @@ When configs share preprocessing but differ only in discretization:
 
 - **Morphology** and **intensity** features are computed **once** and reused.
 - **Texture**, **histogram**, and (typically) **IVH** are computed **per configuration**.
+- Cache reuse is scoped by feature family, so histogram and IVH features are never copied from texture results even when their preprocessing dependencies match.
 
 ### How Results Are Handled
 
@@ -1112,7 +1134,7 @@ When configs share preprocessing but differ only in discretization:
 | What happens | Details |
 | :--- | :--- |
 | **First config** | All feature families are computed and stored in cache |
-| **Subsequent configs** | Matching families are **copied** from cache; differing families are computed fresh |
+| **Subsequent configs** | Matching feature families are **copied** from cache; differing families are computed fresh |
 | **Final results** | Every config has **complete features**—no NaN values, no missing columns |
 
 This means when you concatenate results into a DataFrame for machine learning or statistical analysis, all rows are complete:

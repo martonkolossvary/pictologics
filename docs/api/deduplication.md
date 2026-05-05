@@ -43,7 +43,7 @@ When deduplication reuses features from a previous configuration, the features a
 
 | Scenario | Behavior |
 | :--- | :--- |
-| **deduplicate=True** (default) | Features computed once, then **copied** to all configs with matching preprocessing. All configs receive complete feature sets. |
+| **deduplicate=True** (default) | Features computed once, then **copied** to all configs with the same feature family and matching preprocessing. All configs receive complete feature sets. |
 | **deduplicate=False** | Features computed independently for each config. Same results, but slower. |
 
 ### Example: Results Structure
@@ -175,7 +175,7 @@ The deduplication system understands which preprocessing steps affect which feat
     geometry, not intensity values. This means morphology can be computed once and reused 
     across all filter configurations.
 
-When two configurations share identical values for the relevant preprocessing steps of a feature family, that family is computed once and the result is reused.
+When two configurations share identical values for the relevant preprocessing steps of a feature family, that family is computed once and the result is reused. Cache reuse is scoped by both feature family and preprocessing signature, so families such as `texture`, `histogram`, and `ivh` never reuse each other's cached values even when their relevant preprocessing steps are identical.
 
 ---
 
