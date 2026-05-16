@@ -1397,7 +1397,7 @@ def calculate_glszm_features(
             mask_u8 = (mask_c != 0).astype(np.uint8)
 
         # We need dist_map for the combined kernel signature, even if unused for GLSZM
-        dummy_dist = np.zeros_like(data_c, dtype=np.int32)
+        dummy_dist = np.zeros_like(data_c)
 
         glszm, _ = calculate_zone_features(
             data_c,
