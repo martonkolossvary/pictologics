@@ -1759,7 +1759,7 @@
 <li><strong>Hardware</strong>: Apple M4 Pro, 14 cores, 48 GB</li>
 <li><strong>OS</strong>: macOS 26.4.1 (arm64)</li>
 <li><strong>Python</strong>: 3.12.10</li>
-<li><strong>Core deps</strong>: pictologics 0.4.1, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7</li>
+<li><strong>Core deps</strong>: pictologics 0.4.2, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7</li>
 <li><strong>BLAS/LAPACK</strong>: Apple Accelerate (from <code>numpy.show_config()</code>)</li>
 </ul>
 <p>Note: the benchmark script explicitly calls <code>warmup_jit()</code> before timing to avoid including Numba compilation overhead in the measured runtimes. Timing and memory measurement are separated — <code>tracemalloc</code> is NOT active during timing to avoid biasing the comparison (its per-allocation hooks penalise pure-Python code more than JIT/C code). All calculations are repeated 5 times and the <strong>mean</strong> runtime is reported; peak memory is measured once separately.</p>
@@ -1792,73 +1792,73 @@
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0325 s</td>
+<td style="text-align: left;">0.0300 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0304 s</td>
+<td style="text-align: left;">0.0292 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0312 s</td>
+<td style="text-align: left;">0.0292 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0310 s</td>
+<td style="text-align: left;">0.0277 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0319 s</td>
+<td style="text-align: left;">0.0272 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0312 s</td>
+<td style="text-align: left;">0.0300 s</td>
 <td style="text-align: left;">0.81 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">1.3359 s</td>
+<td style="text-align: left;">1.2968 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">1.3489 s</td>
+<td style="text-align: left;">1.3398 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">1.3918 s</td>
+<td style="text-align: left;">1.3003 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">1.3653 s</td>
+<td style="text-align: left;">1.3156 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">1.3865 s</td>
+<td style="text-align: left;">1.2983 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">1.3950 s</td>
+<td style="text-align: left;">1.2869 s</td>
 <td style="text-align: left;">6.33 MB</td>
 </tr>
 <tr>
@@ -1970,133 +1970,133 @@
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0032 s</td>
+<td style="text-align: left;">0.0028 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
+<td style="text-align: left;">0.0028 s</td>
+<td style="text-align: left;">1.17 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">25</td>
+<td style="text-align: left;">FBN 16</td>
 <td style="text-align: left;">0.0027 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
-<td style="text-align: left;">FBN 16</td>
+<td style="text-align: left;">FBN 32</td>
 <td style="text-align: left;">0.0032 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
-<td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0029 s</td>
-<td style="text-align: left;">1.17 MB</td>
-</tr>
-<tr>
-<td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0029 s</td>
+<td style="text-align: left;">0.0028 s</td>
 <td style="text-align: left;">1.17 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0097 s</td>
+<td style="text-align: left;">0.0088 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0102 s</td>
+<td style="text-align: left;">0.0092 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0105 s</td>
+<td style="text-align: left;">0.0093 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0105 s</td>
+<td style="text-align: left;">0.0091 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0106 s</td>
+<td style="text-align: left;">0.0093 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0105 s</td>
+<td style="text-align: left;">0.0091 s</td>
 <td style="text-align: left;">5.43 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0175 s</td>
+<td style="text-align: left;">0.0157 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0164 s</td>
+<td style="text-align: left;">0.0160 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0164 s</td>
+<td style="text-align: left;">0.0158 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0162 s</td>
+<td style="text-align: left;">0.0165 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0163 s</td>
+<td style="text-align: left;">0.0164 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0166 s</td>
+<td style="text-align: left;">0.0170 s</td>
 <td style="text-align: left;">8.84 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0333 s</td>
+<td style="text-align: left;">0.0327 s</td>
 <td style="text-align: left;">20.46 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
+<td style="text-align: left;">0.0324 s</td>
+<td style="text-align: left;">20.46 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBS 50.0</td>
+<td style="text-align: left;">0.0331 s</td>
+<td style="text-align: left;">20.46 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBN 16</td>
+<td style="text-align: left;">0.0329 s</td>
+<td style="text-align: left;">20.46 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBN 32</td>
 <td style="text-align: left;">0.0334 s</td>
-<td style="text-align: left;">20.46 MB</td>
-</tr>
-<tr>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0335 s</td>
-<td style="text-align: left;">20.46 MB</td>
-</tr>
-<tr>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0337 s</td>
-<td style="text-align: left;">20.46 MB</td>
-</tr>
-<tr>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0333 s</td>
 <td style="text-align: left;">20.46 MB</td>
 </tr>
 <tr>
@@ -2137,145 +2137,145 @@
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.15 MB</td>
+<td style="text-align: left;">0.04 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.13 MB</td>
+<td style="text-align: left;">0.01 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.13 MB</td>
+<td style="text-align: left;">0.0000 s</td>
+<td style="text-align: left;">0.01 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.13 MB</td>
+<td style="text-align: left;">0.0000 s</td>
+<td style="text-align: left;">0.00 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.13 MB</td>
+<td style="text-align: left;">0.0000 s</td>
+<td style="text-align: left;">0.01 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.14 MB</td>
+<td style="text-align: left;">0.02 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.16 MB</td>
+<td style="text-align: left;">0.07 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.14 MB</td>
+<td style="text-align: left;">0.03 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.13 MB</td>
+<td style="text-align: left;">0.01 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.13 MB</td>
+<td style="text-align: left;">0.01 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.14 MB</td>
+<td style="text-align: left;">0.02 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.15 MB</td>
+<td style="text-align: left;">0.04 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.21 MB</td>
+<td style="text-align: left;">0.15 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.16 MB</td>
+<td style="text-align: left;">0.06 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
 <td style="text-align: left;">0.0001 s</td>
-<td style="text-align: left;">0.14 MB</td>
+<td style="text-align: left;">0.03 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0002 s</td>
-<td style="text-align: left;">0.14 MB</td>
+<td style="text-align: left;">0.0001 s</td>
+<td style="text-align: left;">0.02 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0002 s</td>
-<td style="text-align: left;">0.15 MB</td>
+<td style="text-align: left;">0.0001 s</td>
+<td style="text-align: left;">0.05 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0002 s</td>
-<td style="text-align: left;">0.18 MB</td>
+<td style="text-align: left;">0.0001 s</td>
+<td style="text-align: left;">0.10 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0002 s</td>
-<td style="text-align: left;">0.20 MB</td>
+<td style="text-align: left;">0.0001 s</td>
+<td style="text-align: left;">0.14 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0002 s</td>
-<td style="text-align: left;">0.16 MB</td>
+<td style="text-align: left;">0.0001 s</td>
+<td style="text-align: left;">0.05 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0003 s</td>
-<td style="text-align: left;">0.14 MB</td>
+<td style="text-align: left;">0.0001 s</td>
+<td style="text-align: left;">0.03 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0002 s</td>
-<td style="text-align: left;">0.14 MB</td>
+<td style="text-align: left;">0.0001 s</td>
+<td style="text-align: left;">0.02 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0002 s</td>
-<td style="text-align: left;">0.15 MB</td>
+<td style="text-align: left;">0.0001 s</td>
+<td style="text-align: left;">0.04 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0003 s</td>
-<td style="text-align: left;">0.17 MB</td>
+<td style="text-align: left;">0.0001 s</td>
+<td style="text-align: left;">0.09 MB</td>
 </tr>
 </tbody>
 </table>
@@ -2308,25 +2308,25 @@
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
+<td style="text-align: left;">0.0045 s</td>
+<td style="text-align: left;">1.70 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">25</td>
+<td style="text-align: left;">FBS 25.0</td>
 <td style="text-align: left;">0.0041 s</td>
 <td style="text-align: left;">1.70 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
-<td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0040 s</td>
-<td style="text-align: left;">1.70 MB</td>
-</tr>
-<tr>
-<td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0043 s</td>
+<td style="text-align: left;">0.0041 s</td>
 <td style="text-align: left;">1.70 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0042 s</td>
+<td style="text-align: left;">0.0041 s</td>
 <td style="text-align: left;">1.69 MB</td>
 </tr>
 <tr>
@@ -2338,115 +2338,115 @@
 <tr>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0046 s</td>
+<td style="text-align: left;">0.0037 s</td>
 <td style="text-align: left;">1.69 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0176 s</td>
-<td style="text-align: left;">13.50 MB</td>
+<td style="text-align: left;">0.0150 s</td>
+<td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0179 s</td>
-<td style="text-align: left;">13.50 MB</td>
+<td style="text-align: left;">0.0152 s</td>
+<td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0176 s</td>
-<td style="text-align: left;">13.50 MB</td>
+<td style="text-align: left;">0.0152 s</td>
+<td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0178 s</td>
+<td style="text-align: left;">0.0152 s</td>
 <td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0187 s</td>
+<td style="text-align: left;">0.0156 s</td>
 <td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0199 s</td>
+<td style="text-align: left;">0.0153 s</td>
 <td style="text-align: left;">13.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0393 s</td>
-<td style="text-align: left;">45.49 MB</td>
-</tr>
-<tr>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0403 s</td>
-<td style="text-align: left;">45.49 MB</td>
-</tr>
-<tr>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0412 s</td>
-<td style="text-align: left;">45.49 MB</td>
-</tr>
-<tr>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0414 s</td>
+<td style="text-align: left;">0.0394 s</td>
 <td style="text-align: left;">45.50 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
+<td style="text-align: left;">FBS 25.0</td>
+<td style="text-align: left;">0.0389 s</td>
+<td style="text-align: left;">45.50 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBS 50.0</td>
+<td style="text-align: left;">0.0424 s</td>
+<td style="text-align: left;">45.49 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBN 16</td>
+<td style="text-align: left;">0.0382 s</td>
+<td style="text-align: left;">45.49 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0407 s</td>
+<td style="text-align: left;">0.0400 s</td>
 <td style="text-align: left;">45.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0408 s</td>
+<td style="text-align: left;">0.0400 s</td>
 <td style="text-align: left;">45.49 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0850 s</td>
+<td style="text-align: left;">0.0818 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0878 s</td>
+<td style="text-align: left;">0.0824 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0875 s</td>
+<td style="text-align: left;">0.0825 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0874 s</td>
+<td style="text-align: left;">0.0853 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0895 s</td>
+<td style="text-align: left;">0.0870 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 <tr>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0883 s</td>
+<td style="text-align: left;">0.0862 s</td>
 <td style="text-align: left;">107.80 MB</td>
 </tr>
 </tbody>
@@ -2490,7 +2490,7 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0009 s</td>
+<td style="text-align: left;">0.0008 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">0.48 MB</td>
@@ -2500,7 +2500,7 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0008 s</td>
+<td style="text-align: left;">0.0010 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">0.48 MB</td>
@@ -2530,7 +2530,7 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0060 s</td>
+<td style="text-align: left;">0.0054 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">3.82 MB</td>
@@ -2540,7 +2540,7 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0062 s</td>
+<td style="text-align: left;">0.0055 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">3.82 MB</td>
@@ -2550,7 +2550,7 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0062 s</td>
+<td style="text-align: left;">0.0053 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">3.82 MB</td>
@@ -2560,7 +2560,7 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0056 s</td>
+<td style="text-align: left;">0.0053 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">3.82 MB</td>
@@ -2570,7 +2570,7 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0056 s</td>
+<td style="text-align: left;">0.0054 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">3.82 MB</td>
@@ -2580,7 +2580,7 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0062 s</td>
+<td style="text-align: left;">0.0054 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">3.82 MB</td>
@@ -2590,6 +2590,16 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
+<td style="text-align: left;">0.0183 s</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">12.88 MB</td>
+<td style="text-align: left;">N/A</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">75</td>
+<td style="text-align: left;">FBN 32</td>
 <td style="text-align: left;">0.0188 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
@@ -2599,18 +2609,8 @@
 <tr>
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">75</td>
-<td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0192 s</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">12.88 MB</td>
-<td style="text-align: left;">N/A</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0190 s</td>
+<td style="text-align: left;">0.0183 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">12.88 MB</td>
@@ -2620,16 +2620,6 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0181 s</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">12.88 MB</td>
-<td style="text-align: left;">N/A</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBS 25.0</td>
 <td style="text-align: left;">0.0189 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
@@ -2639,8 +2629,18 @@
 <tr>
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">75</td>
+<td style="text-align: left;">FBS 25.0</td>
+<td style="text-align: left;">0.0184 s</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">12.88 MB</td>
+<td style="text-align: left;">N/A</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0192 s</td>
+<td style="text-align: left;">0.0200 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">12.88 MB</td>
@@ -2650,7 +2650,7 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0454 s</td>
+<td style="text-align: left;">0.0446 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">30.52 MB</td>
@@ -2660,16 +2660,6 @@
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0444 s</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">30.52 MB</td>
-<td style="text-align: left;">N/A</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBN 64</td>
 <td style="text-align: left;">0.0449 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
@@ -2679,17 +2669,7 @@
 <tr>
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">100</td>
-<td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0451 s</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">30.52 MB</td>
-<td style="text-align: left;">N/A</td>
-</tr>
-<tr>
-<td style="text-align: left;">Filters</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBS 25.0</td>
+<td style="text-align: left;">FBN 64</td>
 <td style="text-align: left;">0.0445 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
@@ -2699,8 +2679,28 @@
 <tr>
 <td style="text-align: left;">Filters</td>
 <td style="text-align: right;">100</td>
+<td style="text-align: left;">FBS 10.0</td>
+<td style="text-align: left;">0.0441 s</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">30.52 MB</td>
+<td style="text-align: left;">N/A</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">100</td>
+<td style="text-align: left;">FBS 25.0</td>
+<td style="text-align: left;">0.0442 s</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">30.52 MB</td>
+<td style="text-align: left;">N/A</td>
+</tr>
+<tr>
+<td style="text-align: left;">Filters</td>
+<td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0448 s</td>
+<td style="text-align: left;">0.0442 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">30.52 MB</td>
@@ -2720,7 +2720,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0005 s</td>
+<td style="text-align: left;">0.0004 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">0.24 MB</td>
@@ -2740,7 +2740,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0012 s</td>
+<td style="text-align: left;">0.0011 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">0.24 MB</td>
@@ -2760,7 +2760,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0005 s</td>
+<td style="text-align: left;">0.0004 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">0.24 MB</td>
@@ -2770,36 +2770,6 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0025 s</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">1.40 MB</td>
-<td style="text-align: left;">N/A</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">50</td>
-<td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0029 s</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">1.40 MB</td>
-<td style="text-align: left;">N/A</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">50</td>
-<td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0029 s</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">1.40 MB</td>
-<td style="text-align: left;">N/A</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">50</td>
-<td style="text-align: left;">FBS 10.0</td>
 <td style="text-align: left;">0.0026 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
@@ -2809,8 +2779,38 @@
 <tr>
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">50</td>
+<td style="text-align: left;">FBN 32</td>
+<td style="text-align: left;">0.0026 s</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">1.40 MB</td>
+<td style="text-align: left;">N/A</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">50</td>
+<td style="text-align: left;">FBN 64</td>
+<td style="text-align: left;">0.0027 s</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">1.40 MB</td>
+<td style="text-align: left;">N/A</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">50</td>
+<td style="text-align: left;">FBS 10.0</td>
+<td style="text-align: left;">0.0027 s</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">1.40 MB</td>
+<td style="text-align: left;">N/A</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0029 s</td>
+<td style="text-align: left;">0.0026 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">1.40 MB</td>
@@ -2820,7 +2820,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0031 s</td>
+<td style="text-align: left;">0.0026 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">1.40 MB</td>
@@ -2840,7 +2840,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0114 s</td>
+<td style="text-align: left;">0.0116 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.81 MB</td>
@@ -2860,7 +2860,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0128 s</td>
+<td style="text-align: left;">0.0116 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.81 MB</td>
@@ -2870,7 +2870,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0113 s</td>
+<td style="text-align: left;">0.0111 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.81 MB</td>
@@ -2880,7 +2880,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0110 s</td>
+<td style="text-align: left;">0.0105 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.81 MB</td>
@@ -2900,7 +2900,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0231 s</td>
+<td style="text-align: left;">0.0241 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">12.16 MB</td>
@@ -2910,16 +2910,6 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0238 s</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">12.16 MB</td>
-<td style="text-align: left;">N/A</td>
-</tr>
-<tr>
-<td style="text-align: left;">Intensity</td>
-<td style="text-align: right;">100</td>
-<td style="text-align: left;">FBS 10.0</td>
 <td style="text-align: left;">0.0240 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
@@ -2929,8 +2919,18 @@
 <tr>
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">100</td>
+<td style="text-align: left;">FBS 10.0</td>
+<td style="text-align: left;">0.0247 s</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">12.16 MB</td>
+<td style="text-align: left;">N/A</td>
+</tr>
+<tr>
+<td style="text-align: left;">Intensity</td>
+<td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0237 s</td>
+<td style="text-align: left;">0.0232 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">12.16 MB</td>
@@ -2940,7 +2940,7 @@
 <td style="text-align: left;">Intensity</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0229 s</td>
+<td style="text-align: left;">0.0230 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">12.16 MB</td>
@@ -2950,7 +2950,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0029 s</td>
+<td style="text-align: left;">0.0026 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">1.17 MB</td>
@@ -2990,7 +2990,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0027 s</td>
+<td style="text-align: left;">0.0028 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">1.17 MB</td>
@@ -3000,7 +3000,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0028 s</td>
+<td style="text-align: left;">0.0026 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">1.17 MB</td>
@@ -3010,7 +3010,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0101 s</td>
+<td style="text-align: left;">0.0094 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.43 MB</td>
@@ -3020,7 +3020,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0102 s</td>
+<td style="text-align: left;">0.0092 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.43 MB</td>
@@ -3030,7 +3030,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0104 s</td>
+<td style="text-align: left;">0.0094 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.43 MB</td>
@@ -3040,7 +3040,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0097 s</td>
+<td style="text-align: left;">0.0091 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.43 MB</td>
@@ -3050,7 +3050,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0104 s</td>
+<td style="text-align: left;">0.0095 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.43 MB</td>
@@ -3060,7 +3060,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0102 s</td>
+<td style="text-align: left;">0.0091 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">5.43 MB</td>
@@ -3070,7 +3070,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0162 s</td>
+<td style="text-align: left;">0.0159 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">8.84 MB</td>
@@ -3080,16 +3080,6 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0163 s</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">N/A</td>
-<td style="text-align: left;">8.84 MB</td>
-<td style="text-align: left;">N/A</td>
-</tr>
-<tr>
-<td style="text-align: left;">Morphology</td>
-<td style="text-align: right;">75</td>
-<td style="text-align: left;">FBN 64</td>
 <td style="text-align: left;">0.0162 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
@@ -3099,8 +3089,18 @@
 <tr>
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
+<td style="text-align: left;">FBN 64</td>
+<td style="text-align: left;">0.0159 s</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">N/A</td>
+<td style="text-align: left;">8.84 MB</td>
+<td style="text-align: left;">N/A</td>
+</tr>
+<tr>
+<td style="text-align: left;">Morphology</td>
+<td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0173 s</td>
+<td style="text-align: left;">0.0158 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">8.84 MB</td>
@@ -3110,7 +3110,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0161 s</td>
+<td style="text-align: left;">0.0162 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">8.84 MB</td>
@@ -3120,7 +3120,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0164 s</td>
+<td style="text-align: left;">0.0157 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">8.84 MB</td>
@@ -3130,7 +3130,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0328 s</td>
+<td style="text-align: left;">0.0326 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">20.46 MB</td>
@@ -3140,7 +3140,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0331 s</td>
+<td style="text-align: left;">0.0338 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">20.46 MB</td>
@@ -3150,7 +3150,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0329 s</td>
+<td style="text-align: left;">0.0334 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">20.46 MB</td>
@@ -3160,7 +3160,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0331 s</td>
+<td style="text-align: left;">0.0326 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">20.46 MB</td>
@@ -3170,7 +3170,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0333 s</td>
+<td style="text-align: left;">0.0321 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">20.46 MB</td>
@@ -3180,7 +3180,7 @@
 <td style="text-align: left;">Morphology</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0332 s</td>
+<td style="text-align: left;">0.0336 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">20.46 MB</td>
@@ -3190,7 +3190,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0033 s</td>
+<td style="text-align: left;">0.0031 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">2.13 MB</td>
@@ -3200,7 +3200,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0034 s</td>
+<td style="text-align: left;">0.0035 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">2.07 MB</td>
@@ -3210,30 +3210,30 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0056 s</td>
+<td style="text-align: left;">0.0037 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
-<td style="text-align: left;">4.53 MB</td>
+<td style="text-align: left;">4.54 MB</td>
 <td style="text-align: left;">N/A</td>
 </tr>
 <tr>
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0057 s</td>
+<td style="text-align: left;">0.0061 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
-<td style="text-align: left;">10.10 MB</td>
+<td style="text-align: left;">10.12 MB</td>
 <td style="text-align: left;">N/A</td>
 </tr>
 <tr>
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0034 s</td>
+<td style="text-align: left;">0.0037 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
-<td style="text-align: left;">2.16 MB</td>
+<td style="text-align: left;">2.17 MB</td>
 <td style="text-align: left;">N/A</td>
 </tr>
 <tr>
@@ -3250,7 +3250,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0227 s</td>
+<td style="text-align: left;">0.0209 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">19.85 MB</td>
@@ -3260,7 +3260,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0236 s</td>
+<td style="text-align: left;">0.0209 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">19.95 MB</td>
@@ -3270,7 +3270,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0186 s</td>
+<td style="text-align: left;">0.0161 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">9.83 MB</td>
@@ -3280,17 +3280,17 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0154 s</td>
+<td style="text-align: left;">0.0144 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
-<td style="text-align: left;">11.96 MB</td>
+<td style="text-align: left;">12.08 MB</td>
 <td style="text-align: left;">N/A</td>
 </tr>
 <tr>
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0236 s</td>
+<td style="text-align: left;">0.0209 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">19.30 MB</td>
@@ -3300,7 +3300,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">50</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0238 s</td>
+<td style="text-align: left;">0.0218 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">21.08 MB</td>
@@ -3310,7 +3310,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.0814 s</td>
+<td style="text-align: left;">0.0749 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">84.43 MB</td>
@@ -3320,7 +3320,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.0736 s</td>
+<td style="text-align: left;">0.0721 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">86.59 MB</td>
@@ -3330,7 +3330,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.0790 s</td>
+<td style="text-align: left;">0.0766 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">63.72 MB</td>
@@ -3340,17 +3340,17 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.0493 s</td>
+<td style="text-align: left;">0.0466 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
-<td style="text-align: left;">13.36 MB</td>
+<td style="text-align: left;">13.76 MB</td>
 <td style="text-align: left;">N/A</td>
 </tr>
 <tr>
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.0740 s</td>
+<td style="text-align: left;">0.0717 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">89.44 MB</td>
@@ -3360,7 +3360,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">75</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.0735 s</td>
+<td style="text-align: left;">0.0727 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">88.88 MB</td>
@@ -3370,7 +3370,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 16</td>
-<td style="text-align: left;">0.1930 s</td>
+<td style="text-align: left;">0.1816 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">213.37 MB</td>
@@ -3380,7 +3380,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 32</td>
-<td style="text-align: left;">0.2134 s</td>
+<td style="text-align: left;">0.2077 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">224.11 MB</td>
@@ -3390,7 +3390,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBN 64</td>
-<td style="text-align: left;">0.2043 s</td>
+<td style="text-align: left;">0.2158 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">204.71 MB</td>
@@ -3400,17 +3400,17 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 10.0</td>
-<td style="text-align: left;">0.1033 s</td>
+<td style="text-align: left;">0.1004 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
-<td style="text-align: left;">22.17 MB</td>
+<td style="text-align: left;">23.13 MB</td>
 <td style="text-align: left;">N/A</td>
 </tr>
 <tr>
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 25.0</td>
-<td style="text-align: left;">0.2152 s</td>
+<td style="text-align: left;">0.2046 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">230.74 MB</td>
@@ -3420,7 +3420,7 @@
 <td style="text-align: left;">Texture</td>
 <td style="text-align: right;">100</td>
 <td style="text-align: left;">FBS 50.0</td>
-<td style="text-align: left;">0.2085 s</td>
+<td style="text-align: left;">0.1983 s</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">N/A</td>
 <td style="text-align: left;">229.77 MB</td>

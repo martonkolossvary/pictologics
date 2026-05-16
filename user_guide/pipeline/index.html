@@ -2531,6 +2531,10 @@
 <code>reference_image</code>, so DICOM SEG objects and cropped masks can be aligned to image
 geometry before extraction. When you pass an in-memory <code>Image</code> mask, Pictologics
 validates that shape, spacing, origin, and direction already match the image.</p>
+<p>Mask values use <strong>nonzero membership</strong> semantics by default: values <code>1</code>, <code>2</code>,
+<code>3</code>, etc. all mean "inside the ROI". Label numbers are not treated as weights
+for volume, texture, or intensity calculations. Add a <code>binarize_mask</code> step when
+you need to select a specific label or label range from a multi-label mask.</p>
 <div class="admonition info">
 <p class="admonition-title">Complete Feature Sets Guaranteed</p>
 <p>Every configuration always returns a <code>pandas.Series</code> with the <strong>full set of expected
@@ -2714,7 +2718,7 @@ scientifically meaningful for all studies.</p>
 </tbody>
 </table>
 <h3 id="2-resegment">2. <code>resegment</code></h3>
-<p>Refines the ROI mask based on intensity thresholds, excluding voxels outside the specified range from feature extraction. This is essential for removing sentinel/NA values (e.g., -1024, -2048) from the ROI.</p>
+<p>Refines ROI masks based on intensity thresholds, excluding voxels outside the specified range from feature extraction. By default, resegmentation applies to both the morphology mask and the intensity mask, so morphology volumes and shape features describe the selected compartment, not the original geometric ROI. Set <code>apply_to="intensity"</code> only when morphology should remain anchored to the original ROI extent.</p>
 <div class="admonition warning">
 <p class="admonition-title">Memory Usage Alert</p>
 <p>If your image has a background that resamples to 0, and 0 is within your <code>resegment</code> range, <strong>you must use <code>source_mode="auto"</code></strong>.
@@ -2742,10 +2746,16 @@ Otherwise, <code>resegment</code> will include the entire background in the ROI,
 <td style="text-align: left;"><code>None</code></td>
 <td style="text-align: left;">Maximum intensity value</td>
 </tr>
+<tr>
+<td style="text-align: left;"><code>apply_to</code></td>
+<td style="text-align: left;"><code>str</code></td>
+<td style="text-align: left;"><code>"both"</code></td>
+<td style="text-align: left;"><code>"both"</code>, <code>"morph"</code>, or <code>"intensity"</code></td>
+</tr>
 </tbody>
 </table>
 <h3 id="3-filter_outliers">3. <code>filter_outliers</code></h3>
-<p>Removes outliers from the intensity mask based on standard deviations from the mean.</p>
+<p>Removes outliers from ROI masks based on standard deviations from the mean. Like <code>resegment</code>, this defaults to both masks so compartment morphology reflects the filtered voxel set. Use <code>apply_to="intensity"</code> to remove outliers only from intensity, texture, histogram, and IVH calculations.</p>
 <table>
 <thead>
 <tr>
@@ -2761,6 +2771,12 @@ Otherwise, <code>resegment</code> will include the entire background in the ROI,
 <td style="text-align: left;"><code>float</code></td>
 <td style="text-align: left;"><code>3.0</code></td>
 <td style="text-align: left;">Number of standard deviations</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>apply_to</code></td>
+<td style="text-align: left;"><code>str</code></td>
+<td style="text-align: left;"><code>"both"</code></td>
+<td style="text-align: left;"><code>"both"</code>, <code>"morph"</code>, or <code>"intensity"</code></td>
 </tr>
 </tbody>
 </table>
@@ -2788,7 +2804,9 @@ Otherwise, <code>resegment</code> will include the entire background in the ROI,
 <p>Rounds image intensities to the nearest integer. Useful before discretisation if values are close to integers.</p>
 <p><em>No parameters.</em></p>
 <h3 id="6-binarize_mask">6. <code>binarize_mask</code></h3>
-<p>Creates a binary mask from a multi-label mask.</p>
+<p>Creates a binary mask from a multi-label mask. Without this step, all nonzero
+labels are treated as one combined ROI. Use <code>mask_values</code> to select specific
+segments before feature extraction.</p>
 <table>
 <thead>
 <tr>
@@ -3221,6 +3239,10 @@ failed or produced partial results:</p>
 <td>Whether the family needs discretised input</td>
 </tr>
 <tr>
+<td><code>uses_morph_mask</code> / <code>uses_intensity_mask</code></td>
+<td>Which runtime mask(s) the feature row depends on</td>
+</tr>
+<tr>
 <td><code>source_mode</code> / <code>sentinel_value</code></td>
 <td>Source-mask configuration metadata</td>
 </tr>
@@ -3245,24 +3267,24 @@ failed or produced partial results:</p>
 <td>Resampling details</td>
 </tr>
 <tr>
-<td><code>is_resegmented</code> / <code>resegment_params</code></td>
-<td>Resegmentation details</td>
+<td><code>is_resegmented</code> / <code>resegment_apply_to</code> / <code>resegment_params</code></td>
+<td>Resegmentation details and effective mask target</td>
 </tr>
 <tr>
-<td><code>is_outlier_filtered</code> / <code>filter_outliers_params</code></td>
-<td>Outlier filtering details</td>
+<td><code>is_outlier_filtered</code> / <code>filter_outliers_apply_to</code> / <code>filter_outliers_params</code></td>
+<td>Outlier filtering details and effective mask target</td>
 </tr>
 <tr>
 <td><code>is_intensity_rounded</code> / <code>round_intensities_params</code></td>
 <td>Intensity rounding details</td>
 </tr>
 <tr>
-<td><code>keeps_largest_component</code> / <code>keep_largest_component_params</code></td>
-<td>Largest-component mask processing details</td>
+<td><code>keeps_largest_component</code> / <code>keep_largest_component_apply_to</code> / <code>keep_largest_component_params</code></td>
+<td>Largest-component mask processing details and effective mask target</td>
 </tr>
 <tr>
-<td><code>is_mask_binarized</code> / <code>binarize_mask_params</code></td>
-<td>Mask binarization details</td>
+<td><code>is_mask_binarized</code> / <code>binarize_mask_apply_to</code> / <code>binarize_mask_params</code></td>
+<td>Mask binarization details and effective mask target</td>
 </tr>
 <tr>
 <td><code>is_filtered</code> / <code>filter_type</code> / <code>filter_params</code></td>
@@ -3301,8 +3323,8 @@ failed or produced partial results:</p>
 <tbody>
 <tr>
 <td style="text-align: left;"><strong>Morphology</strong></td>
-<td style="text-align: left;">Mask geometry (resample, binarize_mask, keep_largest_component)</td>
-<td style="text-align: left;">Intensity values, filters, discretization</td>
+<td style="text-align: left;">Mask geometry (resample, resegment, filter_outliers, binarize_mask, keep_largest_component)</td>
+<td style="text-align: left;">Response-map filters, discretization</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Intensity</strong></td>
@@ -3314,13 +3336,19 @@ failed or produced partial results:</p>
 <td style="text-align: left;">All of the above <strong>plus</strong> discretization</td>
 <td style="text-align: left;">—</td>
 </tr>
+<tr>
+<td style="text-align: left;"><strong>IVH</strong></td>
+<td style="text-align: left;">Same as texture/histogram unless <code>ivh_use_continuous=True</code></td>
+<td style="text-align: left;">Discretization in continuous mode</td>
+</tr>
 </tbody>
 </table>
 <p>When configs share preprocessing but differ only in discretization:</p>
 <ul>
 <li><strong>Morphology</strong> and <strong>intensity</strong> are computed <strong>once</strong> and reused</li>
-<li><strong>Texture</strong> and <strong>histogram</strong> are computed per configuration</li>
+<li><strong>Texture</strong>, <strong>histogram</strong>, and discretized <strong>IVH</strong> are computed per configuration</li>
 <li>Cache reuse is scoped by feature family as well as preprocessing signature; texture, histogram, and IVH do not reuse each other's cached values.</li>
+<li>Preprocessing order is part of the signature. The same steps in a different order are computed independently because they can produce different ROIs and intensities.</li>
 </ul>
 <h3 id="checking-statistics">Checking Statistics</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">stats</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">deduplication_stats</span>
@@ -3371,13 +3399,17 @@ complete feature set — no missing values.</p>
 <a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># Clear log between runs</span>
 <a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">clear_log</span><span class="p">()</span>
 </code></pre></div>
-<p>The log file contains:</p>
+<p>The saved JSON is self-describing. It contains a log schema version, pipeline
+schema version, Pictologics package version when available, the mask ROI
+semantics used for the run, and an <code>entries</code> array. Each entry records:</p>
 <ul>
-<li>Timestamp and subject ID</li>
-<li>Configuration name</li>
-<li>Source mode and sentinel detection status</li>
-<li>List of executed steps with parameters</li>
-<li>Status of each step</li>
+<li>Timestamp, subject ID, image source, and mask source</li>
+<li>Configuration name and a full configuration snapshot</li>
+<li>Source mode, sentinel detection status, and effective sentinel value</li>
+<li>Deduplication settings and whether a deduplication plan was used</li>
+<li>Mask repositioning settings used when loading mask paths</li>
+<li>List of executed steps with serialized parameters</li>
+<li>Final configuration status, error text, failed step, and feature count when applicable</li>
 </ul>
 <h2 id="examples">Examples</h2>
 <h3 id="standard-suite-fast-baseline">Standard Suite (Fast Baseline)</h3>

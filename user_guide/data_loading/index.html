@@ -2530,10 +2530,11 @@ resegmentation with <strong>Approach 2</strong> (source masking) — see below.<
 <p>The source mask enables <strong>masked interpolation</strong> for resampling and <strong>normalized convolution</strong> for filters, preventing sentinel values from bleeding into valid regions.</p>
 <div class="admonition warning">
 <p class="admonition-title">Source masking does not replace resegmentation</p>
-<p>The source mask protects <strong>resampling and filtering only</strong> — it does <strong>not</strong> change the ROI
-used for feature extraction. Sentinel voxels will still be included in intensity statistics,
-texture matrices, and all other computed features unless you also add a <code>resegment</code> step to
-restrict the ROI to a valid intensity range. In practice, you typically need <strong>both</strong>:</p>
+<p>The source mask protects <strong>resampling and filtering</strong> and, after resampling, keeps ROI masks
+inside the valid source extent. It does <strong>not</strong> define a clinical/intensity compartment by
+itself, and it does not change feature-extraction masks in pipelines with no spatial step.
+Add a <code>resegment</code> step to restrict the ROI to the valid intensity range you want to measure.
+In practice, you typically need <strong>both</strong>:</p>
 <ul>
 <li><code>source_mode="auto"</code> (or an explicit source mask) to protect preprocessing and <strong>prevent memory exhaustion</strong>.</li>
 <li><code>resegment</code> to define the correct ROI for feature extraction.</li>
@@ -2707,96 +2708,110 @@ restrict the ROI to a valid intensity range. In practice, you typically need <st
 <a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="k">for</span> <span class="n">seg_num</span><span class="p">,</span> <span class="n">mask</span> <span class="ow">in</span> <span class="n">masks</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
 <a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>    <span class="n">features</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
 </code></pre></div>
+<p>When a mask contains multiple labels in one volume, <code>RadiomicsPipeline</code> treats
+all nonzero labels as one combined ROI by default. Label values are never used
+as numeric weights in volume or texture calculations. Add a <code>binarize_mask</code> step
+when the run should use only selected label values:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">add_config</span><span class="p">(</span><span class="s2">&quot;segment_2_only&quot;</span><span class="p">,</span> <span class="p">[</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;binarize_mask&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;mask_values&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">}},</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>    <span class="p">{</span><span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="s2">&quot;extract_features&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;families&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;morphology&quot;</span><span class="p">,</span> <span class="s2">&quot;intensity&quot;</span><span class="p">]}},</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="p">])</span>
+</code></pre></div>
 <h3 id="combining-specific-segments-into-a-binary-mask">Combining Specific Segments into a Binary Mask</h3>
 <p>To merge selected segments into a single binary mask:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Load specific segments separately</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">masks</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span><span class="s2">&quot;seg.dcm&quot;</span><span class="p">,</span> <span class="n">segment_numbers</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">combine_segments</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># Combine into single binary mask using logical OR</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">masks</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">array</span> <span class="o">|</span> <span class="n">masks</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">array</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Load specific segments separately</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">masks</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span><span class="s2">&quot;seg.dcm&quot;</span><span class="p">,</span> <span class="n">segment_numbers</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="n">combine_segments</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># Combine into single binary mask using logical OR</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">masks</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">array</span> <span class="o">|</span> <span class="n">masks</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">array</span>
 </code></pre></div>
 <h3 id="aligning-seg-to-a-reference-image">Aligning SEG to a Reference Image</h3>
 <p>SEG files may have different geometry than the source image. Use <code>reference_image</code> to align:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Load the CT image</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/ct_series/&quot;</span><span class="p">)</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># Load and align the segmentation to CT geometry</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>    <span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">,</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="p">)</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>
-<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="c1"># Now mask.array.shape == ct.array.shape</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Load the CT image</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/ct_series/&quot;</span><span class="p">)</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># Load and align the segmentation to CT geometry</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="n">mask</span> <span class="o">=</span> <span class="n">load_seg</span><span class="p">(</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>    <span class="s2">&quot;path/to/segmentation.dcm&quot;</span><span class="p">,</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>    <span class="n">subvoxel_tolerance</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>    <span class="n">min_overlap_fraction</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="p">)</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="c1"># Now mask.array.shape == ct.array.shape</span>
 </code></pre></div>
+<p><code>load_seg()</code> uses the same reference-alignment controls as <code>load_image()</code> and
+<code>load_and_merge_images()</code>, including <code>transpose_axes</code>, <code>subvoxel_tolerance</code>,
+<code>subvoxel_warning_threshold</code>, and <code>min_overlap_fraction</code>.</p>
 <h2 id="merging-multiple-images-with-load_and_merge_images">Merging Multiple Images with <code>load_and_merge_images()</code></h2>
 <p>When you have multiple segmentation masks (e.g., different organs, or masks split across files), use <code>load_and_merge_images()</code> to combine them.</p>
 <h3 id="basic-merging">Basic Merging</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_and_merge_images</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># Merge multiple mask files into one</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">combined_mask</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">([</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>    <span class="s2">&quot;path/to/liver_mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>    <span class="s2">&quot;path/to/kidney_mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    <span class="s2">&quot;path/to/spleen_mask.nii.gz&quot;</span>
-<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="p">])</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_and_merge_images</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="c1"># Merge multiple mask files into one</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="n">combined_mask</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">([</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>    <span class="s2">&quot;path/to/liver_mask.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>    <span class="s2">&quot;path/to/kidney_mask.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>    <span class="s2">&quot;path/to/spleen_mask.nii.gz&quot;</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="p">])</span>
 </code></pre></div>
 <h3 id="relabeling-masks-for-visualization">Relabeling Masks for Visualization</h3>
 <p>When merging binary masks, assign unique labels to each:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Each mask gets a unique label (1, 2, 3, ...)</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>    <span class="p">[</span><span class="s2">&quot;mask1.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask2.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask3.nii.gz&quot;</span><span class="p">],</span>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>    <span class="n">relabel_masks</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="p">)</span>
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="c1"># Result: voxels from mask1 = 1, mask2 = 2, mask3 = 3</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Each mask gets a unique label (1, 2, 3, ...)</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>    <span class="p">[</span><span class="s2">&quot;mask1.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask2.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;mask3.nii.gz&quot;</span><span class="p">],</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>    <span class="n">relabel_masks</span><span class="o">=</span><span class="kc">True</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="p">)</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="c1"># Result: voxels from mask1 = 1, mask2 = 2, mask3 = 3</span>
 </code></pre></div>
 <h3 id="merge-strategy-options">Merge Strategy Options</h3>
 <p>Control how overlapping voxels are handled:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># &quot;max&quot; (default): Take the maximum value at each voxel</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;max&quot;</span><span class="p">)</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># &quot;min&quot;: Take the minimum value at each voxel</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;min&quot;</span><span class="p">)</span>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>
-<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="c1"># &quot;first&quot;: Keep the first non-zero value</span>
-<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;first&quot;</span><span class="p">)</span>
-<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>
-<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="c1"># &quot;last&quot;: Keep the last non-zero value</span>
-<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;last&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># &quot;max&quot; (default): Take the maximum value at each voxel</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;max&quot;</span><span class="p">)</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1"># &quot;min&quot;: Take the minimum value at each voxel</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;min&quot;</span><span class="p">)</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="c1"># &quot;first&quot;: Keep the first non-zero value</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;first&quot;</span><span class="p">)</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="c1"># &quot;last&quot;: Keep the last non-zero value</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span><span class="n">masks</span><span class="p">,</span> <span class="n">conflict_resolution</span><span class="o">=</span><span class="s2">&quot;last&quot;</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="handling-cropped-masks">Handling Cropped Masks</h2>
 <p>Medical imaging software often stores segmentation masks as <strong>cropped volumes</strong> (bounding boxes around the region of interest) to minimize storage. When loading these cropped masks, they need to be repositioned into the original image's coordinate space for proper visualization and analysis.</p>
 <p>The <code>pictologics</code> loader uses the spatial metadata (<code>ImagePositionPatient</code> for DICOM, affine matrix for NIfTI) to calculate where the cropped mask belongs in the full volume.</p>
 <h3 id="repositioning-a-single-cropped-mask">Repositioning a Single Cropped Mask</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Load the full CT image</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/full_ct/&quot;</span><span class="p">)</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1"># Load a cropped mask and reposition it</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="n">cropped_mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>    <span class="s2">&quot;path/to/cropped_mask.nii.gz&quot;</span><span class="p">,</span>
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span>
-<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="p">)</span>
-<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="c1"># cropped_mask now has the same shape as ct</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># Load the full CT image</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/full_ct/&quot;</span><span class="p">)</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="c1"># Load a cropped mask and reposition it</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="n">cropped_mask</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>    <span class="s2">&quot;path/to/cropped_mask.nii.gz&quot;</span><span class="p">,</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="p">)</span>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="c1"># cropped_mask now has the same shape as ct</span>
 </code></pre></div>
 <h3 id="merging-multiple-cropped-masks">Merging Multiple Cropped Masks</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># Load CT as reference</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/ct/&quot;</span><span class="p">)</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="c1"># Merge cropped masks into reference space</span>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>    <span class="p">[</span><span class="s2">&quot;cropped_liver.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;cropped_kidney.nii.gz&quot;</span><span class="p">],</span>
-<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
-<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>    <span class="n">relabel_masks</span><span class="o">=</span><span class="kc">True</span>
-<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># Load CT as reference</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="n">ct</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;path/to/ct/&quot;</span><span class="p">)</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="c1"># Merge cropped masks into reference space</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>    <span class="p">[</span><span class="s2">&quot;cropped_liver.nii.gz&quot;</span><span class="p">,</span> <span class="s2">&quot;cropped_kidney.nii.gz&quot;</span><span class="p">],</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>    <span class="n">relabel_masks</span><span class="o">=</span><span class="kc">True</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="p">)</span>
 </code></pre></div>
 <h3 id="handling-axis-transposition">Handling Axis Transposition</h3>
 <p>If your masks have different axis ordering (e.g., from different software), specify the transformation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>    <span class="n">mask_paths</span><span class="p">,</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>    <span class="n">transpose_axes</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># Swap X and Y axes</span>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>    <span class="n">mask_paths</span><span class="p">,</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>    <span class="n">transpose_axes</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># Swap X and Y axes</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="p">)</span>
 </code></pre></div>
 <h3 id="sub-voxel-alignment-and-overlap-safeguards">Sub-Voxel Alignment and Overlap Safeguards</h3>
 <p>DICOM software from different vendors sometimes stores mask origins with small floating-point imprecision, resulting in fractional-voxel offsets relative to the reference image grid. Pictologics handles this gracefully with two configurable thresholds:</p>
@@ -2826,22 +2841,22 @@ restrict the ROI to a valid intensity range. In practice, you typically need <st
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1"># Dataset with known DICOM precision quirks — suppress sub-voxel warnings</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="c1"># by keeping the default tolerance (0.5) but raising the warning threshold:</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>    <span class="n">mask_paths</span><span class="p">,</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>    <span class="n">subvoxel_warning_threshold</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span>   <span class="c1"># only warn if drift &gt; 10% of a voxel</span>
-<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="p">)</span>
-<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>
-<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="c1"># Stricter project — flag any drift above 5% of a voxel as an error:</span>
-<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
-<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a>    <span class="n">mask_paths</span><span class="p">,</span>
-<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
-<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a>    <span class="n">subvoxel_tolerance</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>
-<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1"># Dataset with known DICOM precision quirks — suppress sub-voxel warnings</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="c1"># by keeping the default tolerance (0.5) but raising the warning threshold:</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>    <span class="n">mask_paths</span><span class="p">,</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>    <span class="n">subvoxel_warning_threshold</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span>   <span class="c1"># only warn if drift &gt; 10% of a voxel</span>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="p">)</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="c1"># Stricter project — flag any drift above 5% of a voxel as an error:</span>
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a><span class="n">combined</span> <span class="o">=</span> <span class="n">load_and_merge_images</span><span class="p">(</span>
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a>    <span class="n">mask_paths</span><span class="p">,</span>
+<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a>    <span class="n">reference_image</span><span class="o">=</span><span class="n">ct</span><span class="p">,</span>
+<a id="__codelineno-24-14" name="__codelineno-24-14" href="#__codelineno-24-14"></a>    <span class="n">reposition_to_reference</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-24-15" name="__codelineno-24-15" href="#__codelineno-24-15"></a>    <span class="n">subvoxel_tolerance</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>
+<a id="__codelineno-24-16" name="__codelineno-24-16" href="#__codelineno-24-16"></a><span class="p">)</span>
 </code></pre></div>
 <h3 id="error-handling">Error Handling</h3>
 <table>
@@ -2888,13 +2903,13 @@ restrict the ROI to a valid intensity range. In practice, you typically need <st
 </div>
 <h2 id="creating-a-full-mask">Creating a Full Mask</h2>
 <p>When you don't have a segmentation mask and want to analyze the entire image:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_full_mask</span>
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="c1"># Create a mask of all ones matching the image geometry</span>
-<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;scan.nii.gz&quot;</span><span class="p">)</span>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="n">full_mask</span> <span class="o">=</span> <span class="n">create_full_mask</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
-<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>
-<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="c1"># Now use full_mask for whole-image analysis</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pictologics</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_full_mask</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="c1"># Create a mask of all ones matching the image geometry</span>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="n">image</span> <span class="o">=</span> <span class="n">load_image</span><span class="p">(</span><span class="s2">&quot;scan.nii.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="n">full_mask</span> <span class="o">=</span> <span class="n">create_full_mask</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="c1"># Now use full_mask for whole-image analysis</span>
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>

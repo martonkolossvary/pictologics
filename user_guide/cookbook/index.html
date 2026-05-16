@@ -2779,13 +2779,13 @@ See the <strong><a href="../configurations/">Configuration &amp; Reproducibility
   values (e.g., -1024, -2048) marking missing or invalid data. Handling them properly requires
   <strong>both</strong> of the following:</p>
 <ol>
-<li><strong><code>source_mode="auto"</code></strong> creates a <em>source mask</em> that protects <strong>resampling and filtering only</strong>.
+<li><strong><code>source_mode="auto"</code></strong> creates a <em>source mask</em> that protects <strong>resampling and filtering</strong>.
    It applies masked interpolation (resampling ignores sentinel neighbors) and normalized
-   convolution (filter kernels exclude sentinel voxels). However, it does <strong>not</strong> change the
-   ROI — sentinel voxels still remain in the region used for feature extraction.</li>
+   convolution (filter kernels exclude sentinel voxels), and after resampling it keeps ROI masks
+   inside the valid source extent. It does not define an intensity compartment by itself.</li>
 <li><strong><code>resegment</code></strong> restricts the <strong>ROI</strong> to a valid intensity range, effectively excluding sentinel
-   voxels from <strong>feature extraction</strong>. Without this step, sentinel values would bias intensity
-   statistics, texture matrices, and all other computed features.</li>
+   voxels from <strong>feature extraction</strong>. By default it updates both morphology and intensity masks,
+   so compartment volumes and shape features reflect the selected voxel range.</li>
 </ol>
 <p>You typically need both: <code>source_mode="auto"</code> to protect preprocessing, and <code>resegment</code> to
 define the correct ROI for analysis.</p>
@@ -4097,8 +4097,8 @@ extend beyond the scan boundary (e.g. whole-organ segmentations near the scan ed
 <tbody>
 <tr>
 <td style="text-align: left;"><strong>Morphology</strong></td>
-<td style="text-align: left;">Mask geometry (resample, binarize_mask, keep_largest_component)</td>
-<td style="text-align: left;">Intensity values, filters, discretization</td>
+<td style="text-align: left;">Mask geometry (resample, resegment, filter_outliers, binarize_mask, keep_largest_component)</td>
+<td style="text-align: left;">Response-map filters, discretization</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Intensity</strong></td>
@@ -4114,7 +4114,7 @@ extend beyond the scan boundary (e.g. whole-organ segmentations near the scan ed
 </table>
 <p>This means:</p>
 <ol>
-<li><strong>Morphology</strong> can be computed once and reused across all configurations (including filtered ones).</li>
+<li><strong>Morphology</strong> can be computed once and reused across configurations with the same mask geometry, including the same resegmentation and outlier-filtering targets.</li>
 <li><strong>Intensity</strong> can be computed once per unique preprocessing+filter combination.</li>
 <li><strong>Texture/Histogram/IVH</strong> must be computed for each discretization strategy.</li>
 </ol>
