@@ -27,6 +27,10 @@ def load_seg(
     segment_numbers: list[int] | None = None,
     combine_segments: bool = True,
     reference_image: "Image | None" = None,
+    transpose_axes: tuple[int, int, int] | None = None,
+    subvoxel_tolerance: float = 0.5,
+    subvoxel_warning_threshold: float = 0.01,
+    min_overlap_fraction: float = 0.5,
 ) -> "Image | dict[int, Image]":
     """Load a DICOM SEG file as a mask Image.
 
@@ -66,6 +70,14 @@ def load_seg(
         reference_image: Optional reference Image for geometry alignment.
             When provided, the output mask will be resampled/repositioned
             to match the reference geometry.
+        transpose_axes: Optional axis transposition to apply before reference
+            alignment.
+        subvoxel_tolerance: Maximum permitted fractional-voxel offset during
+            reference alignment.
+        subvoxel_warning_threshold: Fractional-voxel drift above which a warning
+            is emitted during reference alignment.
+        min_overlap_fraction: Minimum fraction of mask volume that must overlap
+            the reference image during alignment.
 
     Returns:
         If combine_segments is True: A single Image with segment labels.
@@ -167,7 +179,14 @@ def load_seg(
 
         # Align to reference if provided
         if reference_image is not None:
-            result = _align_to_reference(result, reference_image)
+            result = _align_to_reference(
+                result,
+                reference_image,
+                transpose_axes=transpose_axes,
+                subvoxel_tolerance=subvoxel_tolerance,
+                subvoxel_warning_threshold=subvoxel_warning_threshold,
+                min_overlap_fraction=min_overlap_fraction,
+            )
 
         return result
     else:
@@ -190,7 +209,14 @@ def load_seg(
 
             # Align to reference if provided
             if reference_image is not None:
-                mask_image = _align_to_reference(mask_image, reference_image)
+                mask_image = _align_to_reference(
+                    mask_image,
+                    reference_image,
+                    transpose_axes=transpose_axes,
+                    subvoxel_tolerance=subvoxel_tolerance,
+                    subvoxel_warning_threshold=subvoxel_warning_threshold,
+                    min_overlap_fraction=min_overlap_fraction,
+                )
 
             result_dict[seg_num] = mask_image
 
@@ -462,7 +488,15 @@ def _extract_single_segment(
     return result
 
 
-def _align_to_reference(mask: "Image", reference: "Image") -> "Image":
+def _align_to_reference(
+    mask: "Image",
+    reference: "Image",
+    *,
+    transpose_axes: tuple[int, int, int] | None = None,
+    subvoxel_tolerance: float = 0.5,
+    subvoxel_warning_threshold: float = 0.01,
+    min_overlap_fraction: float = 0.5,
+) -> "Image":
     """Align a mask Image to a reference Image geometry.
 
     Uses the same repositioning logic as pictologics.loader._position_in_reference.
@@ -470,6 +504,10 @@ def _align_to_reference(mask: "Image", reference: "Image") -> "Image":
     Args:
         mask: The mask Image to align.
         reference: The reference Image with target geometry.
+        transpose_axes: Optional axis transposition before positioning.
+        subvoxel_tolerance: Maximum permitted fractional-voxel offset.
+        subvoxel_warning_threshold: Fractional-voxel drift warning threshold.
+        min_overlap_fraction: Minimum required overlap with reference geometry.
 
     Returns:
         A new Image aligned to the reference geometry.
@@ -481,7 +519,10 @@ def _align_to_reference(mask: "Image", reference: "Image") -> "Image":
         image=mask,
         reference=reference,
         fill_value=0,
-        transpose_axes=None,
+        transpose_axes=transpose_axes,
+        subvoxel_tolerance=subvoxel_tolerance,
+        subvoxel_warning_threshold=subvoxel_warning_threshold,
+        min_overlap_fraction=min_overlap_fraction,
     )
 
     return aligned

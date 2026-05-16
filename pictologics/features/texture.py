@@ -136,6 +136,11 @@ def _maybe_crop_to_bbox(
     return data_c, mask_c, dist_c
 
 
+def _roi_voxel_count(mask: npt.NDArray[np.floating[Any]]) -> int:
+    """Count ROI voxels using nonzero mask membership semantics."""
+    return int(np.count_nonzero(mask))
+
+
 # --- Zone Features Buffer Pool ---
 # Pre-allocated buffers for _calculate_zone_features_numba to reduce allocation overhead
 class _ZoneBufferPool:
@@ -654,8 +659,8 @@ def calculate_all_texture_matrices(
     Args:
         data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
             Values should be integers in the range [1, n_bins].
-        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the Region of Interest (ROI).
-            Must have the same shape as `data`. Non-zero values indicate the ROI.
+        mask (npt.NDArray[np.floating[Any]]): The 3D mask array defining the Region of Interest (ROI).
+            Must have the same shape as `data`. Nonzero values indicate ROI membership.
         n_bins (int): The number of grey levels used for discretization (e.g., 16, 32, 64).
             This determines the size of the resulting matrices.
         distance_mask (Optional[npt.NDArray[np.floating[Any]]]): Optional mask used to calculate the distance map for GLDZM.
@@ -707,11 +712,9 @@ def calculate_all_texture_matrices(
     # Crop to ROI bounding box (union with distance_mask when provided) to reduce memory traffic.
     data_c, mask_c, distmask_c = _maybe_crop_to_bbox(data, mask, distance_mask)
 
-    # Use a compact mask representation for kernels.
-    if mask_c.dtype == np.uint8:
-        mask_u8 = mask_c
-    else:
-        mask_u8 = (mask_c != 0).astype(np.uint8)
+    # Use a compact binary mask representation for kernels. Label values are
+    # membership markers, not weights.
+    mask_u8 = (mask_c != 0).astype(np.uint8)
     # 1. Local Features (GLCM, GLRLM, NGTDM, NGLDM)
     # Pre-cast data to smallest possible int type (0-based)
     # Input data is 1-based, so we subtract 1.
@@ -742,7 +745,7 @@ def calculate_all_texture_matrices(
     # 2. Zone Features (GLSZM, GLDZM)
     # Pre-calculate distance map for GLDZM
     # Use distance_mask if provided, else mask
-    d_mask = distmask_c if distmask_c is not None else mask_u8
+    d_mask = (distmask_c != 0).astype(np.uint8) if distmask_c is not None else mask_u8
 
     # Pad the mask with 0s to ensure the image border is treated as an edge.
     mask_bool = d_mask > 0
@@ -821,7 +824,7 @@ def calculate_glcm_features(
 
         Args:
             data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
-            mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
+            mask (npt.NDArray[np.floating[Any]]): The 3D mask array defining the ROI. Nonzero values indicate ROI membership.
             n_bins (int): The number of grey levels.
             glcm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLCM matrix. If provided, `data` and `mask`
                 are ignored for matrix calculation, but `data` is still used for `Ng` estimation if needed.
@@ -1044,7 +1047,7 @@ def calculate_glrlm_features(
 
     Args:
         data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
-        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
+        mask (npt.NDArray[np.floating[Any]]): The 3D mask array defining the ROI. Nonzero values indicate ROI membership.
         n_bins (int): The number of grey levels.
         glrlm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLRLM matrix.
 
@@ -1121,7 +1124,7 @@ def calculate_glrlm_features(
     features["normalised_run_length_non_uniformity_IC23"] = np.sum(s_j**2) / (N_runs**2)
 
     # Run Percentage (RP) - 9ZK5
-    n_voxels = np.sum(mask)
+    n_voxels = _roi_voxel_count(mask)
     n_dirs = 13  # Fixed for 3D
     features["run_percentage_9ZK5"] = N_runs / (n_voxels * n_dirs)
 
@@ -1402,7 +1405,7 @@ def calculate_glszm_features(
 
     Args:
         data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
-        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
+        mask (npt.NDArray[np.floating[Any]]): The 3D mask array defining the ROI. Nonzero values indicate ROI membership.
         n_bins (int): The number of grey levels.
         glszm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLSZM matrix.
 
@@ -1462,7 +1465,7 @@ def calculate_glszm_features(
     features["normalised_zone_size_non_uniformity_VB3A"] = np.sum(s_j**2) / (N_zones**2)
 
     # Zone Percentage (ZP) - P30P
-    n_voxels = np.sum(mask)
+    n_voxels = _roi_voxel_count(mask)
     features["zone_percentage_P30P"] = N_zones / n_voxels
 
     # Grey Level Variance (GLV) - BYLV
@@ -1517,7 +1520,7 @@ def calculate_gldzm_features(
 
     Args:
         data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
-        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
+        mask (npt.NDArray[np.floating[Any]]): The 3D mask array defining the ROI. Nonzero values indicate ROI membership.
         n_bins (int): The number of grey levels.
         gldzm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLDZM matrix.
         distance_mask (Optional[npt.NDArray[np.floating[Any]]]): Optional mask used to calculate the distance map.
@@ -1590,7 +1593,7 @@ def calculate_gldzm_features(
     )
 
     # Zone Percentage (ZP) - VIWW
-    n_voxels = np.sum(mask)
+    n_voxels = _roi_voxel_count(mask)
     features["zone_percentage_VIWW"] = N_zones / n_voxels
 
     # Grey Level Variance (GLV) - QK93
@@ -1653,7 +1656,7 @@ def calculate_ngtdm_features(
 
     Args:
         data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
-        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
+        mask (npt.NDArray[np.floating[Any]]): The 3D mask array defining the ROI. Nonzero values indicate ROI membership.
         n_bins (int): The number of grey levels.
         ngtdm_matrices (Optional[tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]]): Pre-calculated NGTDM matrices
             (sum of absolute differences `s`, and count `n`).
@@ -1793,7 +1796,7 @@ def calculate_ngldm_features(
 
     Args:
         data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
-        mask (npt.NDArray[np.floating[Any]]): The 3D binary mask array defining the ROI.
+        mask (npt.NDArray[np.floating[Any]]): The 3D mask array defining the ROI. Nonzero values indicate ROI membership.
         n_bins (int): The number of grey levels.
         ngldm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated NGLDM matrix.
         ngldm_alpha (int): The coarseness parameter α. Two grey levels are considered dependent
@@ -1895,7 +1898,7 @@ def calculate_ngldm_features(
     )
 
     # Dependence Count Percentage - 6XV8
-    n_voxels = np.sum(mask)
+    n_voxels = _roi_voxel_count(mask)
     features["dependence_count_percentage_6XV8"] = N_s / n_voxels
 
     # Grey Level Variance - 1PFV
@@ -1931,7 +1934,7 @@ def calculate_all_texture_features(
 
     Args:
         disc_array: Discretised image array.
-        mask_array: Mask array (ROI).
+        mask_array: Mask array (ROI). Nonzero values indicate ROI membership.
         n_bins: Number of bins.
         distance_mask_array: Optional mask for GLDZM distance calculation.
                              If None, mask_array is used.

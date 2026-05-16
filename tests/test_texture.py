@@ -188,6 +188,31 @@ class TestTextureFeatures(unittest.TestCase):
         )
         self.assertIn("joint_maximum_GYBY", f)
 
+    def test_label_mask_values_are_membership_not_weights(self):
+        label_mask = (self.mask * 3).astype(np.uint8)
+        binary_features = texture_module.calculate_all_texture_features(
+            self.data, self.mask, self.n_bins
+        )
+        label_features = texture_module.calculate_all_texture_features(
+            self.data, label_mask, self.n_bins
+        )
+
+        for key in [
+            "run_percentage_9ZK5",
+            "zone_percentage_P30P",
+            "zone_percentage_VIWW",
+            "dependence_count_percentage_6XV8",
+        ]:
+            self.assertAlmostEqual(label_features[key], binary_features[key])
+
+        binary_matrices = texture_module.calculate_all_texture_matrices(
+            self.data, self.mask, self.n_bins
+        )
+        label_matrices = texture_module.calculate_all_texture_matrices(
+            self.data, label_mask, self.n_bins
+        )
+        np.testing.assert_array_equal(label_matrices["glcm"], binary_matrices["glcm"])
+
     def test_crop_with_disjoint_distance_mask(self):
         mask = np.zeros(self.shape, dtype=int)
         mask[0, 0, 0] = 1

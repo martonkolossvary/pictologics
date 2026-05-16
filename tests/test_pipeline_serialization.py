@@ -212,7 +212,9 @@ class TestExportMethods:
         data = pipeline.to_dict()
         assert "schema_version" in data
         assert data["schema_version"] == CONFIG_SCHEMA_VERSION
+        assert "pictologics_version" in data
         assert "exported_at" in data
+        assert data["mask_roi_semantics"] == "nonzero_values_are_roi_membership"
         assert "configs" in data
         assert "standard_fbn_32" in data["configs"]
 
@@ -228,7 +230,9 @@ class TestExportMethods:
         """Test exporting without metadata."""
         data = pipeline.to_dict(include_metadata=False)
         assert "schema_version" not in data
+        assert "pictologics_version" not in data
         assert "exported_at" not in data
+        assert "mask_roi_semantics" not in data
         assert "configs" in data
 
     def test_to_json(self, pipeline: RadiomicsPipeline) -> None:
@@ -567,6 +571,23 @@ class TestMergeConfigs:
             2.0,
         )
 
+    def test_merge_configs_preserves_source_metadata(self, custom_config: list) -> None:
+        """Test merge preserves source_mode/sentinel metadata for portability."""
+        pipeline = RadiomicsPipeline(load_standard=False)
+        other = RadiomicsPipeline(load_standard=False)
+        other.add_config(
+            "portable",
+            custom_config,
+            source_mode="auto",
+            sentinel_value=-2048.0,
+        )
+
+        pipeline.merge_configs(other)
+        exported = pipeline.to_dict(config_names=["portable"])
+
+        assert exported["configs"]["portable"]["source_mode"] == "auto"
+        assert exported["configs"]["portable"]["sentinel_value"] == -2048.0
+
     def test_merge_configs_returns_self(
         self, pipeline: RadiomicsPipeline, custom_config: list
     ) -> None:
@@ -613,6 +634,10 @@ class TestValidation:
                 "step": "discretise",
                 "params": {"method": "FBN", "n_bins": 8, "min_val": 0, "max_val": 100},
             },
+            {"step": "resegment", "params": {"range_min": 0, "apply_to": "both"}},
+            {"step": "filter_outliers", "params": {"sigma": 2.0, "apply_to": "morph"}},
+            {"step": "keep_largest_component", "params": {"apply_to": "intensity"}},
+            {"step": "binarize_mask", "params": {"threshold": 0.5, "apply_to": "both"}},
             {
                 "step": "extract_features",
                 "params": {

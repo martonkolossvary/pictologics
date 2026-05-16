@@ -588,6 +588,25 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(img.origin, (10.0, 10.0, 10.0))
 
     @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_applies_top_level_rescale(
+        self, mock_dcmread: MagicMock
+    ) -> None:
+        mock_dcm = MagicMock()
+        mock_dcm.pixel_array = np.array([[10, 20]], dtype=np.int16)
+        mock_dcm.PixelSpacing = [1.0, 1.0]
+        del mock_dcm.SpacingBetweenSlices
+        mock_dcm.SliceThickness = 1.0
+        mock_dcm.ImagePositionPatient = [0.0, 0.0, 0.0]
+        mock_dcm.RescaleSlope = 2.0
+        mock_dcm.RescaleIntercept = -5.0
+        mock_dcmread.return_value = mock_dcm
+
+        img = _load_dicom_file("test.dcm")
+
+        self.assertEqual(img.array[0, 0, 0], 15.0)
+        self.assertEqual(img.array[1, 0, 0], 35.0)
+
+    @patch("pictologics.loader.pydicom.dcmread")
     def test_load_dicom_file_missing_metadata(self, mock_dcmread: MagicMock) -> None:
         mock_dcm = MagicMock()
         mock_dcm.pixel_array = np.zeros((100, 100))
@@ -1303,8 +1322,9 @@ class TestRepositioning(unittest.TestCase):
 
     def test_position_in_reference_tiny_drift_is_silent(self) -> None:
         """Drift below warning threshold produces no warning."""
-        from pictologics.loader import _position_in_reference
         import warnings as _warnings
+
+        from pictologics.loader import _position_in_reference
 
         reference = Image(
             array=np.zeros((10, 10, 10)),
@@ -1629,6 +1649,54 @@ class TestRepositioning(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Origin mismatch"):
             load_image("mask.dcm", reference_image=reference)
 
+    @patch("pictologics.loaders.seg_loader.load_seg")
+    @patch("pictologics.loader._is_dicom_seg")
+    @patch("pictologics.loader.Path")
+    def test_load_image_passes_alignment_controls_to_seg_loader(
+        self,
+        mock_Path: MagicMock,
+        mock_is_seg: MagicMock,
+        mock_load_seg: MagicMock,
+    ) -> None:
+        """DICOM SEG path loading must honour reference-alignment controls."""
+        mock_Path.return_value.exists.return_value = True
+        mock_Path.return_value.is_dir.return_value = False
+        mock_is_seg.return_value = True
+        reference = Image(
+            array=np.zeros((10, 10, 10)),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=np.eye(3),
+            modality="CT",
+        )
+        seg = Image(
+            array=np.zeros((10, 10, 10), dtype=np.uint8),
+            spacing=reference.spacing,
+            origin=reference.origin,
+            direction=reference.direction,
+            modality="SEG",
+        )
+        mock_load_seg.return_value = seg
+
+        result = load_image(
+            "mask_seg.dcm",
+            reference_image=reference,
+            transpose_axes=(0, 2, 1),
+            subvoxel_tolerance=0.05,
+            subvoxel_warning_threshold=0.01,
+            min_overlap_fraction=0.25,
+        )
+
+        self.assertIs(result, seg)
+        mock_load_seg.assert_called_once_with(
+            "mask_seg.dcm",
+            reference_image=reference,
+            transpose_axes=(0, 2, 1),
+            subvoxel_tolerance=0.05,
+            subvoxel_warning_threshold=0.01,
+            min_overlap_fraction=0.25,
+        )
+
     @patch("pictologics.loader.load_image")
     def test_load_and_merge_reposition_to_reference(self, mock_load: MagicMock) -> None:
         """Test load_and_merge_images with reposition_to_reference=True."""
@@ -1719,6 +1787,74 @@ class TestRepositioning(unittest.TestCase):
         img = _load_dicom_file("test.dcm")
         # Should be swapped to (X, Y, Z)
         self.assertEqual(img.array.shape, (20, 10, 5))
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_multiframe_rescales_each_frame(
+        self, mock_dcmread: MagicMock
+    ) -> None:
+        """Enhanced multiframe DICOM can store per-frame rescale parameters."""
+        from pictologics.loader import _load_dicom_file
+
+        mock_dcm = MagicMock()
+        mock_dcm.pixel_array = np.array([[[1, 2]], [[1, 2]]], dtype=np.int16)
+        mock_dcm.PixelSpacing = [1.0, 1.0]
+        mock_dcm.SliceThickness = 1.0
+        mock_dcm.ImagePositionPatient = [0.0, 0.0, 0.0]
+        mock_dcm.RescaleSlope = 1.0
+        mock_dcm.RescaleIntercept = 0.0
+        del mock_dcm.SpacingBetweenSlices
+
+        frame_0 = MagicMock()
+        frame_0.PixelValueTransformationSequence = [
+            MagicMock(RescaleSlope=1.0, RescaleIntercept=0.0)
+        ]
+        frame_1 = MagicMock()
+        frame_1.PixelValueTransformationSequence = [
+            MagicMock(RescaleSlope=1.0, RescaleIntercept=100.0)
+        ]
+        mock_dcm.PerFrameFunctionalGroupsSequence = [frame_0, frame_1]
+        mock_dcmread.return_value = mock_dcm
+
+        img = _load_dicom_file("test.dcm")
+
+        self.assertEqual(img.array.shape, (2, 1, 2))
+        self.assertEqual(img.array[0, 0, 0], 1.0)
+        self.assertEqual(img.array[1, 0, 0], 2.0)
+        self.assertEqual(img.array[0, 0, 1], 101.0)
+        self.assertEqual(img.array[1, 0, 1], 102.0)
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_multiframe_uses_shared_rescale_sequence(
+        self, mock_dcmread: MagicMock
+    ) -> None:
+        """Shared functional groups apply when frame-level transforms are absent."""
+        from pictologics.loader import _load_dicom_file
+
+        mock_dcm = MagicMock()
+        mock_dcm.pixel_array = np.array([[[1]], [[2]]], dtype=np.int16)
+        mock_dcm.PixelSpacing = [1.0, 1.0]
+        mock_dcm.SliceThickness = 1.0
+        mock_dcm.ImagePositionPatient = [0.0, 0.0, 0.0]
+        mock_dcm.RescaleSlope = 1.0
+        mock_dcm.RescaleIntercept = 0.0
+        del mock_dcm.SpacingBetweenSlices
+
+        frame_0 = MagicMock()
+        frame_0.PixelValueTransformationSequence = []
+        frame_1 = MagicMock()
+        frame_1.PixelValueTransformationSequence = []
+        shared = MagicMock()
+        shared.PixelValueTransformationSequence = [
+            MagicMock(RescaleSlope=2.0, RescaleIntercept=10.0)
+        ]
+        mock_dcm.PerFrameFunctionalGroupsSequence = [frame_0, frame_1]
+        mock_dcm.SharedFunctionalGroupsSequence = [shared]
+        mock_dcmread.return_value = mock_dcm
+
+        img = _load_dicom_file("test.dcm")
+
+        self.assertEqual(img.array[0, 0, 0], 12.0)
+        self.assertEqual(img.array[0, 0, 1], 14.0)
 
     @patch("pictologics.loader.pydicom.dcmread")
     def test_load_dicom_file_no_spacing_fallback(self, mock_dcmread: MagicMock) -> None:

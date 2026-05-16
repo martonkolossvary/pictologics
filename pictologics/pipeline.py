@@ -26,6 +26,7 @@ import re
 import warnings
 from dataclasses import dataclass
 from enum import Enum
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -90,6 +91,14 @@ CONFIG_SCHEMA_VERSION = "1.0"
 # Valid schema versions (for backward compatibility)
 _VALID_SCHEMA_VERSIONS = {"1.0", "1.1"}
 
+
+def _get_package_version() -> str | None:
+    """Return the installed package version when available."""
+    try:
+        return version("pictologics")
+    except PackageNotFoundError:
+        return None
+
 # ---------------------------------------------------------------------------
 # Feature metadata for describe_features()
 # ---------------------------------------------------------------------------
@@ -146,6 +155,24 @@ _PREPROCESSING_PARAM_COLUMNS = {
     "discretise": "discretise_params",
     "filter": "filter_params",
 }
+_MASK_APPLY_TARGETS = ("both", "morph", "intensity")
+_INTENSITY_MASK_FAMILIES = {
+    "intensity",
+    "spatial_intensity",
+    "local_intensity",
+    "histogram",
+    "ivh",
+    "glcm",
+    "glrlm",
+    "glszm",
+    "gldzm",
+    "ngtdm",
+    "ngldm",
+}
+_INTENSITY_WEIGHTED_MORPHOLOGY_FEATURES = {
+    "integrated_intensity_99N0",
+    "center_of_mass_shift_KLMA",
+}
 
 
 def _normalize_texture_family(family: str) -> str | None:
@@ -167,6 +194,39 @@ def _feature_name_families(family: str) -> list[str]:
         return list(_TEXTURE_FAMILIES)
     texture_family = _normalize_texture_family(family)
     return [texture_family if texture_family is not None else family]
+
+
+def _get_apply_to(params: dict[str, Any], step_name: str) -> str:
+    """Return a validated mask target for preprocessing steps that support it."""
+    apply_to = params.get("apply_to", "both")
+    if apply_to not in _MASK_APPLY_TARGETS:
+        allowed = "', '".join(_MASK_APPLY_TARGETS)
+        raise ValueError(f"{step_name} apply_to must be '{allowed}'")
+    return cast(str, apply_to)
+
+
+def _intersect_mask(mask: Image, valid_mask: npt.NDArray[np.bool_]) -> Image:
+    """Return mask intersected with a boolean validity mask."""
+    return Image(
+        array=(mask.array * valid_mask).astype(np.uint8),
+        spacing=mask.spacing,
+        origin=mask.origin,
+        direction=mask.direction,
+        modality=mask.modality,
+    )
+
+
+def _family_uses_morph_mask(family: str) -> bool:
+    """Whether features in this family depend on the morphology mask geometry."""
+    return family == "morphology" or family == "gldzm"
+
+
+def _feature_uses_intensity_mask(feature_key: str, family: str) -> bool:
+    """Whether this feature row depends on the intensity mask."""
+    return (
+        family in _INTENSITY_MASK_FAMILIES
+        or feature_key in _INTENSITY_WEIGHTED_MORPHOLOGY_FEATURES
+    )
 
 
 # Regex to extract the IBSI alphanumeric code from a feature key.
@@ -453,8 +513,8 @@ class RadiomicsPipeline:
             steps: List of steps. Each step is a dict with 'step' (name) and 'params' (dict).
                    Supported steps:
                    - 'resample': params: new_spacing (required), interpolation (optional)
-                   - 'resegment': params: range_min, range_max
-                   - 'filter_outliers': params: sigma
+                   - 'resegment': params: range_min, range_max, apply_to
+                   - 'filter_outliers': params: sigma, apply_to
                    - 'binarize_mask': params: threshold (float, default 0.5),
                        mask_values (int | list[int] | tuple[int, int]), apply_to ('morph'|'intensity'|'both')
                    - 'keep_largest_component': params: None
@@ -741,6 +801,8 @@ class RadiomicsPipeline:
 
             config_log: dict[str, Any] = {
                 "timestamp": datetime.datetime.now().isoformat(),
+                "schema_version": CONFIG_SCHEMA_VERSION,
+                "pictologics_version": _get_package_version(),
                 "subject_id": subject_id,
                 "config_name": config_name,
                 "image_source": img_source,
@@ -748,11 +810,30 @@ class RadiomicsPipeline:
                 "source_mode": source_mode.value,
                 "sentinel_detected": sentinel_detected,
                 "sentinel_value": detected_sentinel_value,
+                "mask_roi_semantics": "nonzero_values_are_roi_membership",
+                "config_snapshot": self._make_serializable(
+                    {
+                        "source_mode": source_mode.value,
+                        "sentinel_value": explicit_sentinel,
+                        "effective_sentinel_value": detected_sentinel_value,
+                        "steps": steps,
+                    }
+                ),
+                "deduplication": {
+                    "enabled": self._deduplication_enabled,
+                    "rules_version": self._deduplication_rules.version,
+                    "plan_used": dedup_plan is not None,
+                },
+                "run_parameters": {
+                    "requested_config_names": config_names,
+                    "target_configs": target_configs,
+                },
                 "mask_repositioning_settings": {
                     "subvoxel_tolerance": mask_subvoxel_tolerance,
                     "subvoxel_warning_threshold": mask_subvoxel_warning_threshold,
                     "min_overlap_fraction": mask_min_overlap_fraction,
                 },
+                "status": "started",
                 "steps_executed": [],
             }
 
@@ -782,10 +863,17 @@ class RadiomicsPipeline:
 
                     # Log
                     config_log["steps_executed"].append(
-                        {"step": step_name, "params": params, "status": "completed"}
+                        {
+                            "step": step_name,
+                            "params": self._make_serializable(params),
+                            "status": "completed",
+                        }
                     )
+                config_log["status"] = "completed"
+                config_log["result_feature_count"] = len(config_features)
 
             except EmptyROIMaskError as e:
+                config_log["status"] = "empty_roi"
                 config_log["error"] = str(e)
                 config_log["failed_step"] = (
                     current_step if current_step is not None else "initialization"
@@ -799,6 +887,7 @@ class RadiomicsPipeline:
                 all_results[config_name] = pd.Series(
                     {name: float("nan") for name in nan_names}
                 )
+                config_log["result_feature_count"] = len(nan_names)
                 logging.debug(
                     "Config '%s' produced an empty ROI: %s. "
                     "Returning NaN for %d features.",
@@ -809,6 +898,7 @@ class RadiomicsPipeline:
                 continue
 
             except Exception as e:
+                config_log["status"] = "error"
                 config_log["error"] = str(e)
                 config_log["failed_step"] = current_step
                 # Backfill with NaN so the result always has a complete set of
@@ -816,6 +906,7 @@ class RadiomicsPipeline:
                 nan_names = self._get_expected_feature_names(steps)
                 for name in nan_names:
                     config_features.setdefault(name, float("nan"))
+                config_log["result_feature_count"] = len(config_features)
 
             self._log.append(config_log)
 
@@ -832,20 +923,21 @@ class RadiomicsPipeline:
     def _ensure_nonempty_roi(self, state: PipelineState, context: str) -> None:
         """Raise a clear error if the ROI is empty.
 
-        The pipeline uses `mask_values=1` semantics throughout (see `apply_mask`).
+        The pipeline treats any nonzero mask value as ROI membership unless a
+        step explicitly binarizes/selects labels first.
         """
-        has_intensity_roi = bool(np.any(state.intensity_mask.array == 1))
+        has_intensity_roi = bool(np.any(state.intensity_mask.array != 0))
         if not has_intensity_roi:
             raise EmptyROIMaskError(
                 "ROI is empty after preprocessing "
-                f"({context}). Ensure your mask contains at least one voxel with value 1, "
+                f"({context}). Ensure your mask contains at least one nonzero voxel, "
                 "or relax resegmentation/outlier filtering thresholds."
             )
-        has_morph_roi = bool(np.any(state.morph_mask.array == 1))
+        has_morph_roi = bool(np.any(state.morph_mask.array != 0))
         if not has_morph_roi:
             raise EmptyROIMaskError(
                 "ROI is empty after preprocessing "
-                f"({context}). Ensure your mask contains at least one voxel with value 1, "
+                f"({context}). Ensure your mask contains at least one nonzero voxel, "
                 "or relax resegmentation/outlier filtering thresholds."
             )
 
@@ -911,32 +1003,28 @@ class RadiomicsPipeline:
                 mask_threshold=thresh_arg,
             )
 
-            # CRITICAL: If valid source mask exists, apply it to intensity mask.
+            # CRITICAL: If valid source mask exists, apply it to both masks.
             # This prevents background (often 0 after resampling) from being
             # considered part of the ROI if the resegmentation range includes 0.
             if state.source_mask is not None:
                 # Ensure binary mask semantics
                 valid_mask = state.source_mask.array > 0
-                state.intensity_mask = Image(
-                    array=(state.intensity_mask.array * valid_mask).astype(np.uint8),
-                    spacing=state.intensity_mask.spacing,
-                    origin=state.intensity_mask.origin,
-                    direction=state.intensity_mask.direction,
-                    modality=state.intensity_mask.modality,
-                )
+                state.morph_mask = _intersect_mask(state.morph_mask, valid_mask)
+                state.intensity_mask = _intersect_mask(state.intensity_mask, valid_mask)
 
             self._ensure_nonempty_roi(state, context="resample")
 
         elif step_name == "resegment":
             range_min = params.get("range_min")
             range_max = params.get("range_max")
-            state.intensity_mask = resegment_mask(
-                state.image, state.intensity_mask, range_min, range_max
-            )
+            apply_to = _get_apply_to(params, "resegment")
 
-            # If the mask was auto-generated (mask omitted), treat resegmentation as ROI definition
-            # for both intensity and morphology features.
-            if state.mask_was_generated:
+            if apply_to in ("intensity", "both"):
+                state.intensity_mask = resegment_mask(
+                    state.image, state.intensity_mask, range_min, range_max
+                )
+
+            if apply_to in ("morph", "both"):
                 state.morph_mask = resegment_mask(
                     state.image, state.morph_mask, range_min, range_max
                 )
@@ -945,11 +1033,13 @@ class RadiomicsPipeline:
 
         elif step_name == "filter_outliers":
             sigma = params.get("sigma", 3.0)
-            state.intensity_mask = filter_outliers(
-                state.image, state.intensity_mask, sigma
-            )
+            apply_to = _get_apply_to(params, "filter_outliers")
 
-            if state.mask_was_generated:
+            if apply_to in ("intensity", "both"):
+                state.intensity_mask = filter_outliers(
+                    state.image, state.intensity_mask, sigma
+                )
+            if apply_to in ("morph", "both"):
                 state.morph_mask = filter_outliers(state.image, state.morph_mask, sigma)
 
             self._ensure_nonempty_roi(state, context="filter_outliers")
@@ -962,7 +1052,7 @@ class RadiomicsPipeline:
 
         elif step_name == "keep_largest_component":
             # apply_to: "morph", "intensity", or "both" (default)
-            apply_to = params.get("apply_to", "both")
+            apply_to = _get_apply_to(params, "keep_largest_component")
             if apply_to in ("morph", "both"):
                 state.morph_mask = keep_largest_component(state.morph_mask)
             if apply_to in ("intensity", "both"):
@@ -971,7 +1061,7 @@ class RadiomicsPipeline:
             self._ensure_nonempty_roi(state, context="keep_largest_component")
 
         elif step_name == "binarize_mask":
-            apply_to = params.get("apply_to", "both")
+            apply_to = _get_apply_to(params, "binarize_mask")
             threshold = params.get("threshold", 0.5)
             mask_values = params.get("mask_values")
 
@@ -1622,15 +1712,26 @@ class RadiomicsPipeline:
 
         return results
 
-    def save_log(self, output_path: str) -> None:
+    def save_log(self, output_path: str | Path) -> None:
         """
-        Save the processing log to a JSON file.
+        Save the processing log to a self-describing JSON file.
         """
-        if not output_path.endswith(".json"):
-            output_path += ".json"
+        path = Path(output_path)
+        if not str(path).endswith(".json"):
+            path = Path(f"{path}.json")
 
-        with open(output_path, "w") as f:
-            json.dump(self._log, f, indent=4, default=str)
+        payload = {
+            "log_schema_version": "1.0",
+            "pipeline_schema_version": CONFIG_SCHEMA_VERSION,
+            "pictologics_version": _get_package_version(),
+            "exported_at": datetime.datetime.now().isoformat(),
+            "mask_roi_semantics": "nonzero_values_are_roi_membership",
+            "entry_count": len(self._log),
+            "entries": self._make_serializable(self._log),
+        }
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=4, default=str), encoding="utf-8")
 
     # -------------------------------------------------------------------------
     # Configuration Serialization Methods
@@ -1735,14 +1836,18 @@ class RadiomicsPipeline:
             "interpolation": None,
             "resample_params": None,
             "is_resegmented": False,
+            "resegment_apply_to": None,
             "resegment_params": None,
             "is_outlier_filtered": False,
+            "filter_outliers_apply_to": None,
             "filter_outliers_params": None,
             "is_intensity_rounded": False,
             "round_intensities_params": None,
             "keeps_largest_component": False,
+            "keep_largest_component_apply_to": None,
             "keep_largest_component_params": None,
             "is_mask_binarized": False,
+            "binarize_mask_apply_to": None,
             "binarize_mask_params": None,
             "is_discretised": False,
             "discretisation_method": None,
@@ -1797,10 +1902,22 @@ class RadiomicsPipeline:
         resegment_records = records_by_step["resegment"]
         if resegment_records:
             meta["is_resegmented"] = True
+            meta["resegment_apply_to"] = RadiomicsPipeline._catalog_value(
+                [
+                    record["params"].get("apply_to", "both")
+                    for record in resegment_records
+                ]
+            )
 
         filter_outlier_records = records_by_step["filter_outliers"]
         if filter_outlier_records:
             meta["is_outlier_filtered"] = True
+            meta["filter_outliers_apply_to"] = RadiomicsPipeline._catalog_value(
+                [
+                    record["params"].get("apply_to", "both")
+                    for record in filter_outlier_records
+                ]
+            )
 
         round_records = records_by_step["round_intensities"]
         if round_records:
@@ -1809,10 +1926,22 @@ class RadiomicsPipeline:
         largest_component_records = records_by_step["keep_largest_component"]
         if largest_component_records:
             meta["keeps_largest_component"] = True
+            meta["keep_largest_component_apply_to"] = RadiomicsPipeline._catalog_value(
+                [
+                    record["params"].get("apply_to", "both")
+                    for record in largest_component_records
+                ]
+            )
 
         binarize_records = records_by_step["binarize_mask"]
         if binarize_records:
             meta["is_mask_binarized"] = True
+            meta["binarize_mask_apply_to"] = RadiomicsPipeline._catalog_value(
+                [
+                    record["params"].get("apply_to", "both")
+                    for record in binarize_records
+                ]
+            )
 
         discretise_records = records_by_step["discretise"]
         if discretise_records:
@@ -1911,6 +2040,8 @@ class RadiomicsPipeline:
                 *Texture*.
             - **requires_discretisation** – Whether the family needs discretised
                 input.
+            - **uses_morph_mask** / **uses_intensity_mask** – Which runtime ROI
+                mask(s) the feature row depends on.
             - **source_mode** – Source voxel handling mode for the configuration.
             - **sentinel_value** – Explicit sentinel value, if configured.
             - **feature_extraction_step_index** – 1-based position of the
@@ -1991,6 +2122,10 @@ class RadiomicsPipeline:
                             "requires_discretisation": _REQUIRES_DISCRETISATION.get(
                                 family, False
                             ),
+                            "uses_morph_mask": _family_uses_morph_mask(family),
+                            "uses_intensity_mask": _feature_uses_intensity_mask(
+                                fkey, family
+                            ),
                             "source_mode": source_mode,
                             "sentinel_value": sentinel_value,
                             "feature_extraction_step_index": step_index,
@@ -2020,6 +2155,8 @@ class RadiomicsPipeline:
             "family",
             "family_group",
             "requires_discretisation",
+            "uses_morph_mask",
+            "uses_intensity_mask",
             "source_mode",
             "sentinel_value",
             "feature_extraction_step_index",
@@ -2035,14 +2172,18 @@ class RadiomicsPipeline:
             "interpolation",
             "resample_params",
             "is_resegmented",
+            "resegment_apply_to",
             "resegment_params",
             "is_outlier_filtered",
+            "filter_outliers_apply_to",
             "filter_outliers_params",
             "is_intensity_rounded",
             "round_intensities_params",
             "keeps_largest_component",
+            "keep_largest_component_apply_to",
             "keep_largest_component_params",
             "is_mask_binarized",
+            "binarize_mask_apply_to",
             "binarize_mask_params",
             "is_filtered",
             "filter_type",
@@ -2097,7 +2238,9 @@ class RadiomicsPipeline:
 
         if include_metadata:
             result["schema_version"] = CONFIG_SCHEMA_VERSION
+            result["pictologics_version"] = _get_package_version()
             result["exported_at"] = datetime.datetime.now().isoformat()
+            result["mask_roi_semantics"] = "nonzero_values_are_roi_membership"
 
         result["configs"] = serializable_configs
 
@@ -2124,8 +2267,12 @@ class RadiomicsPipeline:
             return [self._make_serializable(item) for item in obj]
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
-        elif isinstance(obj, (np.integer, np.floating)):
+        elif isinstance(obj, (np.integer, np.floating, np.bool_)):
             return obj.item()
+        elif isinstance(obj, Path):
+            return str(obj)
+        elif isinstance(obj, Enum):
+            return obj.value
         return obj
 
     def to_json(
@@ -2406,6 +2553,10 @@ class RadiomicsPipeline:
                 )
                 continue
             self._configs[name] = copy.deepcopy(steps)
+            if name in other._config_metadata:
+                self._config_metadata[name] = copy.deepcopy(other._config_metadata[name])
+            else:
+                self._config_metadata.pop(name, None)
         return self
 
     # -------------------------------------------------------------------------
@@ -2453,10 +2604,10 @@ class RadiomicsPipeline:
             "mask_threshold",
             "round_intensities",
         },
-        "resegment": {"range_min", "range_max"},
-        "filter_outliers": {"sigma"},
+        "resegment": {"range_min", "range_max", "apply_to"},
+        "filter_outliers": {"sigma", "apply_to"},
         "binarize_mask": {"threshold", "mask_values", "apply_to"},
-        "keep_largest_component": set(),
+        "keep_largest_component": {"apply_to"},
         "round_intensities": set(),
         "discretise": {
             "method",

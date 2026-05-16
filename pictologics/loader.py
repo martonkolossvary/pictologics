@@ -37,6 +37,7 @@ transposed for correct display.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, cast
@@ -112,6 +113,68 @@ def _normalize_direction_columns(
     direction = direction / safe_norms
     direction[:, norms == 0.0] = np.eye(3)[:, norms == 0.0]
     return cast(npt.NDArray[np.float64], direction)
+
+
+def _rescale_params_from_functional_group(group: Any) -> tuple[float, float] | None:
+    """Return RescaleSlope/Intercept from a DICOM functional group item if present."""
+    sequence = getattr(group, "PixelValueTransformationSequence", None)
+    if not isinstance(sequence, Sequence) or len(sequence) == 0:
+        return None
+    item = sequence[0]
+    return (
+        float(getattr(item, "RescaleSlope", 1.0)),
+        float(getattr(item, "RescaleIntercept", 0.0)),
+    )
+
+
+def _get_dicom_frame_rescale(ds: Any, frame_index: int) -> tuple[float, float]:
+    """Get frame-specific DICOM rescale parameters, falling back to shared/top-level tags."""
+    per_frame = getattr(ds, "PerFrameFunctionalGroupsSequence", None)
+    group = (
+        per_frame[frame_index]
+        if isinstance(per_frame, Sequence) and frame_index < len(per_frame)
+        else None
+    )
+    if group is not None:
+        params = _rescale_params_from_functional_group(group)
+        if params is not None:
+            return params
+
+    shared = getattr(ds, "SharedFunctionalGroupsSequence", None)
+    group = shared[0] if isinstance(shared, Sequence) and len(shared) > 0 else None
+    if group is not None:
+        params = _rescale_params_from_functional_group(group)
+        if params is not None:
+            return params
+
+    return (
+        float(getattr(ds, "RescaleSlope", 1.0)),
+        float(getattr(ds, "RescaleIntercept", 0.0)),
+    )
+
+
+def _apply_dicom_rescale(
+    data: npt.NDArray[Any],
+    ds: Any,
+) -> npt.NDArray[Any]:
+    """Apply top-level, shared, or per-frame DICOM rescale to stored pixel data."""
+    if data.ndim != 3:
+        slope, intercept = _get_dicom_frame_rescale(ds, 0)
+        if slope != 1.0 or intercept != 0.0:
+            return data.astype(np.float64) * slope + intercept
+        return data
+
+    frame_params = [
+        _get_dicom_frame_rescale(ds, frame_idx) for frame_idx in range(data.shape[0])
+    ]
+    if all(slope == 1.0 and intercept == 0.0 for slope, intercept in frame_params):
+        return data
+
+    scaled = data.astype(np.float64)
+    for frame_idx, (slope, intercept) in enumerate(frame_params):
+        if slope != 1.0 or intercept != 0.0:
+            scaled[frame_idx] = scaled[frame_idx] * slope + intercept
+    return scaled
 
 
 @dataclass
@@ -655,7 +718,14 @@ def load_image(
             if _is_dicom_seg(path):
                 from pictologics.loaders.seg_loader import load_seg
 
-                seg_result = load_seg(path, reference_image=reference_image)
+                seg_result = load_seg(
+                    path,
+                    reference_image=reference_image,
+                    transpose_axes=transpose_axes,
+                    subvoxel_tolerance=subvoxel_tolerance,
+                    subvoxel_warning_threshold=subvoxel_warning_threshold,
+                    min_overlap_fraction=min_overlap_fraction,
+                )
                 # load_seg can return dict when combine_segments=False, but here we use default
                 if isinstance(seg_result, dict):
                     # Should not happen with default args, but handle gracefully
@@ -1353,6 +1423,11 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
     except Exception as e:
         raise ValueError(f"Corrupt or invalid DICOM file '{path}': {e}") from e
 
+    # Apply rescale while the native DICOM frame axis is still intact.  Enhanced
+    # multiframe objects may store distinct transforms per frame.
+    if apply_rescale:
+        data = _apply_dicom_rescale(data, dcm)
+
     # Handle dimensions
     # DICOM pixel_array format:
     #   - 2D: (Rows, Columns) = (Y, X)
@@ -1402,13 +1477,6 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
         direction = np.stack([row_cosines, col_cosines, slice_cosine], axis=1)
     except (AttributeError, ValueError):
         direction = np.eye(3)
-
-    # Rescale to real-world values (e.g., Hounsfield Units)
-    if apply_rescale:
-        slope = getattr(dcm, "RescaleSlope", 1.0)
-        intercept = getattr(dcm, "RescaleIntercept", 0.0)
-        if slope != 1.0 or intercept != 0.0:
-            data = data.astype(np.float64) * float(slope) + float(intercept)
 
     return Image(
         array=data,

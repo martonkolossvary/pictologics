@@ -2,6 +2,23 @@
 
 <!-- towncrier release notes start -->
 
+## [0.4.1] - 2026-05-16
+
+### Changed
+
+- Extended CI to lint tests, added a separate JIT smoke check outside coverage accounting, and made the MkDocs-published changelog the towncrier source with root changelog sync support.
+
+### Fixed
+
+- Fixed IBSI 1 compliance benchmarks that failed due to recent pipeline default changes by explicitly restricting `resegment` and `filter_outliers` steps to the `intensity` mask in standard compliance configurations (Configs C, D, E).
+- Fixed compartment-specific pipeline semantics so `resegment` and `filter_outliers` update morphology masks by default, source masks constrain morphology masks after resampling, deduplication treats mask-narrowing steps as morphology dependencies, and `describe_features()` reports mask usage plus effective `apply_to` targets. Nonzero multi-label mask values are now treated as ROI membership rather than numeric weights across preprocessing, morphology, and texture calculations, while `binarize_mask` remains the explicit label-selection step. Configuration exports and processing logs now include mask semantics, package/schema metadata, configuration snapshots, deduplication settings, and effective source/sentinel details for reproducible runs on other machines.
+- Fixed deduplication signatures to preserve preprocessing step order, corrected continuous-IVH deduplication dependency detection, applied per-frame DICOM rescale transforms for multiframe files, and propagated DICOM SEG alignment controls through reference-aware loading.
+
+### Optimized
+
+- Removed redundant initializations of `min_rot` and `max_rot` arrays in `_ombb_extents_numba` to slightly improve morphology calculation efficiency.
+
+
 ## [0.4.1] - 2026-05-05
 
 ### Changed

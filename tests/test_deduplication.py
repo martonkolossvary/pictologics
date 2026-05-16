@@ -90,7 +90,10 @@ class TestPreprocessingSignature:
             ("resample", {"new_spacing": [1.0, 1.0, 1.0]})
         ])
         parsed = json.loads(sig.json_repr)
-        assert isinstance(parsed, dict)  # JSON is a dict mapping step names to params
+        assert isinstance(parsed, list)
+        assert parsed == [
+            {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}}
+        ]
 
     def test_identical_steps_same_hash(self):
         """Identical preprocessing steps should produce same hash."""
@@ -124,7 +127,7 @@ class TestPreprocessingSignature:
         """Empty steps list should produce valid signature."""
         sig = PreprocessingSignature.from_steps([])
         assert sig.hash
-        assert sig.json_repr == "{}"  # Empty dict as JSON
+        assert sig.json_repr == "[]"
 
     def test_serialization_roundtrip(self):
         """Signature should serialize and deserialize correctly."""
@@ -151,12 +154,14 @@ class TestExtractRelevantSteps:
             {"step": "extract_features", "params": {"families": ["morphology", "intensity", "texture"]}},
         ]
 
-    def test_morphology_excludes_discretisation(self, sample_config: list[dict[str, Any]]):
-        """Morphology should not include discretisation step."""
+    def test_morphology_includes_mask_narrowing_excludes_discretisation(self, sample_config: list[dict[str, Any]]):
+        """Morphology should include mask-narrowing steps but not discretisation."""
         rules = get_default_rules()
         relevant = extract_relevant_steps(sample_config, "morphology", rules)
         step_names = [step_name for step_name, params in relevant]
         assert "resample" in step_names
+        assert "resegment" in step_names
+        assert "filter_outliers" in step_names
         assert "discretise" not in step_names
         assert "extract_features" not in step_names
 
@@ -180,6 +185,19 @@ class TestExtractRelevantSteps:
         relevant = extract_relevant_steps(sample_config, "histogram", rules)
         step_names = [step_name for step_name, params in relevant]
         assert "discretise" in step_names
+
+    def test_relevant_steps_preserve_pipeline_order(self):
+        """Step order is part of preprocessing semantics and the dedup signature."""
+        rules = get_default_rules()
+        config_steps = [
+            {"step": "resegment", "params": {"range_min": 0, "range_max": 100}},
+            {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}},
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+        ]
+
+        relevant = extract_relevant_steps(config_steps, "intensity", rules)
+
+        assert [step_name for step_name, params in relevant] == ["resegment", "resample"]
 
 
 class TestConfigurationAnalyzer:
@@ -273,6 +291,30 @@ class TestConfigurationAnalyzer:
         assert sig1 is not None
         assert sig2 is not None
         assert sig1.hash != sig2.hash, "Different preprocessing should yield different morphology signature"
+
+    def test_different_resegment_different_morphology(self):
+        """Compartment-specific resegmentation should not share morphology signatures."""
+        configs = {
+            "low": [
+                {"step": "resegment", "params": {"range_min": -100.0, "range_max": 30.0}},
+                {"step": "extract_features", "params": {"families": ["morphology"]}},
+            ],
+            "high": [
+                {"step": "resegment", "params": {"range_min": 30.0, "range_max": 150.0}},
+                {"step": "extract_features", "params": {"families": ["morphology"]}},
+            ],
+        }
+        analyzer = ConfigurationAnalyzer(configs)
+        plan = analyzer.analyze()
+
+        sig1 = plan.signatures.get(("low", "morphology"))
+        sig2 = plan.signatures.get(("high", "morphology"))
+
+        assert sig1 is not None
+        assert sig2 is not None
+        assert sig1.hash != sig2.hash
+        assert plan.sources.get(("low", "morphology")) is None
+        assert plan.sources.get(("high", "morphology")) is None
 
     def test_sources_identify_first_occurrence(self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]):
         """Sources should identify first occurrence as None, subsequent as source config."""
@@ -501,6 +543,65 @@ class TestPipelineDeduplicationIntegration:
                 value = dedup_results[config_name][key]
                 assert not np.isnan(value), f"{config_name}:{key} should not be NaN"
                 assert value == pytest.approx(no_dedup_results[config_name][key])
+
+    def test_deduplication_signatures_are_step_order_sensitive(self):
+        """Same steps in a different order must compute independently."""
+        rng = np.random.default_rng(0)
+        array = rng.normal(50.0, 30.0, size=(4, 4, 4)).astype(np.float32)
+        image = Image(
+            array=array,
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+            modality="CT",
+        )
+        mask = Image(
+            array=np.ones_like(array, dtype=np.uint8),
+            spacing=(1.0, 1.0, 1.0),
+            origin=(0.0, 0.0, 0.0),
+            direction=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+            modality="SEG",
+        )
+        configs = {
+            "resample_then_resegment": [
+                {
+                    "step": "resample",
+                    "params": {"new_spacing": (0.5, 0.5, 0.5), "interpolation": "linear"},
+                },
+                {"step": "resegment", "params": {"range_min": 40, "range_max": 80}},
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+            ],
+            "resegment_then_resample": [
+                {"step": "resegment", "params": {"range_min": 40, "range_max": 80}},
+                {
+                    "step": "resample",
+                    "params": {"new_spacing": (0.5, 0.5, 0.5), "interpolation": "linear"},
+                },
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+            ],
+        }
+        dedup_pipeline = RadiomicsPipeline(load_standard=False, deduplicate=True)
+        no_dedup_pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+        for pipeline in (dedup_pipeline, no_dedup_pipeline):
+            for name, steps in configs.items():
+                pipeline.add_config(name, steps)
+
+        dedup_results = dedup_pipeline.run(image, mask)
+        no_dedup_results = no_dedup_pipeline.run(image, mask)
+
+        key = "mean_intensity_Q4LE"
+        assert no_dedup_results["resample_then_resegment"][key] != pytest.approx(
+            no_dedup_results["resegment_then_resample"][key]
+        )
+        assert dedup_pipeline.deduplication_stats == {
+            "reused_families": 0,
+            "computed_families": 2,
+            "cache_hit_rate": 0.0,
+        }
+        for config_name in configs:
+            assert dedup_results[config_name][key] == pytest.approx(
+                no_dedup_results[config_name][key]
+            )
 
     def test_deduplication_stats_empty_before_run(self):
         """deduplication_stats should return empty dict with warning before run()."""
@@ -751,6 +852,21 @@ class TestIVHDependencies:
                 "families": ["ivh"],
                 "ivh_params": {"ivh_use_continuous": True}
             }},
+        ]
+
+        deps = get_ivh_dependencies(config_steps, rules)
+        assert "discretise" not in deps
+
+    def test_ivh_top_level_continuous_mode_removes_discretise_dependency(self):
+        """The runtime top-level ivh_use_continuous parameter controls dedup."""
+        rules = get_default_rules()
+        config_steps = [
+            {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}},
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_use_continuous": True},
+            },
         ]
 
         deps = get_ivh_dependencies(config_steps, rules)

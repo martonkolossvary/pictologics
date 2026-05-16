@@ -195,13 +195,17 @@ the order shown, and repeated preprocessing steps are allowed. The feature
 catalog returned by `describe_features()` mirrors this model: for every output
 feature it records the preprocessing steps that occurred before the
 `extract_features` step, including repeated-step parameters as compact JSON
-arrays.
+arrays. It also records which runtime mask(s) each feature row uses and the
+effective `apply_to` target for mask-changing steps such as `resegment`,
+`filter_outliers`, `keep_largest_component`, and `binarize_mask`.
 
 ### YAML Format Specification
 
 ```yaml
 schema_version: "1.0"
+pictologics_version: "0.4.1"
 exported_at: "2026-01-31T12:00:00.000000"
+mask_roi_semantics: nonzero_values_are_roi_membership
 configs:
   my_custom_config:
     source_mode: full_image
@@ -226,7 +230,9 @@ configs:
 ```json
 {
   "schema_version": "1.0",
+  "pictologics_version": "0.4.1",
   "exported_at": "2026-01-31T12:00:00.000000",
+  "mask_roi_semantics": "nonzero_values_are_roi_membership",
   "configs": {
     "my_custom_config": {
       "source_mode": "full_image",
@@ -254,6 +260,11 @@ configuration value is directly a list of steps. New exports use the explicit
 `steps` form so configuration-level metadata such as `source_mode` and
 `sentinel_value` can round-trip.
 
+Mask labels also round-trip with explicit semantics: exported files record that
+all nonzero mask values are ROI membership by default. Use a `binarize_mask`
+step with `mask_values` when a configuration should select one label, a set of
+labels, or a label range before feature extraction.
+
 ### Schema Versioning
 
 Configuration files include a `schema_version` field to ensure forward compatibility:
@@ -261,6 +272,8 @@ Configuration files include a `schema_version` field to ensure forward compatibi
 - **Current version**: `1.0`
 - Files without a version are treated as version `1.0`
 - Future versions will include automatic migration when loading older configs
+- Exports include the Pictologics package version when available so collaborators
+  can match the implementation used for a run
 
 ## Sharing Configurations
 
@@ -362,6 +375,10 @@ pipeline1.merge_configs(pipeline2)
 pipeline1.merge_configs(pipeline2, overwrite=True)  # Overwrite existing
 pipeline1.merge_configs(pipeline2, overwrite=False)  # Keep existing (default)
 ```
+
+Merging preserves configuration metadata such as `source_mode` and
+`sentinel_value`, so shared configurations remain portable after being combined
+with local or standard configuration sets.
 
 ### Configuration Validation
 
@@ -600,6 +617,13 @@ print(f"  - Mean intensity: {config_features.get('mean_intensity_Q4LE', 'N/A'):.
 pipeline.save_log("logs/test_run_001.json")
 ```
 
+`save_log()` writes a JSON object with `log_schema_version`,
+`pipeline_schema_version`, `pictologics_version`, `mask_roi_semantics`, and an
+`entries` array. Each entry includes the configuration snapshot, executed step
+parameters, source-mode and sentinel information, deduplication settings, mask
+alignment settings, and error/status fields needed to reproduce or audit the run
+on another machine.
+
 ### Step 3: Export Configuration for Sharing (Site A)
 
 Save the configuration to a file that can be shared with collaborators:
@@ -619,7 +643,9 @@ The exported YAML file will look like this:
 
 ```yaml
 schema_version: "1.0"
+pictologics_version: "0.4.1"
 exported_at: "2026-01-31T10:30:00.000000"
+mask_roi_semantics: nonzero_values_are_roi_membership
 configs:
   lung_nodule_fbs25:
     source_mode: full_image
@@ -632,8 +658,10 @@ configs:
         params:
           range_min: -1000
           range_max: 400
+          apply_to: both
       - step: keep_largest_component
-        params: {}
+        params:
+          apply_to: both
       - step: discretise
         params:
           method: FBS

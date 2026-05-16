@@ -297,9 +297,24 @@ def test_apply_mask_simple(mock_image: Image, mock_mask: Image) -> None:
 
 
 def test_apply_mask_none_values(mock_image: Image, mock_mask: Image) -> None:
-    # Explicitly pass None for mask_values (defaults to 1)
+    # Explicit None uses all nonzero mask values.
     values = apply_mask(mock_image, mock_mask, mask_values=None)
     assert values.size == 27
+
+
+def test_apply_mask_treats_nonzero_labels_as_roi(mock_image: Image) -> None:
+    mask_array = np.zeros(mock_image.array.shape, dtype=np.uint8)
+    mask_array[1:3, 1:3, 1:3] = 2
+    mask_array[3, 3, 3] = 5
+    label_mask = Image(
+        mask_array, mock_image.spacing, mock_image.origin, mock_image.direction
+    )
+
+    values = apply_mask(mock_image, label_mask)
+    assert values.size == 9
+
+    values_label_2 = apply_mask(mock_image, label_mask, mask_values=2)
+    assert values_label_2.size == 8
 
 
 def test_apply_mask_errors(mock_image: Image) -> None:
@@ -349,6 +364,24 @@ def test_extract_roi(mock_image: Image, mock_mask: Image) -> None:
 def test_extract_roi_none_values(mock_image: Image, mock_mask: Image) -> None:
     roi_img = extract_roi(mock_image, mock_mask, mask_values=None)
     assert roi_img.array[2, 2, 2] == mock_image.array[2, 2, 2]
+
+
+def test_extract_roi_treats_nonzero_labels_as_roi(mock_image: Image) -> None:
+    mask_array = np.zeros(mock_image.array.shape, dtype=np.uint8)
+    mask_array[1:3, 1:3, 1:3] = 2
+    mask_array[3, 3, 3] = 5
+    label_mask = Image(
+        mask_array, mock_image.spacing, mock_image.origin, mock_image.direction
+    )
+
+    roi_img = extract_roi(mock_image, label_mask)
+    assert not np.isnan(roi_img.array[1, 1, 1])
+    assert not np.isnan(roi_img.array[3, 3, 3])
+    assert np.isnan(roi_img.array[0, 0, 0])
+
+    roi_label_2 = extract_roi(mock_image, label_mask, mask_values=2)
+    assert not np.isnan(roi_label_2.array[1, 1, 1])
+    assert np.isnan(roi_label_2.array[3, 3, 3])
 
 
 # --- resegment_mask Tests ---

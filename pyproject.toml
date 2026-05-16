@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pictologics"
-version = "0.4.1"
+version = "0.4.2"
 description = "IBSI-compliant radiomic feature extraction package"
 authors = ["Márton Kolossváry <marton.kolossvary@gmail.com>"]
 readme = "README.md"
@@ -125,7 +125,7 @@ exclude_lines = [
 # (which triggers slow Numba JIT warmup). Version is passed explicitly
 # via `towncrier build --version X.Y.Z` at release time.
 directory = "changes"
-filename = "CHANGELOG.md"
+filename = "docs/CHANGELOG.md"
 title_format = "## [{version}] - {project_date}"
 start_string = "<!-- towncrier release notes start -->\n"
 orphan_prefix = "+"

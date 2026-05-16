@@ -114,9 +114,12 @@ class DeduplicationRules:
 DEDUPLICATION_RULES_V1_0_0 = DeduplicationRules(
     version="1.0.0",
     family_dependencies={
-        # Morphology depends only on spatial/mask preprocessing
+        # Morphology depends on spatial/mask preprocessing, including
+        # resegmentation when it defines compartment-specific morphology masks.
         "morphology": frozenset({
             "resample",
+            "resegment",
+            "filter_outliers",
             "binarize_mask",
             "keep_largest_component",
         }),
@@ -279,14 +282,18 @@ class PreprocessingSignature:
         Create a signature from a list of (step_name, params) tuples.
 
         Args:
-            steps: List of (step_name, params_dict) tuples, sorted by step name.
+            steps: Ordered list of (step_name, params_dict) tuples.
 
         Returns:
             A PreprocessingSignature with deterministic hash and JSON.
         """
-        # Create deterministic JSON representation
+        # Create deterministic JSON representation. Keep steps as an ordered list
+        # so repeated steps and step order remain part of the signature.
         json_repr = json.dumps(
-            {step_name: _normalize_params(params) for step_name, params in steps},
+            [
+                {"step": step_name, "params": _normalize_params(params)}
+                for step_name, params in steps
+            ],
             sort_keys=True,
             separators=(",", ":"),
         )
@@ -351,12 +358,19 @@ def get_ivh_dependencies(
     Returns:
         The set of preprocessing steps that affect IVH for this config.
     """
-    # Find extract_features step and check ivh_params
+    # Find extract_features step and check IVH continuous mode.  Runtime treats
+    # ivh_use_continuous as a top-level extract_features parameter; keep the
+    # historical nested ivh_params form as a compatibility alias for old configs.
     for step in config_steps:
         if step.get("step") == "extract_features":
             params = step.get("params", {})
             ivh_params = params.get("ivh_params", {})
-            if ivh_params.get("ivh_use_continuous", False) is True:
+            nested_continuous = (
+                ivh_params.get("ivh_use_continuous", False)
+                if isinstance(ivh_params, dict)
+                else False
+            )
+            if params.get("ivh_use_continuous", False) is True or nested_continuous is True:
                 # Remove discretise from dependencies
                 deps = rules.family_dependencies.get("ivh", frozenset())
                 return deps - {"discretise"}
@@ -379,7 +393,7 @@ def extract_relevant_steps(
         rules: The deduplication rules to use.
 
     Returns:
-        Sorted list of (step_name, params) tuples for relevant steps.
+        Ordered list of (step_name, params) tuples for relevant steps.
     """
     # Get dependencies for this family
     if family == "ivh":
@@ -395,8 +409,6 @@ def extract_relevant_steps(
             params = step.get("params", {})
             relevant.append((step_name, params))
 
-    # Sort by step name for deterministic ordering
-    relevant.sort(key=lambda x: x[0])
     return relevant
 
 

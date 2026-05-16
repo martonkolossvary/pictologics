@@ -158,7 +158,7 @@ The deduplication system understands which preprocessing steps affect which feat
 
 | Feature Family | Relevant Preprocessing Steps |
 | :--- | :--- |
-| `morphology` | `resample`, `binarize_mask`, `keep_largest_component` |
+| `morphology` | `resample`, `resegment`, `filter_outliers`, `binarize_mask`, `keep_largest_component` |
 | `intensity` | `resample`, `resegment`, `filter_outliers`, `filter` |
 | `spatial_intensity` | Same as `intensity` |
 | `local_intensity` | Same as `intensity` |
@@ -171,11 +171,11 @@ The deduplication system understands which preprocessing steps affect which feat
     from the **filtered response map**, not the original image. Therefore, different filter 
     configurations will produce different intensity features and cannot be deduplicated.
     
-    **Morphology features are not affected by filters** since they are computed from the mask 
-    geometry, not intensity values. This means morphology can be computed once and reused 
-    across all filter configurations.
+    **Morphology features are not affected by response-map filters** since they are computed from
+    mask geometry, not filtered intensities. Morphology is affected by mask-narrowing preprocessing
+    such as `resegment` and `filter_outliers` when those steps target the morphology mask.
 
-When two configurations share identical values for the relevant preprocessing steps of a feature family, that family is computed once and the result is reused. Cache reuse is scoped by both feature family and preprocessing signature, so families such as `texture`, `histogram`, and `ivh` never reuse each other's cached values even when their relevant preprocessing steps are identical.
+When two configurations share identical values for the relevant preprocessing steps of a feature family in the same order, that family is computed once and the result is reused. Cache reuse is scoped by both feature family and preprocessing signature, so families such as `texture`, `histogram`, and `ivh` never reuse each other's cached values even when their relevant preprocessing steps are identical.
 
 ---
 

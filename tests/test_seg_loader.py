@@ -541,6 +541,44 @@ class TestLoadSegWithReference:
             for img in result.values():
                 assert img.array.shape == reference.array.shape
 
+    def test_align_to_reference_forwards_alignment_controls(self) -> None:
+        """SEG alignment should expose the loader's reference-positioning knobs."""
+        mask = Image(
+            array=np.ones((2, 3, 4), dtype=np.uint8),
+            spacing=(1.0, 2.0, 3.0),
+            origin=(0.0, 0.0, 0.0),
+            modality="SEG",
+        )
+        reference = Image(
+            array=np.zeros((4, 3, 2), dtype=np.uint8),
+            spacing=(1.0, 3.0, 2.0),
+            origin=(0.0, 0.0, 0.0),
+            modality="CT",
+        )
+
+        with patch("pictologics.loader._position_in_reference") as mock_position:
+            mock_position.return_value = reference
+
+            result = _align_to_reference(
+                mask,
+                reference,
+                transpose_axes=(0, 2, 1),
+                subvoxel_tolerance=0.05,
+                subvoxel_warning_threshold=0.01,
+                min_overlap_fraction=0.25,
+            )
+
+        assert result is reference
+        mock_position.assert_called_once_with(
+            image=mask,
+            reference=reference,
+            fill_value=0,
+            transpose_axes=(0, 2, 1),
+            subvoxel_tolerance=0.05,
+            subvoxel_warning_threshold=0.01,
+            min_overlap_fraction=0.25,
+        )
+
 
 class TestEdgeCases:
     """Tests for edge cases and error paths."""

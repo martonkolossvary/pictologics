@@ -16,7 +16,7 @@ Key Features:
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import numpy as np
 from numpy import typing as npt
@@ -566,7 +566,7 @@ def discretise_image(
 def apply_mask(
     image: Image | npt.NDArray[np.floating[Any]],
     mask: Image | npt.NDArray[np.floating[Any]],
-    mask_values: int | list[int] | None = 1,
+    mask_values: int | list[int] | None = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply mask to image and return flattened array of voxel values.
@@ -574,8 +574,9 @@ def apply_mask(
     Args:
         image: Image object or numpy array.
         mask: Image object (mask) or numpy array.
-        mask_values: Value(s) in the mask to consider as ROI. Default is 1.
-                     Can be a single integer or a list of integers.
+        mask_values: Optional value(s) in the mask to consider as ROI. When
+                     omitted, all nonzero mask values are considered ROI
+                     membership. Can be a single integer or a list of integers.
 
     Returns:
         1D numpy array of values within the mask.
@@ -595,24 +596,23 @@ def apply_mask(
 
     # Handle mask values
     if mask_values is None:
-        mask_values = [1]
-    elif isinstance(mask_values, int):
-        mask_values = [mask_values]
-
-    # Create boolean mask
-    roi_mask = np.isin(mask_arr, mask_values)
+        roi_mask = mask_arr != 0
+    else:
+        if isinstance(mask_values, int):
+            mask_values = [mask_values]
+        roi_mask = np.isin(mask_arr, mask_values)
 
     if not np.any(roi_mask):
         return np.array([])
 
     # Apply mask
-    return img_arr[roi_mask]
+    return cast(npt.NDArray[np.floating[Any]], img_arr[roi_mask])
 
 
 def extract_roi(
     image: Image,
     mask: Image,
-    mask_values: int | list[int] | None = 1,
+    mask_values: int | list[int] | None = None,
 ) -> Image:
     """
     Extract ROI from image. Voxels outside the mask are set to NaN.
@@ -621,7 +621,8 @@ def extract_roi(
     Args:
         image: Image object.
         mask: Image object (mask).
-        mask_values: Value(s) in the mask to consider as ROI. Default is 1.
+        mask_values: Optional value(s) in the mask to consider as ROI. When
+            omitted, all nonzero mask values are considered ROI membership.
 
     Returns:
         New Image object with non-ROI voxels set to NaN.
@@ -635,11 +636,11 @@ def extract_roi(
 
     # Handle mask values
     if mask_values is None:
-        mask_values = [1]
-    elif isinstance(mask_values, int):
-        mask_values = [mask_values]
-
-    roi_mask = np.isin(mask.array, mask_values)
+        roi_mask = mask.array != 0
+    else:
+        if isinstance(mask_values, int):
+            mask_values = [mask_values]
+        roi_mask = np.isin(mask.array, mask_values)
 
     new_array = image.array.astype(float)
     new_array[~roi_mask] = np.nan

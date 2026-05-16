@@ -129,8 +129,6 @@ def _ombb_extents_numba(
     """Compute min/max extents of vertices projected onto PCA axes (for OMBB)."""
     min_rot = np.empty(3, dtype=np.float64)
     max_rot = np.empty(3, dtype=np.float64)
-    min_rot[:] = np.inf
-    max_rot[:] = -np.inf
 
     n = verts.shape[0]
 
@@ -803,7 +801,8 @@ def calculate_morphology_features(
     Includes both voxel-based and mesh-based features (IBSI compliant).
 
     Args:
-        mask: Image object containing the binary mask (Morphological Mask).
+        mask: Image object containing the morphological mask. Nonzero values
+            are treated as ROI membership.
         image: Optional Image object containing intensity data (required for some features).
         intensity_mask: Optional Image object containing the intensity mask (e.g. after outlier filtering).
                         If provided, used for intensity-weighted features (99N0, KLMA).
@@ -817,7 +816,7 @@ def calculate_morphology_features(
 
     # 1. Voxel Based Features
     voxel_volume = np.prod(mask.spacing)
-    n_voxels = np.sum(mask.array)
+    n_voxels = np.count_nonzero(mask.array)
     features["volume_voxel_counting_YEKZ"] = float(n_voxels * voxel_volume)
 
     # 2. Mesh Based Features

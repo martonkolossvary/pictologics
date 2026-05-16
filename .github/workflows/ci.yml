@@ -32,7 +32,7 @@ jobs:
 
       - name: Ruff
         run: |
-          poetry run ruff check pictologics
+          poetry run ruff check pictologics tests
 
       - name: Mypy
         run: |
@@ -46,6 +46,53 @@ jobs:
       - name: Pytest
         run: |
           poetry run pytest -q --cov=pictologics --cov-report=xml --cov-report=term-missing
+
+      - name: JIT smoke
+        env:
+          PICTOLOGICS_DISABLE_WARMUP: "1"
+        run: |
+          unset NUMBA_DISABLE_JIT
+          poetry run python - <<'PY'
+          import os
+
+          import numpy as np
+
+          from pictologics import Image, RadiomicsPipeline
+
+          assert os.environ.get("NUMBA_DISABLE_JIT") is None
+          image = Image(
+              np.arange(6 * 6 * 6, dtype=np.float32).reshape(6, 6, 6),
+              spacing=(1.0, 1.0, 1.0),
+              origin=(0.0, 0.0, 0.0),
+          )
+          mask_array = np.zeros((6, 6, 6), dtype=np.uint8)
+          mask_array[1:5, 1:5, 1:5] = 1
+          mask = Image(
+              mask_array,
+              spacing=(1.0, 1.0, 1.0),
+              origin=(0.0, 0.0, 0.0),
+          )
+          pipeline = RadiomicsPipeline(load_standard=False, deduplicate=True)
+          pipeline.add_config(
+              "jit_smoke",
+              [
+                  {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+                  {
+                      "step": "extract_features",
+                      "params": {
+                          "families": ["intensity", "histogram", "ivh", "texture"]
+                      },
+                  },
+              ],
+          )
+          result = pipeline.run(image, mask, config_names=["jit_smoke"])["jit_smoke"]
+          assert len(result) >= 140
+          assert result.notna().sum() >= 140
+          PY
+
+      - name: Changelog sync
+        run: |
+          cmp -s CHANGELOG.md docs/CHANGELOG.md
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6

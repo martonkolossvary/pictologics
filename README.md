@@ -26,7 +26,6 @@ Documentation (User Guide, API, Benchmarks): https://martonkolossvary.github.io/
     *   **IBSI 2**: Image filters ([Phase 1](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/)), filtered features ([Phase 2](https://martonkolossvary.github.io/pictologics/ibsi2_phase2_compliance/)), reproducibility ([Phase 3](https://martonkolossvary.github.io/pictologics/ibsi2_phase3_compliance/))
 *   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, DICOM, DICOM-SEG, DICOM-SR).
 *   **✨ User-Friendly**: Pure Python implementation with a simple installation process and user-friendly pipeline module supporting easy feature extraction and analysis, ensuring a smooth experience from setup to analysis.
-*   **🛡️ Predictable Results**: Every pipeline run returns a complete, fixed set of feature columns — even when individual features or entire configurations fail (values are `NaN`). Batch processing never produces missing columns or ragged rows.
 *   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
 
 ## Installation
@@ -93,7 +92,7 @@ Comparisons between **Pictologics** and **PyRadiomics** (single-thread parity).
 - **Hardware**: Apple M4 Pro, 14 cores, 48 GB
 - **OS**: macOS 26.4.1 (arm64)
 - **Python**: 3.12.10
-- **Core deps**: pictologics 0.4.1, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
+- **Core deps**: pictologics 0.4.2, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
 - **BLAS/LAPACK**: Apple Accelerate (from `numpy.show_config()`)
 
 Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoid including Numba compilation overhead in the measured runtimes. Timing and memory measurement are separated — `tracemalloc` is NOT active during timing to avoid biasing the comparison (its per-allocation hooks penalise pure-Python code more than JIT/C code). All calculations are repeated 5 times and the **mean** runtime is reported; peak memory is measured once separately.

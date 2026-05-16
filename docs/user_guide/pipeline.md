@@ -43,6 +43,11 @@ When you pass a **mask path**, the mask is loaded with the already-loaded image 
 geometry before extraction. When you pass an in-memory `Image` mask, Pictologics
 validates that shape, spacing, origin, and direction already match the image.
 
+Mask values use **nonzero membership** semantics by default: values `1`, `2`,
+`3`, etc. all mean "inside the ROI". Label numbers are not treated as weights
+for volume, texture, or intensity calculations. Add a `binarize_mask` step when
+you need to select a specific label or label range from a multi-label mask.
+
 !!! info "Complete Feature Sets Guaranteed"
     Every configuration always returns a `pandas.Series` with the **full set of expected
     feature names** — even when extraction fails partially or entirely.
@@ -146,7 +151,7 @@ Resamples the image and mask to a new voxel spacing.
 
 ### 2. `resegment`
 
-Refines the ROI mask based on intensity thresholds, excluding voxels outside the specified range from feature extraction. This is essential for removing sentinel/NA values (e.g., -1024, -2048) from the ROI.
+Refines ROI masks based on intensity thresholds, excluding voxels outside the specified range from feature extraction. By default, resegmentation applies to both the morphology mask and the intensity mask, so morphology volumes and shape features describe the selected compartment, not the original geometric ROI. Set `apply_to="intensity"` only when morphology should remain anchored to the original ROI extent.
 
 !!! warning "Memory Usage Alert"
     If your image has a background that resamples to 0, and 0 is within your `resegment` range, **you must use `source_mode="auto"`**.
@@ -156,14 +161,16 @@ Refines the ROI mask based on intensity thresholds, excluding voxels outside the
 |:----------|:-----|:--------|:------------|
 | `range_min` | `float` | `None` | Minimum intensity value |
 | `range_max` | `float` | `None` | Maximum intensity value |
+| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
 
 ### 3. `filter_outliers`
 
-Removes outliers from the intensity mask based on standard deviations from the mean.
+Removes outliers from ROI masks based on standard deviations from the mean. Like `resegment`, this defaults to both masks so compartment morphology reflects the filtered voxel set. Use `apply_to="intensity"` to remove outliers only from intensity, texture, histogram, and IVH calculations.
 
 | Parameter | Type | Default | Description |
 |:----------|:-----|:--------|:------------|
 | `sigma` | `float` | `3.0` | Number of standard deviations |
+| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
 
 ### 4. `keep_largest_component`
 
@@ -181,7 +188,9 @@ Rounds image intensities to the nearest integer. Useful before discretisation if
 
 ### 6. `binarize_mask`
 
-Creates a binary mask from a multi-label mask.
+Creates a binary mask from a multi-label mask. Without this step, all nonzero
+labels are treated as one combined ROI. Use `mask_values` to select specific
+segments before feature extraction.
 
 | Parameter | Type | Default | Description |
 |:----------|:-----|:--------|:------------|
@@ -398,17 +407,18 @@ catalog.head()
 | `family` | Granular family (e.g. `glcm`, `ivh`) |
 | `family_group` | Broad category: *Intensity*, *Morphology*, or *Texture* |
 | `requires_discretisation` | Whether the family needs discretised input |
+| `uses_morph_mask` / `uses_intensity_mask` | Which runtime mask(s) the feature row depends on |
 | `source_mode` / `sentinel_value` | Source-mask configuration metadata |
 | `feature_extraction_step_index` / `feature_extraction_params` | Which `extract_features` step produced the row and its parameters |
 | `preprocessing_sequence` | Ordered preprocessing steps before extraction, e.g. `1:resample > 2:resegment > 3:discretise` |
 | `preprocessing_steps` | Full ordered preprocessing step records as compact JSON |
 | `is_discretised` / `discretisation_method` / `discretisation_param` | Discretisation details |
 | `is_resampled` / `resampling_spacing` / `interpolation` | Resampling details |
-| `is_resegmented` / `resegment_params` | Resegmentation details |
-| `is_outlier_filtered` / `filter_outliers_params` | Outlier filtering details |
+| `is_resegmented` / `resegment_apply_to` / `resegment_params` | Resegmentation details and effective mask target |
+| `is_outlier_filtered` / `filter_outliers_apply_to` / `filter_outliers_params` | Outlier filtering details and effective mask target |
 | `is_intensity_rounded` / `round_intensities_params` | Intensity rounding details |
-| `keeps_largest_component` / `keep_largest_component_params` | Largest-component mask processing details |
-| `is_mask_binarized` / `binarize_mask_params` | Mask binarization details |
+| `keeps_largest_component` / `keep_largest_component_apply_to` / `keep_largest_component_params` | Largest-component mask processing details and effective mask target |
+| `is_mask_binarized` / `binarize_mask_apply_to` / `binarize_mask_params` | Mask binarization details and effective mask target |
 | `is_filtered` / `filter_type` / `filter_params` | Response-map filter details |
 
 The step-parameter columns (`resample_params`, `resegment_params`, `discretise_params`, `filter_params`, etc.) contain only parameters explicitly present in the configuration. Effective summary columns such as `interpolation` and `discretisation_method` include runtime defaults when a step omits them.
@@ -444,15 +454,17 @@ The system analyzes your configurations and identifies reusable features:
 
 | Feature Family | Depends On | Independent Of |
 | :--- | :--- | :--- |
-| **Morphology** | Mask geometry (resample, binarize_mask, keep_largest_component) | Intensity values, filters, discretization |
+| **Morphology** | Mask geometry (resample, resegment, filter_outliers, binarize_mask, keep_largest_component) | Response-map filters, discretization |
 | **Intensity** | Intensity preprocessing (resample, resegment, filter_outliers, filter) | Discretization |
 | **Texture / Histogram** | All of the above **plus** discretization | — |
+| **IVH** | Same as texture/histogram unless `ivh_use_continuous=True` | Discretization in continuous mode |
 
 When configs share preprocessing but differ only in discretization:
 
 - **Morphology** and **intensity** are computed **once** and reused
-- **Texture** and **histogram** are computed per configuration
+- **Texture**, **histogram**, and discretized **IVH** are computed per configuration
 - Cache reuse is scoped by feature family as well as preprocessing signature; texture, histogram, and IVH do not reuse each other's cached values.
+- Preprocessing order is part of the signature. The same steps in a different order are computed independently because they can produce different ROIs and intensities.
 
 ### Checking Statistics
 
@@ -490,13 +502,17 @@ pipeline.save_log("pipeline_execution_log.json")
 pipeline.clear_log()
 ```
 
-The log file contains:
+The saved JSON is self-describing. It contains a log schema version, pipeline
+schema version, Pictologics package version when available, the mask ROI
+semantics used for the run, and an `entries` array. Each entry records:
 
-- Timestamp and subject ID
-- Configuration name
-- Source mode and sentinel detection status
-- List of executed steps with parameters
-- Status of each step
+- Timestamp, subject ID, image source, and mask source
+- Configuration name and a full configuration snapshot
+- Source mode, sentinel detection status, and effective sentinel value
+- Deduplication settings and whether a deduplication plan was used
+- Mask repositioning settings used when loading mask paths
+- List of executed steps with serialized parameters
+- Final configuration status, error text, failed step, and feature count when applicable
 
 ## Examples
 

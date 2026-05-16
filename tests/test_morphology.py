@@ -107,6 +107,14 @@ class TestMorphologyFeatures(unittest.TestCase):
         # Implementaion uses mask indices for moments. n=1. Code says `if n <= 3: return`.
         self.assertNotIn("major_axis_length_TDIC", features)
 
+    def test_label_mask_values_are_membership_not_weights(self):
+        arr = np.zeros((5, 5, 5), dtype=int)
+        arr[1:3, 1:3, 1:3] = 2
+        mask = self._create_image(arr)
+        features = calculate_morphology_features(mask)
+
+        self.assertEqual(features["volume_voxel_counting_YEKZ"], 8.0)
+
     # ----------------------------------------------------------------------
     # Intensity Weighted Features
     # ----------------------------------------------------------------------

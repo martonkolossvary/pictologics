@@ -93,7 +93,7 @@ Pictologics supports two approaches for defining which voxels to analyze. The ri
 This is the most common setup. You have **two separate files**:
 
 - An **image** containing raw intensity values (e.g., CT Hounsfield Units or MRI signal intensities).
-- A **mask** (also called a segmentation) that defines the region of interest (ROI). In the simplest case this is a binary volume (1 = inside the ROI, 0 = outside), but it can also contain **multiple integer labels** encoding different structures (e.g., 1 = left ventricle, 2 = right ventricle). Pictologics can select, combine, or iterate over these labels using the `binarize_mask` pipeline step — see [Data Loading → Combining Segments](data_loading.md#combining-specific-segments-into-a-binary-mask) and the [Cookbook](cookbook.md) for detailed examples.
+- A **mask** (also called a segmentation) that defines the region of interest (ROI). In the simplest case this is a binary volume (1 = inside the ROI, 0 = outside), but it can also contain **multiple integer labels** encoding different structures (e.g., 1 = left ventricle, 2 = right ventricle). By default every nonzero label is ROI membership, not a numeric weight. Use `binarize_mask` when you need to select a specific label, combine labels explicitly, or iterate over labels — see [Data Loading → Combining Segments](data_loading.md#combining-specific-segments-into-a-binary-mask) and the [Cookbook](cookbook.md) for detailed examples.
 
 ```python
 # Load image and mask from separate files
@@ -112,8 +112,8 @@ This is common in pre-cropped lesion exports and research datasets where masking
 
 If left untreated, sentinel values corrupt resampling (interpolation bleeds the artificial value into neighbors) and filtering (convolution kernels mix sentinel values into the response). Handling sentinel values properly requires **two complementary mechanisms**:
 
-1. **`source_mode="auto"`** creates a *source mask* that protects **resampling and filtering only**. It applies masked interpolation and normalized convolution so sentinel voxels don't corrupt valid neighbors. However, it does **not** change the ROI — sentinel voxels still remain in the region used for feature extraction.
-2. **`resegment`** restricts the **ROI** to a valid intensity range, excluding sentinel voxels from **feature extraction**. Without this step, sentinel values would bias intensity statistics, texture matrices, and all other computed features.
+1. **`source_mode="auto"`** creates a *source mask* that protects **resampling and filtering**. It applies masked interpolation and normalized convolution so sentinel voxels don't corrupt valid neighbors, and after resampling it keeps ROI masks inside the valid source extent.
+2. **`resegment`** restricts the **ROI** to a valid intensity range, excluding sentinel voxels from **feature extraction**. By default it updates both the morphology and intensity masks, so compartment volumes and shape features are measured on the selected voxel range. Without this step, sentinel values can still bias feature extraction, especially in pipelines without a spatial preprocessing step.
 
 You typically need both:
 

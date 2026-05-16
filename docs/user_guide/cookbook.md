@@ -54,13 +54,13 @@ You want to:
       values (e.g., -1024, -2048) marking missing or invalid data. Handling them properly requires
       **both** of the following:
 
-        1. **`source_mode="auto"`** creates a *source mask* that protects **resampling and filtering only**.
+        1. **`source_mode="auto"`** creates a *source mask* that protects **resampling and filtering**.
            It applies masked interpolation (resampling ignores sentinel neighbors) and normalized
-           convolution (filter kernels exclude sentinel voxels). However, it does **not** change the
-           ROI — sentinel voxels still remain in the region used for feature extraction.
+           convolution (filter kernels exclude sentinel voxels), and after resampling it keeps ROI masks
+           inside the valid source extent. It does not define an intensity compartment by itself.
         2. **`resegment`** restricts the **ROI** to a valid intensity range, effectively excluding sentinel
-           voxels from **feature extraction**. Without this step, sentinel values would bias intensity
-           statistics, texture matrices, and all other computed features.
+           voxels from **feature extraction**. By default it updates both morphology and intensity masks,
+           so compartment volumes and shape features reflect the selected voxel range.
 
         You typically need both: `source_mode="auto"` to protect preprocessing, and `resegment` to
         define the correct ROI for analysis.
@@ -1348,13 +1348,13 @@ Different feature families have different dependencies:
 
 | Feature Family | Depends On | Independent Of |
 | :--- | :--- | :--- |
-| **Morphology** | Mask geometry (resample, binarize_mask, keep_largest_component) | Intensity values, filters, discretization |
+| **Morphology** | Mask geometry (resample, resegment, filter_outliers, binarize_mask, keep_largest_component) | Response-map filters, discretization |
 | **Intensity** | Intensity preprocessing (resample, resegment, filter_outliers, **filter**) | Discretization |
 | **Texture, Histogram, IVH** | All of the above + **discretization** | — |
 
 This means:
 
-1. **Morphology** can be computed once and reused across all configurations (including filtered ones).
+1. **Morphology** can be computed once and reused across configurations with the same mask geometry, including the same resegmentation and outlier-filtering targets.
 2. **Intensity** can be computed once per unique preprocessing+filter combination.
 3. **Texture/Histogram/IVH** must be computed for each discretization strategy.
 

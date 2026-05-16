@@ -276,14 +276,54 @@ def test_step_resegment(
     mock_reseg.return_value = mock_mask
 
     pipeline.run(mock_image, mock_mask, config_names=["reseg"])
-    mock_reseg.assert_called()
+    assert mock_reseg.call_count == 2
 
-    # Test generated mask case: updates morph mask too?
+    # Test generated mask case: default resegmentation updates both masks too.
     mock_reseg.reset_mock()
     pipeline.run(mock_image, mask=None, config_names=["reseg"])
-    # Should be called twice? Once for intensity, once for morph (since mask_was_generated=True)
-    # Actually code: "if state.mask_was_generated: state.morph_mask = resegment..."
     assert mock_reseg.call_count == 2
+
+
+@pytest.mark.parametrize("deduplicate", [False, True])
+def test_resegment_updates_morphology_mask_for_compartments(deduplicate: bool) -> None:
+    """Morphology features should describe the resegmented compartment mask."""
+    array = np.full((8, 8, 8), 100.0)
+    array[:2, :, :] = -50.0
+    image = Image(
+        array=array,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="CT",
+    )
+    mask = Image(
+        array=np.ones_like(array, dtype=np.uint8),
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="mask",
+    )
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=deduplicate)
+    pipeline.add_config(
+        "low",
+        [
+            {"step": "resegment", "params": {"range_min": -100.0, "range_max": 30.0}},
+            {"step": "extract_features", "params": {"families": ["morphology"]}},
+        ],
+    )
+    pipeline.add_config(
+        "high",
+        [
+            {"step": "resegment", "params": {"range_min": 30.0, "range_max": 150.0}},
+            {"step": "extract_features", "params": {"families": ["morphology"]}},
+        ],
+    )
+
+    results = pipeline.run(image, mask, config_names=["low", "high"])
+
+    assert results["low"]["volume_voxel_counting_YEKZ"] == pytest.approx(128.0)
+    assert results["high"]["volume_voxel_counting_YEKZ"] == pytest.approx(384.0)
+    assert results["low"]["volume_RNU0"] != pytest.approx(results["high"]["volume_RNU0"])
 
 
 @patch("pictologics.pipeline.filter_outliers")
@@ -298,6 +338,7 @@ def test_step_filter_outliers(
 
     # 1. Normal case
     pipeline.run(mock_image, mock_mask, config_names=["filt"])
+    assert mock_filt.call_count == 2
     mock_filt.assert_called_with(ANY, ANY, 2.0)
 
     # 2. Generated mask case -> covers 'if state.mask_was_generated'
@@ -307,6 +348,75 @@ def test_step_filter_outliers(
     pipeline.run(mock_image, mask=None, config_names=["filt"])
     # Should be called twice: once for intensity, once for morph
     assert mock_filt.call_count == 2
+
+
+def test_filter_outliers_updates_morphology_mask_by_default() -> None:
+    """Outlier filtering should narrow compartment morphology unless targeted."""
+    array = np.zeros((8, 8, 8), dtype=float)
+    array[:1, :, :] = 1000.0
+    image = Image(
+        array=array,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="CT",
+    )
+    mask = Image(
+        array=np.ones_like(array, dtype=np.uint8),
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="mask",
+    )
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    pipeline.add_config(
+        "filtered",
+        [
+            {"step": "filter_outliers", "params": {"sigma": 0.5}},
+            {"step": "extract_features", "params": {"families": ["morphology"]}},
+        ],
+    )
+    pipeline.add_config(
+        "intensity_only",
+        [
+            {
+                "step": "filter_outliers",
+                "params": {"sigma": 0.5, "apply_to": "intensity"},
+            },
+            {"step": "extract_features", "params": {"families": ["morphology"]}},
+        ],
+    )
+
+    results = pipeline.run(image, mask, config_names=["filtered", "intensity_only"])
+
+    assert results["filtered"]["volume_voxel_counting_YEKZ"] == pytest.approx(448.0)
+    assert results["intensity_only"]["volume_voxel_counting_YEKZ"] == pytest.approx(512.0)
+
+
+def test_source_mask_after_resample_limits_morphology_mask() -> None:
+    """AUTO source masks should protect morphology masks from resampled sentinels."""
+    array = np.full((8, 8, 8), -2048.0)
+    array[:4, :, :] = 50.0
+    image = Image(
+        array=array,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="CT",
+    )
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    pipeline.add_config(
+        "auto_source",
+        [
+            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+            {"step": "extract_features", "params": {"families": ["morphology"]}},
+        ],
+        source_mode="auto",
+    )
+
+    result = pipeline.run(image, mask=None, config_names=["auto_source"])["auto_source"]
+
+    assert result["volume_voxel_counting_YEKZ"] == pytest.approx(256.0)
 
 
 @patch("pictologics.pipeline.round_intensities")
@@ -398,6 +508,71 @@ def test_step_binarize_mask(
     )
     res = pipeline.run(mock_image, varied_mask, config_names=["bin_morph"])
     assert "bin_morph" in res
+
+
+def test_pipeline_nonzero_mask_labels_are_roi_membership() -> None:
+    image_array = np.zeros((5, 5, 5), dtype=float)
+    label_array = np.zeros_like(image_array, dtype=np.uint8)
+    label_array[1:3, 1:3, 1:3] = 2
+    image = Image(
+        image_array,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="CT",
+    )
+    mask = Image(
+        label_array,
+        spacing=image.spacing,
+        origin=image.origin,
+        direction=image.direction,
+        modality="mask",
+    )
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    pipeline.add_config(
+        "label_mask",
+        [{"step": "extract_features", "params": {"families": ["morphology"]}}],
+    )
+
+    results = pipeline.run(image, mask, config_names=["label_mask"])
+
+    assert results["label_mask"]["volume_voxel_counting_YEKZ"] == pytest.approx(8.0)
+    assert pipeline._log[-1]["mask_roi_semantics"] == "nonzero_values_are_roi_membership"
+    assert pipeline._log[-1]["config_snapshot"]["steps"] == pipeline._configs["label_mask"]
+    assert pipeline._log[-1]["status"] == "completed"
+
+
+def test_binarize_mask_selects_labels_before_morphology() -> None:
+    image_array = np.zeros((6, 6, 6), dtype=float)
+    label_array = np.zeros_like(image_array, dtype=np.uint8)
+    label_array[1:3, 1:3, 1:3] = 1
+    label_array[3:5, 3:5, 3:5] = 2
+    image = Image(
+        image_array,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="CT",
+    )
+    mask = Image(
+        label_array,
+        spacing=image.spacing,
+        origin=image.origin,
+        direction=image.direction,
+        modality="mask",
+    )
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    pipeline.add_config(
+        "label_2",
+        [
+            {"step": "binarize_mask", "params": {"mask_values": 2}},
+            {"step": "extract_features", "params": {"families": ["morphology"]}},
+        ],
+    )
+
+    results = pipeline.run(image, mask, config_names=["label_2"])
+
+    assert results["label_2"]["volume_voxel_counting_YEKZ"] == pytest.approx(8.0)
 
 
 @patch("pictologics.pipeline.discretise_image")
@@ -805,9 +980,14 @@ def test_save_log(pipeline: RadiomicsPipeline, tmp_path: Any) -> None:
     p = tmp_path / "log.json"
     pipeline.save_log(str(p))
     assert p.exists()
+    data = json.loads(p.read_text())
+    assert data["pipeline_schema_version"] == "1.0"
+    assert data["mask_roi_semantics"] == "nonzero_values_are_roi_membership"
+    assert data["entry_count"] == 1
+    assert data["entries"] == [{"test": "entry"}]
 
     p2 = tmp_path / "log_no_ext"
-    pipeline.save_log(str(p2))
+    pipeline.save_log(p2)
     assert (tmp_path / "log_no_ext.json").exists()
 
 
@@ -2696,6 +2876,8 @@ _DESCRIBE_COLUMNS = [
     "family",
     "family_group",
     "requires_discretisation",
+    "uses_morph_mask",
+    "uses_intensity_mask",
     "source_mode",
     "sentinel_value",
     "feature_extraction_step_index",
@@ -2711,14 +2893,18 @@ _DESCRIBE_COLUMNS = [
     "interpolation",
     "resample_params",
     "is_resegmented",
+    "resegment_apply_to",
     "resegment_params",
     "is_outlier_filtered",
+    "filter_outliers_apply_to",
     "filter_outliers_params",
     "is_intensity_rounded",
     "round_intensities_params",
     "keeps_largest_component",
+    "keep_largest_component_apply_to",
     "keep_largest_component_params",
     "is_mask_binarized",
+    "binarize_mask_apply_to",
     "binarize_mask_params",
     "is_filtered",
     "filter_type",
@@ -2830,6 +3016,8 @@ def test_describe_features_records_all_preprocessing_steps() -> None:
 
     assert row["source_mode"] == "auto"
     assert row["sentinel_value"] == -2048.0
+    assert not row["uses_morph_mask"]
+    assert row["uses_intensity_mask"]
     assert row["feature_extraction_step_index"] == 11
     assert json.loads(row["feature_extraction_params"]) == {"families": ["histogram"]}
     assert row["preprocessing_sequence"] == (
@@ -2862,7 +3050,9 @@ def test_describe_features_records_all_preprocessing_steps() -> None:
 
     assert row["is_resegmented"]
     assert len(json.loads(row["resegment_params"])) == 2
+    assert json.loads(row["resegment_apply_to"]) == ["both", "both"]
     assert row["is_outlier_filtered"]
+    assert row["filter_outliers_apply_to"] == "both"
     assert json.loads(row["filter_outliers_params"]) == [
         {"params": {"sigma": 2.0}, "step_index": 3}
     ]
@@ -2871,7 +3061,9 @@ def test_describe_features_records_all_preprocessing_steps() -> None:
         {"params": {}, "step_index": 4}
     ]
     assert row["keeps_largest_component"]
+    assert row["keep_largest_component_apply_to"] == "morph"
     assert row["is_mask_binarized"]
+    assert row["binarize_mask_apply_to"] == "intensity"
 
     assert row["is_filtered"]
     assert row["filter_type"] == "mean"
@@ -2912,9 +3104,12 @@ def test_describe_features_uses_preprocessing_at_extraction_point() -> None:
     assert intensity["feature_extraction_step_index"] == 1
     assert intensity["preprocessing_sequence"] is None
     assert not intensity["is_resegmented"]
+    assert not intensity["uses_morph_mask"]
+    assert intensity["uses_intensity_mask"]
     assert morphology["feature_extraction_step_index"] == 3
     assert morphology["preprocessing_sequence"] == "2:resegment"
     assert morphology["is_resegmented"]
+    assert morphology["uses_morph_mask"]
 
 
 def test_describe_features_catalog_serialization_helpers() -> None:
@@ -3026,3 +3221,31 @@ def test_fill_missing_features_handles_none_params() -> None:
     key = FEATURE_NAMES["intensity"][0]
     assert key in results
     assert np.isnan(results[key])
+
+from enum import Enum
+from pathlib import Path
+from importlib.metadata import PackageNotFoundError
+
+def test_pipeline_serialization_edge_cases():
+    pipeline = RadiomicsPipeline()
+    # Test Enum and Path serialization
+    
+    class DummyEnum(Enum):
+        TEST = "test_value"
+        
+    res = pipeline._make_serializable(Path("/tmp/test"))
+    assert res == "/tmp/test"
+    
+    res = pipeline._make_serializable(DummyEnum.TEST)
+    assert res == "test_value"
+
+def test_get_apply_to_invalid():
+    from pictologics.pipeline import _get_apply_to
+    with pytest.raises(ValueError, match="apply_to must be"):
+        _get_apply_to({"apply_to": "invalid_target"}, "some_step")
+
+def test_get_package_version_not_found():
+    from pictologics.pipeline import _get_package_version
+    with patch("pictologics.pipeline.version") as mock_version:
+        mock_version.side_effect = PackageNotFoundError()
+        assert _get_package_version() is None

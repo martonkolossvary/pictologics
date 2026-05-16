@@ -149,10 +149,11 @@ source_mask = create_source_mask_from_sentinel(image, sentinel)
 The source mask enables **masked interpolation** for resampling and **normalized convolution** for filters, preventing sentinel values from bleeding into valid regions.
 
 !!! warning "Source masking does not replace resegmentation"
-    The source mask protects **resampling and filtering only** — it does **not** change the ROI
-    used for feature extraction. Sentinel voxels will still be included in intensity statistics,
-    texture matrices, and all other computed features unless you also add a `resegment` step to
-    restrict the ROI to a valid intensity range. In practice, you typically need **both**:
+    The source mask protects **resampling and filtering** and, after resampling, keeps ROI masks
+    inside the valid source extent. It does **not** define a clinical/intensity compartment by
+    itself, and it does not change feature-extraction masks in pipelines with no spatial step.
+    Add a `resegment` step to restrict the ROI to the valid intensity range you want to measure.
+    In practice, you typically need **both**:
 
     - `source_mode="auto"` (or an explicit source mask) to protect preprocessing and **prevent memory exhaustion**.
     - `resegment` to define the correct ROI for feature extraction.
@@ -335,6 +336,18 @@ for seg_num, mask in masks.items():
     features = pipeline.run(image=ct, mask=mask)
 ```
 
+When a mask contains multiple labels in one volume, `RadiomicsPipeline` treats
+all nonzero labels as one combined ROI by default. Label values are never used
+as numeric weights in volume or texture calculations. Add a `binarize_mask` step
+when the run should use only selected label values:
+
+```python
+pipeline.add_config("segment_2_only", [
+    {"step": "binarize_mask", "params": {"mask_values": 2}},
+    {"step": "extract_features", "params": {"families": ["morphology", "intensity"]}},
+])
+```
+
 ### Combining Specific Segments into a Binary Mask
 
 To merge selected segments into a single binary mask:
@@ -358,11 +371,17 @@ ct = load_image("path/to/ct_series/")
 # Load and align the segmentation to CT geometry
 mask = load_seg(
     "path/to/segmentation.dcm",
-    reference_image=ct
+    reference_image=ct,
+    subvoxel_tolerance=0.05,
+    min_overlap_fraction=0.5,
 )
 
 # Now mask.array.shape == ct.array.shape
 ```
+
+`load_seg()` uses the same reference-alignment controls as `load_image()` and
+`load_and_merge_images()`, including `transpose_axes`, `subvoxel_tolerance`,
+`subvoxel_warning_threshold`, and `min_overlap_fraction`.
 
 ## Merging Multiple Images with `load_and_merge_images()`
 
