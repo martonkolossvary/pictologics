@@ -811,9 +811,7 @@ class TestSRBatch:
             file_path=Path("/test/sr1.dcm"),
             sop_instance_uid="1.2.3.4",
             measurement_groups=[
-                SRMeasurementGroup(
-                    measurements=[SRMeasurement(name="Test", value=1.0, unit="mm")]
-                )
+                SRMeasurementGroup(measurements=[SRMeasurement(name="Test", value=1.0, unit="mm")])
             ],
         )
         batch = SRBatch(documents=[doc], processing_log=[], output_dir=None)
@@ -888,9 +886,7 @@ class TestSRDocumentFromFolders:
             )
             mock_from_file.return_value = mock_doc
 
-            batch = SRDocument.from_folders(
-                [tmpdir], show_progress=False, num_workers=1
-            )
+            batch = SRDocument.from_folders([tmpdir], show_progress=False, num_workers=1)
 
             assert len(batch.documents) == 2
             assert mock_from_file.call_count == 2
@@ -945,9 +941,7 @@ class TestSRDocumentFromFolders:
             mock_is_sr.return_value = True
             mock_from_file.side_effect = ValueError("Bad SR file")
 
-            batch = SRDocument.from_folders(
-                [tmpdir], show_progress=False, num_workers=1
-            )
+            batch = SRDocument.from_folders([tmpdir], show_progress=False, num_workers=1)
 
             assert len(batch.documents) == 0
             assert len(batch.processing_log) == 1
@@ -987,9 +981,7 @@ class TestSRDocumentFromFolders:
             )
             mock_from_file.return_value = mock_doc
 
-            batch = SRDocument.from_folders(
-                [str(sr1)], show_progress=False, num_workers=1
-            )
+            batch = SRDocument.from_folders([str(sr1)], show_progress=False, num_workers=1)
 
             assert len(batch.documents) == 1
             assert mock_from_file.call_count == 1
@@ -1011,9 +1003,7 @@ class TestSRDocumentFromFolders:
             mock_is_sr.return_value = True
 
             # Run with num_workers=2 to trigger parallel branch
-            batch = SRDocument.from_folders(
-                [tmpdir], show_progress=False, num_workers=2
-            )
+            batch = SRDocument.from_folders([tmpdir], show_progress=False, num_workers=2)
 
             # Verify parallel processing was attempted (files were found and processed)
             assert len(batch.processing_log) == 3
@@ -1040,9 +1030,7 @@ class TestProcessSRFileWorker:
                     study_instance_uid="1.2.3.5",
                     measurement_groups=[
                         SRMeasurementGroup(
-                            measurements=[
-                                SRMeasurement(name="Test", value=1.0, unit="mm")
-                            ]
+                            measurements=[SRMeasurement(name="Test", value=1.0, unit="mm")]
                         )
                     ],
                 )
@@ -1073,9 +1061,7 @@ class TestProcessSRFileWorker:
             with patch("pictologics.utilities.sr_parser.SRDocument.from_file") as mock:
                 mock.return_value = mock_doc
 
-                result = _process_sr_file_worker(
-                    (sr_file, False, output_dir, True, True)
-                )
+                result = _process_sr_file_worker((sr_file, False, output_dir, True, True))
 
                 assert result["log"]["status"] == "success"
                 mock_doc.export_csv.assert_called_once()

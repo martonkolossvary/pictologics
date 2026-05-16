@@ -1,5 +1,6 @@
 # ruff: noqa: E402
 """Tests for pictologics.utilities.dicom_utils module."""
+
 import os
 import tempfile
 import unittest

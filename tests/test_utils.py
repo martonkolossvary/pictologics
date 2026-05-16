@@ -35,9 +35,7 @@ class TestInternalUtils(unittest.TestCase):
 
         # Check info
         # Slices should be 1:4
-        self.assertEqual(
-            info.slices, (slice(1, 4, None), slice(1, 4, None), slice(1, 4, None))
-        )
+        self.assertEqual(info.slices, (slice(1, 4, None), slice(1, 4, None), slice(1, 4, None)))
         self.assertEqual(info.origin_offset, (1, 1, 1))
 
     def test_crop_arrays_empty_mask(self):

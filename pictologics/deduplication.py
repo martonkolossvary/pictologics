@@ -65,9 +65,7 @@ class DeduplicationRules:
         """Serialize rules to a dictionary."""
         return {
             "version": self.version,
-            "family_dependencies": {
-                k: sorted(v) for k, v in self.family_dependencies.items()
-            },
+            "family_dependencies": {k: sorted(v) for k, v in self.family_dependencies.items()},
             "ivh_discretization_dependent_unless": self.ivh_discretization_dependent_unless,
             "comparison_mode": self.comparison_mode,
         }
@@ -77,9 +75,7 @@ class DeduplicationRules:
         """Deserialize rules from a dictionary."""
         return cls(
             version=data["version"],
-            family_dependencies={
-                k: frozenset(v) for k, v in data["family_dependencies"].items()
-            },
+            family_dependencies={k: frozenset(v) for k, v in data["family_dependencies"].items()},
             ivh_discretization_dependent_unless=data["ivh_discretization_dependent_unless"],
             comparison_mode=data["comparison_mode"],
         )
@@ -116,116 +112,142 @@ DEDUPLICATION_RULES_V1_0_0 = DeduplicationRules(
     family_dependencies={
         # Morphology depends on spatial/mask preprocessing, including
         # resegmentation when it defines compartment-specific morphology masks.
-        "morphology": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "binarize_mask",
-            "keep_largest_component",
-        }),
+        "morphology": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "binarize_mask",
+                "keep_largest_component",
+            }
+        ),
         # Intensity features depend on intensity preprocessing but NOT discretization
-        "intensity": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-        }),
-        "spatial_intensity": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-        }),
-        "local_intensity": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-        }),
+        "intensity": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+            }
+        ),
+        "spatial_intensity": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+            }
+        ),
+        "local_intensity": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+            }
+        ),
         # Histogram depends on discretization
-        "histogram": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-            "binarize_mask",
-            "keep_largest_component",
-            "discretise",
-        }),
+        "histogram": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+                "binarize_mask",
+                "keep_largest_component",
+                "discretise",
+            }
+        ),
         # IVH - by default depends on discretization (unless ivh_use_continuous=True)
-        "ivh": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-            "binarize_mask",
-            "keep_largest_component",
-            "discretise",
-        }),
+        "ivh": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+                "binarize_mask",
+                "keep_largest_component",
+                "discretise",
+            }
+        ),
         # All texture features depend on discretization
-        "texture": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-            "binarize_mask",
-            "keep_largest_component",
-            "discretise",
-        }),
-        "glcm": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-            "binarize_mask",
-            "keep_largest_component",
-            "discretise",
-        }),
-        "glrlm": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-            "binarize_mask",
-            "keep_largest_component",
-            "discretise",
-        }),
-        "glszm": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-            "binarize_mask",
-            "keep_largest_component",
-            "discretise",
-        }),
-        "gldzm": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-            "binarize_mask",
-            "keep_largest_component",
-            "discretise",
-        }),
-        "ngtdm": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-            "binarize_mask",
-            "keep_largest_component",
-            "discretise",
-        }),
-        "ngldm": frozenset({
-            "resample",
-            "resegment",
-            "filter_outliers",
-            "filter",
-            "binarize_mask",
-            "keep_largest_component",
-            "discretise",
-        }),
+        "texture": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+                "binarize_mask",
+                "keep_largest_component",
+                "discretise",
+            }
+        ),
+        "glcm": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+                "binarize_mask",
+                "keep_largest_component",
+                "discretise",
+            }
+        ),
+        "glrlm": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+                "binarize_mask",
+                "keep_largest_component",
+                "discretise",
+            }
+        ),
+        "glszm": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+                "binarize_mask",
+                "keep_largest_component",
+                "discretise",
+            }
+        ),
+        "gldzm": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+                "binarize_mask",
+                "keep_largest_component",
+                "discretise",
+            }
+        ),
+        "ngtdm": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+                "binarize_mask",
+                "keep_largest_component",
+                "discretise",
+            }
+        ),
+        "ngldm": frozenset(
+            {
+                "resample",
+                "resegment",
+                "filter_outliers",
+                "filter",
+                "binarize_mask",
+                "keep_largest_component",
+                "discretise",
+            }
+        ),
     },
     ivh_discretization_dependent_unless="ivh_use_continuous=True",
     comparison_mode="exact_params",
@@ -275,9 +297,7 @@ class PreprocessingSignature:
         return hash(self.hash)
 
     @classmethod
-    def from_steps(
-        cls, steps: list[tuple[str, dict[str, Any]]]
-    ) -> "PreprocessingSignature":
+    def from_steps(cls, steps: list[tuple[str, dict[str, Any]]]) -> "PreprocessingSignature":
         """
         Create a signature from a list of (step_name, params) tuples.
 
@@ -328,9 +348,7 @@ def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(value, dict):
             result[key] = _normalize_params(value)
         elif isinstance(value, (list, tuple)):
-            result[key] = [
-                _normalize_params(v) if isinstance(v, dict) else v for v in value
-            ]
+            result[key] = [_normalize_params(v) if isinstance(v, dict) else v for v in value]
         else:
             result[key] = value
     return result
@@ -430,9 +448,7 @@ class DeduplicationPlan:
     """
 
     rules: DeduplicationRules
-    signatures: dict[tuple[str, str], PreprocessingSignature] = field(
-        default_factory=dict
-    )
+    signatures: dict[tuple[str, str], PreprocessingSignature] = field(default_factory=dict)
     sources: dict[tuple[str, str], str | None] = field(default_factory=dict)
     configs_hash: str = ""
 

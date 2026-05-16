@@ -193,10 +193,10 @@ def test_run_all_standard_params(
     # Test "all_standard" expansion without patching get_all_standard_config_names
     # This ensures coverage hits the real method call line.
     # We mock execution steps to avoid heavy computation.
-    with patch.object(
-        pipeline, "_execute_preprocessing_step"
-    ) as mock_exec, patch.object(pipeline, "_extract_features") as mock_ext:
-
+    with (
+        patch.object(pipeline, "_execute_preprocessing_step") as mock_exec,
+        patch.object(pipeline, "_extract_features") as mock_ext,
+    ):
         mock_ext.return_value = {}
         pipeline.run(mock_image, mock_mask, config_names=["all_standard"])
 
@@ -213,10 +213,10 @@ def test_run_defaults_all_configs(
     # Test pipeline.run() with config_names=None (default)
     # This should trigger line 267: if config_names is None: target_configs = list(self._configs.keys())
 
-    with patch.object(
-        pipeline, "_execute_preprocessing_step"
-    ) as _mock_exec, patch.object(pipeline, "_extract_features") as mock_ext:
-
+    with (
+        patch.object(pipeline, "_execute_preprocessing_step") as _mock_exec,
+        patch.object(pipeline, "_extract_features") as mock_ext,
+    ):
         mock_ext.return_value = {}
         # Call without config_names
         res = pipeline.run(mock_image, mock_mask)
@@ -582,9 +582,7 @@ def test_step_discretise(
     mock_image: Image,
     mock_mask: Image,
 ) -> None:
-    pipeline.add_config(
-        "disc", [{"step": "discretise", "params": {"method": "FBN", "n_bins": 16}}]
-    )
+    pipeline.add_config("disc", [{"step": "discretise", "params": {"method": "FBN", "n_bins": 16}}])
     mock_disc.return_value = mock_image
 
     pipeline.run(mock_image, mock_mask, config_names=["disc"])
@@ -619,9 +617,7 @@ def test_step_discretise_fbs_empty_error(
     assert "ROI is empty" in log["error"]
 
 
-def test_step_unknown(
-    pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
-) -> None:
+def test_step_unknown(pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image) -> None:
     pipeline.add_config("unknown", [{"step": "fake_step"}])
     pipeline.run(mock_image, mock_mask, config_names=["unknown"])
 
@@ -640,9 +636,7 @@ def test_extract_morphology(
     mock_image: Image,
     mock_mask: Image,
 ) -> None:
-    pipeline.add_config(
-        "m", [{"step": "extract_features", "params": {"families": ["morphology"]}}]
-    )
+    pipeline.add_config("m", [{"step": "extract_features", "params": {"families": ["morphology"]}}])
     mock_morph.return_value = {"vol": 10}
 
     res = pipeline.run(mock_image, mock_mask, config_names=["m"])
@@ -663,9 +657,7 @@ def test_extract_intensity_defaults(
     mock_image: Image,
     mock_mask: Image,
 ) -> None:
-    pipeline.add_config(
-        "i", [{"step": "extract_features", "params": {"families": ["intensity"]}}]
-    )
+    pipeline.add_config("i", [{"step": "extract_features", "params": {"families": ["intensity"]}}])
     mock_main.return_value = {"mean": 1}
     mock_spatial.return_value = {}
     mock_local.return_value = {}
@@ -743,9 +735,7 @@ def test_extract_histogram_warning(
     mock_mask: Image,
 ) -> None:
     mock_hist.return_value = {"hist_mean": 1}
-    pipeline.add_config(
-        "h", [{"step": "extract_features", "params": {"families": ["histogram"]}}]
-    )
+    pipeline.add_config("h", [{"step": "extract_features", "params": {"families": ["histogram"]}}])
 
     with pytest.warns(
         UserWarning, match="Histogram features requested but image is not discretised"
@@ -796,10 +786,10 @@ def test_extract_ivh_full_params(
     pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
 ) -> None:
     # Cover all parameter mapping branches
-    with patch("pictologics.pipeline.calculate_ivh_features") as mock_ivh, patch(
-        "pictologics.pipeline.apply_mask"
-    ) as mock_apply:
-
+    with (
+        patch("pictologics.pipeline.calculate_ivh_features") as mock_ivh,
+        patch("pictologics.pipeline.apply_mask") as mock_apply,
+    ):
         mock_apply.return_value = [1]
         mock_ivh.return_value = {}
 
@@ -890,14 +880,13 @@ def test_extract_texture_success(
 
     # We need to ensure 'pipeline.py' feature extraction calls GLCM, GLRLM etc.
     # I'll rely on patching calculation functions to prevent errors.
-    with patch("pictologics.pipeline.calculate_glrlm_features") as mr, patch(
-        "pictologics.pipeline.calculate_glszm_features"
-    ) as ms, patch("pictologics.pipeline.calculate_gldzm_features") as md, patch(
-        "pictologics.pipeline.calculate_ngtdm_features"
-    ) as mt, patch(
-        "pictologics.pipeline.calculate_ngldm_features"
-    ) as mn:
-
+    with (
+        patch("pictologics.pipeline.calculate_glrlm_features") as mr,
+        patch("pictologics.pipeline.calculate_glszm_features") as ms,
+        patch("pictologics.pipeline.calculate_gldzm_features") as md,
+        patch("pictologics.pipeline.calculate_ngtdm_features") as mt,
+        patch("pictologics.pipeline.calculate_ngldm_features") as mn,
+    ):
         mr.return_value = {}
         ms.return_value = {}
         md.return_value = {}
@@ -958,9 +947,7 @@ def test_texture_family_aliases_match_single_and_dedup_paths() -> None:
     no_dedup_pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
     no_dedup_pipeline.add_config("raw_glcm", config)
     no_dedup_pipeline.add_config("alias_glcm", alias_config)
-    no_dedup = no_dedup_pipeline.run(
-        image, mask, config_names=["raw_glcm", "alias_glcm"]
-    )
+    no_dedup = no_dedup_pipeline.run(image, mask, config_names=["raw_glcm", "alias_glcm"])
 
     for config_name in ["raw_glcm", "alias_glcm"]:
         expected = no_dedup[config_name].reindex(FEATURE_NAMES["glcm"])
@@ -1010,15 +997,16 @@ def test_empty_roi_check(pipeline: RadiomicsPipeline, mock_image: Image) -> None
 def test_empty_morph_roi_only(pipeline: RadiomicsPipeline) -> None:
     """Covers the morph-only empty branch in _ensure_nonempty_roi."""
     state = MagicMock()
-    state.intensity_mask.array = np.ones((10, 10, 10))   # Non-empty
-    state.morph_mask.array = np.zeros((10, 10, 10))       # Empty
+    state.intensity_mask.array = np.ones((10, 10, 10))  # Non-empty
+    state.morph_mask.array = np.zeros((10, 10, 10))  # Empty
 
     with pytest.raises(EmptyROIMaskError, match="ROI is empty"):
         pipeline._ensure_nonempty_roi(state, "morph_empty")
 
 
 def test_empty_roi_returns_nan_series(
-    pipeline: RadiomicsPipeline, mock_image: Image,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
 ) -> None:
     """When a config hits an empty ROI, run() returns a NaN-filled Series
     with the expected feature names instead of raising."""
@@ -1050,7 +1038,9 @@ def test_empty_roi_returns_nan_series(
 
 
 def test_empty_roi_continues_other_configs(
-    pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
 ) -> None:
     """When one config fails with empty ROI, other configs still execute."""
     # Config that will work (empty steps = no preprocessing = no ROI check issues
@@ -1071,7 +1061,8 @@ def test_empty_roi_continues_other_configs(
 
 
 def test_empty_roi_nan_series_with_texture(
-    pipeline: RadiomicsPipeline, mock_image: Image,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
 ) -> None:
     """NaN series includes all texture sub-family features when 'texture' is requested."""
     empty_mask = Image(
@@ -1109,18 +1100,17 @@ def test_ivh_discretisation_mode(
                 "params": {
                     "families": ["ivh"],
                     "ivh_discretisation": {"method": "FBN", "n_bins": 10},
-                    "ivh_params": {
-                        "bin_width": 0.5
-                    },  # Should override or exist alongside?
+                    "ivh_params": {"bin_width": 0.5},  # Should override or exist alongside?
                 },
             }
         ],
     )
 
-    with patch("pictologics.pipeline.discretise_image") as mock_disc, patch(
-        "pictologics.pipeline.apply_mask"
-    ) as mock_apply, patch("pictologics.pipeline.calculate_ivh_features") as mock_calc:
-
+    with (
+        patch("pictologics.pipeline.discretise_image") as mock_disc,
+        patch("pictologics.pipeline.apply_mask") as mock_apply,
+        patch("pictologics.pipeline.calculate_ivh_features") as mock_calc,
+    ):
         mock_disc.return_value = mock_image  # Temp disc image
         mock_apply.return_value = [1, 2]
         mock_calc.return_value = {}
@@ -1146,10 +1136,10 @@ def test_ivh_continuous_mode(
         ],
     )
 
-    with patch("pictologics.pipeline.apply_mask") as mock_apply, patch(
-        "pictologics.pipeline.calculate_ivh_features"
-    ) as mock_calc:
-
+    with (
+        patch("pictologics.pipeline.apply_mask") as mock_apply,
+        patch("pictologics.pipeline.calculate_ivh_features") as mock_calc,
+    ):
         mock_apply.return_value = [1.5, 2.5]
         mock_calc.return_value = {}
 
@@ -1224,9 +1214,7 @@ def test_params_explicit_none(
     pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
 ) -> None:
     # Explicit None should be converted to {}
-    with patch(
-        "pictologics.pipeline.calculate_spatial_intensity_features"
-    ) as mock_calc:
+    with patch("pictologics.pipeline.calculate_spatial_intensity_features") as mock_calc:
         mock_calc.return_value = {}
         pipeline.add_config(
             "none_params",
@@ -1254,22 +1242,17 @@ def test_params_explicit_none_all(
     pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
 ) -> None:
     # Test ivh and texture matrix params explicit None
-    with patch("pictologics.pipeline.calculate_ivh_features") as mock_ivh, patch(
-        "pictologics.pipeline.calculate_all_texture_matrices"
-    ) as mock_tex, patch("pictologics.pipeline.calculate_glcm_features"), patch(
-        "pictologics.pipeline.calculate_glrlm_features"
-    ), patch(
-        "pictologics.pipeline.calculate_glszm_features"
-    ), patch(
-        "pictologics.pipeline.calculate_gldzm_features"
-    ), patch(
-        "pictologics.pipeline.calculate_ngtdm_features"
-    ), patch(
-        "pictologics.pipeline.calculate_ngldm_features"
-    ), patch(
-        "pictologics.pipeline.discretise_image", return_value=mock_image
+    with (
+        patch("pictologics.pipeline.calculate_ivh_features") as mock_ivh,
+        patch("pictologics.pipeline.calculate_all_texture_matrices") as mock_tex,
+        patch("pictologics.pipeline.calculate_glcm_features"),
+        patch("pictologics.pipeline.calculate_glrlm_features"),
+        patch("pictologics.pipeline.calculate_glszm_features"),
+        patch("pictologics.pipeline.calculate_gldzm_features"),
+        patch("pictologics.pipeline.calculate_ngtdm_features"),
+        patch("pictologics.pipeline.calculate_ngldm_features"),
+        patch("pictologics.pipeline.discretise_image", return_value=mock_image),
     ):
-
         mock_ivh.return_value = {}
         mock_tex.return_value = {
             "glcm": 1,
@@ -1320,9 +1303,7 @@ def test_params_explicit_none_all(
         mock_tex.assert_called()
 
 
-def test_run_subject_id(
-    pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
-) -> None:
+def test_run_subject_id(pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image) -> None:
     pipeline.add_config("subj", [])
     res = pipeline.run(mock_image, mock_mask, subject_id="P001", config_names=["subj"])
     # subject_id should NOT appear in the feature Series (it's metadata, not a feature)
@@ -1358,22 +1339,15 @@ def test_step_discretise_fbs_success(
         ],
     )
 
-    with patch(
-        "pictologics.pipeline.calculate_all_texture_matrices"
-    ) as mock_tex, patch(
-        "pictologics.pipeline.calculate_glcm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_glrlm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_glszm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_gldzm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_ngtdm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_ngldm_features", return_value={}
+    with (
+        patch("pictologics.pipeline.calculate_all_texture_matrices") as mock_tex,
+        patch("pictologics.pipeline.calculate_glcm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_glrlm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_glszm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_gldzm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_ngtdm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_ngldm_features", return_value={}),
     ):
-
         mock_tex.return_value = {
             "glcm": 1,
             "glrlm": 1,
@@ -1412,10 +1386,11 @@ def test_ivh_disc_with_params(
         ],
     )
 
-    with patch("pictologics.pipeline.calculate_ivh_features") as mock_ivh, patch(
-        "pictologics.pipeline.apply_mask", return_value=[1]
-    ), patch("pictologics.pipeline.discretise_image", return_value=mock_image):
-
+    with (
+        patch("pictologics.pipeline.calculate_ivh_features") as mock_ivh,
+        patch("pictologics.pipeline.apply_mask", return_value=[1]),
+        patch("pictologics.pipeline.discretise_image", return_value=mock_image),
+    ):
         mock_ivh.return_value = {}
         pipeline.run(mock_image, mock_mask, config_names=["ivh_fbs"])
 
@@ -1439,26 +1414,17 @@ def test_texture_matrix_params_explicit(
         ],
     )
 
-    with patch(
-        "pictologics.pipeline.calculate_all_texture_matrices"
-    ) as mock_tex, patch(
-        "pictologics.pipeline.discretise_image", return_value=mock_image
-    ), patch(
-        "pictologics.pipeline.apply_mask", return_value=[1]
-    ), patch(
-        "pictologics.pipeline.calculate_glcm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_glrlm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_glszm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_gldzm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_ngtdm_features", return_value={}
-    ), patch(
-        "pictologics.pipeline.calculate_ngldm_features", return_value={}
+    with (
+        patch("pictologics.pipeline.calculate_all_texture_matrices") as mock_tex,
+        patch("pictologics.pipeline.discretise_image", return_value=mock_image),
+        patch("pictologics.pipeline.apply_mask", return_value=[1]),
+        patch("pictologics.pipeline.calculate_glcm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_glrlm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_glszm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_gldzm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_ngtdm_features", return_value={}),
+        patch("pictologics.pipeline.calculate_ngldm_features", return_value={}),
     ):
-
         mock_tex.return_value = {
             "glcm": 1,
             "glrlm": 1,
@@ -1778,9 +1744,7 @@ def test_step_resample_missing_param(
     """Test resample step error when new_spacing is missing."""
     pipeline.add_config(
         "resample_no_spacing",
-        [
-            {"step": "resample", "params": {"interpolation": "linear"}}
-        ],  # Missing new_spacing
+        [{"step": "resample", "params": {"interpolation": "linear"}}],  # Missing new_spacing
     )
 
     pipeline.run(mock_image, mock_mask, config_names=["resample_no_spacing"])
@@ -1805,10 +1769,7 @@ def test_step_binarize_missing_threshold(
     pipeline.run(mock_image, mock_mask, config_names=["binarize_no_thresh"])
     log = pipeline._log[-1]
     assert "error" in log
-    assert (
-        "binarize_mask requires 'threshold' unless mask_values is provided"
-        in log["error"]
-    )
+    assert "binarize_mask requires 'threshold' unless mask_values is provided" in log["error"]
 
 
 # --- Deduplication Configuration Tests ---
@@ -2179,12 +2140,8 @@ def test_extract_ivh_via_dedup_path(
     pipeline = RadiomicsPipeline(deduplicate=True)
     mock_ivh.return_value = {"ivh_v10": 0.5}
 
-    pipeline.add_config(
-        "cfg1", [{"step": "extract_features", "params": {"families": ["ivh"]}}]
-    )
-    pipeline.add_config(
-        "cfg2", [{"step": "extract_features", "params": {"families": ["ivh"]}}]
-    )
+    pipeline.add_config("cfg1", [{"step": "extract_features", "params": {"families": ["ivh"]}}])
+    pipeline.add_config("cfg2", [{"step": "extract_features", "params": {"families": ["ivh"]}}])
     result = pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_ivh.assert_called()
@@ -2778,9 +2735,7 @@ def test_from_dict_handles_invalid_deduplication_plan() -> None:
         "schema_version": "1.0",
         "configs": {
             "test": {
-                "steps": [
-                    {"step": "extract_features", "params": {"families": ["morphology"]}}
-                ]
+                "steps": [{"step": "extract_features", "params": {"families": ["morphology"]}}]
             }
         },
         "deduplication": {
@@ -2799,8 +2754,7 @@ def test_from_dict_handles_invalid_deduplication_plan() -> None:
         assert pipeline._last_deduplication_plan is None
         assert len(w) >= 1
         assert any(
-            "failed to restore deduplication plan" in str(warning.message).lower()
-            for warning in w
+            "failed to restore deduplication plan" in str(warning.message).lower() for warning in w
         )
 
 
@@ -2828,11 +2782,15 @@ def test_feature_name_registry_sync() -> None:
     mask_arr = np.zeros((10, 10, 10), dtype=np.uint8)
     mask_arr[2:8, 2:8, 2:8] = 1
     img = Image(
-        array=arr, spacing=(1.0, 1.0, 1.0), origin=(0, 0, 0),
+        array=arr,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0, 0, 0),
         direction=(1, 0, 0, 0, 1, 0, 0, 0, 1),
     )
     mask = Image(
-        array=mask_arr, spacing=(1.0, 1.0, 1.0), origin=(0, 0, 0),
+        array=mask_arr,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0, 0, 0),
         direction=(1, 0, 0, 0, 1, 0, 0, 0, 1),
     )
     vals = arr[mask_arr == 1]
@@ -2843,15 +2801,11 @@ def test_feature_name_registry_sync() -> None:
         "ivh": list(calculate_ivh_features(vals).keys()),
         "spatial_intensity": list(calculate_spatial_intensity_features(img, mask).keys()),
         "local_intensity": list(calculate_local_intensity_features(img, mask).keys()),
-        "morphology": list(
-            calculate_morphology_features(mask, img, intensity_mask=mask).keys()
-        ),
+        "morphology": list(calculate_morphology_features(mask, img, intensity_mask=mask).keys()),
         "glcm": list(calculate_glcm_features(arr, mask_arr, 32).keys()),
         "glrlm": list(calculate_glrlm_features(arr, mask_arr, 32).keys()),
         "glszm": list(calculate_glszm_features(arr, mask_arr, 32).keys()),
-        "gldzm": list(
-            calculate_gldzm_features(arr, mask_arr, 32, distance_mask=mask_arr).keys()
-        ),
+        "gldzm": list(calculate_gldzm_features(arr, mask_arr, 32, distance_mask=mask_arr).keys()),
         "ngtdm": list(calculate_ngtdm_features(arr, mask_arr, 32).keys()),
         "ngldm": list(calculate_ngldm_features(arr, mask_arr, 32).keys()),
     }
@@ -2927,7 +2881,9 @@ def test_describe_features_default_configs() -> None:
 
     # Each config should have the same number of features (no spatial/local)
     counts = df.groupby("config").size()
-    assert counts.nunique() == 1, f"Expected uniform feature count per config, got {counts.to_dict()}"
+    assert counts.nunique() == 1, (
+        f"Expected uniform feature count per config, got {counts.to_dict()}"
+    )
 
     # All standard configs are resampled and discretised
     assert df["is_resampled"].all()
@@ -3057,9 +3013,7 @@ def test_describe_features_records_all_preprocessing_steps() -> None:
         {"params": {"sigma": 2.0}, "step_index": 3}
     ]
     assert row["is_intensity_rounded"]
-    assert json.loads(row["round_intensities_params"]) == [
-        {"params": {}, "step_index": 4}
-    ]
+    assert json.loads(row["round_intensities_params"]) == [{"params": {}, "step_index": 4}]
     assert row["keeps_largest_component"]
     assert row["keep_largest_component_apply_to"] == "morph"
     assert row["is_mask_binarized"]
@@ -3154,9 +3108,7 @@ def test_describe_features_ibsi_code_parsing() -> None:
     assert code == "TU9B"
 
     # IVH feature with numeric suffix
-    name, code = RadiomicsPipeline._parse_feature_key(
-        "volume_at_intensity_fraction_0.10_BC2M_10"
-    )
+    name, code = RadiomicsPipeline._parse_feature_key("volume_at_intensity_fraction_0.10_BC2M_10")
     assert name == "volume_at_intensity_fraction_0.10"
     assert code == "BC2M"
 
@@ -3222,30 +3174,36 @@ def test_fill_missing_features_handles_none_params() -> None:
     assert key in results
     assert np.isnan(results[key])
 
+
 from enum import Enum
-from pathlib import Path
 from importlib.metadata import PackageNotFoundError
+from pathlib import Path
+
 
 def test_pipeline_serialization_edge_cases():
     pipeline = RadiomicsPipeline()
     # Test Enum and Path serialization
-    
+
     class DummyEnum(Enum):
         TEST = "test_value"
-        
+
     res = pipeline._make_serializable(Path("/tmp/test"))
     assert res == "/tmp/test"
-    
+
     res = pipeline._make_serializable(DummyEnum.TEST)
     assert res == "test_value"
 
+
 def test_get_apply_to_invalid():
     from pictologics.pipeline import _get_apply_to
+
     with pytest.raises(ValueError, match="apply_to must be"):
         _get_apply_to({"apply_to": "invalid_target"}, "some_step")
 
+
 def test_get_package_version_not_found():
     from pictologics.pipeline import _get_package_version
+
     with patch("pictologics.pipeline.version") as mock_version:
         mock_version.side_effect = PackageNotFoundError()
         assert _get_package_version() is None

@@ -146,9 +146,7 @@ def _normalized_gaussian_laplace(
     valid_image = np.where(source_mask, image, 0.0).astype(np.float64)
 
     # Apply LoG to zeroed image
-    log_response = gaussian_laplace(
-        valid_image, sigma=sigma, mode=mode, truncate=truncate
-    )
+    log_response = gaussian_laplace(valid_image, sigma=sigma, mode=mode, truncate=truncate)
 
     # Compute weight sum using Gaussian (not LoG, since LoG sums to 0)
     weight_sum = gaussian_filter(
@@ -195,9 +193,7 @@ def _normalized_convolve1d(
 
     # Compute weight sum using absolute kernel (for proper normalization)
     abs_kernel = np.abs(kernel)
-    weight_sum = convolve1d(
-        source_mask.astype(np.float64), abs_kernel, axis=axis, mode=mode
-    )
+    weight_sum = convolve1d(source_mask.astype(np.float64), abs_kernel, axis=axis, mode=mode)
 
     # Normalize
     valid_output = weight_sum >= weight_threshold

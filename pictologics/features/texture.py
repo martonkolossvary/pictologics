@@ -162,7 +162,9 @@ class _ZoneBufferPool:
             cls._instance = cls()
         return cls._instance
 
-    def get_buffers(self, max_zones: int) -> tuple[
+    def get_buffers(
+        self, max_zones: int
+    ) -> tuple[
         npt.NDArray[np.floating[Any]],
         npt.NDArray[np.floating[Any]],
         npt.NDArray[np.floating[Any]],
@@ -210,9 +212,7 @@ _offsets = np.stack([_z.ravel(), _y.ravel(), _x.ravel()], axis=1)
 OFFSETS_26 = _offsets[np.any(_offsets != 0, axis=1)].astype(np.int32)
 
 # Define 6-neighbor offsets (Manhattan distance 1)
-_manhattan_dist = (
-    np.abs(OFFSETS_26[:, 0]) + np.abs(OFFSETS_26[:, 1]) + np.abs(OFFSETS_26[:, 2])
-)
+_manhattan_dist = np.abs(OFFSETS_26[:, 0]) + np.abs(OFFSETS_26[:, 1]) + np.abs(OFFSETS_26[:, 2])
 OFFSETS_6 = OFFSETS_26[_manhattan_dist == 1].astype(np.int32)
 
 # Convert to tuple of tuples for literal_unroll (pure Python ints)
@@ -272,9 +272,7 @@ def _calculate_local_features_numba(
         glcm_local = np.zeros((1, 1, 1, 1), dtype=np.uint32)
 
     if calc_glrlm:
-        glrlm_local = np.zeros(
-            (n_threads, n_dirs, n_bins, max_dim + 1), dtype=np.uint32
-        )
+        glrlm_local = np.zeros((n_threads, n_dirs, n_bins, max_dim + 1), dtype=np.uint32)
     else:
         glrlm_local = np.zeros((1, 1, 1, 1), dtype=np.uint32)
 
@@ -610,21 +608,9 @@ def _process_voxel(
 
                     # Optimized GLRLM loop with max_steps
                     if 0 <= cz < depth and 0 <= cy < height and 0 <= cx < width:
-                        steps_z = (
-                            (depth - 1 - cz)
-                            if dz == 1
-                            else (cz if dz == -1 else max_dim)
-                        )
-                        steps_y = (
-                            (height - 1 - cy)
-                            if dy == 1
-                            else (cy if dy == -1 else max_dim)
-                        )
-                        steps_x = (
-                            (width - 1 - cx)
-                            if dx == 1
-                            else (cx if dx == -1 else max_dim)
-                        )
+                        steps_z = (depth - 1 - cz) if dz == 1 else (cz if dz == -1 else max_dim)
+                        steps_y = (height - 1 - cy) if dy == 1 else (cy if dy == -1 else max_dim)
+                        steps_x = (width - 1 - cx) if dx == 1 else (cx if dx == -1 else max_dim)
 
                         max_steps = min(steps_z, steps_y, steps_x)
 
@@ -750,9 +736,7 @@ def calculate_all_texture_matrices(
     # Pad the mask with 0s to ensure the image border is treated as an edge.
     mask_bool = d_mask > 0
     mask_padded = np.pad(mask_bool, 1, mode="constant", constant_values=0)
-    dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(
-        np.int32
-    )
+    dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.int32)
     dist_map = dist_map_padded[1:-1, 1:-1, 1:-1]
 
     glszm, gldzm = calculate_zone_features(
@@ -926,9 +910,7 @@ def calculate_glcm_features(
 
     # Difference Entropy - NTRS
     mask_pd = p_diff > 0
-    features["difference_entropy_NTRS"] = -np.sum(
-        p_diff[mask_pd] * np.log2(p_diff[mask_pd])
-    )
+    features["difference_entropy_NTRS"] = -np.sum(p_diff[mask_pd] * np.log2(p_diff[mask_pd]))
 
     # Sum Average - ZGXS
     k_sum_grid = I + J
@@ -971,9 +953,7 @@ def calculate_glcm_features(
         Ng_eff = 1  # Fallback
 
     # Normalised Inverse Difference - NDRX
-    features["normalised_inverse_difference_NDRX"] = np.sum(
-        P / (1 + np.abs(I - J) / Ng_eff)
-    )
+    features["normalised_inverse_difference_NDRX"] = np.sum(P / (1 + np.abs(I - J) / Ng_eff))
 
     # Inverse Difference Moment - WF0Z
     features["inverse_difference_moment_WF0Z"] = np.sum(P / (1 + (I - J) ** 2))
@@ -985,18 +965,14 @@ def calculate_glcm_features(
 
     # Inverse Variance - E8JP
     mask_neq = I != J
-    features["inverse_variance_E8JP"] = np.sum(
-        P[mask_neq] / ((I[mask_neq] - J[mask_neq]) ** 2)
-    )
+    features["inverse_variance_E8JP"] = np.sum(P[mask_neq] / ((I[mask_neq] - J[mask_neq]) ** 2))
 
     # Correlation - NI2N
     term1 = np.sum((I - mu) * (J - mu) * P)
     if features["joint_variance_UR99"] != 0:
         features["correlation_NI2N"] = term1 / features["joint_variance_UR99"]
     else:
-        features["correlation_NI2N"] = (
-            1.0  # Or NaN? IBSI doesn't specify for 0 variance.
-        )
+        features["correlation_NI2N"] = 1.0  # Or NaN? IBSI doesn't specify for 0 variance.
 
     # Autocorrelation - QWB0
     features["autocorrelation_QWB0"] = np.sum(I * J * P)
@@ -1424,7 +1400,12 @@ def calculate_glszm_features(
         dummy_dist = np.zeros_like(data_c, dtype=np.int32)
 
         glszm, _ = calculate_zone_features(
-            data_c, mask_u8, dummy_dist, n_bins, calc_glszm=True, calc_gldzm=False  # type: ignore[arg-type]
+            data_c,
+            mask_u8,
+            dummy_dist,
+            n_bins,
+            calc_glszm=True,
+            calc_gldzm=False,  # type: ignore[arg-type]
         )
     else:
         glszm = glszm_matrix
@@ -1453,9 +1434,7 @@ def calculate_glszm_features(
     features["grey_level_non_uniformity_JNSA"] = np.sum(s_i**2) / N_zones
 
     # Normalised Grey Level Non-Uniformity (GLNN) - Y1RO
-    features["normalised_grey_level_non_uniformity_Y1RO"] = np.sum(s_i**2) / (
-        N_zones**2
-    )
+    features["normalised_grey_level_non_uniformity_Y1RO"] = np.sum(s_i**2) / (N_zones**2)
 
     # Zone Size Non-Uniformity (ZSNU) - 4JP3
     s_j = np.sum(glszm, axis=0)
@@ -1539,9 +1518,7 @@ def calculate_gldzm_features(
         # Pad the mask with 0s to ensure the image border is treated as an edge.
         mask_bool = d_mask > 0
         mask_padded = np.pad(mask_bool, 1, mode="constant", constant_values=0)
-        dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(
-            np.int32
-        )
+        dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.int32)
         dist_map = dist_map_padded[1:-1, 1:-1, 1:-1]
 
         _, gldzm = calculate_zone_features(  # type: ignore[arg-type]
@@ -1579,18 +1556,14 @@ def calculate_gldzm_features(
     features["grey_level_non_uniformity_VFT7"] = np.sum(s_i**2) / N_zones
 
     # Normalised Grey Level Non-Uniformity (GLNN) - 7HP3
-    features["normalised_grey_level_non_uniformity_7HP3"] = np.sum(s_i**2) / (
-        N_zones**2
-    )
+    features["normalised_grey_level_non_uniformity_7HP3"] = np.sum(s_i**2) / (N_zones**2)
 
     # Zone Distance Non-Uniformity (ZDNU) - V294
     s_j = np.sum(gldzm, axis=0)
     features["zone_distance_non_uniformity_V294"] = np.sum(s_j**2) / N_zones
 
     # Normalised Zone Distance Non-Uniformity (ZDNN) - IATH
-    features["normalised_zone_distance_non_uniformity_IATH"] = np.sum(s_j**2) / (
-        N_zones**2
-    )
+    features["normalised_zone_distance_non_uniformity_IATH"] = np.sum(s_j**2) / (N_zones**2)
 
     # Zone Percentage (ZP) - VIWW
     n_voxels = _roi_voxel_count(mask)
@@ -1615,24 +1588,16 @@ def calculate_gldzm_features(
     features["high_grey_level_zone_emphasis_K26C"] = np.sum(P * (I**2))
 
     # Small Distance Low Grey Level Emphasis (SDLGLE) - RUVG
-    features["small_distance_low_grey_level_emphasis_RUVG"] = np.sum(
-        P / ((I**2) * (J**2))
-    )
+    features["small_distance_low_grey_level_emphasis_RUVG"] = np.sum(P / ((I**2) * (J**2)))
 
     # Small Distance High Grey Level Emphasis (SDHGLE) - DKNJ
-    features["small_distance_high_grey_level_emphasis_DKNJ"] = np.sum(
-        P * (I**2) / (J**2)
-    )
+    features["small_distance_high_grey_level_emphasis_DKNJ"] = np.sum(P * (I**2) / (J**2))
 
     # Large Distance Low Grey Level Emphasis (LDLGLE) - A7WM
-    features["large_distance_low_grey_level_emphasis_A7WM"] = np.sum(
-        P * (J**2) / (I**2)
-    )
+    features["large_distance_low_grey_level_emphasis_A7WM"] = np.sum(P * (J**2) / (I**2))
 
     # Large Distance High Grey Level Emphasis (LDHGLE) - KLTH
-    features["large_distance_high_grey_level_emphasis_KLTH"] = np.sum(
-        P * (I**2) * (J**2)
-    )
+    features["large_distance_high_grey_level_emphasis_KLTH"] = np.sum(P * (I**2) * (J**2))
 
     return features
 
@@ -1862,24 +1827,16 @@ def calculate_ngldm_features(
     features["high_grey_level_count_emphasis_OAE7"] = np.sum(P * (I**2))
 
     # Low Dependence Low Grey Level Emphasis (LDLGE) - EQ3F
-    features["low_dependence_low_grey_level_emphasis_EQ3F"] = np.sum(
-        P / ((I**2) * (J**2))
-    )
+    features["low_dependence_low_grey_level_emphasis_EQ3F"] = np.sum(P / ((I**2) * (J**2)))
 
     # Low Dependence High Grey Level Emphasis (LDHGE) - JA6D
-    features["low_dependence_high_grey_level_emphasis_JA6D"] = np.sum(
-        P * (I**2) / (J**2)
-    )
+    features["low_dependence_high_grey_level_emphasis_JA6D"] = np.sum(P * (I**2) / (J**2))
 
     # High Dependence Low Grey Level Emphasis (HDLGE) - NBZI
-    features["high_dependence_low_grey_level_emphasis_NBZI"] = np.sum(
-        P * (J**2) / (I**2)
-    )
+    features["high_dependence_low_grey_level_emphasis_NBZI"] = np.sum(P * (J**2) / (I**2))
 
     # High Dependence High Grey Level Emphasis (HDHGE) - 9QMG
-    features["high_dependence_high_grey_level_emphasis_9QMG"] = np.sum(
-        P * (I**2) * (J**2)
-    )
+    features["high_dependence_high_grey_level_emphasis_9QMG"] = np.sum(P * (I**2) * (J**2))
 
     # Grey Level Non-Uniformity - FP8K
     s_i = np.sum(ngldm, axis=1)
@@ -1893,9 +1850,7 @@ def calculate_ngldm_features(
     features["dependence_count_non_uniformity_Z87G"] = np.sum(s_j**2) / N_s
 
     # Normalised Dependence Count Non-Uniformity - OKJI
-    features["normalised_dependence_count_non_uniformity_OKJI"] = np.sum(s_j**2) / (
-        N_s**2
-    )
+    features["normalised_dependence_count_non_uniformity_OKJI"] = np.sum(s_j**2) / (N_s**2)
 
     # Dependence Count Percentage - 6XV8
     n_voxels = _roi_voxel_count(mask)
@@ -1983,9 +1938,7 @@ def calculate_all_texture_features(
             mask_array,
             n_bins,
             gldzm_matrix=texture_matrices["gldzm"],
-            distance_mask=(
-                distance_mask_array if distance_mask_array is not None else mask_array
-            ),
+            distance_mask=(distance_mask_array if distance_mask_array is not None else mask_array),
         )
     )
 

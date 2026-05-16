@@ -25,7 +25,9 @@ class BBoxInfo:
     origin_offset: tuple[int, int, int]  # (z, y, x) offset from original origin
 
 
-def compute_nonzero_bbox(mask: npt.NDArray[np.floating[Any]]) -> Optional[tuple[slice, slice, slice]]:
+def compute_nonzero_bbox(
+    mask: npt.NDArray[np.floating[Any]],
+) -> Optional[tuple[slice, slice, slice]]:
     """Compute the tight bounding box of non-zero voxels in a 3D mask.
 
     Args:

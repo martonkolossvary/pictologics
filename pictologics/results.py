@@ -106,9 +106,7 @@ def format_results(
                 elif output_type == "json":
                     return "[]"
 
-            df = pd.DataFrame(
-                columns=list(meta.keys()) + [config_col, "feature_name", "value"]
-            )
+            df = pd.DataFrame(columns=list(meta.keys()) + [config_col, "feature_name", "value"])
             return df  # Columns are already in order
 
         # Reorder keys/columns
@@ -149,12 +147,7 @@ def format_results(
 
 def save_results(
     data: (
-        dict[str, Any]
-        | list[dict[str, Any]]
-        | pd.DataFrame
-        | list[pd.DataFrame]
-        | str
-        | list[str]
+        dict[str, Any] | list[dict[str, Any]] | pd.DataFrame | list[pd.DataFrame] | str | list[str]
     ),
     path: str | Path,
     file_format: str | None = None,
@@ -198,9 +191,7 @@ def save_results(
     if file_format == "json":
         # Check if data is already in a compatible format
         is_dict = isinstance(data, dict)
-        is_list_of_dicts = isinstance(data, list) and (
-            not data or isinstance(data[0], dict)
-        )
+        is_list_of_dicts = isinstance(data, list) and (not data or isinstance(data[0], dict))
 
         if is_dict:
             with open(path, "w") as f:
@@ -232,12 +223,7 @@ def save_results(
 
 def _normalize_to_dataframe(
     data: (
-        dict[str, Any]
-        | list[dict[str, Any]]
-        | pd.DataFrame
-        | list[pd.DataFrame]
-        | str
-        | list[str]
+        dict[str, Any] | list[dict[str, Any]] | pd.DataFrame | list[pd.DataFrame] | str | list[str]
     ),
 ) -> pd.DataFrame:
     """
@@ -266,9 +252,7 @@ def _normalize_to_dataframe(
                     raise ValueError(f"Item at index {i} is not valid JSON: {e}") from e
             else:
                 # Should not happen if list type check passed, but for safety in mixed lists cleanup
-                raise ValueError(
-                    f"Mixed types in list (expected string, got {type(item)})."
-                )
+                raise ValueError(f"Mixed types in list (expected string, got {type(item)}).")
         data = parsed_list
 
     # 2. Now data is Dict, List[Dict], DataFrame, or List[DataFrame]

@@ -258,9 +258,7 @@ class TestSaveSlices:
             origin=(0.0, 0.0, 0.0),
         )
 
-    def test_save_overlay_mode(
-        self, synthetic_image: Image, synthetic_mask: Image
-    ) -> None:
+    def test_save_overlay_mode(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test saving with both image and mask."""
         with tempfile.TemporaryDirectory() as tmpdir:
             files = save_slices(
@@ -307,9 +305,7 @@ class TestSaveSlices:
             )
             assert len(files) == 2
 
-    def test_save_jpeg_format(
-        self, synthetic_image: Image, synthetic_mask: Image
-    ) -> None:
+    def test_save_jpeg_format(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test saving as JPEG."""
         with tempfile.TemporaryDirectory() as tmpdir:
             files = save_slices(
@@ -355,9 +351,7 @@ class TestSaveSlices:
             with pytest.raises(ValueError, match="At least one"):
                 save_slices(output_dir=tmpdir)
 
-    def test_save_with_dpi_72(
-        self, synthetic_image: Image, synthetic_mask: Image
-    ) -> None:
+    def test_save_with_dpi_72(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test saving with 72 DPI (scale_factor=1.0)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             files = save_slices(
@@ -394,18 +388,15 @@ class TestVisualizeSlices:
             origin=(0.0, 0.0, 0.0),
         )
 
-    def test_visualize_overlay_mode(
-        self, synthetic_image: Image, synthetic_mask: Image
-    ) -> None:
+    def test_visualize_overlay_mode(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test interactive viewer with overlay."""
-        with patch("matplotlib.pyplot.subplots") as mock_subplots, patch(
-            "matplotlib.pyplot.axes"
-        ), patch("matplotlib.widgets.Slider") as mock_slider_class, patch(
-            "matplotlib.pyplot.show"
-        ) as mock_show, patch(
-            "matplotlib.pyplot.subplots_adjust"
+        with (
+            patch("matplotlib.pyplot.subplots") as mock_subplots,
+            patch("matplotlib.pyplot.axes"),
+            patch("matplotlib.widgets.Slider") as mock_slider_class,
+            patch("matplotlib.pyplot.show") as mock_show,
+            patch("matplotlib.pyplot.subplots_adjust"),
         ):
-
             mock_fig = MagicMock()
             mock_ax = MagicMock()
             mock_subplots.return_value = (mock_fig, mock_ax)
@@ -420,14 +411,13 @@ class TestVisualizeSlices:
 
     def test_visualize_image_only(self, synthetic_image: Image) -> None:
         """Test interactive viewer with image only."""
-        with patch("matplotlib.pyplot.subplots") as mock_subplots, patch(
-            "matplotlib.pyplot.axes"
-        ), patch("matplotlib.widgets.Slider"), patch(
-            "matplotlib.pyplot.show"
-        ) as mock_show, patch(
-            "matplotlib.pyplot.subplots_adjust"
+        with (
+            patch("matplotlib.pyplot.subplots") as mock_subplots,
+            patch("matplotlib.pyplot.axes"),
+            patch("matplotlib.widgets.Slider"),
+            patch("matplotlib.pyplot.show") as mock_show,
+            patch("matplotlib.pyplot.subplots_adjust"),
         ):
-
             mock_fig = MagicMock()
             mock_ax = MagicMock()
             mock_subplots.return_value = (mock_fig, mock_ax)
@@ -438,14 +428,13 @@ class TestVisualizeSlices:
 
     def test_visualize_mask_only(self, synthetic_mask: Image) -> None:
         """Test interactive viewer with mask only."""
-        with patch("matplotlib.pyplot.subplots") as mock_subplots, patch(
-            "matplotlib.pyplot.axes"
-        ), patch("matplotlib.widgets.Slider"), patch(
-            "matplotlib.pyplot.show"
-        ) as mock_show, patch(
-            "matplotlib.pyplot.subplots_adjust"
+        with (
+            patch("matplotlib.pyplot.subplots") as mock_subplots,
+            patch("matplotlib.pyplot.axes"),
+            patch("matplotlib.widgets.Slider"),
+            patch("matplotlib.pyplot.show") as mock_show,
+            patch("matplotlib.pyplot.subplots_adjust"),
         ):
-
             mock_fig = MagicMock()
             mock_ax = MagicMock()
             mock_subplots.return_value = (mock_fig, mock_ax)
@@ -473,12 +462,12 @@ class TestVisualizeSlices:
         self, synthetic_image: Image, synthetic_mask: Image
     ) -> None:
         """Test visualize with axis=0 and axis=1."""
-        with patch("matplotlib.pyplot.subplots") as mock_subplots, patch(
-            "matplotlib.pyplot.axes"
-        ), patch("matplotlib.widgets.Slider") as mock_slider_class, patch(
-            "matplotlib.pyplot.show"
-        ), patch(
-            "matplotlib.pyplot.subplots_adjust"
+        with (
+            patch("matplotlib.pyplot.subplots") as mock_subplots,
+            patch("matplotlib.pyplot.axes"),
+            patch("matplotlib.widgets.Slider") as mock_slider_class,
+            patch("matplotlib.pyplot.show"),
+            patch("matplotlib.pyplot.subplots_adjust"),
         ):
             mock_fig = MagicMock()
             mock_ax = MagicMock()
@@ -492,16 +481,14 @@ class TestVisualizeSlices:
             # Test axis=1 (coronal)
             visualize_slices(image=synthetic_image, mask=synthetic_mask, axis=1)
 
-    def test_visualize_callbacks(
-        self, synthetic_image: Image, synthetic_mask: Image
-    ) -> None:
+    def test_visualize_callbacks(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test that slider update and scroll callbacks work."""
-        with patch("matplotlib.pyplot.subplots") as mock_subplots, patch(
-            "matplotlib.pyplot.axes"
-        ), patch("matplotlib.widgets.Slider") as mock_slider_class, patch(
-            "matplotlib.pyplot.show"
-        ), patch(
-            "matplotlib.pyplot.subplots_adjust"
+        with (
+            patch("matplotlib.pyplot.subplots") as mock_subplots,
+            patch("matplotlib.pyplot.axes"),
+            patch("matplotlib.widgets.Slider") as mock_slider_class,
+            patch("matplotlib.pyplot.show"),
+            patch("matplotlib.pyplot.subplots_adjust"),
         ):
             mock_fig = MagicMock()
             mock_ax = MagicMock()
@@ -582,9 +569,7 @@ class TestSaveSlicesAdditional:
         arr[20:40, 20:40, 5:15] = 1
         return Image(array=arr, spacing=(1.0, 1.0, 2.0), origin=(0.0, 0.0, 0.0))
 
-    def test_save_jpg_format_alias(
-        self, synthetic_image: Image, synthetic_mask: Image
-    ) -> None:
+    def test_save_jpg_format_alias(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test saving with 'jpg' format alias."""
         with tempfile.TemporaryDirectory() as tmpdir:
             files = save_slices(
@@ -612,9 +597,7 @@ class TestSaveSlicesAdditional:
             assert len(files) == 1
             assert files[0].endswith(".png")
 
-    def test_save_tiff_format(
-        self, synthetic_image: Image, synthetic_mask: Image
-    ) -> None:
+    def test_save_tiff_format(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test saving as TIFF."""
         with tempfile.TemporaryDirectory() as tmpdir:
             files = save_slices(

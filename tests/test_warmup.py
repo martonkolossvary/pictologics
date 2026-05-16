@@ -5,9 +5,7 @@ from unittest.mock import MagicMock, patch
 
 # Filter warnings for the test suite itself if needed
 warnings.filterwarnings("ignore", category=RuntimeWarning)
-warnings.filterwarnings(
-    "ignore", message="The NumPy module was reloaded.*", category=UserWarning
-)
+warnings.filterwarnings("ignore", message="The NumPy module was reloaded.*", category=UserWarning)
 
 
 class TestWarmup(unittest.TestCase):
@@ -27,12 +25,11 @@ class TestWarmup(unittest.TestCase):
     def test_warmup_runs(self) -> None:
         """Test that warmup runs successfully and triggers expected internal functions."""
         # We Mock the internal _warmup_* methods to verify flow without paying JIT cost
-        with patch("pictologics.warmup._warmup_texture") as mock_tex, patch(
-            "pictologics.warmup._warmup_intensity"
-        ) as mock_int, patch(
-            "pictologics.warmup._warmup_morphology"
-        ) as mock_morph:
-
+        with (
+            patch("pictologics.warmup._warmup_texture") as mock_tex,
+            patch("pictologics.warmup._warmup_intensity") as mock_int,
+            patch("pictologics.warmup._warmup_morphology") as mock_morph,
+        ):
             from pictologics.warmup import warmup_jit
 
             warmup_jit()
@@ -66,7 +63,9 @@ class TestWarmup(unittest.TestCase):
             # Verify warning was emitted
             runtime_warnings = [x for x in w if issubclass(x.category, RuntimeWarning)]
             self.assertTrue(len(runtime_warnings) >= 1)
-            self.assertTrue(any("warmup failed" in str(x.message).lower() for x in runtime_warnings))
+            self.assertTrue(
+                any("warmup failed" in str(x.message).lower() for x in runtime_warnings)
+            )
 
     @patch("pictologics.warmup.numba.get_num_threads")
     def test_warmup_fallback_logic(self, mock_get_threads: MagicMock) -> None:
@@ -79,10 +78,11 @@ class TestWarmup(unittest.TestCase):
             mock_config.NUMBA_NUM_THREADS = 2
             # We mock the internal heavy functions to avoid running them fully here
             # since we only care about the thread logic at the start of _warmup_texture
-            with patch("pictologics.warmup._warmup_intensity"), patch(
-                "pictologics.warmup._warmup_morphology"
-            ), patch("pictologics.warmup.texture") as _mock_texture_mod:
-
+            with (
+                patch("pictologics.warmup._warmup_intensity"),
+                patch("pictologics.warmup._warmup_morphology"),
+                patch("pictologics.warmup.texture") as _mock_texture_mod,
+            ):
                 from pictologics.warmup import warmup_jit
 
                 # Suppress expected warmup failure warning (mocked texture causes failure)

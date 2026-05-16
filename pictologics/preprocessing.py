@@ -304,8 +304,7 @@ def resample_image(
 
     if effective_source is not None and effective_source.shape != image.array.shape:
         raise ValueError(
-            f"Source mask shape {effective_source.shape} must match image shape "
-            f"{image.array.shape}"
+            f"Source mask shape {effective_source.shape} must match image shape {image.array.shape}"
         )
 
     # Map interpolation string to spline order
@@ -387,9 +386,7 @@ def resample_image(
     extent_orig = (np.array(image.array.shape) - 1) * original_spacing
     extent_new = (new_shape - 1) * target_spacing
     origin_shift = 0.5 * (extent_orig - extent_new)
-    new_origin = tuple(
-        np.array(image.origin) + _direction_matrix(image.direction) @ origin_shift
-    )
+    new_origin = tuple(np.array(image.origin) + _direction_matrix(image.direction) @ origin_shift)
 
     return Image(
         array=resampled_array,
@@ -465,9 +462,7 @@ def discretise_image(
             mask_arr = roi_mask
 
         if mask_arr.shape != array.shape:
-            raise ValueError(
-                f"Shape mismatch: Image {array.shape} vs Mask {mask_arr.shape}"
-            )
+            raise ValueError(f"Shape mismatch: Image {array.shape} vs Mask {mask_arr.shape}")
 
         # Extract ROI values (ignoring NaNs)
         roi_values = array[(mask_arr > 0) & (~np.isnan(array))]
@@ -514,8 +509,7 @@ def discretise_image(
         else:
             # IBSI FBN: floor(N_g * (X - X_min) / (X_max - X_min)) + 1
             temp_discretised = (
-                np.floor(n_bins * (values - current_min) / (current_max - current_min))
-                + 1
+                np.floor(n_bins * (values - current_min) / (current_max - current_min)) + 1
             )
 
             # Handle max value case (it falls into N_g + 1 with this formula)

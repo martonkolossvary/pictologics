@@ -199,9 +199,7 @@ def test_discretise_empty_image() -> None:
 
 def test_discretise_image_fbn_explicit_range(mock_image: Image) -> None:
     # FBN with explicit min/max
-    disc = discretise_image(
-        mock_image, method="FBN", n_bins=5, min_val=0.0, max_val=10.0
-    )
+    disc = discretise_image(mock_image, method="FBN", n_bins=5, min_val=0.0, max_val=10.0)
     assert disc.array.shape == mock_image.array.shape
 
 
@@ -306,9 +304,7 @@ def test_apply_mask_treats_nonzero_labels_as_roi(mock_image: Image) -> None:
     mask_array = np.zeros(mock_image.array.shape, dtype=np.uint8)
     mask_array[1:3, 1:3, 1:3] = 2
     mask_array[3, 3, 3] = 5
-    label_mask = Image(
-        mask_array, mock_image.spacing, mock_image.origin, mock_image.direction
-    )
+    label_mask = Image(mask_array, mock_image.spacing, mock_image.origin, mock_image.direction)
 
     values = apply_mask(mock_image, label_mask)
     assert values.size == 9
@@ -370,9 +366,7 @@ def test_extract_roi_treats_nonzero_labels_as_roi(mock_image: Image) -> None:
     mask_array = np.zeros(mock_image.array.shape, dtype=np.uint8)
     mask_array[1:3, 1:3, 1:3] = 2
     mask_array[3, 3, 3] = 5
-    label_mask = Image(
-        mask_array, mock_image.spacing, mock_image.origin, mock_image.direction
-    )
+    label_mask = Image(mask_array, mock_image.spacing, mock_image.origin, mock_image.direction)
 
     roi_img = extract_roi(mock_image, label_mask)
     assert not np.isnan(roi_img.array[1, 1, 1])
@@ -474,9 +468,7 @@ def test_filter_outliers_bool_mask(mock_image: Image) -> None:
 
 
 def test_filter_outliers_empty(mock_image: Image) -> None:
-    empty = Image(
-        np.zeros(mock_image.array.shape), mock_image.spacing, mock_image.origin
-    )
+    empty = Image(np.zeros(mock_image.array.shape), mock_image.spacing, mock_image.origin)
     res = filter_outliers(mock_image, empty)
     assert np.sum(res.array) == 0
 

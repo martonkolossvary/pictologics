@@ -61,9 +61,7 @@ class TestFiltersParallelCoverage:
             pooling="average",
             use_parallel=True,
         )
-        laws_filter(
-            image, "E3L3S3", rotation_invariant=True, pooling="min", use_parallel=True
-        )
+        laws_filter(image, "E3L3S3", rotation_invariant=True, pooling="min", use_parallel=True)
 
         # Test boundary as string
         laws_filter(image, "E3L3S3", boundary="mirror")

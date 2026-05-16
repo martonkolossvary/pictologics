@@ -80,9 +80,7 @@ class TestBaseFilters:
         # result = 200 / 2 = 100.
         # This correctly interpolates the missing center value from neighbors!
 
-        result, valid_out = _normalized_uniform_filter(
-            image, mask, size=3, mode="constant"
-        )
+        result, valid_out = _normalized_uniform_filter(image, mask, size=3, mode="constant")
 
         # Center pixel check
         assert np.isclose(result[1], 100.0)
@@ -100,9 +98,7 @@ class TestBaseFilters:
         mask[5, 5, 5] = False  # Center invalid (e.g. sentinel)
 
         # Should not crash
-        result, valid_out = _normalized_gaussian_laplace(
-            image, mask, sigma=1.0, mode="constant"
-        )
+        result, valid_out = _normalized_gaussian_laplace(image, mask, sigma=1.0, mode="constant")
         assert result.shape == shape
         assert valid_out.shape == shape
 
@@ -122,9 +118,7 @@ class TestBaseFilters:
         # weight window: [1, 0, 1] * [0.5, 1.0, 0.5] = 0.5 + 0 + 0.5 = 1.0
         # result = 20 / 1.0 = 20. Correct interpolation!
 
-        result, valid_out = _normalized_convolve1d(
-            image, mask, kernel, axis=0, mode="constant"
-        )
+        result, valid_out = _normalized_convolve1d(image, mask, kernel, axis=0, mode="constant")
 
         assert np.isclose(result[1], 20.0)
 
@@ -134,8 +128,6 @@ class TestBaseFilters:
         mask = np.ones(shape, dtype=bool)
         g = np.array([0.2, 0.6, 0.2], dtype=np.float32)
 
-        result, valid_out = _normalized_separable_convolve_3d(
-            image, mask, g, g, g, mode="constant"
-        )
+        result, valid_out = _normalized_separable_convolve_3d(image, mask, g, g, g, mode="constant")
         assert result.shape == shape
         assert valid_out.shape == shape

@@ -19,7 +19,6 @@ from pictologics.preprocessing import resample_image
 
 
 class TestCoverageGapFiller:
-
     def setup_method(self):
         self.shape = (20, 20, 20)
         self.image_arr = np.random.rand(*self.shape).astype(np.float32)
@@ -88,9 +87,7 @@ class TestCoverageGapFiller:
 
     def test_simoncelli_source_mask(self):
         # Covers wavelets.py line 322
-        res = simoncelli_wavelet(
-            self.image_arr, level=1, source_mask=self.source_mask_arr
-        )
+        res = simoncelli_wavelet(self.image_arr, level=1, source_mask=self.source_mask_arr)
         assert res.shape == self.shape
 
     def test_preprocessing_resample_ndmask(self):
@@ -160,9 +157,7 @@ class TestCoverageGapFiller:
         pipeline.add_config("auto_config", config_roi, source_mode="auto")
 
         # AUTO detection now logs at debug level (no UserWarning expected)
-        results_auto = pipeline.run(
-            img_sent, self.mask, config_names=["auto_config"]
-        )
+        results_auto = pipeline.run(img_sent, self.mask, config_names=["auto_config"])
         assert "auto_config" in results_auto
 
         auto_logs = [entry for entry in pipeline._log if entry["config_name"] == "auto_config"]
@@ -203,9 +198,7 @@ class TestCoverageGapFiller:
         config = [{"step": "filter", "params": {"type": "mean"}}]
 
         # Explicit sentinel
-        pipeline.add_config(
-            "explicit_sent", config, source_mode="auto", sentinel_value=-1000
-        )
+        pipeline.add_config("explicit_sent", config, source_mode="auto", sentinel_value=-1000)
 
         # Image with sentinel
         img_arr_sent = np.full(self.shape, -1000.0, dtype=np.float32)

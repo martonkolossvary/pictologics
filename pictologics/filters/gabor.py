@@ -183,8 +183,7 @@ def _apply_gabor_to_plane(
     """
     # Pre-compute all kernels for efficiency
     kernels = [
-        _create_gabor_kernel_2d(sigma_voxels, lambda_voxels, gamma, theta)
-        for theta in thetas
+        _create_gabor_kernel_2d(sigma_voxels, lambda_voxels, gamma, theta) for theta in thetas
     ]
 
     def process_slice(
@@ -234,9 +233,7 @@ def _apply_gabor_to_plane(
             response = convolve_prepadded(k)
             if result_slice is None:
                 result_slice = (
-                    response.astype(np.float64)
-                    if pooling == "average"
-                    else response.copy()
+                    response.astype(np.float64) if pooling == "average" else response.copy()
                 )
             else:
                 if pooling == "max":
@@ -264,9 +261,7 @@ def _apply_gabor_to_plane(
         with ThreadPoolExecutor() as executor:
             # image_reordered[i] is a view, no copy needed
             processed = list(
-                executor.map(
-                    process_slice, [image_reordered[i] for i in range(n_slices)]
-                )
+                executor.map(process_slice, [image_reordered[i] for i in range(n_slices)])
             )
     else:
         # Sequential processing for small images

@@ -7,6 +7,7 @@ Setting NUMBA_DISABLE_JIT=1 here ensures that Numba functions run as
 regular Python code, allowing unittest.mock.patch to work correctly
 on numpy functions called inside Numba-decorated functions.
 """
+
 import os
 
 # Disable Numba JIT compilation BEFORE any imports

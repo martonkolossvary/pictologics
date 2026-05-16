@@ -251,9 +251,7 @@ def _mesh_area_volume_numba(
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _mvee_khachiyan_numba(
     points: npt.NDArray[np.floating[Any]], tol: float = 0.001
-) -> tuple[
-    Optional[npt.NDArray[np.floating[Any]]], Optional[npt.NDArray[np.floating[Any]]]
-]:
+) -> tuple[Optional[npt.NDArray[np.floating[Any]]], Optional[npt.NDArray[np.floating[Any]]]]:
     """
     Find Minimum Volume Enclosing Ellipsoid (MVEE) using the Khachiyan algorithm.
 
@@ -474,9 +472,7 @@ def _get_mesh_features(
         return {}, None, None
 
     mask_cropped = mask_arr[bbox]
-    origin_offset = np.array(
-        [bbox[0].start, bbox[1].start, bbox[2].start], dtype=np.float64
-    )
+    origin_offset = np.array([bbox[0].start, bbox[1].start, bbox[2].start], dtype=np.float64)
 
     mask_padded_u8 = np.pad(mask_cropped, 1, mode="constant", constant_values=0)
     mask_padded = np.ascontiguousarray(mask_padded_u8.astype(np.float32, copy=False))
@@ -513,19 +509,15 @@ def _get_shape_features(surface_area: float, mesh_volume: float) -> dict[str, fl
         return features
 
     features["surface_to_volume_ratio_2PR5"] = surface_area / mesh_volume
-    features["compactness_1_SKGS"] = mesh_volume / (
-        np.sqrt(np.pi) * (surface_area**1.5)
-    )
+    features["compactness_1_SKGS"] = mesh_volume / (np.sqrt(np.pi) * (surface_area**1.5))
     features["compactness_2_BQWJ"] = (36 * np.pi * (mesh_volume**2)) / (surface_area**3)
     features["spherical_disproportion_KRCK"] = surface_area / (
         (36 * np.pi * (mesh_volume**2)) ** (1 / 3)
     )
-    features["sphericity_QCFX"] = (
-        (36 * np.pi * (mesh_volume**2)) ** (1 / 3)
-    ) / surface_area
-    features["asphericity_25C7"] = (
-        (1 / (36 * np.pi)) * (surface_area**3) / (mesh_volume**2)
-    ) ** (1 / 3) - 1
+    features["sphericity_QCFX"] = ((36 * np.pi * (mesh_volume**2)) ** (1 / 3)) / surface_area
+    features["asphericity_25C7"] = ((1 / (36 * np.pi)) * (surface_area**3) / (mesh_volume**2)) ** (
+        1 / 3
+    ) - 1
 
     return features
 
@@ -548,8 +540,8 @@ def _get_pca_features(
     if mask_moments is not None:
         n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = mask_moments
     else:
-        n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = (
-            _accumulate_moments_from_mask_numba(mask.array)
+        n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = _accumulate_moments_from_mask_numba(
+            mask.array
         )
     if n <= 3:
         return features, None, None
@@ -679,12 +671,7 @@ def _get_bounding_box_features(
         dims_rot = max_rot - min_rot
         vol_ombb = float(np.prod(dims_rot))
         area_ombb = float(
-            2
-            * (
-                dims_rot[0] * dims_rot[1]
-                + dims_rot[1] * dims_rot[2]
-                + dims_rot[2] * dims_rot[0]
-            )
+            2 * (dims_rot[0] * dims_rot[1] + dims_rot[1] * dims_rot[2] + dims_rot[2] * dims_rot[0])
         )
 
         if vol_ombb > 0:
@@ -708,9 +695,7 @@ def _get_mvee_features(
 
     hull_points = verts[hull.vertices]
     hull_points_f64 = (
-        hull_points
-        if hull_points.dtype == np.float64
-        else hull_points.astype(np.float64)
+        hull_points if hull_points.dtype == np.float64 else hull_points.astype(np.float64)
     )
     A_mvee, _ = _mvee_khachiyan_numba(hull_points_f64)
 
@@ -745,11 +730,9 @@ def _get_intensity_morphology_features(
     """Calculate intensity-weighted morphological features."""
     features: dict[str, float] = {}
 
-    count_i, sum_w, sum_i0_w, sum_i1_w, sum_i2_w = (
-        _accumulate_intensity_weighted_moments_numba(
-            intensity_mask.array,
-            image.array,
-        )
+    count_i, sum_w, sum_i0_w, sum_i1_w, sum_i2_w = _accumulate_intensity_weighted_moments_numba(
+        intensity_mask.array,
+        image.array,
     )
     if count_i > 0:
         mean_intensity = sum_w / float(count_i)
@@ -757,10 +740,15 @@ def _get_intensity_morphology_features(
 
         # Center of Mass Shift
         if mask_moments is not None:
-            n_m, s0_m, s1_m, s2_m = mask_moments[0], mask_moments[1], mask_moments[2], mask_moments[3]
+            n_m, s0_m, s1_m, s2_m = (
+                mask_moments[0],
+                mask_moments[1],
+                mask_moments[2],
+                mask_moments[3],
+            )
         else:
-            n_m, s0_m, s1_m, s2_m, _, _, _, _, _, _ = (
-                _accumulate_moments_from_mask_numba(mask.array)
+            n_m, s0_m, s1_m, s2_m, _, _, _, _, _, _ = _accumulate_moments_from_mask_numba(
+                mask.array
             )
         if n_m > 0:
             m0 = s0_m / float(n_m)

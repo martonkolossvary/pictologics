@@ -148,7 +148,7 @@ def synthetic_dicom_dir(tmp_path: Path) -> Path:
     for i in range(5):
         create_synthetic_dicom(
             dicom_dir / f"slice_{i:03d}.dcm",
-            sop_uid=f"1.2.3.4.5.6.7.8.9.{100+i}",
+            sop_uid=f"1.2.3.4.5.6.7.8.9.{100 + i}",
             instance_number=i + 1,
             image_position=(0.0, 0.0, float(i * 2.5)),
             slice_location=float(i * 2.5),
@@ -170,7 +170,7 @@ def synthetic_multi_patient_dir(tmp_path: Path) -> Path:
             patient_id="SYNTH_PATIENT_001",
             study_uid="1.2.3.4.5.1.1",
             series_uid="1.2.3.4.5.1.1.1",
-            sop_uid=f"1.2.3.4.5.1.1.1.{i+1}",
+            sop_uid=f"1.2.3.4.5.1.1.1.{i + 1}",
             instance_number=i + 1,
             image_position=(0.0, 0.0, float(i * 2.5)),
             slice_location=float(i * 2.5),
@@ -183,7 +183,7 @@ def synthetic_multi_patient_dir(tmp_path: Path) -> Path:
             patient_id="SYNTH_PATIENT_002",
             study_uid="1.2.3.4.5.2.1",
             series_uid="1.2.3.4.5.2.1.1",
-            sop_uid=f"1.2.3.4.5.2.1.1.{i+1}",
+            sop_uid=f"1.2.3.4.5.2.1.1.{i + 1}",
             instance_number=i + 1,
             image_position=(0.0, 0.0, float(i * 3.0)),
             slice_location=float(i * 3.0),
@@ -576,9 +576,7 @@ class TestHelperFunctions:
         # Configure to raise exception when accessing attribute
         mock_dcm.configure_mock(spec=[])  # Empty spec causes AttributeError
         # Use regular getattr behavior which will fail
-        type(mock_dcm).BadAttr = property(
-            lambda self: (_ for _ in ()).throw(Exception("Error"))
-        )
+        type(mock_dcm).BadAttr = property(lambda self: (_ for _ in ()).throw(Exception("Error")))
 
         result = _get_tag_value(mock_dcm, "BadAttr", "default")
         # Should return default on exception (lines 898-899)
@@ -1028,9 +1026,7 @@ class TestDicomDatabase:
         with tempfile.TemporaryDirectory() as tmpdir:
             base_path = Path(tmpdir) / "export"
             # Include invalid level name
-            created = db.export_csv(
-                str(base_path), levels=["patients", "invalid_level"]
-            )
+            created = db.export_csv(str(base_path), levels=["patients", "invalid_level"])
 
             # Only valid levels are exported
             assert "patients" in created
@@ -1190,9 +1186,7 @@ class TestFileScanning:
     def test_scan_empty_directory(self) -> None:
         """Test scanning empty directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            files = _scan_dicom_files(
-                [Path(tmpdir)], recursive=True, show_progress=False
-            )
+            files = _scan_dicom_files([Path(tmpdir)], recursive=True, show_progress=False)
             assert files == []
 
     def test_scan_nonexistent_path(self) -> None:
@@ -1349,9 +1343,7 @@ class TestSyntheticDicom:
         patients_df_with = db.get_patients_df(include_instance_lists=True)
         assert len(patients_df_with["InstanceSOPUIDs"].iloc[0]) == 5
 
-    def test_export_csv_synthetic(
-        self, synthetic_dicom_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_export_csv_synthetic(self, synthetic_dicom_dir: Path, tmp_path: Path) -> None:
         """Test CSV export with synthetic files."""
         db = DicomDatabase.from_folders(
             [str(synthetic_dicom_dir)],
@@ -1369,9 +1361,7 @@ class TestSyntheticDicom:
         for _level, path in result.items():
             assert Path(path).exists()
 
-    def test_export_json_synthetic(
-        self, synthetic_dicom_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_export_json_synthetic(self, synthetic_dicom_dir: Path, tmp_path: Path) -> None:
         """Test JSON export with synthetic files."""
         db = DicomDatabase.from_folders(
             [str(synthetic_dicom_dir)],
@@ -1507,16 +1497,12 @@ class TestSyntheticDicom:
 
         # Scan non-recursively - should only find root files (original 5)
         # This hits recursive=False branch (line 768)
-        result = _scan_dicom_files(
-            [synthetic_dicom_dir], recursive=False, show_progress=False
-        )
+        result = _scan_dicom_files([synthetic_dicom_dir], recursive=False, show_progress=False)
         assert len(result) == 5
         assert subfile not in result
 
         # Verify recursive scan finds it (total 6)
-        result_rec = _scan_dicom_files(
-            [synthetic_dicom_dir], recursive=True, show_progress=False
-        )
+        result_rec = _scan_dicom_files([synthetic_dicom_dir], recursive=True, show_progress=False)
         assert len(result_rec) == 6
 
 
@@ -1535,9 +1521,7 @@ class TestMetadataExtraction:
             invalid_file = Path(tmpdir) / "invalid.dcm"
             invalid_file.write_text("Not a valid DICOM file")
 
-            result = _extract_single_file_metadata(
-                invalid_file, extract_private_tags=True
-            )
+            result = _extract_single_file_metadata(invalid_file, extract_private_tags=True)
             assert result is None
 
 
@@ -1656,8 +1640,7 @@ class TestEdgeCases:
 
         # Check common metadata was extracted
         assert (
-            "SliceThickness" in series.common_metadata
-            or "Manufacturer" in series.common_metadata
+            "SliceThickness" in series.common_metadata or "Manufacturer" in series.common_metadata
         )
 
     def test_check_completeness_no_instance_numbers(self) -> None:
@@ -1698,9 +1681,7 @@ class TestExceptionHandling:
                 # Make is_dicom raise an exception
                 mock_is_dicom.side_effect = Exception("Mock exception")
 
-                files = _scan_dicom_files(
-                    [Path(tmpdir)], recursive=True, show_progress=False
-                )
+                files = _scan_dicom_files([Path(tmpdir)], recursive=True, show_progress=False)
                 # Should handle exception gracefully and return empty list
                 assert files == []
 
@@ -1725,9 +1706,7 @@ class TestExceptionHandling:
 
     def test_extract_metadata_ipp_exception(self) -> None:
         """Test ImagePositionPatient extraction exception handling (lines 822-823)."""
-        with patch(
-            "pictologics.utilities.dicom_database.pydicom.dcmread"
-        ) as mock_dcmread:
+        with patch("pictologics.utilities.dicom_database.pydicom.dcmread") as mock_dcmread:
             mock_dcm = MagicMock()
             mock_dcm.PatientID = "P001"
             mock_dcm.StudyInstanceUID = "study1"
@@ -1744,18 +1723,14 @@ class TestExceptionHandling:
 
             mock_dcmread.return_value = mock_dcm
 
-            result = _extract_single_file_metadata(
-                Path("/fake.dcm"), extract_private_tags=False
-            )
+            result = _extract_single_file_metadata(Path("/fake.dcm"), extract_private_tags=False)
             assert result is not None
             # ProjectionScore should be None when IPP/IOP are None (line 842-843)
             assert result["ProjectionScore"] is None
 
     def test_extract_metadata_private_tag_exception(self) -> None:
         """Test private tag extraction exception handling (lines 875-876)."""
-        with patch(
-            "pictologics.utilities.dicom_database.pydicom.dcmread"
-        ) as mock_dcmread:
+        with patch("pictologics.utilities.dicom_database.pydicom.dcmread") as mock_dcmread:
             mock_dcm = MagicMock()
             mock_dcm.PatientID = "P001"
             mock_dcm.StudyInstanceUID = "study1"
@@ -1781,9 +1756,7 @@ class TestExceptionHandling:
 
             mock_dcmread.return_value = mock_dcm
 
-            result = _extract_single_file_metadata(
-                Path("/fake.dcm"), extract_private_tags=True
-            )
+            result = _extract_single_file_metadata(Path("/fake.dcm"), extract_private_tags=True)
             # Should handle exception gracefully
             assert result is not None
             # Private tag should not be in result (exception was caught)
@@ -1791,9 +1764,7 @@ class TestExceptionHandling:
 
     def test_extract_metadata_projection_score_exception(self) -> None:
         """Test projection score calculation exception handling (lines 840-841)."""
-        with patch(
-            "pictologics.utilities.dicom_database.pydicom.dcmread"
-        ) as mock_dcmread:
+        with patch("pictologics.utilities.dicom_database.pydicom.dcmread") as mock_dcmread:
             mock_dcm = MagicMock()
             mock_dcm.PatientID = "P001"
             mock_dcm.StudyInstanceUID = "study1"
@@ -1865,12 +1836,8 @@ class TestParallelProcessing:
                                 series_instance_uid="series2",
                                 series_number=2,
                                 instances=[
-                                    DicomInstance(
-                                        "inst2", Path("/2.dcm"), projection_score=10.0
-                                    ),
-                                    DicomInstance(
-                                        "inst1", Path("/1.dcm"), projection_score=5.0
-                                    ),
+                                    DicomInstance("inst2", Path("/2.dcm"), projection_score=10.0),
+                                    DicomInstance("inst1", Path("/1.dcm"), projection_score=5.0),
                                 ],
                             ),
                             DicomSeries(
@@ -1923,9 +1890,7 @@ class TestParallelProcessing:
 
     def test_is_dicom_file_exception(self) -> None:
         """Test _is_dicom_file handles exceptions (lines 734-735)."""
-        with patch(
-            "pictologics.utilities.dicom_database.pydicom.misc.is_dicom"
-        ) as mock:
+        with patch("pictologics.utilities.dicom_database.pydicom.misc.is_dicom") as mock:
             mock.side_effect = Exception("Read error")
             result = _is_dicom_file(Path("/fake/file.dcm"))
             assert result is None
@@ -1980,9 +1945,7 @@ class TestMultiSeriesSplitting:
         series_uids = series_df["SeriesInstanceUID"].astype(str).tolist()
         # num_instances = series_df["NumInstances"].tolist()
 
-        target_indices = [
-            i for i, uid in enumerate(series_uids) if uid.startswith(series_uid)
-        ]
+        target_indices = [i for i, uid in enumerate(series_uids) if uid.startswith(series_uid)]
         assert len(target_indices) == 2
 
         # Verify suffixes
@@ -2040,9 +2003,7 @@ class TestMultiSeriesSplitting:
         s_uids = series_df["SeriesInstanceUID"].astype(str).tolist()
         s_counts = series_df["NumInstances"].tolist()
 
-        target_indices = [
-            i for i, uid in enumerate(s_uids) if uid.startswith(series_uid)
-        ]
+        target_indices = [i for i, uid in enumerate(s_uids) if uid.startswith(series_uid)]
         assert len(target_indices) == 2
 
         counts = [s_counts[i] for i in target_indices]

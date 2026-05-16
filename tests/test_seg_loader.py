@@ -128,9 +128,7 @@ class TestIsDicomSeg:
 
             result = _is_dicom_seg("/path/to/file.dcm")
             assert result is True
-            mock_read.assert_called_once_with(
-                "/path/to/file.dcm", stop_before_pixels=True
-            )
+            mock_read.assert_called_once_with("/path/to/file.dcm", stop_before_pixels=True)
 
     def test_is_dicom_seg_false_different_sop(self) -> None:
         """Test non-SEG DICOM file returns False."""

@@ -27,16 +27,12 @@ class TestTextureFeatures(unittest.TestCase):
         texture_module._ZoneBufferPool._instance = None
 
     def test_calculate_all_matrices_basic(self):
-        matrices = texture_module.calculate_all_texture_matrices(
-            self.data, self.mask, self.n_bins
-        )
+        matrices = texture_module.calculate_all_texture_matrices(self.data, self.mask, self.n_bins)
         self.assertIn("glcm", matrices)
 
     def test_max_zones_less_than_one(self):
         mask_empty = np.zeros(self.shape, dtype=int)
-        res = texture_module.calculate_zone_features(
-            self.data, mask_empty, self.data, self.n_bins
-        )
+        res = texture_module.calculate_zone_features(self.data, mask_empty, self.data, self.n_bins)
         self.assertEqual(np.sum(res[0]), 0)
 
     def test_glszm_uint8_mask_optimization(self):
@@ -91,9 +87,7 @@ class TestTextureFeatures(unittest.TestCase):
 
     def test_ngtdm_ngldm_casting_and_threads(self):
         with patch("pictologics.features.texture.numba.config") as mock_config:
-            type(mock_config).NUMBA_NUM_THREADS = PropertyMock(
-                side_effect=AttributeError
-            )
+            type(mock_config).NUMBA_NUM_THREADS = PropertyMock(side_effect=AttributeError)
             texture_module.calculate_ngtdm_features(self.data, self.mask, self.n_bins)
             texture_module.calculate_ngldm_features(self.data, self.mask, self.n_bins)
 
@@ -127,9 +121,7 @@ class TestTextureFeatures(unittest.TestCase):
         with self.assertRaises(ValueError):
             texture_module._maybe_crop_to_bbox(np.zeros((3, 3, 3)), np.zeros((2, 2, 2)))
 
-        self.assertIsNone(
-            texture_module.compute_nonzero_bbox(np.zeros(self.shape, dtype=int))
-        )
+        self.assertIsNone(texture_module.compute_nonzero_bbox(np.zeros(self.shape, dtype=int)))
 
         data_orig, mask_orig, dist_orig = texture_module._maybe_crop_to_bbox(
             self.data, np.zeros(self.shape, dtype=int), None
@@ -141,26 +133,18 @@ class TestTextureFeatures(unittest.TestCase):
         shape_small = (2, 2, 2)
         data_small = np.ones(shape_small, dtype=int)
         mask_small = np.ones(shape_small, dtype=int)
-        texture_module.calculate_all_texture_matrices(
-            data_small, mask_small, self.n_bins
-        )
+        texture_module.calculate_all_texture_matrices(data_small, mask_small, self.n_bins)
 
     def test_zone_features_buffer_pool_resize(self):
         mask_small = np.zeros(self.shape, dtype=int)
         mask_small[2, 2, 2] = 1
-        texture_module.calculate_zone_features(
-            self.data, mask_small, self.data, self.n_bins
-        )
+        texture_module.calculate_zone_features(self.data, mask_small, self.data, self.n_bins)
 
         mask_large = np.ones(self.shape, dtype=int)
-        texture_module.calculate_zone_features(
-            self.data, mask_large, self.data, self.n_bins
-        )
+        texture_module.calculate_zone_features(self.data, mask_large, self.data, self.n_bins)
 
         # Reuse path
-        texture_module.calculate_zone_features(
-            self.data, mask_small, self.data, self.n_bins
-        )
+        texture_module.calculate_zone_features(self.data, mask_small, self.data, self.n_bins)
 
     def test_glrlm_boundary_conditions(self):
         data = np.zeros((3, 3, 5), dtype=int)
@@ -172,9 +156,7 @@ class TestTextureFeatures(unittest.TestCase):
 
     def test_empty_roi_fast_exit(self):
         mask_empty = np.zeros(self.shape, dtype=int)
-        matrices = texture_module.calculate_all_texture_matrices(
-            self.data, mask_empty, self.n_bins
-        )
+        matrices = texture_module.calculate_all_texture_matrices(self.data, mask_empty, self.n_bins)
         self.assertEqual(np.sum(matrices["glcm"]), 0)
 
     def test_individual_feature_calculators(self):
@@ -183,9 +165,7 @@ class TestTextureFeatures(unittest.TestCase):
         texture_module.calculate_gldzm_features(self.data, self.mask, self.n_bins)
 
     def test_calculate_all_features_wrapper(self):
-        f = texture_module.calculate_all_texture_features(
-            self.data, self.mask, self.n_bins
-        )
+        f = texture_module.calculate_all_texture_features(self.data, self.mask, self.n_bins)
         self.assertIn("joint_maximum_GYBY", f)
 
     def test_label_mask_values_are_membership_not_weights(self):
@@ -247,9 +227,7 @@ class TestTextureFeatures(unittest.TestCase):
 
     def test_calculate_all_uint8_mask(self):
         mask_u8 = self.mask.astype(np.uint8)
-        m = texture_module.calculate_all_texture_matrices(
-            self.data, mask_u8, self.n_bins
-        )
+        m = texture_module.calculate_all_texture_matrices(self.data, mask_u8, self.n_bins)
         self.assertIn("glcm", m)
 
     def test_calculate_all_medium_bins(self):
@@ -264,9 +242,7 @@ class TestTextureFeatures(unittest.TestCase):
             type(mock_config).NUMBA_NUM_THREADS = PropertyMock(return_value="invalid")
 
             # 1. Main wrapper (Lines 703-704 check)
-            m = texture_module.calculate_all_texture_matrices(
-                self.data, self.mask, self.n_bins
-            )
+            m = texture_module.calculate_all_texture_matrices(self.data, self.mask, self.n_bins)
             self.assertIn("glcm", m)
 
             # 2. NGTDM (Lines 1654-1655 check)
@@ -295,18 +271,14 @@ class TestTextureFeatures(unittest.TestCase):
     def test_glcm_zero_sum(self):
         # Line 859: if total_sum == 0
         glcm = np.zeros((13, 2, 2), dtype=float)
-        f = texture_module.calculate_glcm_features(
-            self.data, self.mask, n_bins=2, glcm_matrix=glcm
-        )
+        f = texture_module.calculate_glcm_features(self.data, self.mask, n_bins=2, glcm_matrix=glcm)
         self.assertEqual(f, {})
 
     def test_glrlm_fallback_coverage(self):
         # 1. Thread config fallback in GLRLM (lines 1037-1040)
         with patch("pictologics.features.texture.numba.config") as mock_config:
             type(mock_config).NUMBA_NUM_THREADS = PropertyMock(return_value="invalid")
-            f = texture_module.calculate_glrlm_features(
-                self.data, self.mask, self.n_bins
-            )
+            f = texture_module.calculate_glrlm_features(self.data, self.mask, self.n_bins)
             self.assertIn("short_runs_emphasis_22OV", f)
 
     def test_glrlm_high_bitdepth_coverage(self):
@@ -350,9 +322,7 @@ class TestTextureFeatures(unittest.TestCase):
         # Use int64 mask
         mask_int64 = self.mask.astype(int)
         self.assertNotEqual(mask_int64.dtype, np.uint8)
-        f_glszm = texture_module.calculate_glszm_features(
-            self.data, mask_int64, self.n_bins
-        )
+        f_glszm = texture_module.calculate_glszm_features(self.data, mask_int64, self.n_bins)
         self.assertIn("small_zone_emphasis_P001", f_glszm)
 
     def test_gldzm_min_dist_update(self):

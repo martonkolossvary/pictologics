@@ -99,6 +99,7 @@ def _get_package_version() -> str | None:
     except PackageNotFoundError:
         return None
 
+
 # ---------------------------------------------------------------------------
 # Feature metadata for describe_features()
 # ---------------------------------------------------------------------------
@@ -224,8 +225,7 @@ def _family_uses_morph_mask(family: str) -> bool:
 def _feature_uses_intensity_mask(feature_key: str, family: str) -> bool:
     """Whether this feature row depends on the intensity mask."""
     return (
-        family in _INTENSITY_MASK_FAMILIES
-        or feature_key in _INTENSITY_WEIGHTED_MORPHOLOGY_FEATURES
+        family in _INTENSITY_MASK_FAMILIES or feature_key in _INTENSITY_WEIGHTED_MORPHOLOGY_FEATURES
     )
 
 
@@ -358,9 +358,7 @@ class RadiomicsPipeline:
                 user-defined ones.
         """
         self._configs: dict[str, list[dict[str, Any]]] = {}
-        self._config_metadata: dict[str, dict[str, Any]] = (
-            {}
-        )  # Stores source_mode, etc.
+        self._config_metadata: dict[str, dict[str, Any]] = {}  # Stores source_mode, etc.
         self._log: list[dict[str, Any]] = []
 
         # Deduplication settings
@@ -369,9 +367,7 @@ class RadiomicsPipeline:
         if deduplication_rules is None:
             self._deduplication_rules = get_default_rules()
         elif isinstance(deduplication_rules, str):
-            self._deduplication_rules = DeduplicationRules.get_version(
-                deduplication_rules
-            )
+            self._deduplication_rules = DeduplicationRules.get_version(deduplication_rules)
         else:
             self._deduplication_rules = deduplication_rules
 
@@ -427,9 +423,7 @@ class RadiomicsPipeline:
 
         Returns names from loaded templates that start with 'standard_'.
         """
-        return sorted(
-            [name for name in self._configs.keys() if name.startswith("standard_")]
-        )
+        return sorted([name for name in self._configs.keys() if name.startswith("standard_")])
 
     # -------------------------------------------------------------------------
     # Deduplication Properties
@@ -574,9 +568,7 @@ class RadiomicsPipeline:
         # Validate source_mode
         valid_modes = {"full_image", "roi_only", "auto"}
         if source_mode not in valid_modes:
-            raise ValueError(
-                f"Invalid source_mode '{source_mode}'. Must be one of: {valid_modes}"
-            )
+            raise ValueError(f"Invalid source_mode '{source_mode}'. Must be one of: {valid_modes}")
 
         for step in steps:
             if not isinstance(step, dict):
@@ -712,9 +704,7 @@ class RadiomicsPipeline:
         if self._deduplication_enabled and len(target_configs) > 1:
             # Get configs for analysis
             configs_to_analyze = {name: self._configs[name] for name in target_configs}
-            analyzer = ConfigurationAnalyzer(
-                configs_to_analyze, self._deduplication_rules
-            )
+            analyzer = ConfigurationAnalyzer(configs_to_analyze, self._deduplication_rules)
             dedup_plan = analyzer.analyze()
             self._last_deduplication_plan = dedup_plan
             self._configs_modified_since_plan = False
@@ -758,9 +748,7 @@ class RadiomicsPipeline:
                     # If mask was auto-generated (full mask), do not use it for
                     # "outside-ness" check in detection, as everything is "inside".
                     mask_for_detection = orig_mask if not mask_was_generated else None
-                    detected = detect_sentinel_value(
-                        orig_img, roi_mask=mask_for_detection
-                    )
+                    detected = detect_sentinel_value(orig_img, roi_mask=mask_for_detection)
                     if detected is not None:
                         detected_sentinel_value = detected
                         sentinel_detected = True
@@ -884,13 +872,10 @@ class RadiomicsPipeline:
                 # that downstream formatting/concatenation always sees a
                 # complete, predictable set of columns.
                 nan_names = self._get_expected_feature_names(steps)
-                all_results[config_name] = pd.Series(
-                    {name: float("nan") for name in nan_names}
-                )
+                all_results[config_name] = pd.Series({name: float("nan") for name in nan_names})
                 config_log["result_feature_count"] = len(nan_names)
                 logging.debug(
-                    "Config '%s' produced an empty ROI: %s. "
-                    "Returning NaN for %d features.",
+                    "Config '%s' produced an empty ROI: %s. Returning NaN for %d features.",
                     config_name,
                     e,
                     len(nan_names),
@@ -960,10 +945,7 @@ class RadiomicsPipeline:
 
             # Determine source_mask for resampling (if not FULL_IMAGE mode)
             source_mask_arg = None
-            if (
-                state.source_mode != SourceMode.FULL_IMAGE
-                and state.source_mask is not None
-            ):
+            if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
                 source_mask_arg = state.source_mask
 
             # Update Image and raw_image
@@ -974,9 +956,7 @@ class RadiomicsPipeline:
                 round_intensities=round_intensities_flag,
                 source_mask=source_mask_arg,
             )
-            state.raw_image = (
-                state.image
-            )  # Keep raw_image in sync before discretisation
+            state.raw_image = state.image  # Keep raw_image in sync before discretisation
 
             # Propagate source_mask from resampled image if it was used
             if state.image.has_source_mask and state.image.source_mask is not None:
@@ -1036,9 +1016,7 @@ class RadiomicsPipeline:
             apply_to = _get_apply_to(params, "filter_outliers")
 
             if apply_to in ("intensity", "both"):
-                state.intensity_mask = filter_outliers(
-                    state.image, state.intensity_mask, sigma
-                )
+                state.intensity_mask = filter_outliers(state.image, state.intensity_mask, sigma)
             if apply_to in ("morph", "both"):
                 state.morph_mask = filter_outliers(state.image, state.morph_mask, sigma)
 
@@ -1046,9 +1024,7 @@ class RadiomicsPipeline:
 
         elif step_name == "round_intensities":
             state.image = round_intensities(state.image)
-            state.raw_image = (
-                state.image
-            )  # Keep raw_image in sync before discretisation
+            state.raw_image = state.image  # Keep raw_image in sync before discretisation
 
         elif step_name == "keep_largest_component":
             # apply_to: "morph", "intensity", or "both" (default)
@@ -1151,9 +1127,7 @@ class RadiomicsPipeline:
             boundary = boundary_map.get(boundary_str, BoundaryCondition.MIRROR)
 
             # Extract filter-specific params (exclude type and boundary)
-            filter_params = {
-                k: v for k, v in params.items() if k not in ("type", "boundary")
-            }
+            filter_params = {k: v for k, v in params.items() if k not in ("type", "boundary")}
 
             # Apply filter based on type
             filtered_array: npt.NDArray[np.floating[Any]]
@@ -1161,10 +1135,7 @@ class RadiomicsPipeline:
             if filter_type == "mean":
                 filter_params["boundary"] = boundary
                 # Pass source_mask if not in FULL_IMAGE mode
-                if (
-                    state.source_mode != SourceMode.FULL_IMAGE
-                    and state.source_mask is not None
-                ):
+                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
                     source_arr = state.source_mask.array > 0
                     result_tuple = mean_filter(
                         state.image.array, source_mask=source_arr, **filter_params
@@ -1183,10 +1154,7 @@ class RadiomicsPipeline:
                 if "spacing_mm" not in filter_params:
                     filter_params["spacing_mm"] = state.image.spacing
                 # Pass source_mask if not in FULL_IMAGE mode
-                if (
-                    state.source_mode != SourceMode.FULL_IMAGE
-                    and state.source_mask is not None
-                ):
+                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
                     source_arr = state.source_mask.array > 0
                     result_tuple_log = laplacian_of_gaussian(
                         state.image.array, source_mask=source_arr, **filter_params
@@ -1196,19 +1164,14 @@ class RadiomicsPipeline:
                     else:
                         filtered_array = result_tuple_log
                 else:
-                    filtered_array = laplacian_of_gaussian(
-                        state.image.array, **filter_params
-                    )
+                    filtered_array = laplacian_of_gaussian(state.image.array, **filter_params)
 
             elif filter_type == "laws":
                 filter_params["boundary"] = boundary
                 # 'kernel' param maps to first positional arg
                 kernel = filter_params.pop("kernel", "L5E5E5")
                 # Pass source_mask if not in FULL_IMAGE mode
-                if (
-                    state.source_mode != SourceMode.FULL_IMAGE
-                    and state.source_mask is not None
-                ):
+                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
                     source_arr = state.source_mask.array > 0
                     result_laws = laws_filter(
                         state.image.array,
@@ -1221,19 +1184,14 @@ class RadiomicsPipeline:
                     else:
                         filtered_array = result_laws
                 else:
-                    filtered_array = laws_filter(
-                        state.image.array, kernel, **filter_params
-                    )
+                    filtered_array = laws_filter(state.image.array, kernel, **filter_params)
 
             elif filter_type == "gabor":
                 filter_params["boundary"] = boundary
                 if "spacing_mm" not in filter_params:
                     filter_params["spacing_mm"] = state.image.spacing
                 # Pass source_mask if not in FULL_IMAGE mode
-                if (
-                    state.source_mode != SourceMode.FULL_IMAGE
-                    and state.source_mask is not None
-                ):
+                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
                     source_arr = state.source_mask.array > 0
                     filter_params["source_mask"] = source_arr
                 filtered_array = gabor_filter(state.image.array, **filter_params)
@@ -1241,10 +1199,7 @@ class RadiomicsPipeline:
             elif filter_type == "wavelet":
                 filter_params["boundary"] = boundary
                 # Pass source_mask if not in FULL_IMAGE mode
-                if (
-                    state.source_mode != SourceMode.FULL_IMAGE
-                    and state.source_mask is not None
-                ):
+                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
                     source_arr = state.source_mask.array > 0
                     filter_params["source_mask"] = source_arr
                 filtered_array = wavelet_transform(state.image.array, **filter_params)
@@ -1252,10 +1207,7 @@ class RadiomicsPipeline:
             elif filter_type == "simoncelli":
                 # Simoncelli doesn't use boundary param
                 # Pass source_mask if not in FULL_IMAGE mode
-                if (
-                    state.source_mode != SourceMode.FULL_IMAGE
-                    and state.source_mask is not None
-                ):
+                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
                     source_arr = state.source_mask.array > 0
                     filter_params["source_mask"] = source_arr
                 filtered_array = simoncelli_wavelet(state.image.array, **filter_params)
@@ -1264,10 +1216,7 @@ class RadiomicsPipeline:
                 # Riesz transform variants
                 variant = filter_params.pop("variant", "base")
                 # Pass source_mask if not in FULL_IMAGE mode
-                if (
-                    state.source_mode != SourceMode.FULL_IMAGE
-                    and state.source_mask is not None
-                ):
+                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
                     source_arr = state.source_mask.array > 0
                     filter_params["source_mask"] = source_arr
                 if variant == "log":
@@ -1275,9 +1224,7 @@ class RadiomicsPipeline:
                         filter_params["spacing_mm"] = state.image.spacing
                     filtered_array = riesz_log(state.image.array, **filter_params)
                 elif variant == "simoncelli":
-                    filtered_array = riesz_simoncelli(
-                        state.image.array, **filter_params
-                    )
+                    filtered_array = riesz_simoncelli(state.image.array, **filter_params)
                 else:
                     filtered_array = riesz_transform(state.image.array, **filter_params)
 
@@ -1380,9 +1327,7 @@ class RadiomicsPipeline:
                     if key not in results:
                         results[key] = nan
 
-    def _extract_features(
-        self, state: PipelineState, params: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _extract_features(self, state: PipelineState, params: dict[str, Any]) -> dict[str, Any]:
         """
         Extract features based on current state.
         """
@@ -1556,9 +1501,7 @@ class RadiomicsPipeline:
 
         elif (texture_family := _normalize_texture_family(family)) is not None:
             results.update(
-                self._compute_texture_features(
-                    state, texture_family, texture_matrix_params
-                )
+                self._compute_texture_features(state, texture_family, texture_matrix_params)
             )
 
         return results
@@ -1867,9 +1810,7 @@ class RadiomicsPipeline:
         meta["preprocessing_steps"] = RadiomicsPipeline._catalog_json(records)
 
         records_by_step: dict[str, list[dict[str, Any]]] = {
-            step_name: [
-                record for record in records if record.get("step") == step_name
-            ]
+            step_name: [record for record in records if record.get("step") == step_name]
             for step_name in _PREPROCESSING_STEPS
         }
 
@@ -1889,13 +1830,10 @@ class RadiomicsPipeline:
         resample_records = records_by_step["resample"]
         if resample_records:
             meta["is_resampled"] = True
-            spacings = [
-                record["params"].get("new_spacing") for record in resample_records
-            ]
+            spacings = [record["params"].get("new_spacing") for record in resample_records]
             meta["resampling_spacing"] = RadiomicsPipeline._catalog_value(spacings)
             interpolations = [
-                record["params"].get("interpolation", "linear")
-                for record in resample_records
+                record["params"].get("interpolation", "linear") for record in resample_records
             ]
             meta["interpolation"] = RadiomicsPipeline._catalog_value(interpolations)
 
@@ -1903,20 +1841,14 @@ class RadiomicsPipeline:
         if resegment_records:
             meta["is_resegmented"] = True
             meta["resegment_apply_to"] = RadiomicsPipeline._catalog_value(
-                [
-                    record["params"].get("apply_to", "both")
-                    for record in resegment_records
-                ]
+                [record["params"].get("apply_to", "both") for record in resegment_records]
             )
 
         filter_outlier_records = records_by_step["filter_outliers"]
         if filter_outlier_records:
             meta["is_outlier_filtered"] = True
             meta["filter_outliers_apply_to"] = RadiomicsPipeline._catalog_value(
-                [
-                    record["params"].get("apply_to", "both")
-                    for record in filter_outlier_records
-                ]
+                [record["params"].get("apply_to", "both") for record in filter_outlier_records]
             )
 
         round_records = records_by_step["round_intensities"]
@@ -1927,28 +1859,20 @@ class RadiomicsPipeline:
         if largest_component_records:
             meta["keeps_largest_component"] = True
             meta["keep_largest_component_apply_to"] = RadiomicsPipeline._catalog_value(
-                [
-                    record["params"].get("apply_to", "both")
-                    for record in largest_component_records
-                ]
+                [record["params"].get("apply_to", "both") for record in largest_component_records]
             )
 
         binarize_records = records_by_step["binarize_mask"]
         if binarize_records:
             meta["is_mask_binarized"] = True
             meta["binarize_mask_apply_to"] = RadiomicsPipeline._catalog_value(
-                [
-                    record["params"].get("apply_to", "both")
-                    for record in binarize_records
-                ]
+                [record["params"].get("apply_to", "both") for record in binarize_records]
             )
 
         discretise_records = records_by_step["discretise"]
         if discretise_records:
             meta["is_discretised"] = True
-            methods = [
-                record["params"].get("method", "FBN") for record in discretise_records
-            ]
+            methods = [record["params"].get("method", "FBN") for record in discretise_records]
             meta["discretisation_method"] = RadiomicsPipeline._catalog_value(methods)
             disc_params: list[Any] = []
             for method, record in zip(methods, discretise_records, strict=True):
@@ -2104,9 +2028,7 @@ class RadiomicsPipeline:
                 if step_name == "extract_features":
                     feature_keys = self._get_expected_feature_names([step_def])
                     config_meta = self._extract_config_metadata(active_preprocessing)
-                    extraction_params = (
-                        self._catalog_json(params) if params else None
-                    )
+                    extraction_params = self._catalog_json(params) if params else None
 
                     for fkey in feature_keys:
                         fname, code = self._parse_feature_key(fkey)
@@ -2119,13 +2041,9 @@ class RadiomicsPipeline:
                             "ibsi_code": code,
                             "family": family,
                             "family_group": _FAMILY_GROUP.get(family, "Unknown"),
-                            "requires_discretisation": _REQUIRES_DISCRETISATION.get(
-                                family, False
-                            ),
+                            "requires_discretisation": _REQUIRES_DISCRETISATION.get(family, False),
                             "uses_morph_mask": _family_uses_morph_mask(family),
-                            "uses_intensity_mask": _feature_uses_intensity_mask(
-                                fkey, family
-                            ),
+                            "uses_intensity_mask": _feature_uses_intensity_mask(fkey, family),
                             "source_mode": source_mode,
                             "sentinel_value": sentinel_value,
                             "feature_extraction_step_index": step_index,
@@ -2189,11 +2107,7 @@ class RadiomicsPipeline:
             "filter_type",
             "filter_params",
         ]
-        return (
-            pd.DataFrame(rows, columns=columns)
-            if rows
-            else pd.DataFrame(columns=columns)
-        )
+        return pd.DataFrame(rows, columns=columns) if rows else pd.DataFrame(columns=columns)
 
     def to_dict(
         self,
@@ -2216,9 +2130,7 @@ class RadiomicsPipeline:
             configs_to_export = self._configs
         else:
             configs_to_export = {
-                name: self._configs[name]
-                for name in config_names
-                if name in self._configs
+                name: self._configs[name] for name in config_names if name in self._configs
             }
 
         # Convert tuples to lists for serialization
@@ -2251,9 +2163,7 @@ class RadiomicsPipeline:
             }
             # Include last plan if available and not stale
             if self._last_deduplication_plan and not self._configs_modified_since_plan:
-                result["deduplication"][
-                    "last_plan"
-                ] = self._last_deduplication_plan.to_dict()
+                result["deduplication"]["last_plan"] = self._last_deduplication_plan.to_dict()
 
         return result
 
@@ -2333,9 +2243,7 @@ class RadiomicsPipeline:
         elif suffix in (".yaml", ".yml"):
             content = self.to_yaml(config_names=config_names)
         else:
-            raise ValueError(
-                f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml"
-            )
+            raise ValueError(f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml")
 
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -2517,17 +2425,11 @@ class RadiomicsPipeline:
         content = path.read_text(encoding="utf-8")
 
         if suffix == ".json":
-            return cls.from_json(
-                content, validate=validate, load_standard=load_standard
-            )
+            return cls.from_json(content, validate=validate, load_standard=load_standard)
         elif suffix in (".yaml", ".yml"):
-            return cls.from_yaml(
-                content, validate=validate, load_standard=load_standard
-            )
+            return cls.from_yaml(content, validate=validate, load_standard=load_standard)
         else:
-            raise ValueError(
-                f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml"
-            )
+            raise ValueError(f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml")
 
     def merge_configs(
         self,

@@ -89,9 +89,7 @@ class DicomSeries:
         """
         if all(inst.projection_score is not None for inst in self.instances):
             return sorted(self.instances, key=lambda x: x.projection_score or 0)
-        return sorted(
-            self.instances, key=lambda x: x.instance_number if x.instance_number else 0
-        )
+        return sorted(self.instances, key=lambda x: x.instance_number if x.instance_number else 0)
 
     def check_completeness(self, spacing_tolerance: float = 0.1) -> dict[str, Any]:
         """Check if the series has all expected slices.
@@ -131,15 +129,11 @@ class DicomSeries:
 
         # Check if we have projection scores for geometric validation
         projection_scores = [
-            inst.projection_score
-            for inst in sorted_instances
-            if inst.projection_score is not None
+            inst.projection_score for inst in sorted_instances if inst.projection_score is not None
         ]
 
         if len(projection_scores) < 2:
-            result["warnings"].append(
-                "Insufficient spatial data for geometric completeness check"
-            )
+            result["warnings"].append("Insufficient spatial data for geometric completeness check")
             # Fall back to instance number validation
             instance_numbers = [
                 inst.instance_number
@@ -382,9 +376,7 @@ class DicomDatabase:
                 "NumStudies": len(patient.studies),
                 "NumSeries": sum(len(study.series) for study in patient.studies),
                 "NumInstances": sum(
-                    len(series.instances)
-                    for study in patient.studies
-                    for series in study.series
+                    len(series.instances) for study in patient.studies for series in study.series
                 ),
             }
             if include_instance_lists:
@@ -392,9 +384,7 @@ class DicomDatabase:
                 row["InstanceFilePaths"] = patient.get_file_paths()
 
             # Add study date range
-            study_dates = [
-                study.study_date for study in patient.studies if study.study_date
-            ]
+            study_dates = [study.study_date for study in patient.studies if study.study_date]
             if study_dates:
                 row["EarliestStudyDate"] = min(study_dates)
                 row["LatestStudyDate"] = max(study_dates)
@@ -444,9 +434,7 @@ class DicomDatabase:
                     "StudyTime": study.study_time,
                     "StudyDescription": study.study_description,
                     "NumSeries": len(study.series),
-                    "NumInstances": sum(
-                        len(series.instances) for series in study.series
-                    ),
+                    "NumInstances": sum(len(series.instances) for series in study.series),
                 }
                 if include_instance_lists:
                     row["InstanceSOPUIDs"] = study.get_instance_uids()
@@ -588,24 +576,16 @@ class DicomDatabase:
 
                         # Image position
                         if instance.image_position_patient:
-                            row["ImagePositionPatient_X"] = (
-                                instance.image_position_patient[0]
-                            )
-                            row["ImagePositionPatient_Y"] = (
-                                instance.image_position_patient[1]
-                            )
-                            row["ImagePositionPatient_Z"] = (
-                                instance.image_position_patient[2]
-                            )
+                            row["ImagePositionPatient_X"] = instance.image_position_patient[0]
+                            row["ImagePositionPatient_Y"] = instance.image_position_patient[1]
+                            row["ImagePositionPatient_Z"] = instance.image_position_patient[2]
                         else:
                             row["ImagePositionPatient_X"] = None
                             row["ImagePositionPatient_Y"] = None
                             row["ImagePositionPatient_Z"] = None
 
                         # Image orientation
-                        row["ImageOrientationPatient"] = (
-                            instance.image_orientation_patient
-                        )
+                        row["ImageOrientationPatient"] = instance.image_orientation_patient
 
                         # Add parent-level metadata
                         row["PatientsName"] = patient.patients_name
@@ -678,9 +658,7 @@ class DicomDatabase:
             # Convert list columns to JSON strings for CSV compatibility
             for col in df.columns:
                 if df[col].apply(lambda x: isinstance(x, list)).any():
-                    df[col] = df[col].apply(
-                        lambda x: json.dumps(x) if isinstance(x, list) else x
-                    )
+                    df[col] = df[col].apply(lambda x: json.dumps(x) if isinstance(x, list) else x)
             df.to_csv(file_path, index=False)
             created_files[level] = file_path
 
@@ -968,9 +946,7 @@ def _extract_all_metadata(
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             results = list(
                 tqdm(
-                    executor.map(
-                        _extract_metadata_wrapper, args_list, chunksize=chunksize
-                    ),
+                    executor.map(_extract_metadata_wrapper, args_list, chunksize=chunksize),
                     total=len(dicom_files),
                     desc="Extracting metadata",
                     disable=not show_progress,
@@ -1011,16 +987,8 @@ def _sort_hierarchy(patients: list[DicomPatient]) -> list[DicomPatient]:
                 # Sort instances by projection score, fallback to instance number
                 series.instances.sort(
                     key=lambda x: (
-                        (
-                            x.projection_score
-                            if x.projection_score is not None
-                            else float("inf")
-                        ),
-                        (
-                            x.instance_number
-                            if x.instance_number is not None
-                            else float("inf")
-                        ),
+                        (x.projection_score if x.projection_score is not None else float("inf")),
+                        (x.instance_number if x.instance_number is not None else float("inf")),
                         x.sop_instance_uid,
                     )
                 )
@@ -1086,9 +1054,7 @@ def _extract_single_file_metadata(
         "AcquisitionDate": _get_tag_value(dcm, "AcquisitionDate"),
         "AcquisitionTime": _get_tag_value(dcm, "AcquisitionTime"),
         # Multi-phase splitting tags
-        "NominalPercentageOfCardiacPhase": _get_tag_value(
-            dcm, "NominalPercentageOfCardiacPhase"
-        ),
+        "NominalPercentageOfCardiacPhase": _get_tag_value(dcm, "NominalPercentageOfCardiacPhase"),
         "TemporalPositionIdentifier": _get_tag_value(dcm, "TemporalPositionIdentifier"),
         "TriggerTime": _get_tag_value(dcm, "TriggerTime"),
         "AcquisitionNumber": _get_tag_value(dcm, "AcquisitionNumber"),
@@ -1268,9 +1234,7 @@ def _build_hierarchy(
                         file_path=inst_meta["file_path"],
                         instance_number=inst_meta.get("InstanceNumber"),
                         image_position_patient=inst_meta.get("ImagePositionPatient"),
-                        image_orientation_patient=inst_meta.get(
-                            "ImageOrientationPatient"
-                        ),
+                        image_orientation_patient=inst_meta.get("ImageOrientationPatient"),
                         slice_location=inst_meta.get("SliceLocation"),
                         acquisition_datetime=_combine_datetime(
                             inst_meta.get("AcquisitionDate"),
@@ -1433,9 +1397,7 @@ def _values_equal(a: Any, b: Any) -> bool:
         return False
 
 
-def _combine_datetime(
-    date_str: Optional[str], time_str: Optional[str]
-) -> Optional[str]:
+def _combine_datetime(date_str: Optional[str], time_str: Optional[str]) -> Optional[str]:
     """Combine DICOM date and time strings into ISO format."""
     if not date_str:
         return None

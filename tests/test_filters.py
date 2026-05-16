@@ -77,9 +77,7 @@ class TestFilterResult:
 
     def test_filter_result_creation(self):
         arr = np.ones((5, 5, 5), dtype=np.float32)
-        result = FilterResult(
-            response_map=arr, filter_name="test", filter_params={"size": 3}
-        )
+        result = FilterResult(response_map=arr, filter_name="test", filter_params={"size": 3})
         assert result.filter_name == "test"
         assert result.filter_params == {"size": 3}
 
@@ -183,15 +181,11 @@ class TestLaplacianOfGaussian:
         assert result.shape == small_3d_image.shape
 
     def test_with_tuple_spacing(self, small_3d_image):
-        result = laplacian_of_gaussian(
-            small_3d_image, sigma_mm=2.0, spacing_mm=(1.0, 1.0, 1.0)
-        )
+        result = laplacian_of_gaussian(small_3d_image, sigma_mm=2.0, spacing_mm=(1.0, 1.0, 1.0))
         assert result.shape == small_3d_image.shape
 
     def test_different_truncation(self, small_3d_image):
-        result = laplacian_of_gaussian(
-            small_3d_image, sigma_mm=2.0, spacing_mm=1.0, truncate=3.0
-        )
+        result = laplacian_of_gaussian(small_3d_image, sigma_mm=2.0, spacing_mm=1.0, truncate=3.0)
         assert result.shape == small_3d_image.shape
 
     def test_all_boundary_conditions(self, small_3d_image):
@@ -249,15 +243,11 @@ class TestLawsFilter:
 
     def test_all_pooling_methods(self, small_3d_image):
         for pooling in ["max", "average", "min"]:
-            result = laws_filter(
-                small_3d_image, "E5L5S5", rotation_invariant=True, pooling=pooling
-            )
+            result = laws_filter(small_3d_image, "E5L5S5", rotation_invariant=True, pooling=pooling)
             assert result.shape == small_3d_image.shape
 
     def test_compute_energy(self, small_3d_image):
-        result = laws_filter(
-            small_3d_image, "E5L5S5", compute_energy=True, energy_distance=3
-        )
+        result = laws_filter(small_3d_image, "E5L5S5", compute_energy=True, energy_distance=3)
         assert result.shape == small_3d_image.shape
         assert np.all(result >= 0)  # Energy is non-negative
 
@@ -280,9 +270,7 @@ class TestLawsFilter:
 
     def test_invalid_pooling(self, small_3d_image):
         with pytest.raises(ValueError, match="Unknown pooling"):
-            laws_filter(
-                small_3d_image, "L5L5L5", rotation_invariant=True, pooling="invalid"
-            )
+            laws_filter(small_3d_image, "L5L5L5", rotation_invariant=True, pooling="invalid")
 
 
 # =============================================================================
@@ -366,9 +354,7 @@ class TestGaborFilter:
         assert result.shape == small_3d_image.shape
 
     def test_integer_spacing(self, small_3d_image):
-        result = gabor_filter(
-            small_3d_image, sigma_mm=5.0, lambda_mm=2.0, gamma=0.5, spacing_mm=2
-        )
+        result = gabor_filter(small_3d_image, sigma_mm=5.0, lambda_mm=2.0, gamma=0.5, spacing_mm=2)
         assert result.shape == small_3d_image.shape
 
     def test_invalid_pooling(self, small_3d_image):
@@ -409,15 +395,11 @@ class TestWaveletTransform:
     def test_different_decompositions(self, small_3d_image):
         decomps = ["LLL", "HHL", "LHH"]
         for decomp in decomps:
-            result = wavelet_transform(
-                small_3d_image, wavelet="db2", level=1, decomposition=decomp
-            )
+            result = wavelet_transform(small_3d_image, wavelet="db2", level=1, decomposition=decomp)
             assert result.shape == small_3d_image.shape
 
     def test_rotation_invariant(self, small_3d_image):
-        result = wavelet_transform(
-            small_3d_image, wavelet="db2", level=1, rotation_invariant=True
-        )
+        result = wavelet_transform(small_3d_image, wavelet="db2", level=1, rotation_invariant=True)
         assert result.shape == small_3d_image.shape
 
     def test_all_pooling_methods(self, small_3d_image):
@@ -433,15 +415,11 @@ class TestWaveletTransform:
 
     def test_all_boundary_conditions(self, small_3d_image):
         for boundary in BoundaryCondition:
-            result = wavelet_transform(
-                small_3d_image, wavelet="db2", level=1, boundary=boundary
-            )
+            result = wavelet_transform(small_3d_image, wavelet="db2", level=1, boundary=boundary)
             assert result.shape == small_3d_image.shape
 
     def test_string_boundary_condition(self, small_3d_image):
-        result = wavelet_transform(
-            small_3d_image, wavelet="db2", level=1, boundary="mirror"
-        )
+        result = wavelet_transform(small_3d_image, wavelet="db2", level=1, boundary="mirror")
         assert result.shape == small_3d_image.shape
 
     def test_invalid_pooling(self, small_3d_image):
@@ -505,9 +483,7 @@ class TestRieszLog:
         assert result.shape == small_3d_image.shape
 
     def test_with_spacing(self, small_3d_image):
-        result = riesz_log(
-            small_3d_image, sigma_mm=2.0, order=(1, 0, 0), spacing_mm=2.0
-        )
+        result = riesz_log(small_3d_image, sigma_mm=2.0, order=(1, 0, 0), spacing_mm=2.0)
         assert result.shape == small_3d_image.shape
 
     def test_different_orders(self, small_3d_image):

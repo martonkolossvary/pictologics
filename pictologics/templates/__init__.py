@@ -29,11 +29,7 @@ def list_template_files() -> list[str]:
         List of template file names (without path).
     """
     templates_dir = _get_templates_path()
-    return [
-        f.name
-        for f in templates_dir.iterdir()
-        if f.is_file() and f.name.endswith(".yaml")
-    ]
+    return [f.name for f in templates_dir.iterdir() if f.is_file() and f.name.endswith(".yaml")]
 
 
 def load_template_file(filename: str) -> dict[str, Any]:

@@ -28,7 +28,6 @@ from pictologics.loader import (
 
 
 class TestLoader(unittest.TestCase):
-
     # --- _ensure_3d Tests ---
     def test_ensure_3d_2d(self) -> None:
         arr = np.zeros((10, 10))
@@ -150,9 +149,7 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(best, subdir2)
 
     @patch("pictologics.loader.pydicom.misc.is_dicom")
-    def test_find_best_dicom_series_dir_with_oserror(
-        self, mock_is_dicom: MagicMock
-    ) -> None:
+    def test_find_best_dicom_series_dir_with_oserror(self, mock_is_dicom: MagicMock) -> None:
         mock_root = MagicMock()
         mock_root.exists.return_value = True
 
@@ -175,9 +172,7 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(best, subdir_ok)
 
     @patch("pictologics.loader.pydicom.misc.is_dicom")
-    def test_find_best_dicom_series_dir_none_found(
-        self, mock_is_dicom: MagicMock
-    ) -> None:
+    def test_find_best_dicom_series_dir_none_found(self, mock_is_dicom: MagicMock) -> None:
         mock_root = MagicMock()
         mock_root.exists.return_value = True
         mock_root.rglob.return_value = []
@@ -216,9 +211,7 @@ class TestLoader(unittest.TestCase):
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader._load_nifti")
-    def test_load_image_nifti(
-        self, mock_load_nifti: MagicMock, mock_Path_cls: MagicMock
-    ) -> None:
+    def test_load_image_nifti(self, mock_load_nifti: MagicMock, mock_Path_cls: MagicMock) -> None:
         mock_path_obj = mock_Path_cls.return_value
         mock_path_obj.exists.return_value = True
         mock_path_obj.is_dir.return_value = False
@@ -322,9 +315,7 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(img.modality, "Nifti")
 
     @patch("pictologics.loader.nib.load")
-    def test_load_nifti_normalizes_affine_direction(
-        self, mock_nib_load: MagicMock
-    ) -> None:
+    def test_load_nifti_normalizes_affine_direction(self, mock_nib_load: MagicMock) -> None:
         mock_img = MagicMock()
         mock_img.get_fdata.return_value = np.zeros((10, 10, 5))
         mock_img.header.get_zooms.return_value = (2.0, 3.0, 4.0)
@@ -588,9 +579,7 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(img.origin, (10.0, 10.0, 10.0))
 
     @patch("pictologics.loader.pydicom.dcmread")
-    def test_load_dicom_file_applies_top_level_rescale(
-        self, mock_dcmread: MagicMock
-    ) -> None:
+    def test_load_dicom_file_applies_top_level_rescale(self, mock_dcmread: MagicMock) -> None:
         mock_dcm = MagicMock()
         mock_dcm.pixel_array = np.array([[10, 20]], dtype=np.int16)
         mock_dcm.PixelSpacing = [1.0, 1.0]
@@ -886,9 +875,7 @@ class TestLoader(unittest.TestCase):
         np.testing.assert_array_equal(merged.array, expected)
 
     @patch("pictologics.loader.load_image")
-    def test_load_and_merge_conflict_resolution(
-        self, mock_load_image: MagicMock
-    ) -> None:
+    def test_load_and_merge_conflict_resolution(self, mock_load_image: MagicMock) -> None:
         mask1 = MagicMock()
         mask1.array = np.array([[[10]]])
         mask1.spacing = (1.0, 1.0, 1.0)
@@ -922,9 +909,7 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(merged.array[0, 0, 0], 20)
 
     @patch("pictologics.loader.load_image")
-    def test_load_and_merge_geometry_mismatch_spacing(
-        self, mock_load: MagicMock
-    ) -> None:
+    def test_load_and_merge_geometry_mismatch_spacing(self, mock_load: MagicMock) -> None:
         mask1 = MagicMock()
         mask1.array = np.zeros((10,))
         mask1.spacing = (1, 1, 1)
@@ -940,9 +925,7 @@ class TestLoader(unittest.TestCase):
             load_and_merge_images(["p1", "p2"])
 
     @patch("pictologics.loader.load_image")
-    def test_load_and_merge_geometry_mismatch_origin(
-        self, mock_load: MagicMock
-    ) -> None:
+    def test_load_and_merge_geometry_mismatch_origin(self, mock_load: MagicMock) -> None:
         mask1 = MagicMock()
         mask1.array = np.zeros((10,))
         mask1.spacing = (1, 1, 1)
@@ -958,9 +941,7 @@ class TestLoader(unittest.TestCase):
             load_and_merge_images(["p1", "p2"])
 
     @patch("pictologics.loader.load_image")
-    def test_load_and_merge_geometry_mismatch_direction(
-        self, mock_load: MagicMock
-    ) -> None:
+    def test_load_and_merge_geometry_mismatch_direction(self, mock_load: MagicMock) -> None:
         mask1 = MagicMock()
         mask1.array = np.zeros((10,))
         mask1.spacing = (1, 1, 1)
@@ -978,9 +959,7 @@ class TestLoader(unittest.TestCase):
             load_and_merge_images(["p1", "p2"])
 
     @patch("pictologics.loader.load_image")
-    def test_load_and_merge_validation_against_reference(
-        self, mock_load: MagicMock
-    ) -> None:
+    def test_load_and_merge_validation_against_reference(self, mock_load: MagicMock) -> None:
         mask1 = MagicMock()
         mask1.array = np.zeros((10, 10, 10))
         mask1.spacing = (1, 1, 1)
@@ -1743,9 +1722,7 @@ class TestRepositioning(unittest.TestCase):
     def test_load_and_merge_reposition_no_reference_error(self) -> None:
         """Test error when reposition_to_reference=True but no reference provided."""
         with self.assertRaisesRegex(ValueError, "reference_image must be provided"):
-            load_and_merge_images(
-                ["p1"], reposition_to_reference=True, reference_image=None
-            )
+            load_and_merge_images(["p1"], reposition_to_reference=True, reference_image=None)
 
     @patch("pictologics.loader.pydicom.dcmread")
     def test_load_dicom_file_spacing_between_slices_preferred(
@@ -1789,9 +1766,7 @@ class TestRepositioning(unittest.TestCase):
         self.assertEqual(img.array.shape, (20, 10, 5))
 
     @patch("pictologics.loader.pydicom.dcmread")
-    def test_load_dicom_file_multiframe_rescales_each_frame(
-        self, mock_dcmread: MagicMock
-    ) -> None:
+    def test_load_dicom_file_multiframe_rescales_each_frame(self, mock_dcmread: MagicMock) -> None:
         """Enhanced multiframe DICOM can store per-frame rescale parameters."""
         from pictologics.loader import _load_dicom_file
 
@@ -1876,9 +1851,7 @@ class TestRepositioning(unittest.TestCase):
         self.assertEqual(img.spacing[2], 1.0)
 
     @patch("pictologics.loader.pydicom.dcmread")
-    def test_load_dicom_file_direction_extraction(
-        self, mock_dcmread: MagicMock
-    ) -> None:
+    def test_load_dicom_file_direction_extraction(self, mock_dcmread: MagicMock) -> None:
         """Test direction matrix extraction from ImageOrientationPatient."""
         from pictologics.loader import _load_dicom_file
 
@@ -1900,9 +1873,7 @@ class TestRepositioning(unittest.TestCase):
         np.testing.assert_array_almost_equal(img.direction[:, 1], [0.0, 1.0, 0.0])
 
     @patch("pictologics.loader.load_image")
-    def test_load_and_merge_relabel_masks_reposition(
-        self, mock_load_image: MagicMock
-    ) -> None:
+    def test_load_and_merge_relabel_masks_reposition(self, mock_load_image: MagicMock) -> None:
         """Test relabel_masks with reposition_to_reference."""
         # Reference image
         reference = Image(
@@ -2090,9 +2061,7 @@ class TestRepositioning(unittest.TestCase):
         self.assertEqual(merged.array[0, 0, 0], 9.0)
 
     @patch("pictologics.loader.load_image")
-    def test_load_and_merge_relabel_masks_standard_mode(
-        self, mock_load_image: MagicMock
-    ) -> None:
+    def test_load_and_merge_relabel_masks_standard_mode(self, mock_load_image: MagicMock) -> None:
         """Test relabel_masks in standard mode (no repositioning)."""
         # Two masks with identical geometry
         mask1 = Image(
@@ -2120,9 +2089,7 @@ class TestRepositioning(unittest.TestCase):
         self.assertEqual(merged.array[0, 1, 1], 2)
 
     @patch("pictologics.loader.load_image")
-    def test_load_and_merge_load_error_reposition(
-        self, mock_load_image: MagicMock
-    ) -> None:
+    def test_load_and_merge_load_error_reposition(self, mock_load_image: MagicMock) -> None:
         """Test error handling when load_image fails in reposition mode."""
         reference = Image(
             array=np.zeros((10, 10, 10)),

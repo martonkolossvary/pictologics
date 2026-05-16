@@ -80,16 +80,12 @@ def _validate_geometry(
             f"Dimension mismatch between {target_name} {target.array.shape} "
             f"and {reference_name} {reference.array.shape}."
         )
-    if check_spacing and not np.allclose(
-        target.spacing, reference.spacing, atol=atol, rtol=rtol
-    ):
+    if check_spacing and not np.allclose(target.spacing, reference.spacing, atol=atol, rtol=rtol):
         raise ValueError(
             f"Spacing mismatch between {target_name} {target.spacing} "
             f"and {reference_name} {reference.spacing}."
         )
-    if check_origin and not np.allclose(
-        target.origin, reference.origin, atol=atol, rtol=rtol
-    ):
+    if check_origin and not np.allclose(target.origin, reference.origin, atol=atol, rtol=rtol):
         raise ValueError(
             f"Origin mismatch between {target_name} {target.origin} "
             f"and {reference_name} {reference.origin}."
@@ -164,9 +160,7 @@ def _apply_dicom_rescale(
             return data.astype(np.float64) * slope + intercept
         return data
 
-    frame_params = [
-        _get_dicom_frame_rescale(ds, frame_idx) for frame_idx in range(data.shape[0])
-    ]
+    frame_params = [_get_dicom_frame_rescale(ds, frame_idx) for frame_idx in range(data.shape[0])]
     if all(slope == 1.0 and intercept == 0.0 for slope, intercept in frame_params):
         return data
 
@@ -266,9 +260,7 @@ class Image:
             array=self.array.copy(),
             spacing=self.spacing,
             origin=self.origin,
-            direction=(
-                self.direction if self.direction is None else self.direction.copy()
-            ),
+            direction=(self.direction if self.direction is None else self.direction.copy()),
             modality=self.modality,
             source_mask=mask_arr.astype(bool),
         )
@@ -355,13 +347,9 @@ def _position_in_reference(
 
     # 0. Validate parameters
     if not 0.0 <= min_overlap_fraction <= 1.0:
-        raise ValueError(
-            f"min_overlap_fraction must be in [0.0, 1.0], got {min_overlap_fraction}."
-        )
+        raise ValueError(f"min_overlap_fraction must be in [0.0, 1.0], got {min_overlap_fraction}.")
     if subvoxel_tolerance < 0.0:
-        raise ValueError(
-            f"subvoxel_tolerance must be >= 0.0, got {subvoxel_tolerance}."
-        )
+        raise ValueError(f"subvoxel_tolerance must be >= 0.0, got {subvoxel_tolerance}.")
     if subvoxel_warning_threshold < 0.0:
         raise ValueError(
             f"subvoxel_warning_threshold must be >= 0.0, got {subvoxel_warning_threshold}."
@@ -447,10 +435,7 @@ def _position_in_reference(
     # Source (cropped image) ranges
     src_start = np.array([max(0, -voxel_offset[i]) for i in range(3)])
     src_end = np.array(
-        [
-            min(data.shape[i], reference.array.shape[i] - voxel_offset[i])
-            for i in range(3)
-        ]
+        [min(data.shape[i], reference.array.shape[i] - voxel_offset[i]) for i in range(3)]
     )
 
     # Destination (reference) ranges
@@ -524,9 +509,7 @@ def _find_best_dicom_series_dir(root: Path) -> Path:
     for d in candidates:
         try:
             # Count DICOMs using pydicom's robust check
-            count = sum(
-                1 for f in d.iterdir() if f.is_file() and pydicom.misc.is_dicom(f)
-            )
+            count = sum(1 for f in d.iterdir() if f.is_file() and pydicom.misc.is_dicom(f))
             if count > 0:
                 found_any = True
 
@@ -758,9 +741,7 @@ def load_image(
                 min_overlap_fraction,
             )
         else:
-            _validate_geometry(
-                loaded_image, reference_image, "loaded image", "reference image"
-            )
+            _validate_geometry(loaded_image, reference_image, "loaded image", "reference image")
 
     return loaded_image
 
@@ -896,18 +877,14 @@ def load_and_merge_images(
         )
 
     if reposition_to_reference and reference_image is None:
-        raise ValueError(
-            "reference_image must be provided when reposition_to_reference=True."
-        )
+        raise ValueError("reference_image must be provided when reposition_to_reference=True.")
 
     if reposition_to_reference:
         # Mode: Reposition each image to reference space, then merge
         assert reference_image is not None  # Already validated above
 
         # Initialize merged array with reference geometry
-        merged_array = np.full(
-            reference_image.array.shape, fill_value, dtype=np.float64
-        )
+        merged_array = np.full(reference_image.array.shape, fill_value, dtype=np.float64)
 
         for i, path in enumerate(image_paths):
             try:
@@ -944,9 +921,7 @@ def load_and_merge_images(
             # Apply relabeling: replace all non-zero values with mask index + 1
             if relabel_masks:
                 label_value = i + 1  # 1-indexed labels
-                current_array = np.where(
-                    current_array != fill_value, label_value, fill_value
-                )
+                current_array = np.where(current_array != fill_value, label_value, fill_value)
 
             # Merge with conflict resolution
             if i == 0:
@@ -956,13 +931,9 @@ def load_and_merge_images(
             else:
                 # Subsequent images: apply conflict resolution
                 # Overlap: non-fill in both
-                overlap_mask = (merged_array != fill_value) & (
-                    current_array != fill_value
-                )
+                overlap_mask = (merged_array != fill_value) & (current_array != fill_value)
                 # New data: fill in merged, non-fill in current
-                new_data_mask = (merged_array == fill_value) & (
-                    current_array != fill_value
-                )
+                new_data_mask = (merged_array == fill_value) & (current_array != fill_value)
 
                 # Apply new data
                 merged_array[new_data_mask] = current_array[new_data_mask]
@@ -998,9 +969,7 @@ def load_and_merge_images(
                 apply_rescale=apply_rescale,
             )
         except Exception as e:
-            raise ValueError(
-                f"Failed to load first image '{image_paths[0]}': {e}"
-            ) from e
+            raise ValueError(f"Failed to load first image '{image_paths[0]}': {e}") from e
 
         merged_array = consensus_image.array.astype(np.float64)
 
@@ -1020,9 +989,7 @@ def load_and_merge_images(
             except Exception as e:
                 raise ValueError(f"Failed to load image '{path}': {e}") from e
 
-            _validate_geometry(
-                current_image, consensus_image, f"image '{path}'", "consensus image"
-            )
+            _validate_geometry(current_image, consensus_image, f"image '{path}'", "consensus image")
 
             current_array = current_image.array
 
@@ -1074,9 +1041,7 @@ def load_and_merge_images(
 
     # Apply binarization if requested
     if binarize is not None:
-        mask_out: npt.NDArray[np.floating[Any]] = np.zeros_like(
-            merged_array, dtype=np.uint8
-        )
+        mask_out: npt.NDArray[np.floating[Any]] = np.zeros_like(merged_array, dtype=np.uint8)
         if isinstance(binarize, bool) and binarize is True:
             mask_out[merged_array > 0] = 1
         elif isinstance(binarize, int) and not isinstance(binarize, bool):
@@ -1138,9 +1103,7 @@ def _ensure_3d(
             )
         return array[..., dataset_index]
     else:
-        raise ValueError(
-            f"Unsupported array dimensionality: {ndim}. Expected 2, 3, or 4."
-        )
+        raise ValueError(f"Unsupported array dimensionality: {ndim}. Expected 2, 3, or 4.")
 
 
 def _load_nifti(path: str, dataset_index: int = 0) -> Image:
@@ -1313,9 +1276,7 @@ def _load_dicom_series(
     # Sort slices by projection of position onto the normal vector
     try:
         slices.sort(
-            key=lambda s: np.dot(
-                np.array(s.ImagePositionPatient, dtype=float), slice_normal
-            )
+            key=lambda s: np.dot(np.array(s.ImagePositionPatient, dtype=float), slice_normal)
         )
     except AttributeError:
         # Fallback to InstanceNumber if ImagePositionPatient is missing

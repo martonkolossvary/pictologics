@@ -146,8 +146,7 @@ def load_seg(
         for seg_num in segment_numbers:
             if seg_num not in available_segments:
                 raise ValueError(
-                    f"Segment {seg_num} not found. "
-                    f"Available segments: {available_segments}"
+                    f"Segment {seg_num} not found. Available segments: {available_segments}"
                 )
         target_segments = segment_numbers
 
@@ -162,9 +161,7 @@ def load_seg(
 
     if combine_segments:
         # Create combined label image
-        combined_array = _extract_combined_segments(
-            seg, pixel_array, target_segments, n_frames
-        )
+        combined_array = _extract_combined_segments(seg, pixel_array, target_segments, n_frames)
 
         # Reorder axes from (Z, Y, X) or (frames, rows, cols) to (X, Y, Z)
         combined_array = np.transpose(combined_array, (2, 1, 0))
@@ -250,17 +247,11 @@ def _extract_seg_geometry(
     direction = None
 
     # Try to get from SharedFunctionalGroupsSequence
-    if (
-        hasattr(seg, "SharedFunctionalGroupsSequence")
-        and seg.SharedFunctionalGroupsSequence
-    ):
+    if hasattr(seg, "SharedFunctionalGroupsSequence") and seg.SharedFunctionalGroupsSequence:
         shared_fg = seg.SharedFunctionalGroupsSequence[0]
 
         # Get pixel spacing from PixelMeasuresSequence
-        if (
-            hasattr(shared_fg, "PixelMeasuresSequence")
-            and shared_fg.PixelMeasuresSequence
-        ):
+        if hasattr(shared_fg, "PixelMeasuresSequence") and shared_fg.PixelMeasuresSequence:
             pm = shared_fg.PixelMeasuresSequence[0]
             if hasattr(pm, "PixelSpacing") and pm.PixelSpacing:
                 row_spacing = float(pm.PixelSpacing[0])
@@ -270,10 +261,7 @@ def _extract_seg_geometry(
                 spacing = (col_spacing, row_spacing, slice_thickness)
 
         # Get orientation from PlaneOrientationSequence
-        if (
-            hasattr(shared_fg, "PlaneOrientationSequence")
-            and shared_fg.PlaneOrientationSequence
-        ):
+        if hasattr(shared_fg, "PlaneOrientationSequence") and shared_fg.PlaneOrientationSequence:
             po = shared_fg.PlaneOrientationSequence[0]
             if hasattr(po, "ImageOrientationPatient") and po.ImageOrientationPatient:
                 iop = [float(x) for x in po.ImageOrientationPatient]
@@ -283,31 +271,19 @@ def _extract_seg_geometry(
                 direction = np.column_stack([row_cosines, col_cosines, slice_cosines])
 
     # Try to get origin from first frame's PlanePositionSequence
-    if (
-        hasattr(seg, "PerFrameFunctionalGroupsSequence")
-        and seg.PerFrameFunctionalGroupsSequence
-    ):
+    if hasattr(seg, "PerFrameFunctionalGroupsSequence") and seg.PerFrameFunctionalGroupsSequence:
         first_frame = seg.PerFrameFunctionalGroupsSequence[0]
-        if (
-            hasattr(first_frame, "PlanePositionSequence")
-            and first_frame.PlanePositionSequence
-        ):
+        if hasattr(first_frame, "PlanePositionSequence") and first_frame.PlanePositionSequence:
             pp = first_frame.PlanePositionSequence[0]
             if hasattr(pp, "ImagePositionPatient") and pp.ImagePositionPatient:
                 ipp = [float(x) for x in pp.ImagePositionPatient]
                 origin = (ipp[0], ipp[1], ipp[2])
 
     # Calculate slice spacing from frame positions if available
-    if (
-        hasattr(seg, "PerFrameFunctionalGroupsSequence")
-        and seg.PerFrameFunctionalGroupsSequence
-    ):
+    if hasattr(seg, "PerFrameFunctionalGroupsSequence") and seg.PerFrameFunctionalGroupsSequence:
         positions = []
         for frame_fg in seg.PerFrameFunctionalGroupsSequence:
-            if (
-                hasattr(frame_fg, "PlanePositionSequence")
-                and frame_fg.PlanePositionSequence
-            ):
+            if hasattr(frame_fg, "PlanePositionSequence") and frame_fg.PlanePositionSequence:
                 pp = frame_fg.PlanePositionSequence[0]
                 if hasattr(pp, "ImagePositionPatient") and pp.ImagePositionPatient:
                     positions.append([float(x) for x in pp.ImagePositionPatient])
@@ -365,18 +341,13 @@ def _extract_combined_segments(
                 frame_to_segment[frame_idx] = seg_id.ReferencedSegmentNumber
 
             # Get dimension index for slice position
-            if (
-                hasattr(frame_fg, "FrameContentSequence")
-                and frame_fg.FrameContentSequence
-            ):
+            if hasattr(frame_fg, "FrameContentSequence") and frame_fg.FrameContentSequence:
                 fc = frame_fg.FrameContentSequence[0]
                 if hasattr(fc, "DimensionIndexValues") and fc.DimensionIndexValues:
                     # Typically [slice_index, segment_number] or similar
                     dim_values = list(fc.DimensionIndexValues)
                     # Use first dimension as slice index (0-indexed)
-                    frame_to_slice[frame_idx] = (
-                        dim_values[0] - 1 if dim_values else frame_idx
-                    )
+                    frame_to_slice[frame_idx] = dim_values[0] - 1 if dim_values else frame_idx
 
     # Determine number of slices
     if frame_to_slice:
@@ -446,16 +417,11 @@ def _extract_single_segment(
                 seg_id = frame_fg.SegmentIdentificationSequence[0]
                 frame_to_segment[frame_idx] = seg_id.ReferencedSegmentNumber
 
-            if (
-                hasattr(frame_fg, "FrameContentSequence")
-                and frame_fg.FrameContentSequence
-            ):
+            if hasattr(frame_fg, "FrameContentSequence") and frame_fg.FrameContentSequence:
                 fc = frame_fg.FrameContentSequence[0]
                 if hasattr(fc, "DimensionIndexValues") and fc.DimensionIndexValues:
                     dim_values = list(fc.DimensionIndexValues)
-                    frame_to_slice[frame_idx] = (
-                        dim_values[0] - 1 if dim_values else frame_idx
-                    )
+                    frame_to_slice[frame_idx] = dim_values[0] - 1 if dim_values else frame_idx
 
     # Determine number of slices
     if frame_to_slice:

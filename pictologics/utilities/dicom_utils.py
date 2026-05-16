@@ -218,9 +218,7 @@ def get_dicom_phases(
         else:
             candidates = list(path_obj.iterdir())
 
-        dicom_files = [
-            f for f in candidates if f.is_file() and pydicom.misc.is_dicom(f)
-        ]
+        dicom_files = [f for f in candidates if f.is_file() and pydicom.misc.is_dicom(f)]
 
     if not dicom_files:
         raise ValueError(f"No DICOM files found in: {path}")
@@ -289,21 +287,13 @@ def get_dicom_phases(
         if split_tag == "NominalPercentageOfCardiacPhase":
             label = f"Phase {split_value}%" if split_value is not None else f"Phase {i}"
         elif split_tag == "TemporalPositionIdentifier":
-            label = (
-                f"Temporal {split_value}" if split_value is not None else f"Time {i}"
-            )
+            label = f"Temporal {split_value}" if split_value is not None else f"Time {i}"
         elif split_tag == "EchoNumber":
             label = f"Echo {split_value}" if split_value is not None else f"Echo {i}"
         elif split_tag == "AcquisitionNumber":
-            label = (
-                f"Acquisition {split_value}" if split_value is not None else f"Acq {i}"
-            )
+            label = f"Acquisition {split_value}" if split_value is not None else f"Acq {i}"
         elif split_tag == "TriggerTime":
-            label = (
-                f"Trigger {split_value}ms"
-                if split_value is not None
-                else f"Trigger {i}"
-            )
+            label = f"Trigger {split_value}ms" if split_value is not None else f"Trigger {i}"
         elif split_tag == "spatial":
             label = f"Volume {i + 1}"
         else:

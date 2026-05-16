@@ -401,9 +401,7 @@ def calculate_intensity_features(
 
     # 4.1.15 Coefficient of variation (7TET)
     if mean_val != 0:
-        features["intensity_coefficient_of_variation_7TET"] = float(
-            np.sqrt(var_val) / mean_val
-        )
+        features["intensity_coefficient_of_variation_7TET"] = float(np.sqrt(var_val) / mean_val)
     else:
         features["intensity_coefficient_of_variation_7TET"] = np.nan
 
@@ -475,9 +473,7 @@ def calculate_intensity_histogram_features(
         denom = m2**1.5
         if denom != 0.0:
             features["discretised_intensity_skewness_88K1"] = float(m3 / denom)
-            features["discretised_intensity_kurtosis_C3I7"] = float(
-                (m4 / (m2 * m2)) - 3.0
-            )
+            features["discretised_intensity_kurtosis_C3I7"] = float((m4 / (m2 * m2)) - 3.0)
 
     p10, p25, median_val, p75, p90 = np.percentile(disc, [10, 25, 50, 75, 90])
 
@@ -537,14 +533,10 @@ def calculate_intensity_histogram_features(
         gradient = np.gradient(hist_counts)
         features["maximum_histogram_gradient_12CE"] = float(np.max(gradient))
         max_grad_idx = int(np.argmax(gradient))
-        features["maximum_histogram_gradient_intensity_8E6O"] = float(
-            min_val_i + max_grad_idx
-        )
+        features["maximum_histogram_gradient_intensity_8E6O"] = float(min_val_i + max_grad_idx)
         features["minimum_histogram_gradient_VQB3"] = float(np.min(gradient))
         min_grad_idx = int(np.argmin(gradient))
-        features["minimum_histogram_gradient_intensity_RHQZ"] = float(
-            min_val_i + min_grad_idx
-        )
+        features["minimum_histogram_gradient_intensity_RHQZ"] = float(min_val_i + min_grad_idx)
 
     return features
 
@@ -634,9 +626,7 @@ def calculate_ivh_features(
             get_volume_fraction_at_intensity_fraction_physical(0.90)
         )
 
-    features[
-        "volume_fraction_difference_between_intensity_0.10_and_0.90_fractions_DDTU"
-    ] = float(
+    features["volume_fraction_difference_between_intensity_0.10_and_0.90_fractions_DDTU"] = float(
         features["volume_at_intensity_fraction_0.10_BC2M_10"]
         - features["volume_at_intensity_fraction_0.90_BC2M_90"]
     )
@@ -722,16 +712,10 @@ def calculate_ivh_features(
         else:
             return float(candidates[-1])
 
-    features["intensity_at_volume_fraction_0.10_GBPN_10"] = (
-        get_intensity_at_volume_fraction(0.10)
-    )
-    features["intensity_at_volume_fraction_0.90_GBPN_90"] = (
-        get_intensity_at_volume_fraction(0.90)
-    )
+    features["intensity_at_volume_fraction_0.10_GBPN_10"] = get_intensity_at_volume_fraction(0.10)
+    features["intensity_at_volume_fraction_0.90_GBPN_90"] = get_intensity_at_volume_fraction(0.90)
 
-    features[
-        "intensity_fraction_difference_between_volume_0.10_and_0.90_fractions_CNV2"
-    ] = float(
+    features["intensity_fraction_difference_between_volume_0.10_and_0.90_fractions_CNV2"] = float(
         features["intensity_at_volume_fraction_0.10_GBPN_10"]
         - features["intensity_at_volume_fraction_0.90_GBPN_90"]
     )
@@ -755,9 +739,7 @@ def calculate_ivh_features(
             # Standard FBS mapping: index k corresponds to [min + (k-1)w, min + kw)
             # center = min_val + (k - 1 + 0.5) * w
             # k is the value in unique_vals
-            intensities_arr = (
-                min_val + (unique_vals.astype(np.float64) - 0.5) * bin_width
-            )
+            intensities_arr = min_val + (unique_vals.astype(np.float64) - 0.5) * bin_width
         else:
             intensities_arr = unique_vals.astype(np.float64)
 
@@ -839,10 +821,8 @@ def calculate_spatial_intensity_features(
     mean_int = np.mean(intensities)
 
     # Calculate terms using Parallelized Numba Function
-    numer_moran, numer_geary_1, numer_geary_2, sum_weights = (
-        _calculate_spatial_features_numba(
-            xi, yi, zi, intensities, float(mean_int), sx, sy, sz
-        )
+    numer_moran, numer_geary_1, numer_geary_2, sum_weights = _calculate_spatial_features_numba(
+        xi, yi, zi, intensities, float(mean_int), sx, sy, sz
     )
 
     # Moran's I - N365
@@ -906,18 +886,14 @@ def calculate_local_intensity_features(
     if len(x_idx) == 0:
         return features
 
-    mask_indices = np.ascontiguousarray(
-        np.stack([x_idx, y_idx, z_idx], axis=1).astype(np.int32)
-    )
+    mask_indices = np.ascontiguousarray(np.stack([x_idx, y_idx, z_idx], axis=1).astype(np.int32))
     offsets = _sphere_offsets_for_radius(spacing_tuple, radius_mm)
 
     # Calculate local means only for ROI voxels
     roi_means = _calculate_local_mean_numba(data, mask_indices, offsets)
 
     # Compute both peaks without allocating ROI intensity arrays.
-    global_peak, local_peak = _calculate_local_peaks_numba(
-        data, mask_indices, roi_means
-    )
+    global_peak, local_peak = _calculate_local_peaks_numba(data, mask_indices, roi_means)
     features["global_intensity_peak_0F91"] = float(global_peak)
     features["local_intensity_peak_VJGA"] = float(local_peak)
 

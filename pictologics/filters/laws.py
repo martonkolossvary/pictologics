@@ -81,9 +81,7 @@ def _separable_convolve_3d(
     return cast(npt.NDArray[np.floating[Any]], result.astype(image.dtype, copy=False))
 
 
-def _get_rotation_permutations_3d() -> (
-    List[Tuple[Tuple[int, int, int], Tuple[bool, bool, bool]]]
-):
+def _get_rotation_permutations_3d() -> List[Tuple[Tuple[int, int, int], Tuple[bool, bool, bool]]]:
     """
     Get all 24 right-angle rotation permutations for 3D (the octahedral group).
 
@@ -225,9 +223,7 @@ def laws_filter(
     # Parse kernel names (e.g., "E5L5S5" -> ["E5", "L5", "S5"])
     kernel_names = _parse_kernel_string(kernels)
     if len(kernel_names) != 3:
-        raise ValueError(
-            f"Expected 3 kernel names for 3D, got {len(kernel_names)}: {kernel_names}"
-        )
+        raise ValueError(f"Expected 3 kernel names for 3D, got {len(kernel_names)}: {kernel_names}")
 
     # Handle boundary condition
     if isinstance(boundary, str):
@@ -276,8 +272,7 @@ def laws_filter(
             with ThreadPoolExecutor() as executor:
                 # Submit all rotation tasks
                 future_to_rot = {
-                    executor.submit(apply_rotated_convolution, rot): rot
-                    for rot in rotations
+                    executor.submit(apply_rotated_convolution, rot): rot for rot in rotations
                 }
 
                 # Pool responses incrementally
@@ -288,9 +283,7 @@ def laws_filter(
                     if result is None:
                         # Initialize accumulator with first result
                         result = (
-                            response.astype(np.float64)
-                            if pooling == "average"
-                            else response.copy()
+                            response.astype(np.float64) if pooling == "average" else response.copy()
                         )
                     else:
                         if result is None:  # pragma: no cover
@@ -319,9 +312,7 @@ def laws_filter(
 
                 if i == 0:
                     result = (
-                        response.astype(np.float64)
-                        if pooling == "average"
-                        else response.copy()
+                        response.astype(np.float64) if pooling == "average" else response.copy()
                     )
                 else:
                     if result is None:  # pragma: no cover
@@ -336,9 +327,7 @@ def laws_filter(
                     elif pooling == "min":
                         np.minimum(res, response, out=res)
                     else:
-                        raise ValueError(
-                            f"Unknown pooling method: {pooling}"
-                        )  # pragma: no cover
+                        raise ValueError(f"Unknown pooling method: {pooling}")  # pragma: no cover
 
         # Finalize average pooling
         if pooling == "average" and result is not None:

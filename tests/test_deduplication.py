@@ -78,22 +78,16 @@ class TestPreprocessingSignature:
 
     def test_signature_hash_format(self):
         """Signature hash should be a valid hex string."""
-        sig = PreprocessingSignature.from_steps([
-            ("resample", {"new_spacing": [1.0, 1.0, 1.0]})
-        ])
+        sig = PreprocessingSignature.from_steps([("resample", {"new_spacing": [1.0, 1.0, 1.0]})])
         assert len(sig.hash) == 64  # SHA256 hex digest
         assert all(c in "0123456789abcdef" for c in sig.hash)
 
     def test_signature_json_is_valid(self):
         """Signature json should be valid JSON."""
-        sig = PreprocessingSignature.from_steps([
-            ("resample", {"new_spacing": [1.0, 1.0, 1.0]})
-        ])
+        sig = PreprocessingSignature.from_steps([("resample", {"new_spacing": [1.0, 1.0, 1.0]})])
         parsed = json.loads(sig.json_repr)
         assert isinstance(parsed, list)
-        assert parsed == [
-            {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}}
-        ]
+        assert parsed == [{"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}}]
 
     def test_identical_steps_same_hash(self):
         """Identical preprocessing steps should produce same hash."""
@@ -107,12 +101,8 @@ class TestPreprocessingSignature:
 
     def test_different_steps_different_hash(self):
         """Different preprocessing steps should produce different hash."""
-        sig1 = PreprocessingSignature.from_steps([
-            ("resample", {"new_spacing": [1.0, 1.0, 1.0]})
-        ])
-        sig2 = PreprocessingSignature.from_steps([
-            ("resample", {"new_spacing": [2.0, 2.0, 2.0]})
-        ])
+        sig1 = PreprocessingSignature.from_steps([("resample", {"new_spacing": [1.0, 1.0, 1.0]})])
+        sig2 = PreprocessingSignature.from_steps([("resample", {"new_spacing": [2.0, 2.0, 2.0]})])
         assert sig1.hash != sig2.hash
 
     def test_param_order_does_not_affect_hash(self):
@@ -131,9 +121,7 @@ class TestPreprocessingSignature:
 
     def test_serialization_roundtrip(self):
         """Signature should serialize and deserialize correctly."""
-        sig = PreprocessingSignature.from_steps([
-            ("resample", {"new_spacing": [1.0, 1.0, 1.0]})
-        ])
+        sig = PreprocessingSignature.from_steps([("resample", {"new_spacing": [1.0, 1.0, 1.0]})])
         data = sig.to_dict()
         restored = PreprocessingSignature.from_dict(data)
         assert restored.hash == sig.hash
@@ -151,10 +139,15 @@ class TestExtractRelevantSteps:
             {"step": "filter_outliers", "params": {"sigma": 3.0}},
             {"step": "resegment", "params": {"range_min": -100, "range_max": 400}},
             {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-            {"step": "extract_features", "params": {"families": ["morphology", "intensity", "texture"]}},
+            {
+                "step": "extract_features",
+                "params": {"families": ["morphology", "intensity", "texture"]},
+            },
         ]
 
-    def test_morphology_includes_mask_narrowing_excludes_discretisation(self, sample_config: list[dict[str, Any]]):
+    def test_morphology_includes_mask_narrowing_excludes_discretisation(
+        self, sample_config: list[dict[str, Any]]
+    ):
         """Morphology should include mask-narrowing steps but not discretisation."""
         rules = get_default_rules()
         relevant = extract_relevant_steps(sample_config, "morphology", rules)
@@ -211,13 +204,21 @@ class TestConfigurationAnalyzer:
             {"step": "filter_outliers", "params": {"sigma": 3.0}},
         ]
         return {
-            "config_fbn_32": base_steps + [
+            "config_fbn_32": base_steps
+            + [
                 {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-                {"step": "extract_features", "params": {"families": ["morphology", "intensity", "texture"]}},
+                {
+                    "step": "extract_features",
+                    "params": {"families": ["morphology", "intensity", "texture"]},
+                },
             ],
-            "config_fbn_64": base_steps + [
+            "config_fbn_64": base_steps
+            + [
                 {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
-                {"step": "extract_features", "params": {"families": ["morphology", "intensity", "texture"]}},
+                {
+                    "step": "extract_features",
+                    "params": {"families": ["morphology", "intensity", "texture"]},
+                },
             ],
         }
 
@@ -237,14 +238,18 @@ class TestConfigurationAnalyzer:
             ],
         }
 
-    def test_analyzer_creates_plan(self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]):
+    def test_analyzer_creates_plan(
+        self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]
+    ):
         """Analyzer should create a valid DeduplicationPlan."""
         analyzer = ConfigurationAnalyzer(two_configs_same_preprocessing)
         plan = analyzer.analyze()
         assert isinstance(plan, DeduplicationPlan)
         assert plan.rules.version == CURRENT_RULES_VERSION
 
-    def test_same_preprocessing_shared_morphology(self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]):
+    def test_same_preprocessing_shared_morphology(
+        self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]
+    ):
         """Configs with same preprocessing should share morphology signature."""
         analyzer = ConfigurationAnalyzer(two_configs_same_preprocessing)
         plan = analyzer.analyze()
@@ -256,7 +261,9 @@ class TestConfigurationAnalyzer:
         assert sig2 is not None
         assert sig1.hash == sig2.hash, "Same preprocessing should yield same morphology signature"
 
-    def test_same_preprocessing_shared_intensity(self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]):
+    def test_same_preprocessing_shared_intensity(
+        self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]
+    ):
         """Configs with same preprocessing should share intensity signature."""
         analyzer = ConfigurationAnalyzer(two_configs_same_preprocessing)
         plan = analyzer.analyze()
@@ -268,7 +275,9 @@ class TestConfigurationAnalyzer:
         assert sig2 is not None
         assert sig1.hash == sig2.hash, "Same preprocessing should yield same intensity signature"
 
-    def test_different_discretisation_different_texture(self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]):
+    def test_different_discretisation_different_texture(
+        self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]
+    ):
         """Configs with different discretisation should have different texture signatures."""
         analyzer = ConfigurationAnalyzer(two_configs_same_preprocessing)
         plan = analyzer.analyze()
@@ -278,9 +287,13 @@ class TestConfigurationAnalyzer:
 
         assert sig1 is not None
         assert sig2 is not None
-        assert sig1.hash != sig2.hash, "Different discretisation should yield different texture signature"
+        assert sig1.hash != sig2.hash, (
+            "Different discretisation should yield different texture signature"
+        )
 
-    def test_different_preprocessing_different_morphology(self, two_configs_different_preprocessing: dict[str, list[dict[str, Any]]]):
+    def test_different_preprocessing_different_morphology(
+        self, two_configs_different_preprocessing: dict[str, list[dict[str, Any]]]
+    ):
         """Configs with different preprocessing should have different morphology signatures."""
         analyzer = ConfigurationAnalyzer(two_configs_different_preprocessing)
         plan = analyzer.analyze()
@@ -290,7 +303,9 @@ class TestConfigurationAnalyzer:
 
         assert sig1 is not None
         assert sig2 is not None
-        assert sig1.hash != sig2.hash, "Different preprocessing should yield different morphology signature"
+        assert sig1.hash != sig2.hash, (
+            "Different preprocessing should yield different morphology signature"
+        )
 
     def test_different_resegment_different_morphology(self):
         """Compartment-specific resegmentation should not share morphology signatures."""
@@ -316,7 +331,9 @@ class TestConfigurationAnalyzer:
         assert plan.sources.get(("low", "morphology")) is None
         assert plan.sources.get(("high", "morphology")) is None
 
-    def test_sources_identify_first_occurrence(self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]):
+    def test_sources_identify_first_occurrence(
+        self, two_configs_same_preprocessing: dict[str, list[dict[str, Any]]]
+    ):
         """Sources should identify first occurrence as None, subsequent as source config."""
         analyzer = ConfigurationAnalyzer(two_configs_same_preprocessing)
         plan = analyzer.analyze()
@@ -371,7 +388,9 @@ class TestDeduplicationPlan:
         assert plan.is_stale(configs) is False
 
         # Modified configs should be stale
-        modified_configs = {"test": [{"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}}]}
+        modified_configs = {
+            "test": [{"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}}]
+        }
         assert plan.is_stale(modified_configs) is True
 
     def test_serialization_roundtrip(self):
@@ -403,11 +422,11 @@ class TestDeduplicationPlan:
             rules=get_default_rules(),
             sources={
                 ("config1", "morphology"): None,  # computed
-                ("config1", "intensity"): None,   # computed
+                ("config1", "intensity"): None,  # computed
                 ("config2", "morphology"): "config1",  # reused
-                ("config2", "intensity"): "config1",   # reused
+                ("config2", "intensity"): "config1",  # reused
                 ("config3", "morphology"): "config1",  # reused
-                ("config3", "intensity"): "config1",   # reused
+                ("config3", "intensity"): "config1",  # reused
             },
         )
         summary = plan.get_summary()
@@ -485,10 +504,13 @@ class TestPipelineDeduplicationIntegration:
     ):
         """Pipeline run should work with single config (no deduplication needed)."""
         pipeline = RadiomicsPipeline()
-        pipeline.add_config("simple", [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
-            {"step": "extract_features", "params": {"families": ["intensity"]}},
-        ])
+        pipeline.add_config(
+            "simple",
+            [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+            ],
+        )
 
         results = pipeline.run(simple_image, simple_mask, config_names=["simple"])
         assert "simple" in results
@@ -608,10 +630,13 @@ class TestPipelineDeduplicationIntegration:
         import warnings
 
         pipeline = RadiomicsPipeline(deduplicate=True)
-        pipeline.add_config("test", [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
-            {"step": "extract_features", "params": {"families": ["intensity"]}},
-        ])
+        pipeline.add_config(
+            "test",
+            [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+            ],
+        )
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -632,14 +657,22 @@ class TestPipelineDeduplicationIntegration:
         base_steps = [
             {"step": "resegment", "params": {"range_min": 0, "range_max": 100}},
         ]
-        pipeline.add_config("fbn_8", base_steps + [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
-            {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
-        ])
-        pipeline.add_config("fbn_16", base_steps + [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
-            {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
-        ])
+        pipeline.add_config(
+            "fbn_8",
+            base_steps
+            + [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+                {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
+            ],
+        )
+        pipeline.add_config(
+            "fbn_16",
+            base_steps
+            + [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
+                {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
+            ],
+        )
 
         # First run
         pipeline.run(simple_image, simple_mask, config_names=["fbn_8", "fbn_16"])
@@ -665,14 +698,22 @@ class TestPipelineDeduplicationIntegration:
         base_steps = [
             {"step": "resegment", "params": {"range_min": 0, "range_max": 100}},
         ]
-        pipeline.add_config("fbn_8", base_steps + [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
-            {"step": "extract_features", "params": {"families": ["morphology", "intensity"]}},
-        ])
-        pipeline.add_config("fbn_16", base_steps + [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
-            {"step": "extract_features", "params": {"families": ["morphology", "intensity"]}},
-        ])
+        pipeline.add_config(
+            "fbn_8",
+            base_steps
+            + [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+                {"step": "extract_features", "params": {"families": ["morphology", "intensity"]}},
+            ],
+        )
+        pipeline.add_config(
+            "fbn_16",
+            base_steps
+            + [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
+                {"step": "extract_features", "params": {"families": ["morphology", "intensity"]}},
+            ],
+        )
 
         pipeline.run(simple_image, simple_mask, config_names=["fbn_8", "fbn_16"])
         stats = pipeline.deduplication_stats
@@ -696,14 +737,20 @@ class TestPipelineDeduplicationIntegration:
         """deduplication_stats should return dict with expected keys when dedup is active."""
         pipeline = RadiomicsPipeline(deduplicate=True)
         # Need at least 2 configs to trigger deduplication
-        pipeline.add_config("config1", [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
-            {"step": "extract_features", "params": {"families": ["intensity"]}},
-        ])
-        pipeline.add_config("config2", [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
-            {"step": "extract_features", "params": {"families": ["intensity"]}},
-        ])
+        pipeline.add_config(
+            "config1",
+            [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+            ],
+        )
+        pipeline.add_config(
+            "config2",
+            [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+            ],
+        )
 
         pipeline.run(simple_image, simple_mask, config_names=["config1", "config2"])
         stats = pipeline.deduplication_stats
@@ -720,10 +767,13 @@ class TestPipelineDeduplicationIntegration:
     ):
         """deduplication_stats returns empty dict with warning when only 1 config."""
         pipeline = RadiomicsPipeline(deduplicate=True)
-        pipeline.add_config("single", [
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
-            {"step": "extract_features", "params": {"families": ["intensity"]}},
-        ])
+        pipeline.add_config(
+            "single",
+            [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+            ],
+        )
 
         # Single config doesn't trigger deduplication
         pipeline.run(simple_image, simple_mask, config_names=["single"])
@@ -752,9 +802,7 @@ class TestSchemaVersionMigration:
             "schema_version": "1.0",
             "configs": {
                 "test": {
-                    "steps": [
-                        {"step": "extract_features", "params": {"families": ["intensity"]}}
-                    ]
+                    "steps": [{"step": "extract_features", "params": {"families": ["intensity"]}}]
                 }
             },
         }
@@ -848,10 +896,10 @@ class TestIVHDependencies:
         config_steps = [
             {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}},
             {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-            {"step": "extract_features", "params": {
-                "families": ["ivh"],
-                "ivh_params": {"ivh_use_continuous": True}
-            }},
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_params": {"ivh_use_continuous": True}},
+            },
         ]
 
         deps = get_ivh_dependencies(config_steps, rules)
@@ -916,10 +964,13 @@ class TestConfigurationAnalyzerEdgeCases:
         """Analyzer should add spatial_intensity when include_spatial_intensity=True."""
         configs = {
             "test": [
-                {"step": "extract_features", "params": {
-                    "families": ["intensity"],
-                    "include_spatial_intensity": True,
-                }}
+                {
+                    "step": "extract_features",
+                    "params": {
+                        "families": ["intensity"],
+                        "include_spatial_intensity": True,
+                    },
+                }
             ]
         }
         analyzer = ConfigurationAnalyzer(configs)
@@ -930,10 +981,13 @@ class TestConfigurationAnalyzerEdgeCases:
         """Analyzer should add local_intensity when include_local_intensity=True."""
         configs = {
             "test": [
-                {"step": "extract_features", "params": {
-                    "families": ["intensity"],
-                    "include_local_intensity": True,
-                }}
+                {
+                    "step": "extract_features",
+                    "params": {
+                        "families": ["intensity"],
+                        "include_local_intensity": True,
+                    },
+                }
             ]
         }
         analyzer = ConfigurationAnalyzer(configs)
@@ -945,7 +999,7 @@ class TestConfigurationAnalyzerEdgeCases:
         configs = {
             "test": [
                 {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-                {"step": "extract_features", "params": {"families": ["texture"]}}
+                {"step": "extract_features", "params": {"families": ["texture"]}},
             ]
         }
         analyzer = ConfigurationAnalyzer(configs)

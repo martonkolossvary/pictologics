@@ -24,7 +24,6 @@ from pictologics.features.intensity import (
 
 
 class TestIntensityFeatures(unittest.TestCase):
-
     # ----------------------------------------------------------------------
     # 4.1 First Order Statistics
     # ----------------------------------------------------------------------
@@ -62,9 +61,7 @@ class TestIntensityFeatures(unittest.TestCase):
         values = np.array([-1, 1], dtype=float)
         features = calculate_intensity_features(values)
         self.assertTrue(np.isnan(features["intensity_coefficient_of_variation_7TET"]))
-        self.assertTrue(
-            np.isnan(features["intensity_quartile_coefficient_of_dispersion_9S40"])
-        )
+        self.assertTrue(np.isnan(features["intensity_quartile_coefficient_of_dispersion_9S40"]))
 
     # ----------------------------------------------------------------------
     # 4.2 Intensity Histogram
@@ -94,17 +91,13 @@ class TestIntensityFeatures(unittest.TestCase):
         features = calculate_intensity_histogram_features(disc_vals)
         self.assertTrue(np.isnan(features["discretised_intensity_skewness_88K1"]))
         self.assertTrue(np.isnan(features["discretised_intensity_kurtosis_C3I7"]))
-        self.assertEqual(
-            features["intensity_histogram_coefficient_of_variation_CWYJ"], 0.0
-        )
+        self.assertEqual(features["intensity_histogram_coefficient_of_variation_CWYJ"], 0.0)
         self.assertTrue(np.isnan(features["maximum_histogram_gradient_12CE"]))
 
     def test_calculate_intensity_histogram_features_zero_mean(self) -> None:
         disc_vals = np.array([-1, 1])
         features = calculate_intensity_histogram_features(disc_vals)
-        self.assertTrue(
-            np.isnan(features["intensity_histogram_coefficient_of_variation_CWYJ"])
-        )
+        self.assertTrue(np.isnan(features["intensity_histogram_coefficient_of_variation_CWYJ"]))
 
     # ----------------------------------------------------------------------
     # 4.3 IVH
@@ -116,9 +109,7 @@ class TestIntensityFeatures(unittest.TestCase):
         disc_vals = np.array([0, 1, 2, 3, 4])
         features = calculate_ivh_features(disc_vals, bin_width=1.0, min_val=0.0)
 
-        self.assertAlmostEqual(
-            features["volume_at_intensity_fraction_0.10_BC2M_10"], 0.8
-        )
+        self.assertAlmostEqual(features["volume_at_intensity_fraction_0.10_BC2M_10"], 0.8)
 
     def test_calculate_ivh_features_empty(self) -> None:
         features = calculate_ivh_features(np.array([]))
@@ -158,17 +149,13 @@ class TestIntensityFeatures(unittest.TestCase):
             target_range_min=0.0,
             target_range_max=6.0,
         )
-        self.assertAlmostEqual(
-            features["volume_at_intensity_fraction_0.10_BC2M_10"], 2.0 / 3.0
-        )
+        self.assertAlmostEqual(features["volume_at_intensity_fraction_0.10_BC2M_10"], 2.0 / 3.0)
 
         # Test the branch where bin_width is NOT provided but target range IS.
         features2 = calculate_ivh_features(
             disc_vals, min_val=0.0, target_range_min=0.0, target_range_max=6.0
         )
-        self.assertAlmostEqual(
-            features2["volume_at_intensity_fraction_0.10_BC2M_10"], 2.0 / 3.0
-        )
+        self.assertAlmostEqual(features2["volume_at_intensity_fraction_0.10_BC2M_10"], 2.0 / 3.0)
 
     def test_calculate_ivh_features_integer_path(self) -> None:
         # Test the 'Standard Integer Bins' fast path logic.
@@ -298,9 +285,7 @@ class TestIntensityFeatures(unittest.TestCase):
     def test_calculate_spatial_intensity_features_disabled(self) -> None:
         mock_img = MagicMock()
         mock_mask = MagicMock()
-        features = calculate_spatial_intensity_features(
-            mock_img, mock_mask, enabled=False
-        )
+        features = calculate_spatial_intensity_features(mock_img, mock_mask, enabled=False)
         self.assertEqual(features, {})
 
     # ----------------------------------------------------------------------
@@ -333,9 +318,7 @@ class TestIntensityFeatures(unittest.TestCase):
     def test_calculate_local_intensity_features_disabled(self) -> None:
         mock_img = MagicMock()
         mock_mask = MagicMock()
-        features = calculate_local_intensity_features(
-            mock_img, mock_mask, enabled=False
-        )
+        features = calculate_local_intensity_features(mock_img, mock_mask, enabled=False)
         self.assertEqual(features, {})
 
     def test_internal_helpers_edge_cases(self) -> None:

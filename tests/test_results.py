@@ -50,9 +50,7 @@ class TestFormatResults:
         data = json.loads(result)
         assert data["config_a__feature1"] == 1.0
 
-    def test_wide_format_with_metadata(
-        self, sample_results: dict[str, pd.Series]
-    ) -> None:
+    def test_wide_format_with_metadata(self, sample_results: dict[str, pd.Series]) -> None:
         """Test wide format with metadata."""
         meta = {"subject_id": "sub-001", "age": 25}
         result = format_results(sample_results, fmt="wide", meta=meta)
@@ -79,9 +77,7 @@ class TestFormatResults:
         assert "feature_name" in result.columns
         assert "value" in result.columns
 
-    def test_long_format_custom_config_col(
-        self, sample_results: dict[str, pd.Series]
-    ) -> None:
+    def test_long_format_custom_config_col(self, sample_results: dict[str, pd.Series]) -> None:
         """Test long format with a custom config column name."""
         result = format_results(
             sample_results, fmt="long", output_type="pandas", config_col="configuration"
@@ -90,14 +86,10 @@ class TestFormatResults:
         assert "configuration" in result.columns
         assert "config" not in result.columns
 
-    def test_long_format_with_metadata(
-        self, sample_results: dict[str, pd.Series]
-    ) -> None:
+    def test_long_format_with_metadata(self, sample_results: dict[str, pd.Series]) -> None:
         """Test long format with metadata included in every row."""
         meta = {"subject_id": "sub-001"}
-        result = format_results(
-            sample_results, fmt="long", output_type="pandas", meta=meta
-        )
+        result = format_results(sample_results, fmt="long", output_type="pandas", meta=meta)
         assert isinstance(result, pd.DataFrame)
         assert "subject_id" in result.columns
         assert (result["subject_id"] == "sub-001").all()
@@ -275,9 +267,7 @@ class TestSaveResults:
         # We can just check file content string to avoid pandas exception quirks in this env.
         # A truly empty dataframe saved to CSV might be an empty file or just newline.
         content = path.read_text().strip()
-        assert (
-            content == "" or content == '""'
-        )  # Quote if pandas puts quotes? usually empty.
+        assert content == "" or content == '""'  # Quote if pandas puts quotes? usually empty.
 
     def test_save_list_dicts_to_json(self, tmp_path: Path) -> None:
         """Test saving a list of dictionaries to JSON (hits optimization path)."""

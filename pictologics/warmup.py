@@ -145,9 +145,7 @@ def _warmup_intensity() -> None:
     data = np.zeros((5, 5, 5), dtype=np.float64)
     data[2, 2, 2] = 10.0
     # Two voxels in mask
-    mask_indices = np.ascontiguousarray(
-        np.array([[2, 2, 2], [2, 2, 3]], dtype=np.int32)
-    )
+    mask_indices = np.ascontiguousarray(np.array([[2, 2, 2], [2, 2, 3]], dtype=np.int32))
     # Two offsets
     offsets = np.ascontiguousarray(np.array([[0, 0, 0], [0, 0, 1]], dtype=np.int32))
 
@@ -219,9 +217,7 @@ def _warmup_filters() -> None:
     dummy_img = np.ones((5, 5, 5), dtype=np.float32)
     matrix = np.array([1.1, 1.1, 1.1])  # Slight scaling
     offset = np.array([0.0, 0.0, 0.0])
-    _ = affine_transform(
-        dummy_img, matrix=matrix, offset=offset, output_shape=(6, 6, 6), order=1
-    )
+    _ = affine_transform(dummy_img, matrix=matrix, offset=offset, output_shape=(6, 6, 6), order=1)
 
     # 2. Warmup FFT convolution (used in Gabor, Laws, etc.)
     dummy_2d = np.ones((8, 8), dtype=np.float32)

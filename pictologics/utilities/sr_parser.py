@@ -171,9 +171,7 @@ class SRDocument:
         ]
         sop_class = str(getattr(dcm, "SOPClassUID", ""))
         if sop_class not in sr_sop_classes:
-            raise ValueError(
-                f"File is not a DICOM SR document. SOPClassUID: {sop_class}"
-            )
+            raise ValueError(f"File is not a DICOM SR document. SOPClassUID: {sop_class}")
 
         # Extract basic document info
         sop_instance_uid = str(getattr(dcm, "SOPInstanceUID", ""))
@@ -460,15 +458,12 @@ class SRDocument:
 
         # Prepare worker arguments
         worker_args = [
-            (f, extract_private_tags, out_path, export_csv, export_json)
-            for f in sr_files
+            (f, extract_private_tags, out_path, export_csv, export_json) for f in sr_files
         ]
 
         if num_workers == 1:
             # Sequential processing
-            iterator = tqdm(
-                worker_args, desc="Processing SR files", disable=not show_progress
-            )
+            iterator = tqdm(worker_args, desc="Processing SR files", disable=not show_progress)
             for args in iterator:
                 result = _process_sr_file_worker(args)
                 processing_log.append(result["log"])
@@ -626,9 +621,7 @@ def _process_sr_file_worker(
         log_entry["patient_id"] = doc.patient_id
         log_entry["study_instance_uid"] = doc.study_instance_uid
         log_entry["status"] = "success"
-        log_entry["num_measurements"] = sum(
-            len(g.measurements) for g in doc.measurement_groups
-        )
+        log_entry["num_measurements"] = sum(len(g.measurements) for g in doc.measurement_groups)
 
         # Export if output_dir specified
         if output_dir is not None:
@@ -687,9 +680,7 @@ def _parse_content_sequence(
         # Extract concept name
         concept_name = None
         if hasattr(item, "ConceptNameCodeSequence") and item.ConceptNameCodeSequence:
-            concept_name = str(
-                getattr(item.ConceptNameCodeSequence[0], "CodeMeaning", "")
-            )
+            concept_name = str(getattr(item.ConceptNameCodeSequence[0], "CodeMeaning", ""))
 
         # Handle CONTAINER items (measurement groups)
         if value_type == "CONTAINER":
@@ -802,9 +793,7 @@ def _get_code_value(item: Any) -> Optional[str]:
     """
     if hasattr(item, "ConceptCodeSequence") and item.ConceptCodeSequence:
         code = item.ConceptCodeSequence[0]
-        return str(getattr(code, "CodeMeaning", "")) or str(
-            getattr(code, "CodeValue", "")
-        )
+        return str(getattr(code, "CodeMeaning", "")) or str(getattr(code, "CodeValue", ""))
     return None
 
 

@@ -115,9 +115,7 @@ def wavelet_transform(
                     rotated = np.flip(rotated, axis=axis)
 
             # Apply wavelet
-            response = _apply_undecimated_wavelet_3d(
-                rotated, lo, hi, level, decomposition, mode
-            )
+            response = _apply_undecimated_wavelet_3d(rotated, lo, hi, level, decomposition, mode)
 
             # Undo rotation for response
             for axis, flip in enumerate(flips):
@@ -132,8 +130,7 @@ def wavelet_transform(
             with ThreadPoolExecutor() as executor:
                 # Submit all rotation tasks
                 future_to_rot = {
-                    executor.submit(apply_rotated_wavelet, rot): rot
-                    for rot in rotations
+                    executor.submit(apply_rotated_wavelet, rot): rot for rot in rotations
                 }
 
                 # Pool responses incrementally
@@ -144,9 +141,7 @@ def wavelet_transform(
                     if result is None:
                         # Initialize accumulator with first result
                         result = (
-                            response.astype(np.float64)
-                            if pooling == "average"
-                            else response.copy()
+                            response.astype(np.float64) if pooling == "average" else response.copy()
                         )
                     else:
                         if result is None:  # pragma: no cover
@@ -163,9 +158,7 @@ def wavelet_transform(
                         elif pooling == "min":
                             np.minimum(res, response, out=res)
                         else:
-                            raise ValueError(
-                                f"Unknown pooling: {pooling}"
-                            )  # pragma: no cover
+                            raise ValueError(f"Unknown pooling: {pooling}")  # pragma: no cover
 
                     # Explicitly delete response
                     del response
@@ -177,9 +170,7 @@ def wavelet_transform(
 
                 if i == 0:
                     result = (
-                        response.astype(np.float64)
-                        if pooling == "average"
-                        else response.copy()
+                        response.astype(np.float64) if pooling == "average" else response.copy()
                     )
                 else:
                     if result is None:  # pragma: no cover
@@ -194,9 +185,7 @@ def wavelet_transform(
                     elif pooling == "min":
                         np.minimum(res_seq, response, out=res_seq)
                     else:
-                        raise ValueError(
-                            f"Unknown pooling: {pooling}"
-                        )  # pragma: no cover
+                        raise ValueError(f"Unknown pooling: {pooling}")  # pragma: no cover
 
         # Finalize average pooling
         if pooling == "average" and result is not None:
@@ -245,9 +234,7 @@ def _apply_undecimated_wavelet_3d(
                 result = convolve1d(result, filters[char], axis=axis, mode=mode)
             return result
 
-    raise RuntimeError(
-        "Unexpected end of wavelet decomposition loop"
-    )  # pragma: no cover
+    raise RuntimeError("Unexpected end of wavelet decomposition loop")  # pragma: no cover
 
 
 def _atrous_upsample(

@@ -31,7 +31,6 @@ from pictologics.loader import Image
 
 
 class TestMorphologyFeatures(unittest.TestCase):
-
     def _create_image(self, array, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0)):
         return Image(array, spacing, origin)
 
@@ -134,9 +133,7 @@ class TestMorphologyFeatures(unittest.TestCase):
 
         vol = features["volume_RNU0"]
         # Integrated intensity = Vol * Mean Intensity. Mean = 10.
-        self.assertAlmostEqual(
-            features["integrated_intensity_99N0"], vol * 10.0, delta=1e-4
-        )
+        self.assertAlmostEqual(features["integrated_intensity_99N0"], vol * 10.0, delta=1e-4)
         # CoM shift should be ~0 as both are symmetric cubes
         self.assertAlmostEqual(features["center_of_mass_shift_KLMA"], 0.0)
 

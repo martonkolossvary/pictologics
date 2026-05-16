@@ -482,8 +482,7 @@ def save_slices(
     if image is not None and mask is not None:
         if image.array.shape != mask.array.shape:
             raise ValueError(
-                f"Image shape {image.array.shape} does not match "
-                f"mask shape {mask.array.shape}"
+                f"Image shape {image.array.shape} does not match mask shape {mask.array.shape}"
             )
 
     # Get reference array for shape
@@ -644,8 +643,7 @@ def visualize_slices(
     if image is not None and mask is not None:
         if image.array.shape != mask.array.shape:
             raise ValueError(
-                f"Image shape {image.array.shape} does not match "
-                f"mask shape {mask.array.shape}"
+                f"Image shape {image.array.shape} does not match mask shape {mask.array.shape}"
             )
 
     # Get reference array for shape
@@ -665,9 +663,7 @@ def visualize_slices(
     # Get slice data
     def get_slice(
         idx: int,
-    ) -> tuple[
-        Optional[npt.NDArray[np.floating[Any]]], Optional[npt.NDArray[np.floating[Any]]]
-    ]:
+    ) -> tuple[Optional[npt.NDArray[np.floating[Any]]], Optional[npt.NDArray[np.floating[Any]]]]:
         img_slice = None
         mask_slice = None
 
