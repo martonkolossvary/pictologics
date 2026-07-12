@@ -12,6 +12,7 @@ os.environ["NUMBA_DISABLE_JIT"] = "1"
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock, patch
 
 from pictologics.loader import (
@@ -21,6 +22,7 @@ from pictologics.loader import (
     _load_dicom_file,
     _load_dicom_series,
     _load_nifti,
+    _warn_if_mixed_coordinate_frames,
     create_full_mask,
     load_and_merge_images,
     load_image,
@@ -612,6 +614,113 @@ class TestLoader(unittest.TestCase):
         mock_dcmread.side_effect = Exception("Corrupt")
         with self.assertRaises(ValueError):
             _load_dicom_file("bad.dcm")
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_enhanced_multiframe(self, mock_dcmread: MagicMock) -> None:
+        """Enhanced multiframe: geometry lives in functional groups (not top-level
+        tags) and frames are stored out of spatial order, so the loader reads the
+        shared/per-frame groups, spatially reorders the frames, and estimates the
+        z-spacing from the frame positions."""
+        pixel = np.arange(3 * 2 * 2, dtype=np.int16).reshape(3, 2, 2)  # (Z, Y, X)
+
+        measures = SimpleNamespace(PixelSpacing=[0.5, 0.6])
+        orient = SimpleNamespace(ImageOrientationPatient=[1, 0, 0, 0, 1, 0])
+        shared = SimpleNamespace(
+            PixelMeasuresSequence=[measures],
+            PlaneOrientationSequence=[orient],
+        )
+
+        def frame(z: float) -> SimpleNamespace:
+            return SimpleNamespace(
+                PlanePositionSequence=[SimpleNamespace(ImagePositionPatient=[0.0, 0.0, z])]
+            )
+
+        per_frame = [frame(2.0), frame(1.0), frame(0.0)]  # descending z -> reorder
+
+        dcm = MagicMock()
+        dcm.pixel_array = pixel
+        del dcm.ImageOrientationPatient
+        del dcm.PixelSpacing
+        del dcm.SpacingBetweenSlices
+        del dcm.SliceThickness
+        del dcm.ImagePositionPatient
+        dcm.SharedFunctionalGroupsSequence = [shared]
+        dcm.PerFrameFunctionalGroupsSequence = per_frame
+        dcm.RescaleSlope = 1.0
+        dcm.RescaleIntercept = 0.0
+        mock_dcmread.return_value = dcm
+
+        img = _load_dicom_file("mf.dcm")
+        # spacing: X=PixelSpacing[1], Y=PixelSpacing[0], Z estimated from positions (=1)
+        self.assertAlmostEqual(img.spacing[0], 0.6)
+        self.assertAlmostEqual(img.spacing[1], 0.5)
+        self.assertAlmostEqual(img.spacing[2], 1.0)
+        # origin from the first spatially-sorted frame (z=0)
+        self.assertEqual(img.origin, (0.0, 0.0, 0.0))
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_shared_plane_position(self, mock_dcmread: MagicMock) -> None:
+        """A 2D frame with no per-frame positions falls back to the shared
+        PlanePositionSequence for its origin."""
+        dcm = MagicMock()
+        dcm.pixel_array = np.zeros((2, 2), dtype=np.int16)
+        dcm.PixelSpacing = [1.0, 1.0]
+        del dcm.SpacingBetweenSlices
+        dcm.SliceThickness = 1.0
+        del dcm.ImageOrientationPatient
+        del dcm.ImagePositionPatient
+        pos = SimpleNamespace(ImagePositionPatient=[3.0, 4.0, 5.0])
+        dcm.SharedFunctionalGroupsSequence = [SimpleNamespace(PlanePositionSequence=[pos])]
+        dcm.RescaleSlope = 1.0
+        dcm.RescaleIntercept = 0.0
+        mock_dcmread.return_value = dcm
+
+        img = _load_dicom_file("seg2d.dcm")
+        self.assertEqual(img.origin, (3.0, 4.0, 5.0))
+
+    def test_warn_if_mixed_coordinate_frames(self) -> None:
+        nifti = Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0), modality="Nifti")
+        dicom = Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0), modality="CT")
+        with self.assertWarns(UserWarning):
+            _warn_if_mixed_coordinate_frames(nifti, dicom)
+
+    @patch("pictologics.loader._is_dicom_seg")
+    @patch("pictologics.loader.Path")
+    def test_load_image_seg_ignores_dataset_index(
+        self, mock_Path_cls: MagicMock, mock_is_seg: MagicMock
+    ) -> None:
+        """load_image warns that dataset_index/fill_value are ignored for DICOM SEG."""
+        mock_path_obj = mock_Path_cls.return_value
+        mock_path_obj.exists.return_value = True
+        mock_path_obj.is_dir.return_value = False
+        mock_is_seg.return_value = True
+
+        with patch.object(
+            __import__("pictologics.loaders.seg_loader", fromlist=["load_seg"]),
+            "load_seg",
+            return_value=MagicMock(),
+        ):
+            with self.assertWarns(UserWarning):
+                load_image("seg.dcm", dataset_index=1)
+
+    # --- with_source_mask validation (merged from test_loader_coverage.py) ---
+    def test_with_source_mask_shape_mismatch(self) -> None:
+        img = Image(np.zeros((10, 10, 10), np.float32), (1, 1, 1), (0, 0, 0))
+        with self.assertRaisesRegex(ValueError, "Source mask shape"):
+            img.with_source_mask(np.zeros((5, 5, 5), dtype=bool))
+        # A matching bool array and an Image mask are both accepted.
+        self.assertTrue(img.with_source_mask(np.zeros((10, 10, 10), bool)).has_source_mask)
+        mask_img = Image(np.zeros((10, 10, 10), np.uint8), (1, 1, 1), (0, 0, 0))
+        self.assertTrue(img.with_source_mask(mask_img).has_source_mask)
+
+    def test_with_source_mask_int_array(self) -> None:
+        # Non-bool arrays are accepted; nonzero -> valid.
+        img = Image(np.zeros((5, 5, 5), np.float32), (1, 1, 1), (0, 0, 0))
+        int_mask = np.zeros((5, 5, 5), np.int32)
+        int_mask[2, 2, 2] = 1
+        masked = img.with_source_mask(int_mask)
+        self.assertTrue(masked.source_mask[2, 2, 2])
+        self.assertFalse(masked.source_mask[0, 0, 0])
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader.pydicom.misc.is_dicom")

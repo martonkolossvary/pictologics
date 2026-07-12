@@ -19,6 +19,7 @@ from pictologics.features.morphology import (
     _get_bounding_box_features,
     _get_convex_hull_features,
     _get_intensity_morphology_features,
+    _get_mesh_features,
     _get_mvee_features,
     _get_pca_features,
     _max_pairwise_distance_numba,
@@ -417,20 +418,6 @@ class TestMorphologyFeatures(unittest.TestCase):
             self.assertIsNone(A)
             self.assertIsNone(c)
 
-        def side_effect_inv_recompute(a):
-            # We want to fail when it recomputes.
-            # But making it loop 50 times with random data is hard to control.
-            # Instead, we just assume line 323 is unreachable with well-behaved data in standard tests
-            # unless we force the loop interaction.
-            # Given difficulty, we might skip this if 99% is acceptable, OR:
-            # We can force the loop counter? No, it's local var.
-            return original_inv(a)
-
-        # Since I cannot easily force the loop to 50 and then fail without rewriting logic or deep mocking,
-        # I will accept hitting the final exception which is easy (shape check).
-        # The recompute exception is very rare (numerical conditioning).
-        # I'll add the final exception test which I wrote above.
-
     def test_intensity_morphology_no_mask_moments(self):
         """Covers _get_intensity_morphology_features fallback when mask_moments=None."""
         arr = np.zeros((5, 5, 5), dtype=int)
@@ -446,6 +433,27 @@ class TestMorphologyFeatures(unittest.TestCase):
         )
         self.assertIn("integrated_intensity_99N0", features)
         self.assertIn("center_of_mass_shift_KLMA", features)
+
+    def test_get_mesh_features_empty_mask(self):
+        """Empty mask -> no nonzero bbox -> mesh features return empty with no mesh data."""
+        empty = self._create_image(np.zeros((5, 5, 5), dtype=int))
+        features, verts, faces = _get_mesh_features(empty)
+        self.assertEqual(features, {})
+        self.assertIsNone(verts)
+        self.assertIsNone(faces)
+
+    def test_intensity_morphology_empty_intensity_mask(self):
+        """Empty intensity mask -> no nonzero bbox -> returns before accumulation."""
+        arr = np.zeros((5, 5, 5), dtype=int)
+        arr[1:4, 1:4, 1:4] = 1
+        mask = self._create_image(arr)
+        image = self._create_image(np.full((5, 5, 5), 10.0, dtype=float))
+        empty_intensity = self._create_image(np.zeros((5, 5, 5), dtype=int))
+
+        features = _get_intensity_morphology_features(
+            mask, image, empty_intensity, mesh_volume=27.0
+        )
+        self.assertNotIn("integrated_intensity_99N0", features)
 
 
 if __name__ == "__main__":

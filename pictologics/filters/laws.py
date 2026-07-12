@@ -2,25 +2,20 @@
 """Laws kernels filter implementation (IBSI code: JTXT)."""
 
 import math
-from typing import Any, Dict, List, Optional, Tuple, Union, overload
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, Tuple, Union, cast, overload
 
 import numpy as np
 from numpy import typing as npt
-from scipy.ndimage import uniform_filter
+from scipy.ndimage import convolve1d, uniform_filter
 
 from .base import (
     BoundaryCondition,
     _normalized_separable_convolve_3d,
+    _prepare_masked_image,
     ensure_float32,
     get_scipy_mode,
 )
-
-# ... (omitted kernels, assume they are there) ...
-# Wait, I cannot replace just the function def and imports in one go if they are far apart.
-# I should do imports first, then function def.
-# But I pressed "replace_file_content" with intention to do both? No, I should use multi_replace.
-# I'll cancel this and use multi_replace.
-
 
 # Normalized Laws kernels (IBSI 2 Table 6)
 _LAWS_KERNELS: Dict[str, npt.NDArray[np.floating[Any]]] = {
@@ -69,15 +64,10 @@ def _separable_convolve_3d(
     Returns:
         Convolved 3D array
     """
-    from scipy.ndimage import convolve1d
-
     # Apply 1D convolutions sequentially along each axis
     result = convolve1d(image, g1, axis=0, mode=mode)
     result = convolve1d(result, g2, axis=1, mode=mode)
     result = convolve1d(result, g3, axis=2, mode=mode)
-    # Explicit cast to fix MyPy 'no-any-return'
-    from typing import cast
-
     return cast(npt.NDArray[np.floating[Any]], result.astype(image.dtype, copy=False))
 
 
@@ -181,13 +171,23 @@ def laws_filter(
             If None (default), auto-enables for images > ~128³ voxels.
             Only affects rotation_invariant mode.
         source_mask: Optional boolean mask where True = valid voxel.
-            When provided, uses normalized separable convolution to exclude
-            invalid (sentinel) voxels from computation. Only supported in
-            non-rotation-invariant mode.
+            In non-rotation-invariant mode, uses normalized separable convolution
+            to exclude invalid (sentinel) voxels. In rotation-invariant mode,
+            invalid voxels are zero-filled as a first-order approximation (the
+            rotated kernels preclude normalized convolution).
 
     Returns:
         If source_mask is None: Response map (or energy image if compute_energy=True)
         If source_mask provided: Tuple of (response_map, output_valid_mask)
+
+    Raises:
+        ValueError: If `kernels` does not parse into exactly 3 Laws kernel
+            codes (wrong count or malformed string), if any parsed kernel
+            code is not a recognized name (see `LAWS_KERNELS`), or if
+            `rotation_invariant=True` and `pooling` is not "max", "average",
+            or "min".
+        RuntimeError: Defensive check raised if no response was computed;
+            not expected to occur in normal use.
 
     Example:
         Apply Laws E5L5S5 kernel with rotation invariance and texture energy:
@@ -235,104 +235,84 @@ def laws_filter(
         raise ValueError(f"Unknown pooling method: {pooling}")
 
     # Get 1D kernels for separable convolution
-    g1 = LAWS_KERNELS[kernel_names[0]].astype(np.float32)
-    g2 = LAWS_KERNELS[kernel_names[1]].astype(np.float32)
-    g3 = LAWS_KERNELS[kernel_names[2]].astype(np.float32)
+    try:
+        g1 = LAWS_KERNELS[kernel_names[0]].astype(np.float32)
+        g2 = LAWS_KERNELS[kernel_names[1]].astype(np.float32)
+        g3 = LAWS_KERNELS[kernel_names[2]].astype(np.float32)
+    except KeyError as exc:
+        valid = ", ".join(sorted(LAWS_KERNELS))
+        raise ValueError(
+            f"Unknown Laws kernel {exc.args[0]!r}; valid kernels are: {valid}"
+        ) from exc
 
     # Auto-detect parallel mode based on image size
     if use_parallel is None:
         use_parallel = image.size > _PARALLEL_THRESHOLD
 
+    result: npt.NDArray[np.floating[Any]] | None = None
+
     if rotation_invariant:
+        # Normalized convolution isn't available on the rotated kernels, so zero-fill
+        # invalid voxels as a first-order approximation (same approach the FFT-based
+        # filters use). The output validity mask is the input mask (zero-fill does
+        # not shrink it, unlike normalized convolution).
+        if source_mask is not None:
+            image = _prepare_masked_image(image, source_mask)
+            valid_mask = source_mask
+        else:
+            valid_mask = None
+
         rotations = _get_rotation_permutations_3d()
 
-        def apply_rotated_convolution(
-            rotation: Tuple[Tuple[int, int, int], Tuple[bool, bool, bool]],
-        ) -> npt.NDArray[np.floating[Any]]:
-            """Apply separable convolution with rotated kernels."""
-            perm, flips = rotation
-            # Permute kernel order to match rotation
-            rotated_kernels = [g1, g2, g3]
-            rotated_kernels = [rotated_kernels[p] for p in perm]
-            # Flip kernels as needed
-            for i, do_flip in enumerate(flips):
-                if do_flip:
-                    rotated_kernels[i] = rotated_kernels[i][::-1].copy()
-            # Apply separable convolution
+        # Every Laws 1D kernel is odd-length and either symmetric (L, S, R) or
+        # antisymmetric (E, W). Reversing a symmetric kernel is a no-op; reversing an
+        # antisymmetric one negates it. So each of the 24 rotated separable
+        # convolutions equals ±(a convolution with the kernels permuted but not
+        # flipped). We therefore compute only the (at most 6) distinct permutations
+        # and recover every rotation's response with a sign flip.
+        kernel_arrays = [g1, g2, g3]
+        antisym = [bool(np.allclose(k, -k[::-1])) for k in kernel_arrays]
+
+        base_keys: List[Tuple[Tuple[str, str, str], Tuple[int, int, int]]] = []
+        seen: set[Tuple[str, str, str]] = set()
+        for perm, _flips in rotations:
+            key = (kernel_names[perm[0]], kernel_names[perm[1]], kernel_names[perm[2]])
+            if key not in seen:
+                seen.add(key)
+                base_keys.append((key, perm))
+
+        def _base(perm: Tuple[int, int, int]) -> npt.NDArray[np.floating[Any]]:
             return _separable_convolve_3d(
-                image, rotated_kernels[0], rotated_kernels[1], rotated_kernels[2], mode
+                image, kernel_arrays[perm[0]], kernel_arrays[perm[1]], kernel_arrays[perm[2]], mode
             )
 
         if use_parallel:
-            # Parallel processing for large images
-            # Use as_completed to process results as they finish, avoiding
-            # holding all 24 response maps in memory at once.
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
             with ThreadPoolExecutor() as executor:
-                # Submit all rotation tasks
-                future_to_rot = {
-                    executor.submit(apply_rotated_convolution, rot): rot for rot in rotations
-                }
-
-                # Pool responses incrementally
-                result: npt.NDArray[np.floating[Any]] | None = None
-                for _, future in enumerate(as_completed(future_to_rot)):
-                    response = future.result()
-
-                    if result is None:
-                        # Initialize accumulator with first result
-                        result = (
-                            response.astype(np.float64) if pooling == "average" else response.copy()
-                        )
-                    else:
-                        if result is None:  # pragma: no cover
-                            raise RuntimeError("Result should not be None")
-
-                        res = result
-
-                        if pooling == "max":
-                            np.maximum(res, response, out=res)
-                        elif pooling == "average":
-                            res += response
-                        elif pooling == "min":
-                            np.minimum(res, response, out=res)
-                        else:
-                            raise ValueError(
-                                f"Unknown pooling method: {pooling}"
-                            )  # pragma: no cover
-
-                    # Explicitly delete response to free memory
-                    del response
+                computed = list(executor.map(lambda kp: _base(kp[1]), base_keys))
         else:
-            # Sequential processing for small images (avoid thread overhead)
-            result = None
-            for i, rotation in enumerate(rotations):
-                response = apply_rotated_convolution(rotation)
+            computed = [_base(perm) for _key, perm in base_keys]
+        base_cache = {key: resp for (key, _perm), resp in zip(base_keys, computed, strict=True)}
 
-                if i == 0:
-                    result = (
-                        response.astype(np.float64) if pooling == "average" else response.copy()
-                    )
-                else:
-                    if result is None:  # pragma: no cover
-                        raise RuntimeError("Result should not be None")
-
-                    res = result
-
-                    if pooling == "max":
-                        np.maximum(res, response, out=res)
-                    elif pooling == "average":
-                        res += response
-                    elif pooling == "min":
-                        np.minimum(res, response, out=res)
-                    else:
-                        raise ValueError(f"Unknown pooling method: {pooling}")  # pragma: no cover
+        for perm, flips in rotations:
+            key = (kernel_names[perm[0]], kernel_names[perm[1]], kernel_names[perm[2]])
+            sign = 1
+            for i, do_flip in enumerate(flips):
+                if do_flip and antisym[perm[i]]:
+                    sign = -sign
+            base = base_cache[key]
+            signed = base if sign > 0 else -base
+            if result is None:
+                result = signed.astype(np.float64) if pooling == "average" else signed.copy()
+            elif pooling == "max":
+                np.maximum(result, signed, out=result)
+            elif pooling == "average":
+                result += signed
+            else:  # "min"
+                np.minimum(result, signed, out=result)
 
         # Finalize average pooling
         if pooling == "average" and result is not None:
             result /= len(rotations)
-        valid_mask = None
     else:
         # Non-rotation-invariant: single separable convolution
         if source_mask is not None:
@@ -348,11 +328,12 @@ def laws_filter(
         if result is None:  # pragma: no cover
             raise RuntimeError("Result should not be None")
 
-        # Energy = mean of absolute values over δ neighborhood
-        # This is equivalent to uniform_filter on |result|
-        abs_result = np.abs(result)
+        # Energy = mean of absolute values over δ neighborhood, i.e. uniform_filter
+        # on |result|. Accumulate in float64: scipy's running moving-sum otherwise
+        # drifts in float32 over long axes. Cast the result back to float32.
+        abs_result = np.abs(result).astype(np.float64, copy=False)
         energy_support = 2 * energy_distance + 1
-        result = uniform_filter(abs_result, size=energy_support, mode=mode)
+        result = uniform_filter(abs_result, size=energy_support, mode=mode).astype(np.float32)
 
     if result is None:  # pragma: no cover
         raise RuntimeError("Result should not be None")

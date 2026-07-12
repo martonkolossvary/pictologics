@@ -32,6 +32,25 @@ This differs from raw DICOM and matplotlib conventions:
 The loaders handle the necessary axis transformations automatically. When using
 visualization utilities like `visualize_mask_overlay()`, slices are internally
 transposed for correct display.
+
+World Coordinate Frames:
+------------------------
+Origin and direction metadata are reported in the **native world frame of the
+source format** and are *not* converted between frames:
+
+- **DICOM** (series, single files, SEG): LPS+ (Left, Posterior, Superior), as
+  defined by ``ImagePositionPatient`` / ``ImageOrientationPatient``.
+- **NIfTI**: RAS+ (Right, Anterior, Superior), as defined by the NIfTI affine
+  read via nibabel. (Note: SimpleITK converts NIfTI to LPS+ on load; this
+  library does not.)
+
+The X and Y axes of the two frames point in opposite directions, so origins and
+direction matrices from different formats are **not directly comparable**. Do
+not mix formats within a single geometric operation (e.g., a DICOM-derived
+``reference_image`` with a NIfTI mask): geometry validation will fail or, worse,
+repositioning may silently misalign. Keep an image and its masks in the same
+format, or convert one externally beforehand. A ``UserWarning`` is emitted when
+such mixing is detected.
 """
 
 from __future__ import annotations
@@ -59,6 +78,25 @@ def _direction_matrix(direction: Any) -> npt.NDArray[np.float64]:
     if matrix.shape != (3, 3):
         raise ValueError(f"Direction must be a 3x3 matrix, got shape {matrix.shape}.")
     return matrix
+
+
+def _warn_if_mixed_coordinate_frames(image: Image, reference: Image) -> None:
+    """Warn when NIfTI- and DICOM-sourced images are combined geometrically.
+
+    NIfTI geometry is in the RAS+ world frame while DICOM geometry is in LPS+
+    (see module docstring). Detection is heuristic: images loaded from NIfTI
+    carry ``modality == "Nifti"``, everything else is assumed DICOM-sourced.
+    """
+    if (image.modality == "Nifti") != (reference.modality == "Nifti"):
+        warnings.warn(
+            "Mixing NIfTI- and DICOM-sourced images: NIfTI geometry is in the "
+            "RAS+ world frame while DICOM geometry is in LPS+, and no conversion "
+            "is performed. Geometry validation/repositioning may fail or silently "
+            "misalign. Use the same source format for an image and its masks, or "
+            "convert one externally.",
+            UserWarning,
+            stacklevel=3,
+        )
 
 
 def _validate_geometry(
@@ -111,12 +149,54 @@ def _normalize_direction_columns(
     return cast(npt.NDArray[np.float64], direction)
 
 
-def _rescale_params_from_functional_group(group: Any) -> tuple[float, float] | None:
-    """Return RescaleSlope/Intercept from a DICOM functional group item if present."""
-    sequence = getattr(group, "PixelValueTransformationSequence", None)
+def _functional_group_item(group: Any, sequence_name: str) -> Any:
+    """Return the first item of a DICOM functional-group sequence, or None."""
+    sequence = getattr(group, sequence_name, None)
     if not isinstance(sequence, Sequence) or len(sequence) == 0:
         return None
-    item = sequence[0]
+    return sequence[0]
+
+
+def _shared_functional_group_item(ds: Any, sequence_name: str) -> Any:
+    """Look up a functional-group item that applies to all frames of an enhanced
+    multiframe object.
+
+    Checks SharedFunctionalGroupsSequence first, then falls back to the first
+    item of PerFrameFunctionalGroupsSequence. Returns None if unavailable.
+    """
+    for parent_name in ("SharedFunctionalGroupsSequence", "PerFrameFunctionalGroupsSequence"):
+        parent = getattr(ds, parent_name, None)
+        if isinstance(parent, Sequence) and len(parent) > 0:
+            item = _functional_group_item(parent[0], sequence_name)
+            if item is not None:
+                return item
+    return None
+
+
+def _per_frame_positions(ds: Any, n_frames: int) -> list[npt.NDArray[np.float64]] | None:
+    """Return ImagePositionPatient for every frame of an enhanced multiframe object.
+
+    Returns None unless PerFrameFunctionalGroupsSequence provides a position for
+    each of the ``n_frames`` frames.
+    """
+    per_frame = getattr(ds, "PerFrameFunctionalGroupsSequence", None)
+    if not isinstance(per_frame, Sequence) or len(per_frame) != n_frames:
+        return None
+    positions = []
+    for group in per_frame:
+        item = _functional_group_item(group, "PlanePositionSequence")
+        ipp = getattr(item, "ImagePositionPatient", None) if item is not None else None
+        if ipp is None or len(ipp) != 3:
+            return None
+        positions.append(np.array([float(ipp[0]), float(ipp[1]), float(ipp[2])], dtype=np.float64))
+    return positions
+
+
+def _rescale_params_from_functional_group(group: Any) -> tuple[float, float] | None:
+    """Return RescaleSlope/Intercept from a DICOM functional group item if present."""
+    item = _functional_group_item(group, "PixelValueTransformationSequence")
+    if item is None:
+        return None
     return (
         float(getattr(item, "RescaleSlope", 1.0)),
         float(getattr(item, "RescaleIntercept", 0.0)),
@@ -171,7 +251,7 @@ def _apply_dicom_rescale(
     return scaled
 
 
-@dataclass
+@dataclass(eq=False)
 class Image:
     """
     A standardized container for 3D medical image data and metadata.
@@ -179,6 +259,13 @@ class Image:
     This class serves as the common interface for all image processing operations
     in the library, abstracting away the differences between file formats like
     DICOM and NIfTI.
+
+    Note:
+        ``origin`` and ``direction`` are expressed in the native world frame of
+        the source format (LPS+ for DICOM, RAS+ for NIfTI) — see the module
+        docstring ("World Coordinate Frames"). Equality (``==``) compares object
+        identity: element-wise comparison of the array fields would be ambiguous,
+        so dataclass-generated equality is disabled.
 
     Attributes:
         array (npt.NDArray[np.floating[Any]]): The 3D image data with shape (x, y, z).
@@ -194,6 +281,19 @@ class Image:
             When set, preprocessing operations like resampling and filtering will exclude
             invalid voxels from interpolation/convolution to prevent sentinel value contamination.
             If None, all voxels are assumed to contain valid data (traditional behavior).
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.loader import Image
+
+        array = np.zeros((10, 10, 5), dtype=np.float32)
+        image = Image(array=array, spacing=(1.0, 1.0, 2.0), origin=(0.0, 0.0, 0.0))
+        print(image.array.shape)
+        # (10, 10, 5)
+        print(image.has_source_mask)
+        # False
+        ```
     """
 
     array: npt.NDArray[np.floating[Any]]
@@ -282,6 +382,19 @@ def create_full_mask(reference_image: Image, dtype: DTypeLike = np.uint8) -> Ima
 
     Raises:
         ValueError: If the reference image does not have a valid 3D array.
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.loader import Image, create_full_mask
+
+        image = Image(array=np.zeros((10, 10, 5)), spacing=(1.0, 1.0, 2.0), origin=(0.0, 0.0, 0.0))
+        mask = create_full_mask(image)
+        print(mask.array.shape, mask.array.dtype)
+        # (10, 10, 5) uint8
+        print(mask.array.min(), mask.array.max())
+        # 1 1
+        ```
     """
     if reference_image.array.ndim != 3:
         raise ValueError(
@@ -344,6 +457,7 @@ def _position_in_reference(
         ValueError: If spacing, direction, sub-voxel tolerance, or minimum overlap
             fraction checks fail.
     """
+    _warn_if_mixed_coordinate_frames(image, reference)
 
     # 0. Validate parameters
     if not 0.0 <= min_overlap_fraction <= 1.0:
@@ -570,6 +684,14 @@ def load_image(
         For DICOM SEG files, this function uses ``pictologics.loaders.load_seg()``
         internally. For more control over segment extraction (e.g., selecting specific
         segments or extracting them separately), use ``load_seg()`` directly.
+        ``dataset_index`` and ``fill_value`` do not apply to SEG files and are
+        ignored with a ``UserWarning`` if set to non-default values.
+
+    Warning:
+        NIfTI and DICOM geometry live in different world coordinate frames
+        (RAS+ vs LPS+) and are not converted — do not mix formats between an
+        image and its ``reference_image``/masks. See the module docstring
+        ("World Coordinate Frames").
 
     Args:
         path (str): The absolute or relative path to the image file (e.g., .nii.gz,
@@ -592,7 +714,9 @@ def load_image(
             loading cropped segmentation masks that need to match a full-sized image.
         transpose_axes (tuple[int, int, int] | None): Optional axis transposition to apply
             before repositioning. Use this if the mask's axis order differs from the reference.
-            E.g., (0, 2, 1) swaps Y and Z axes. Only used when reference_image is provided.
+            E.g., (0, 2, 1) swaps Y and Z axes. Only used when reference_image is provided;
+            when set, repositioning is performed even if the loaded shape already matches
+            the reference.
         fill_value (float): Fill value for regions outside the loaded image when
             repositioning (default: 0.0). Only used when reference_image is provided.
         apply_rescale (bool): If True (default), apply RescaleSlope and RescaleIntercept
@@ -701,6 +825,13 @@ def load_image(
             if _is_dicom_seg(path):
                 from pictologics.loaders.seg_loader import load_seg
 
+                if dataset_index != 0 or fill_value != 0.0:
+                    warnings.warn(
+                        "dataset_index and fill_value are ignored for DICOM SEG files. "
+                        "Use pictologics.loaders.load_seg() directly for segment selection.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
                 seg_result = load_seg(
                     path,
                     reference_image=reference_image,
@@ -718,19 +849,21 @@ def load_image(
 
             try:
                 loaded_image = _load_dicom_file(path, apply_rescale)
-            except Exception:
+            except Exception as read_error:
                 raise ValueError(
                     f"Unsupported file format or unable to read file: {path}"
-                ) from None
+                ) from read_error
     except Exception as e:
         # Re-raise ValueErrors directly, wrap others
         if isinstance(e, ValueError):
             raise e
         raise ValueError(f"Failed to load image from '{path}': {e}") from e
 
-    # Apply repositioning if reference_image is provided and shapes differ
+    # Apply repositioning if reference_image is provided and shapes differ,
+    # or if an explicit axis transposition was requested (a transposed mask may
+    # coincidentally have the same shape as the reference, e.g. cubic volumes).
     if reference_image is not None:
-        if loaded_image.array.shape != reference_image.array.shape:
+        if loaded_image.array.shape != reference_image.array.shape or transpose_axes is not None:
             loaded_image = _position_in_reference(
                 loaded_image,
                 reference_image,
@@ -741,6 +874,7 @@ def load_image(
                 min_overlap_fraction,
             )
         else:
+            _warn_if_mixed_coordinate_frames(loaded_image, reference_image)
             _validate_geometry(loaded_image, reference_image, "loaded image", "reference image")
 
     return loaded_image
@@ -1202,9 +1336,11 @@ def _load_dicom_series(
     """
     from pictologics.utilities.dicom_utils import MULTI_PHASE_TAGS, split_dicom_phases
 
-    # List all DICOM files
+    # List candidate files; non-DICOM files are skipped during the metadata
+    # read below (dcmread rejects them), avoiding a separate is_dicom pass
+    # that would open every file twice.
     path_obj = Path(path)
-    files = [p for p in path_obj.iterdir() if p.is_file() and pydicom.misc.is_dicom(p)]
+    files = [p for p in path_obj.iterdir() if p.is_file()]
     if not files:
         raise ValueError(f"No DICOM files found in directory: {path}")
 
@@ -1366,6 +1502,14 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
     (segmentation objects, multiframe images). The resulting image will be in
     (X, Y, Z) format with at least 1 slice in the Z dimension.
 
+    Geometry tags (PixelSpacing, SpacingBetweenSlices/SliceThickness,
+    ImagePositionPatient, ImageOrientationPatient) are read from the top level,
+    falling back to the Shared/PerFrame functional groups used by enhanced
+    multiframe objects. When per-frame positions are available, frames are
+    sorted spatially (projection onto the slice normal, like
+    ``_load_dicom_series``) and the Z spacing is derived from consecutive frame
+    positions if no spacing tag is present.
+
     Args:
         path (str): Path to the DICOM file.
         apply_rescale (bool): If True (default), apply RescaleSlope and RescaleIntercept
@@ -1389,6 +1533,40 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
     if apply_rescale:
         data = _apply_dicom_rescale(data, dcm)
 
+    # Enhanced multiframe objects store geometry in functional groups rather
+    # than top-level tags; resolve shared items once (top level takes precedence).
+    measures = _shared_functional_group_item(dcm, "PixelMeasuresSequence")
+    orientation_item = _shared_functional_group_item(dcm, "PlaneOrientationSequence")
+
+    # Extract direction matrix from ImageOrientationPatient if available
+    iop = getattr(dcm, "ImageOrientationPatient", None)
+    if iop is None and orientation_item is not None:
+        iop = getattr(orientation_item, "ImageOrientationPatient", None)
+    slice_cosine = np.array([0.0, 0.0, 1.0])
+    direction = np.eye(3)
+    if iop is not None:
+        try:
+            orientation = np.asarray(iop, dtype=float)
+            row_cosines = orientation[:3]
+            col_cosines = orientation[3:]
+            slice_cosine = np.cross(row_cosines, col_cosines)
+            direction = np.stack([row_cosines, col_cosines, slice_cosine], axis=1)
+        except (TypeError, ValueError):
+            slice_cosine = np.array([0.0, 0.0, 1.0])
+            direction = np.eye(3)
+
+    # Sort multiframe data spatially when per-frame positions are available
+    # (frame storage order is not guaranteed to match spatial order). Rescale
+    # has already been applied, so reordering frames here is safe.
+    frame_positions = None
+    if data.ndim == 3:
+        frame_positions = _per_frame_positions(dcm, data.shape[0])
+        if frame_positions is not None:
+            order = np.argsort([float(np.dot(p, slice_cosine)) for p in frame_positions])
+            if not np.array_equal(order, np.arange(len(order))):
+                data = data[order]
+            frame_positions = [frame_positions[i] for i in order]
+
     # Handle dimensions
     # DICOM pixel_array format:
     #   - 2D: (Rows, Columns) = (Y, X)
@@ -1407,14 +1585,30 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
 
     # Metadata extraction
     try:
-        ps = dcm.PixelSpacing
+        ps = getattr(dcm, "PixelSpacing", None)
+        if ps is None and measures is not None:
+            ps = getattr(measures, "PixelSpacing", None)
+        if ps is None:
+            raise AttributeError("PixelSpacing")
+
         # Prefer SpacingBetweenSlices over SliceThickness (consistent with _load_dicom_series)
-        if hasattr(dcm, "SpacingBetweenSlices"):
-            spacing_z = float(dcm.SpacingBetweenSlices)
-        elif hasattr(dcm, "SliceThickness"):
-            spacing_z = float(dcm.SliceThickness)
-        else:
-            spacing_z = 1.0
+        spacing_z = None
+        for tag_source in (dcm, measures):
+            if tag_source is None:
+                continue
+            if hasattr(tag_source, "SpacingBetweenSlices"):
+                spacing_z = float(tag_source.SpacingBetweenSlices)
+                break
+            if hasattr(tag_source, "SliceThickness"):
+                spacing_z = float(tag_source.SliceThickness)
+                break
+        if spacing_z is None:
+            # Estimate from consecutive (sorted) frame positions if available
+            if frame_positions is not None and len(frame_positions) > 1:
+                spacing_z = float(np.linalg.norm(frame_positions[1] - frame_positions[0]))
+            else:
+                spacing_z = 1.0
+
         spacing = (
             float(ps[1]),  # Column spacing (X)
             float(ps[0]),  # Row spacing (Y)
@@ -1423,21 +1617,22 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
     except (AttributeError, IndexError):
         spacing = (1.0, 1.0, 1.0)
 
+    # Origin: first (spatially sorted) frame position takes precedence for
+    # multiframe objects; otherwise the top-level tag, then functional groups.
     try:
-        ipp = dcm.ImagePositionPatient
+        if frame_positions is not None:
+            ipp: Any = frame_positions[0]
+        else:
+            ipp = getattr(dcm, "ImagePositionPatient", None)
+            if ipp is None:
+                position_item = _shared_functional_group_item(dcm, "PlanePositionSequence")
+                if position_item is not None:
+                    ipp = getattr(position_item, "ImagePositionPatient", None)
+            if ipp is None:
+                raise AttributeError("ImagePositionPatient")
         origin = (float(ipp[0]), float(ipp[1]), float(ipp[2]))
-    except AttributeError:
+    except (AttributeError, IndexError, TypeError):
         origin = (0.0, 0.0, 0.0)
-
-    # Extract direction matrix from ImageOrientationPatient if available
-    try:
-        orientation = np.array(dcm.ImageOrientationPatient, dtype=float)
-        row_cosines = orientation[:3]
-        col_cosines = orientation[3:]
-        slice_cosine = np.cross(row_cosines, col_cosines)
-        direction = np.stack([row_cosines, col_cosines, slice_cosine], axis=1)
-    except (AttributeError, ValueError):
-        direction = np.eye(3)
 
     return Image(
         array=data,

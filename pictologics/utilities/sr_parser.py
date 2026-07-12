@@ -805,6 +805,14 @@ def is_dicom_sr(path: str | Path) -> bool:
 
     Returns:
         True if the file is a DICOM SR object, False otherwise.
+
+    Example:
+        ```python
+        from pictologics.utilities.sr_parser import is_dicom_sr
+
+        if is_dicom_sr("report.dcm"):
+            print("This is a DICOM SR document")
+        ```
     """
     import pydicom
 

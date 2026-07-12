@@ -344,6 +344,185 @@ class TestTextureFeatures(unittest.TestCase):
         # Check that we got a result (feature exists)
         self.assertIn("small_distance_emphasis_0GBI", f)
 
+    # ------------------------------------------------------------------
+    # Local-feature kernel branch coverage (interior gaps in the ROI)
+    # ------------------------------------------------------------------
+    def test_local_kernel_interior_empty_slice(self):
+        """An interior all-background z-slice is skipped (it survives the bbox crop)."""
+        data = np.ones((3, 5, 5), dtype=int)
+        mask = np.zeros((3, 5, 5), dtype=int)
+        mask[0] = 1
+        mask[2] = 1  # z=1 is empty but z=0/z=2 keep it inside the ROI bbox
+        m = texture_module.calculate_all_texture_matrices(data, mask, self.n_bins)
+        self.assertIn("glcm", m)
+
+    def test_local_kernel_interior_background_hole(self):
+        """A background hole in the safe interior exercises the masked GLRLM branches:
+        the skip-background return, the run-start-adjacent-to-background test, and the
+        run-walk break when a run hits background before the image edge."""
+        data = np.ones((5, 5, 5), dtype=int)
+        mask = np.ones((5, 5, 5), dtype=int)
+        mask[2, 2, 2] = 0
+        m = texture_module.calculate_all_texture_matrices(data, mask, self.n_bins)
+        self.assertIn("glrlm", m)
+
+    def test_matrices_zone_only_no_gldzm(self):
+        """Disabling every local family and GLDZM exercises the placeholder paths
+        (zero local matrices; dummy distance array for the GLSZM-only zone call)."""
+        m = texture_module.calculate_all_texture_matrices(
+            self.data,
+            self.mask,
+            self.n_bins,
+            calc_glcm=False,
+            calc_glrlm=False,
+            calc_ngtdm=False,
+            calc_ngldm=False,
+            calc_gldzm=False,
+        )
+        self.assertIn("glszm", m)
+
+    # ------------------------------------------------------------------
+    # Parallel zone kernel (n_chunks > 1) branch coverage
+    # ------------------------------------------------------------------
+    def _run_parallel_zone_kernel(
+        self, data, mask, dist_map, n_chunks, calc_glszm=True, calc_gldzm=True
+    ):
+        texture_module._ZoneBufferPool._instance = None
+        pool = texture_module._ZoneBufferPool.get_instance()
+        max_zones = max(int(np.count_nonzero(mask)), 1)
+        res_gl, res_size, res_dist, stack = pool.get_buffers(max_zones)
+        return texture_module._calculate_zone_features_numba(
+            data,
+            mask,
+            dist_map,
+            self.n_bins,
+            res_gl,
+            res_size,
+            res_dist,
+            stack,
+            n_chunks,
+            calc_glszm,
+            calc_gldzm,
+        )
+
+    def test_parallel_zone_kernel_merge(self):
+        """A single-grey column spanning z is labelled per-chunk, then the boundary
+        union-find merges the sub-zones into one zone (with a min-distance update)."""
+        depth = 6
+        data = np.ones((depth, 3, 3), dtype=int)
+        mask = np.zeros((depth, 3, 3), dtype=int)
+        mask[:, 1, 1] = 1
+        # strictly decreasing distance so the per-chunk DFS updates min_dist
+        dist_map = np.zeros((depth, 3, 3), dtype=np.int32)
+        dist_map[:, 1, 1] = np.arange(depth, 0, -1)
+        glszm, gldzm = self._run_parallel_zone_kernel(data, mask, dist_map, n_chunks=4)
+        self.assertEqual(int(glszm.sum()), 1)  # the per-chunk sub-zones merged into one
+        self.assertEqual(int(gldzm.sum()), 1)
+
+    def test_uf_find_path_compression(self):
+        """_uf_find flattens a multi-hop parent chain onto the root."""
+        parent = np.array([0, 0, 1, 2, 3], dtype=np.int32)  # 4 -> 3 -> 2 -> 1 -> 0
+        self.assertEqual(texture_module._uf_find(parent, 4), 0)
+        self.assertEqual(parent[4], 0)
+        self.assertEqual(parent[3], 0)
+
+    def test_parallel_zone_kernel_edge_cases(self):
+        depth = 4
+        data = np.ones((depth, 3, 3), dtype=int)
+        mask = np.zeros((depth, 3, 3), dtype=int)
+        mask[:, 1, 1] = 1
+        dist = np.zeros((depth, 3, 3), dtype=np.int32)
+
+        # n_chunks < 1 clamps up to 1; n_chunks > depth clamps down to depth
+        self._run_parallel_zone_kernel(data, mask, dist, n_chunks=0)
+        self._run_parallel_zone_kernel(data, mask, dist, n_chunks=100)
+        # calc_gldzm=False uses the dummy distance buffer
+        self._run_parallel_zone_kernel(data, mask, dist, n_chunks=2, calc_gldzm=False)
+        # all-zero distances -> max_dist_val falls back to 1
+        glszm, _ = self._run_parallel_zone_kernel(data, mask, dist, n_chunks=2)
+        self.assertEqual(int(glszm.sum()), 1)
+
+        # ROI voxels with an out-of-range grey level are marked invalid and skipped
+        data_bad = np.full((depth, 3, 3), self.n_bins + 5, dtype=int)
+        glszm_bad, _ = self._run_parallel_zone_kernel(data_bad, mask, dist, n_chunks=2)
+        self.assertEqual(int(glszm_bad.sum()), 0)
+
+    def test_parallel_zone_merge_attach_higher_root(self):
+        """Two chunk-0 zones both touching one chunk-1 zone force the union to attach a
+        higher-id root onto a lower one (the `ra > rb` branch of the boundary merge)."""
+        mask = np.zeros((2, 4, 4), dtype=int)
+        mask[0, 0, 0] = 1  # chunk-0 zone A (lowest id)
+        mask[0, 2, 2] = 1  # chunk-0 zone B (higher id, not adjacent to A)
+        mask[1, 1, 1] = 1  # chunk-1 zone C, 26-adjacent to both A and B
+        data = np.ones((2, 4, 4), dtype=int)
+        dist = np.zeros((2, 4, 4), dtype=np.int32)
+        glszm, _ = self._run_parallel_zone_kernel(data, mask, dist, n_chunks=2)
+        self.assertEqual(int(glszm.sum()), 1)  # A, B and C all merge into one zone
+
+    def test_parallel_zone_dispatch(self):
+        """>= 2^17 voxels with >1 thread routes calculate_zone_features to the parallel kernel."""
+        with patch("pictologics.features.texture.numba.config.NUMBA_NUM_THREADS", 4):
+            shape = (32, 64, 64)  # 131072 == 2^17
+            data = np.ones(shape, dtype=int)
+            mask = np.zeros(shape, dtype=int)
+            mask[:, 0, 0] = 1
+            dist_map = np.zeros(shape, dtype=np.int32)
+            glszm, _ = texture_module.calculate_zone_features(data, mask, dist_map, self.n_bins)
+            self.assertEqual(int(glszm.sum()), 1)
+
+
+class TestRoiVoxelCount(unittest.TestCase):
+    """_roi_voxel_count returns the same nonzero count across mask dtypes."""
+
+    def test_dtype_gate_matches_count_nonzero(self) -> None:
+        rng = np.random.default_rng(0)
+        base = rng.integers(0, 2, size=(6, 6, 6))
+        # Float path (dtype.kind == "f"): NaN/Inf count as ROI, -0.0 and 0.0 do not.
+        f = base.astype(np.float64)
+        f.flat[:4] = [np.nan, np.inf, -0.0, 0.0]
+        self.assertEqual(texture_module._roi_voxel_count(f), int(np.count_nonzero(f)))
+        # Non-float masks keep the direct count path.
+        for m in (base.astype(np.int32), base.astype(np.uint8), base.astype(bool)):
+            self.assertEqual(texture_module._roi_voxel_count(m), int(np.count_nonzero(m)))
+
+
+class TestGldzmDistanceMap(unittest.TestCase):
+    """`_gldzm_distance_map` (the GLDZM distance-to-border map) matches the reference
+    `scipy.ndimage.distance_transform_cdt` computation it replaces for 3D masks, and
+    falls back to that same scipy-based computation for non-3D input."""
+
+    @staticmethod
+    def _scipy_reference(mask_bool: np.ndarray) -> np.ndarray:
+        from scipy.ndimage import distance_transform_cdt
+
+        mask_padded = np.pad(mask_bool, 1, mode="constant", constant_values=0)
+        dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.int32)
+        unpad = tuple(slice(1, -1) for _ in range(mask_bool.ndim))
+        return dist_map_padded[unpad]
+
+    def test_matches_scipy_reference_3d(self) -> None:
+        rng = np.random.default_rng(0)
+        for shape in [(1, 1, 1), (5, 5, 5), (1, 6, 7), (9, 3, 4)]:
+            mask_bool = rng.random(shape) < 0.5
+            expected = self._scipy_reference(mask_bool)
+            actual = texture_module._gldzm_distance_map(mask_bool)
+            np.testing.assert_array_equal(actual, expected)
+            self.assertEqual(actual.dtype, expected.dtype)
+
+    def test_all_background_and_all_foreground(self) -> None:
+        for mask_bool in (np.zeros((4, 4, 4), dtype=bool), np.ones((4, 4, 4), dtype=bool)):
+            expected = self._scipy_reference(mask_bool)
+            actual = texture_module._gldzm_distance_map(mask_bool)
+            np.testing.assert_array_equal(actual, expected)
+
+    def test_non_3d_falls_back_to_scipy(self) -> None:
+        """Non-3D masks (never produced by the texture pipeline) hit the defensive
+        scipy fallback branch."""
+        mask_2d = np.array([[True, False, True], [False, True, False]])
+        expected = self._scipy_reference(mask_2d)
+        actual = texture_module._gldzm_distance_map(mask_2d)
+        np.testing.assert_array_equal(actual, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

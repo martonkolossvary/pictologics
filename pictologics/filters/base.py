@@ -7,6 +7,7 @@ from typing import Any, Dict, Tuple, Union
 
 import numpy as np
 from numpy import typing as npt
+from scipy.ndimage import convolve1d, gaussian_filter, gaussian_laplace, uniform_filter
 
 
 class BoundaryCondition(Enum):
@@ -14,6 +15,18 @@ class BoundaryCondition(Enum):
     IBSI 2 boundary conditions for image padding (GBYQ).
 
     Maps to scipy.ndimage mode parameter values.
+
+    Example:
+        ```python
+        from pictologics.filters import BoundaryCondition
+
+        boundary = BoundaryCondition.MIRROR
+        print(boundary.value)
+        # "reflect"
+
+        # Also constructible from the scipy mode string used by get_scipy_mode
+        boundary = BoundaryCondition["MIRROR"]
+        ```
     """
 
     ZERO = "constant"  # Zero padding (Z3VE)
@@ -24,7 +37,22 @@ class BoundaryCondition(Enum):
 
 @dataclass
 class FilterResult:
-    """Container for filter response maps and metadata."""
+    """Container for filter response maps and metadata.
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.filters.base import FilterResult
+
+        result = FilterResult(
+            response_map=np.zeros((4, 4, 4), dtype=np.float32),
+            filter_name="mean",
+            filter_params={"support": 3},
+        )
+        print(result.shape, result.dtype)
+        # (4, 4, 4) float32
+        ```
+    """
 
     response_map: npt.NDArray[np.floating[Any]]
     filter_name: str
@@ -95,8 +123,6 @@ def _normalized_uniform_filter(
     Returns:
         Tuple of (filtered_image, output_valid_mask)
     """
-    from scipy.ndimage import uniform_filter
-
     # Zero out invalid voxels
     valid_image = np.where(source_mask, image, 0.0).astype(np.float64)
 
@@ -140,8 +166,6 @@ def _normalized_gaussian_laplace(
     Returns:
         Tuple of (filtered_image, output_valid_mask)
     """
-    from scipy.ndimage import gaussian_filter, gaussian_laplace
-
     # Zero out invalid voxels
     valid_image = np.where(source_mask, image, 0.0).astype(np.float64)
 
@@ -183,8 +207,6 @@ def _normalized_convolve1d(
     Returns:
         Tuple of (filtered_image, output_valid_mask)
     """
-    from scipy.ndimage import convolve1d
-
     # Zero out invalid voxels
     valid_image = np.where(source_mask, image, 0.0).astype(np.float64)
 
@@ -227,8 +249,6 @@ def _normalized_separable_convolve_3d(
     Returns:
         Tuple of (filtered_image, output_valid_mask)
     """
-    from scipy.ndimage import convolve1d
-
     # Zero out invalid voxels
     valid_image = np.where(source_mask, image, 0.0).astype(np.float64)
 

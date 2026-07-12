@@ -119,5 +119,9 @@ def laplacian_of_gaussian(
             image, source_mask, sigma=sigma_voxels, mode=mode, truncate=truncate
         )
     else:
-        # Original behavior - return just the result (backward compatible)
-        return gaussian_laplace(image, sigma=sigma_voxels, mode=mode, truncate=truncate)  # type: ignore[no-any-return]
+        # Cast to float32 for consistency with the masked path and the other filters
+        # (gaussian_laplace accumulates in the input dtype, so a float64 image keeps
+        # its precision through the convolution before the final downcast).
+        return gaussian_laplace(  # type: ignore[no-any-return]
+            image, sigma=sigma_voxels, mode=mode, truncate=truncate
+        ).astype(np.float32)

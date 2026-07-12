@@ -1,12 +1,13 @@
 # pictologics/filters/gabor.py
 """Gabor filter implementation (IBSI code: Q88H)."""
 
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional, Tuple, Union, cast
 
 import numpy as np
+import scipy.fft
 from numpy import typing as npt
-from scipy.signal import fftconvolve
 
 from .base import (
     BoundaryCondition,
@@ -54,13 +55,19 @@ def gabor_filter(
         pooling: Pooling method ("average", "max", "min")
         average_over_planes: If True, average 2D responses over 3 orthogonal planes
         use_parallel: If True, process slices in parallel. If None (default),
-            auto-enables for images > ~80³ voxels.
+            auto-enables for images > ~46³ voxels.
         source_mask: Optional boolean mask where True = valid voxel.
             When provided, zeros out invalid (sentinel) voxels before
             FFT-based convolution to prevent contamination.
 
     Returns:
         Response map (modulus of complex response)
+
+    Raises:
+        ValueError: If `pooling` is not "max", "average", or "min", or if
+            `rotation_invariant=True` is set without providing `delta_theta`.
+        RuntimeError: Defensive check raised if plane averaging fails to
+            produce a result; not expected to occur in normal use.
 
     Example:
         Apply Gabor filter with rotation invariance over orthogonal planes:
@@ -79,7 +86,7 @@ def gabor_filter(
             lambda_mm=4.0,
             gamma=0.5,
             rotation_invariant=True,
-            delta_theta=np.pi/4,
+            delta_theta=0.7853981633974483,  # pi/4
             average_over_planes=True
         )
         ```
@@ -100,6 +107,16 @@ def gabor_filter(
     if isinstance(spacing_mm, (int, float)):
         spacing_mm = (float(spacing_mm),) * 3
 
+    # The 2D kernel is built in voxel units from a single spacing value, which is
+    # only correct for isotropic voxels (IBSI expects isotropic resampling first).
+    if not (np.isclose(spacing_mm[0], spacing_mm[1]) and np.isclose(spacing_mm[1], spacing_mm[2])):
+        warnings.warn(
+            "gabor_filter assumes isotropic voxel spacing; the kernel is built from "
+            f"the first-axis spacing ({spacing_mm[0]}) only. Resample to isotropic "
+            "spacing first for IBSI-compliant results.",
+            stacklevel=2,
+        )
+
     # Convert mm to voxels (use in-plane spacing for 2D filter)
     sigma_voxels = sigma_mm / spacing_mm[0]  # Assume isotropic in-plane
     lambda_voxels = lambda_mm / spacing_mm[0]
@@ -118,10 +135,20 @@ def gabor_filter(
     if use_parallel is None:
         use_parallel = image.size > _PARALLEL_THRESHOLD
 
-    if rotation_invariant and delta_theta is not None:
+    if rotation_invariant:
+        if delta_theta is None:
+            raise ValueError(
+                "rotation_invariant=True requires delta_theta (the orientation step in radians)"
+            )
         # Generate orientations from 0 to 2π
         n_orientations = int(np.ceil(2 * np.pi / delta_theta))
         thetas = [i * delta_theta for i in range(n_orientations)]
+        # The Gabor response modulus is π-periodic in theta: kernel(θ+π) = conj(kernel(θ))
+        # and the image is real, so |response| is identical for θ and θ+π. When the
+        # orientation set is closed under +π (n even and spans exactly 2π), the second
+        # half duplicates the first; drop it (max/min/average pooling are unchanged).
+        if n_orientations % 2 == 0 and abs(n_orientations * delta_theta - 2 * np.pi) < 1e-9:
+            thetas = thetas[: n_orientations // 2]
     else:
         thetas = [theta]
 
@@ -186,75 +213,79 @@ def _apply_gabor_to_plane(
         _create_gabor_kernel_2d(sigma_voxels, lambda_voxels, gamma, theta) for theta in thetas
     ]
 
+    # Move the plane axis to position 0 so each image_reordered[i] is a 2D slice
+    # (a view; the copy happens later in np.pad).
+    image_reordered = np.moveaxis(image, plane_axis, 0)
+    n_slices = image_reordered.shape[0]
+    slice_h, slice_w = int(image_reordered.shape[1]), int(image_reordered.shape[2])
+
+    # All slices share one 2D shape and all kernels share one shape, so the FFT of
+    # each padded slice can be computed once and reused across every orientation,
+    # and each kernel's FFT can be computed once for the whole plane. This is the
+    # equivalent of fftconvolve(padded, k, "same") but without re-transforming the
+    # slice per kernel and the kernels per slice.
+    kernel_shape = kernels[0].shape
+    pad_h = kernel_shape[0] // 2
+    pad_w = kernel_shape[1] // 2
+
+    # Map scipy.ndimage mode to numpy.pad mode
+    pad_mode_map = {
+        "constant": "constant",
+        "reflect": "symmetric",
+        "mirror": "reflect",
+        "nearest": "edge",
+        "wrap": "wrap",
+    }
+    pad_mode_literal = pad_mode_map.get(mode, "constant")
+
+    padded_h = slice_h + 2 * pad_h
+    padded_w = slice_w + 2 * pad_w
+    fshape = (
+        scipy.fft.next_fast_len(padded_h + kernel_shape[0] - 1),
+        scipy.fft.next_fast_len(padded_w + kernel_shape[1] - 1),
+    )
+    kernel_ffts = [scipy.fft.fftn(k, s=fshape) for k in kernels]
+
     def process_slice(
         slice_2d: npt.NDArray[np.floating[Any]],
     ) -> npt.NDArray[np.floating[Any]]:
         """Process a single 2D slice with all orientations using in-place pooling."""
-        # Optimization: Pre-pad and pre-cast the slice once, as all kernels have the same size.
-        # This avoids redundant padding and casting inside the loop.
-
-        # Get padding parameters from the first kernel (all have same size)
-        kernel_shape = kernels[0].shape
-        pad_h = kernel_shape[0] // 2
-        pad_w = kernel_shape[1] // 2
-
-        # Map scipy.ndimage mode to numpy.pad mode
-        pad_mode_map = {
-            "constant": "constant",
-            "reflect": "symmetric",
-            "mirror": "reflect",
-            "nearest": "edge",
-            "wrap": "wrap",
-        }
-        pad_mode_literal = pad_mode_map.get(mode, "constant")
-
-        # Pad and cast to complex64 once
         padded = np.pad(slice_2d, ((pad_h, pad_h), (pad_w, pad_w)), mode=pad_mode_literal)  # type: ignore[call-overload]
-        padded_complex = padded.astype(np.complex64)
+        f_padded = scipy.fft.fftn(padded.astype(np.complex64), s=fshape)
 
-        # Helper to convolve pre-padded image
         def convolve_prepadded(
-            k: npt.NDArray[np.floating[Any]],
+            k_fft: npt.NDArray[np.complexfloating[Any, Any]],
         ) -> npt.NDArray[np.floating[Any]]:
-            # fftconvolve mode="same" on padded image
-            response = fftconvolve(padded_complex, k, mode="same")
-            # Crop back to original size
-            h, w = slice_2d.shape
-            cropped = response[pad_h : pad_h + h, pad_w : pad_w + w]
-            # Explicit cast to avoid MyPy 'no-any-return'
+            # Full convolution via FFT; the "same"+unpad crop reduces to a fixed
+            # offset of 2*pad because the kernel half-width equals pad.
+            full = scipy.fft.ifftn(f_padded * k_fft)
+            cropped = full[2 * pad_h : 2 * pad_h + slice_h, 2 * pad_w : 2 * pad_w + slice_w]
             return cast(npt.NDArray[np.floating[Any]], np.abs(cropped))
 
-        if len(kernels) == 1:
-            return convolve_prepadded(kernels[0])
+        if len(kernel_ffts) == 1:
+            return convolve_prepadded(kernel_ffts[0])
 
         # In-place pooling to avoid allocating n_orientations x slice memory
         result_slice: npt.NDArray[np.floating[Any]] | None = None
-        for k in kernels:
-            response = convolve_prepadded(k)
+        for k_fft in kernel_ffts:
+            response = convolve_prepadded(k_fft)
             if result_slice is None:
-                result_slice = (
-                    response.astype(np.float64) if pooling == "average" else response.copy()
-                )
-            else:
-                if pooling == "max":
-                    np.maximum(result_slice, response, out=result_slice)
-                elif pooling == "average":
-                    result_slice += response
-                else:  # pooling == "min"
-                    np.minimum(result_slice, response, out=result_slice)
+                # np.abs already returns a fresh array, so no copy is needed.
+                result_slice = response.astype(np.float64) if pooling == "average" else response
+            elif pooling == "max":
+                np.maximum(result_slice, response, out=result_slice)
+            elif pooling == "average":
+                result_slice += response
+            else:  # pooling == "min"
+                np.minimum(result_slice, response, out=result_slice)
 
         # Mypy check
         if result_slice is None:  # pragma: no cover
             raise RuntimeError("Result slice should not be None")
 
         if pooling == "average":
-            result_slice /= len(kernels)
+            result_slice /= len(kernel_ffts)
         return result_slice.astype(np.float32)
-
-    # Use moveaxis for efficient slice access (contiguous memory)
-    # This moves plane_axis to position 0 for efficient iteration
-    image_reordered = np.moveaxis(image, plane_axis, 0)
-    n_slices = image_reordered.shape[0]
 
     if use_parallel:
         # Parallel processing for large images

@@ -101,5 +101,7 @@ def mean_filter(
         # Use normalized convolution for source masking
         return _normalized_uniform_filter(image, source_mask, size=support, mode=mode)
     else:
-        # Original behavior - return just the result (backward compatible)
-        return uniform_filter(image, size=support, mode=mode)  # type: ignore[no-any-return]
+        # Cast to float32 for consistency with the masked path and the other filters
+        # (uniform_filter accumulates in the input dtype, so a float64 image keeps
+        # its precision through the running sum before the final downcast).
+        return uniform_filter(image, size=support, mode=mode).astype(np.float32)  # type: ignore[no-any-return]

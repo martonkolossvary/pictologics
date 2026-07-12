@@ -43,6 +43,23 @@ class TestIntensityFeatures(unittest.TestCase):
         # Skewness: symmetric -> 0
         self.assertAlmostEqual(features["intensity_skewness_KE2A"], 0.0)
 
+    def test_calculate_intensity_features_percentiles_ibsi_nearest_rank(self) -> None:
+        # IBSI uses the nearest-rank percentile convention (smallest value with at
+        # least p% of the data at or below it), not linear interpolation. On 1..10
+        # this gives integer percentiles; linear interpolation would give 1.9/9.1.
+        values = np.arange(1, 11, dtype=float)
+        features = calculate_intensity_features(values)
+        self.assertAlmostEqual(features["10th_intensity_percentile_QG58"], 1.0)
+        self.assertAlmostEqual(features["90th_intensity_percentile_8DWT"], 9.0)
+        # P25 = 3, P75 = 8 -> IQR = 5.
+        self.assertAlmostEqual(features["intensity_interquartile_range_SALO"], 5.0)
+        # Robust MAD over [P10, P90] = values 1..9: mean 5, MAD = 20/9.
+        self.assertAlmostEqual(
+            features["intensity_robust_mean_absolute_deviation_1128"], 20.0 / 9.0
+        )
+        # Median stays the conventional sample median (mean of the two middle values).
+        self.assertAlmostEqual(features["median_intensity_Y12H"], 5.5)
+
     def test_calculate_intensity_features_empty(self) -> None:
         features = calculate_intensity_features(np.array([]))
         self.assertEqual(features, {})
@@ -81,6 +98,61 @@ class TestIntensityFeatures(unittest.TestCase):
         # = 0.0625 + 0.140625 + 0.046875 = 0.25
         self.assertAlmostEqual(features["discretised_intensity_uniformity_BJ5W"], 0.25)
 
+    def test_calculate_intensity_histogram_features_percentiles_nearest_rank(self) -> None:
+        # Nearest-rank percentiles on the discretised histogram path (1..10).
+        disc_vals = np.arange(1, 11, dtype=np.int64)
+        features = calculate_intensity_histogram_features(disc_vals, n_bins=10)
+        self.assertAlmostEqual(features["10th_discretised_intensity_percentile_1PR"], 1.0)
+        self.assertAlmostEqual(features["90th_discretised_intensity_percentile_GPMT"], 9.0)
+        self.assertAlmostEqual(features["median_discretised_intensity_WIFQ"], 5.5)
+
+    def test_calculate_intensity_histogram_features_multimodal(self) -> None:
+        # IBSI AMMC: with multiple modes, select the one closest to the mean.
+        # Modes 1 and 5, mean 3.2 -> 5 is closer.
+        disc_vals = np.array([1, 1, 4, 5, 5])
+        features = calculate_intensity_histogram_features(disc_vals)
+        self.assertAlmostEqual(features["intensity_histogram_mode_AMMC"], 5.0)
+
+        # Modes equidistant from the mean -> select the one below it.
+        # Modes 2 and 4, mean 3.0 -> 2.
+        disc_vals = np.array([2, 2, 4, 4])
+        features = calculate_intensity_histogram_features(disc_vals)
+        self.assertAlmostEqual(features["intensity_histogram_mode_AMMC"], 2.0)
+
+    def test_calculate_intensity_histogram_features_full_range(self) -> None:
+        # IBSI: with n_bins given, the histogram spans [1, N_g] including bins
+        # the data does not reach. Values 3, 3, 4 with N_g=6:
+        # histogram [0, 0, 2, 1, 0, 0], gradient [0, 1, 0.5, -1, -0.5, 0].
+        disc_vals = np.array([3, 3, 4])
+        features = calculate_intensity_histogram_features(disc_vals, n_bins=6)
+        self.assertAlmostEqual(features["maximum_histogram_gradient_12CE"], 1.0)
+        self.assertAlmostEqual(features["maximum_histogram_gradient_intensity_8E6O"], 2.0)
+        self.assertAlmostEqual(features["minimum_histogram_gradient_VQB3"], -1.0)
+        self.assertAlmostEqual(features["minimum_histogram_gradient_intensity_RHQZ"], 4.0)
+        # Value-based features are unaffected by the padded bins.
+        self.assertAlmostEqual(features["intensity_histogram_mode_AMMC"], 3.0)
+        self.assertAlmostEqual(features["minimum_discretised_intensity_1PR8"], 3.0)
+        self.assertAlmostEqual(features["maximum_discretised_intensity_3NCY"], 4.0)
+
+        # Without n_bins the histogram spans only the observed range [3, 4]:
+        # histogram [2, 1], gradient [-1, -1].
+        features = calculate_intensity_histogram_features(disc_vals)
+        self.assertAlmostEqual(features["maximum_histogram_gradient_12CE"], -1.0)
+        self.assertAlmostEqual(features["maximum_histogram_gradient_intensity_8E6O"], 3.0)
+
+        # Constant data has a defined gradient over the full histogram
+        # (data-range fallback would give NaN): [0, 2, 0, 0] -> [2, 0, -1, 0].
+        features = calculate_intensity_histogram_features(np.array([2, 2]), n_bins=4)
+        self.assertAlmostEqual(features["maximum_histogram_gradient_12CE"], 2.0)
+        self.assertAlmostEqual(features["minimum_histogram_gradient_VQB3"], -1.0)
+
+    def test_calculate_intensity_histogram_features_n_bins_validation(self) -> None:
+        # Values outside [1, n_bins] are a configuration error.
+        with self.assertRaises(ValueError):
+            calculate_intensity_histogram_features(np.array([3, 3, 7]), n_bins=6)
+        with self.assertRaises(ValueError):
+            calculate_intensity_histogram_features(np.array([0, 1]), n_bins=6)
+
     def test_calculate_intensity_histogram_features_empty(self) -> None:
         features = calculate_intensity_histogram_features(np.array([]))
         self.assertEqual(features, {})
@@ -110,6 +182,14 @@ class TestIntensityFeatures(unittest.TestCase):
         features = calculate_ivh_features(disc_vals, bin_width=1.0, min_val=0.0)
 
         self.assertAlmostEqual(features["volume_at_intensity_fraction_0.10_BC2M_10"], 0.8)
+
+    def test_calculate_ivh_features_degenerate_range(self) -> None:
+        # max_val == min_val: candidate grid collapses to a single bin center
+        # instead of crashing.
+        features = calculate_ivh_features(
+            np.array([1, 1, 1]), bin_width=1.0, min_val=5.0, max_val=5.0
+        )
+        self.assertTrue(np.isfinite(features["intensity_at_volume_fraction_0.10_GBPN_10"]))
 
     def test_calculate_ivh_features_empty(self) -> None:
         features = calculate_ivh_features(np.array([]))
@@ -213,12 +293,9 @@ class TestIntensityFeatures(unittest.TestCase):
         pass
 
     def test_calculate_ivh_features_inverted_range(self) -> None:
-        # Hits L614: if g_min > g_max: return [] logic or similar...
-        # Actually logic is: g_min=5, g_max=2. num_steps negative. idx empty. candidates empty.
-        # Binary search fails. Should raise IndexError or similar if not handled.
-        # We just want to ensure the code lines run.
+        # max_val < min_val is a configuration error.
         disc_vals = np.array([0, 1])
-        with self.assertRaises(IndexError):
+        with self.assertRaises(ValueError):
             calculate_ivh_features(disc_vals, bin_width=1.0, min_val=5.0, max_val=2.0)
 
     def test_calculate_ivh_features_small_input_general(self) -> None:
@@ -244,6 +321,50 @@ class TestIntensityFeatures(unittest.TestCase):
         features = calculate_spatial_intensity_features(mock_img, mock_mask)
         self.assertFalse(np.isnan(features["morans_i_index_N365"]))
         self.assertFalse(np.isnan(features["gearys_c_measure_NPT7"]))
+
+    def test_calculate_spatial_intensity_features_matches_bruteforce(self) -> None:
+        # Verify the optimized (symmetry-exploiting) kernel against a direct
+        # implementation of the IBSI definitions over all ordered voxel pairs.
+        rng = np.random.default_rng(42)
+        shape = (4, 4, 3)
+        spacing = (0.7, 0.9, 3.0)
+        data = rng.normal(100.0, 25.0, size=shape)
+        mask = (rng.random(shape) < 0.6).astype(np.uint8)
+
+        mock_img = MagicMock()
+        mock_img.array = data
+        mock_img.spacing = spacing
+        mock_mask = MagicMock()
+        mock_mask.array = mask
+
+        features = calculate_spatial_intensity_features(mock_img, mock_mask)
+
+        xs, ys, zs = np.where(mask > 0)
+        vals = data[mask > 0].astype(np.float64)
+        n = vals.size
+        diff = vals - vals.mean()
+
+        w_sum = 0.0
+        moran_num = 0.0
+        geary_num = 0.0
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                dx = (float(xs[i]) - float(xs[j])) * spacing[0]
+                dy = (float(ys[i]) - float(ys[j])) * spacing[1]
+                dz = (float(zs[i]) - float(zs[j])) * spacing[2]
+                w = 1.0 / np.sqrt(dx * dx + dy * dy + dz * dz)
+                w_sum += w
+                moran_num += w * diff[i] * diff[j]
+                geary_num += w * (vals[i] - vals[j]) ** 2
+
+        denom = float(np.sum(diff * diff))
+        expected_moran = (n / w_sum) * (moran_num / denom)
+        expected_geary = ((n - 1) / (2 * w_sum)) * (geary_num / denom)
+
+        self.assertAlmostEqual(features["morans_i_index_N365"], expected_moran)
+        self.assertAlmostEqual(features["gearys_c_measure_NPT7"], expected_geary)
 
     def test_calculate_spatial_intensity_features_parallel_safety(self) -> None:
         # Regression test for parallel/serial execution.
@@ -326,7 +447,6 @@ class TestIntensityFeatures(unittest.TestCase):
         from pictologics.features.intensity import (
             _calculate_local_peaks_numba,
             _central_moments_2_3_4,
-            _max_mean_at_max_intensity,
             _mean_abs_dev,
             _robust_mean_abs_dev,
             _sum_sq_centered,
@@ -429,12 +549,6 @@ class TestIntensityFeatures(unittest.TestCase):
         glob, loc = _calculate_local_peaks_numba(data, mask_indices, roi_means)
         self.assertEqual(glob, 8.0)  # max of means
         self.assertEqual(loc, 8.0)  # max intensity (10) occurs at 8.0 mean
-
-        # Test _max_mean_at_max_intensity helper
-        # 2 voxels. values 10, 10. means 5, 8. max_val=10.
-        roi_data = np.array([10.0, 10.0])
-        best = _max_mean_at_max_intensity(roi_data, roi_means, 10.0)
-        self.assertEqual(best, 8.0)
 
 
 if __name__ == "__main__":

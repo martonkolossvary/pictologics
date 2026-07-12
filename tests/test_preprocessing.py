@@ -10,12 +10,17 @@ warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 os.environ["NUMBA_DISABLE_JIT"] = "1"
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
+from numpy.testing import assert_array_equal
 
 from pictologics.loader import Image
 from pictologics.preprocessing import (
     apply_mask,
+    create_source_mask_from_sentinel,
+    detect_sentinel_value,
     discretise_image,
     extract_roi,
     filter_outliers,
@@ -437,7 +442,9 @@ def test_filter_outliers_float_mask(mock_image: Image) -> None:
     mask = Image(mask_arr, mock_image.spacing, mock_image.origin)
 
     filtered = filter_outliers(mock_image, mask)
-    assert filtered.array.dtype == np.uint8
+    # Mask dtype is preserved; outlier voxels are zeroed in place
+    assert filtered.array.dtype == mask_arr.dtype
+    assert np.all(filtered.array[mask_arr == 0] == 0)
 
 
 def test_filter_outliers_bool_mask(mock_image: Image) -> None:
@@ -501,3 +508,199 @@ def test_keep_largest_component(mock_image: Image) -> None:
     # Run again on single component
     again = keep_largest_component(largest)
     assert np.array_equal(again.array, largest.array)
+
+
+def test_keep_largest_component_2d() -> None:
+    # A non-3D mask takes the full-array path (no bounding-box crop).
+    out = keep_largest_component(Image(np.ones((4, 4), dtype=np.uint8), (1.0, 1.0), (0.0, 0.0)))
+    assert out.array.shape == (4, 4)
+
+
+def test_extract_roi_integer_image() -> None:
+    # An integer image is upcast to float (NaN-capable) before masking.
+    img = Image(np.arange(27, dtype=np.int32).reshape(3, 3, 3), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    mask = Image(np.ones((3, 3, 3), dtype=np.uint8), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    assert extract_roi(img, mask).array.dtype == np.float64
+
+
+# ---------------------------------------------------------------------------
+# Sentinel detection & source-mask creation
+# (merged from the former test_preprocessing_coverage.py)
+# ---------------------------------------------------------------------------
+
+
+def test_detect_sentinel_value_basic() -> None:
+    arr = np.full((10, 10, 10), -2048.0, dtype=np.float32)
+    arr[2:8, 2:8, 2:8] = 100.0
+    assert detect_sentinel_value(Image(arr, (1, 1, 1), (0, 0, 0))) == -2048.0
+
+
+def test_detect_sentinel_value_none() -> None:
+    # All-zero image: 0.0 is a default candidate and dominates -> detected.
+    zeros = Image(np.zeros((10, 10, 10), np.float32), (1, 1, 1), (0, 0, 0))
+    assert detect_sentinel_value(zeros) == 0.0
+    # Noise with no candidate value present -> None.
+    noise = np.random.rand(10, 10, 10).astype(np.float32) + 100.0
+    assert detect_sentinel_value(Image(noise, (1, 1, 1), (0, 0, 0))) is None
+
+
+def test_detect_sentinel_with_roi() -> None:
+    shape = (20, 20, 20)
+    roi = np.zeros(shape, dtype=np.uint8)
+    roi[5:15, 5:15, 5:15] = 1
+    roi_img = Image(roi, (1, 1, 1), (0, 0, 0))
+    arr = np.full(shape, -1024.0, dtype=np.float32)
+    arr[5:15, 5:15, 5:15] = 50.0
+    assert detect_sentinel_value(Image(arr, (1, 1, 1), (0, 0, 0)), roi_mask=roi_img) == -1024.0
+
+    # A candidate that lives inside the ROI is not treated as a background sentinel.
+    arr2 = np.zeros(shape, dtype=np.float32)
+    arr2[5:15, 5:15, 5:15] = -1024.0
+    assert (
+        detect_sentinel_value(
+            Image(arr2, (1, 1, 1), (0, 0, 0)),
+            candidate_values=(-1024.0,),
+            roi_mask=roi_img,
+        )
+        is None
+    )
+
+
+def test_detect_sentinel_below_threshold() -> None:
+    # A candidate occupying < 5% of the image must not be detected.
+    arr = np.full((10, 10, 10), 100.0, dtype=np.float32)
+    arr.flat[:30] = -1024.0  # 3% of 1000 voxels
+    assert detect_sentinel_value(Image(arr, (1, 1, 1), (0, 0, 0))) is None
+
+
+def test_detect_sentinel_highest_proportion_wins() -> None:
+    # When two candidates both exceed the threshold, the larger fraction wins.
+    arr = np.full((10, 10, 10), 100.0, dtype=np.float32)
+    arr.flat[:100] = -1024.0  # 10%
+    arr.flat[100:400] = 0.0  # 30%
+    assert detect_sentinel_value(Image(arr, (1, 1, 1), (0, 0, 0))) == 0.0
+
+
+def test_create_source_mask_from_sentinel() -> None:
+    img = Image(np.array([-2048.0, 100.0, -2048.0], dtype=np.float32), (1, 1, 1), (0, 0, 0))
+    mask = create_source_mask_from_sentinel(img, -2048.0)
+    assert mask.modality == "SOURCE_MASK"
+    assert_array_equal(mask.array, [0, 1, 0])  # 0 where sentinel, 1 where valid
+
+    img_tol = Image(np.array([-2048.1, -2047.9, 100.0], dtype=np.float32), (1, 1, 1), (0, 0, 0))
+    mask_tol = create_source_mask_from_sentinel(img_tol, -2048.0, tolerance=0.5)
+    assert_array_equal(mask_tol.array, [0, 0, 1])
+
+
+def test_resample_with_source_mask() -> None:
+    # 3D column [10, sentinel, 30] with the centre flagged invalid.
+    arr = np.array([[[10.0]], [[-1000.0]], [[30.0]]], dtype=np.float32)
+    img = Image(arr, (1.0, 1.0, 1.0), (0, 0, 0))
+    src = np.array([[[1]], [[0]], [[1]]], dtype=np.uint8)
+    img_masked = img.with_source_mask(Image(src, img.spacing, img.origin))
+
+    # Default weight_threshold=0.5: gap voxels are zeroed and flagged invalid;
+    # the sentinel must not leak into any valid output voxel.
+    r = resample_image(img_masked, new_spacing=(0.5, 1.0, 1.0), interpolation="linear")
+    data, valid = r.array.flatten(), r.source_mask.flatten()
+    assert np.all(data[valid] > 0)
+    assert np.all(data[valid] < 40)
+    assert np.all(data[~valid] == 0)
+    assert not np.all(valid)
+
+    # A permissive threshold restores gap-filling via normalized convolution.
+    rf = resample_image(
+        img_masked, new_spacing=(0.5, 1.0, 1.0), interpolation="linear", weight_threshold=0.01
+    )
+    df = rf.array.flatten()
+    assert np.all(df > 0)
+    assert np.all(df < 40)
+    assert np.all(rf.source_mask)
+
+
+# ---------------------------------------------------------------------------
+# Numba kernel paths (float64, size >= _KERNEL_MIN_SIZE). _KERNEL_MIN_SIZE is
+# patched small so tiny arrays exercise the single-pass kernels; the optimization
+# work proved these bit-identical to the numpy fallback.
+# ---------------------------------------------------------------------------
+
+
+def _f64(shape: tuple[int, ...]) -> np.ndarray:
+    return np.arange(int(np.prod(shape)), dtype=np.float64).reshape(shape)
+
+
+def test_discretise_fbn_kernel_clamps() -> None:
+    arr = _f64((4, 4, 4))
+    arr[0, 0, 0] = np.nan  # NaN maps to bin 0
+    img = Image(arr, (1, 1, 1), (0, 0, 0))
+    # Explicit range narrower than the data: values below it clamp to bin 1,
+    # values above clamp to n_bins.
+    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+        out = discretise_image(img, method="FBN", n_bins=8, min_val=20.0, max_val=40.0)
+    assert out.array[0, 0, 0] == 0
+    assert out.array.min() >= 0
+    assert out.array.max() <= 8
+
+
+def test_discretise_fbs_kernel_clamps() -> None:
+    arr = _f64((4, 4, 4))
+    arr[0, 0, 0] = np.nan
+    img = Image(arr, (1, 1, 1), (0, 0, 0))
+    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+        out = discretise_image(img, method="FBS", bin_width=5.0, min_val=20.0, max_val=40.0)
+    assert out.array[0, 0, 0] == 0
+
+
+def test_discretise_integer_input() -> None:
+    # Integer input takes the out-of-place (promoting) division branch.
+    img = Image(np.arange(27, dtype=np.int32).reshape(3, 3, 3), (1, 1, 1), (0, 0, 0))
+    assert discretise_image(img, method="FBN", n_bins=4).array.max() <= 4
+    assert discretise_image(img, method="FBS", bin_width=3.0).array.min() >= 1
+
+
+def test_discretise_empty_image_returns_image() -> None:
+    img = Image(np.zeros((0,), dtype=np.float64), (1, 1, 1), (0, 0, 0))
+    out = discretise_image(img, method="FBN", n_bins=4)
+    assert isinstance(out, Image)
+    assert out.array.size == 0
+
+
+def test_resample_nearest_kernel() -> None:
+    img = Image(np.random.rand(8, 8, 8).astype(np.float64), (1, 1, 1), (0, 0, 0))
+    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+        assert resample_image(img, (0.7, 0.7, 0.7), interpolation="nearest").array.ndim == 3
+        assert resample_image(img, (1.3, 1.3, 1.3), interpolation="nearest").array.ndim == 3
+
+
+def test_resample_linear_kernel_and_all_valid_source() -> None:
+    img = Image(np.random.rand(8, 8, 8).astype(np.float64), (1, 1, 1), (0, 0, 0))
+    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+        resample_image(img, (0.7, 0.7, 0.7), interpolation="linear")
+        # An all-valid source mask collapses to "no mask", but the resampled image
+        # still carries an all-valid source mask.
+        all_valid = img.with_source_mask(
+            Image(np.ones((8, 8, 8), np.uint8), img.spacing, img.origin)
+        )
+        r = resample_image(all_valid, (0.7, 0.7, 0.7), interpolation="linear")
+    assert r.source_mask is not None
+    assert bool(r.source_mask.all())
+
+
+def test_resample_masked_linear_kernel() -> None:
+    # A partial source mask + float64 + linear routes to the fused masked kernel.
+    img = Image(np.random.rand(8, 8, 8).astype(np.float64), (1, 1, 1), (0, 0, 0))
+    src = np.ones((8, 8, 8), dtype=np.uint8)
+    src[3:5, 3:5, 3:5] = 0
+    masked = img.with_source_mask(Image(src, img.spacing, img.origin))
+    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+        r = resample_image(masked, (0.7, 0.7, 0.7), interpolation="linear")
+    assert r.array.ndim == 3
+    assert r.source_mask is not None
+
+
+def test_resegment_kernel() -> None:
+    img = Image(_f64((4, 4, 4)), (1, 1, 1), (0, 0, 0))
+    mask = Image(np.ones((4, 4, 4), dtype=np.uint8), (1, 1, 1), (0, 0, 0))
+    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+        out = resegment_mask(img, mask, range_min=5.0, range_max=50.0)
+    assert out.array.shape == (4, 4, 4)

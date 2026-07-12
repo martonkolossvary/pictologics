@@ -10,17 +10,15 @@ warnings.filterwarnings("ignore", message="The NumPy module was reloaded.*", cat
 
 class TestWarmup(unittest.TestCase):
     def setUp(self) -> None:
-        # Ensure we start with no env var set (or save previous state)
-        self.prev_env = os.environ.get("PICTOLOGICS_DISABLE_WARMUP")
-        if self.prev_env:
-            del os.environ["PICTOLOGICS_DISABLE_WARMUP"]
+        # Snapshot os.environ (auto-restored in tearDown) and ensure warmup is
+        # enabled for the duration of each test regardless of what other test
+        # modules left in the environment.
+        self._env_patcher = patch.dict(os.environ, {}, clear=False)
+        self._env_patcher.start()
+        os.environ.pop("PICTOLOGICS_DISABLE_WARMUP", None)
 
     def tearDown(self) -> None:
-        # Restore env var
-        if self.prev_env:
-            os.environ["PICTOLOGICS_DISABLE_WARMUP"] = self.prev_env
-        elif "PICTOLOGICS_DISABLE_WARMUP" in os.environ:
-            del os.environ["PICTOLOGICS_DISABLE_WARMUP"]
+        self._env_patcher.stop()
 
     def test_warmup_runs(self) -> None:
         """Test that warmup runs successfully and triggers expected internal functions."""
@@ -94,21 +92,22 @@ class TestWarmup(unittest.TestCase):
                 _ = mock_config.NUMBA_NUM_THREADS
 
     def test_warmup_integration_data_setup_coverage(self) -> None:
-        """
-        Integration test to ensure the data setup code in _warmup_* methods runs without error.
-        This actually compiles/runs the JIT kernels on dummy data.
-        """
-        # We allow this to run slowly. It is critical for checking the dummy data correctness.
+        """Integration test: the data-setup code in each _warmup_* helper runs (and
+        compiles/executes the kernels on dummy data) without raising."""
         from pictologics.warmup import (
             _warmup_intensity,
             _warmup_morphology,
             _warmup_texture,
         )
 
-        # Call them directly to ensure they don't raise exceptions
-        try:
-            _warmup_texture()
-            _warmup_intensity()
-            _warmup_morphology()
-        except Exception as e:
-            self.fail(f"Warmup integration failed with error: {e}")
+        # A raise here fails the test with the original traceback.
+        _warmup_texture()
+        _warmup_intensity()
+        _warmup_morphology()
+
+    def test_warmup_texture_thread_config_fallback(self) -> None:
+        """A non-integer NUMBA_NUM_THREADS falls back to a single thread."""
+        from pictologics.warmup import _warmup_texture
+
+        with patch("pictologics.warmup.numba.config.NUMBA_NUM_THREADS", "invalid"):
+            _warmup_texture()  # int("invalid") -> ValueError -> n_threads = 1

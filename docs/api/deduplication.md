@@ -52,11 +52,11 @@ When deduplication reuses features from a previous configuration, the features a
 results = pipeline.run(image, mask, config_names=["fbn_8", "fbn_16", "fbn_32"])
 
 # All configs have IDENTICAL morphology values (computed once, copied to others)
-assert results["fbn_8"]["volume_mesh_ml_HTUR"] == results["fbn_16"]["volume_mesh_ml_HTUR"]
-assert results["fbn_8"]["volume_mesh_ml_HTUR"] == results["fbn_32"]["volume_mesh_ml_HTUR"]
+assert results["fbn_8"]["volume_RNU0"] == results["fbn_16"]["volume_RNU0"]
+assert results["fbn_8"]["volume_RNU0"] == results["fbn_32"]["volume_RNU0"]
 
 # Texture features DIFFER (depend on discretization)
-assert results["fbn_8"]["glcm_joint_avg_d1_HTUR"] != results["fbn_32"]["glcm_joint_avg_d1_HTUR"]
+assert results["fbn_8"]["joint_average_60VM"] != results["fbn_32"]["joint_average_60VM"]
 ```
 
 ### Data Tables and Concatenation
@@ -65,18 +65,13 @@ When you concatenate results into a single DataFrame (e.g., for machine learning
 
 ```python
 import pandas as pd
-from pictologics import format_results
 
-# Format results for each config
-rows = []
-for config_name, features in results.items():
-    row = format_results({config_name: features}, fmt="wide", meta={"config": config_name})
-    rows.append(row)
-
-# Concatenate into single DataFrame - NO missing values!
+# Deduplication copies each computed family into every config that reuses it, so all
+# configs expose the same feature keys — stacking them leaves no missing values.
+rows = [{"config": name, **results[name].to_dict()} for name in results]
 df = pd.DataFrame(rows)
-print(df.shape)  # (3, N) - all rows complete
-print(df.isna().sum().sum())  # 0 - no NaN values
+print(df.shape)                    # one row per config; columns = config + all features
+print(int(df.isna().sum().sum()))  # 0 - no NaN values
 ```
 
 ---
@@ -89,7 +84,9 @@ print(df.isna().sum().sum())  # 0 - no NaN values
       members:
         - version
         - family_dependencies
-        - validate
+        - get_version
+        - to_dict
+        - from_dict
 
 ---
 
@@ -100,7 +97,7 @@ print(df.isna().sum().sum())  # 0 - no NaN values
       show_source: true
       members:
         - from_steps
-        - hash_value
+        - hash
         - json_repr
 
 ---
@@ -113,8 +110,6 @@ print(df.isna().sum().sum())  # 0 - no NaN values
       members:
         - __init__
         - analyze
-        - get_preprocessing_steps
-        - get_feature_families
 
 ---
 
@@ -124,9 +119,12 @@ print(df.isna().sum().sum())  # 0 - no NaN values
     options:
       show_source: true
       members:
-        - create
-        - get_plan
-        - summary
+        - should_compute
+        - get_source
+        - is_stale
+        - get_summary
+        - to_dict
+        - from_dict
 
 ---
 
@@ -186,7 +184,7 @@ The `RadiomicsPipeline` class integrates deduplication through these parameters:
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `deduplicate` | `bool` | `True` | Enable/disable deduplication |
-| `deduplication_rules` | `str` or `DeduplicationRules` | `"1.0.0"` | Rules version for reproducibility |
+| `deduplication_rules` | `str`, `DeduplicationRules`, or `None` | `None` | Rules version for reproducibility (`None` resolves to the current default rules, `"1.0.0"`) |
 
 These settings are preserved during serialization (`to_dict()`, `save_configs()`, etc.) and restored during deserialization.
 

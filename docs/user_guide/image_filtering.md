@@ -34,7 +34,7 @@ The Mean filter replaces each voxel's intensity with the average intensity of it
 | Parameter | Type | Description |
 |:----------|:-----|:------------|
 | `support` | `int` | The size of the kernel (e.g., `3` for a 3x3x3 kernel). |
-| `boundary` | `str` | Boundary condition (`"mirror"`, `"nearest"`, `"periodic"`, `"constant"`). Default: `"mirror"`. |
+| `boundary` | `str` | Boundary condition, resolved by enum name (`"mirror"`, `"nearest"`, `"periodic"`, `"zero"`). Default: `"zero"`. |
 
 ### Usage
 
@@ -101,9 +101,9 @@ Laws filters use a set of 1D kernels (Level, Edge, Spot, Wave, Ripple) combined 
 
 | Parameter | Type | Description |
 |:----------|:-----|:------------|
-| `kernel` | `str` | The 3D kernel name (e.g., `"E5L5S5"`). See `pictologics.filters.laws.LAWS_KERNELS` for list. |
+| `kernels` | `str` | The 3D kernel name (e.g., `"E5L5S5"`). See `pictologics.filters.laws.LAWS_KERNELS` for list. Direct-API kwarg; the Pipeline `"laws"` step uses the key `"kernel"` (singular). |
 | `rotation_invariant` | `bool` | If `True`, averages response across rotationally symmetric kernels (e.g., E5L5S5, L5E5S5, L5S5E5). |
-| `compute_energy` | `bool` | If `True` (default), computes local energy (average absolute deviation) in a window. |
+| `compute_energy` | `bool` | If `True`, computes local energy (average absolute deviation) in a window. Default: `False`. |
 | `energy_distance` | `int` | Distance for the energy window (Chebyshev distance). Default: `7`. |
 
 ### Usage
@@ -128,7 +128,8 @@ Laws filters use a set of 1D kernels (Level, Edge, Spot, Wave, Ripple) combined 
     response = laws_filter(
         image_array, 
         kernels="E5L5S5", 
-        rotation_invariant=True
+        rotation_invariant=True,
+        compute_energy=True
     )
     ```
 
@@ -145,6 +146,7 @@ Gabor filters are sinusoidal waves modulated by a Gaussian envelope. They are ex
 | `gamma` | `float` | Spatial aspect ratio. Default: `1.0`. |
 | `theta` | `float` | Orientation angle (if not rotation invariant). |
 | `rotation_invariant` | `bool` | If `True`, aggregates responses over multiple orientations. |
+| `delta_theta` | `float` | Orientation step in radians. **Required** when `rotation_invariant=True` (raises `ValueError` otherwise). |
 
 ### Usage
 
@@ -155,7 +157,8 @@ Gabor filters are sinusoidal waves modulated by a Gaussian envelope. They are ex
         "type": "gabor",
         "sigma_mm": 5.0,
         "lambda_mm": 2.0,
-        "rotation_invariant": True
+        "rotation_invariant": True,
+        "delta_theta": 0.7853981633974483  # pi/4
     }}
     ```
 
@@ -170,7 +173,8 @@ Gabor filters are sinusoidal waves modulated by a Gaussian envelope. They are ex
         lambda_mm=2.0,
         gamma=1.0,
         spacing_mm=(1.0, 1.0, 1.0),
-        rotation_invariant=True
+        rotation_invariant=True,
+        delta_theta=0.7853981633974483,  # pi/4
     )
     ```
 
@@ -253,7 +257,7 @@ The Riesz transform provides a steerable filter bank. It can be combined with ot
 | Parameter | Type | Description |
 |:----------|:-----|:------------|
 | `order` | `Tuple[int, ...]` | Order tuple `(l1, l2, l3)` specifying derivative order per axis, e.g. `(1, 0, 0)`. |
-| `variant` | `str` | Feature variant: `"base"`, `"log"`, or `"simoncelli"`. |
+| `variant` | `str` | Pipeline-level dispatch key (not a `riesz_transform` kwarg): `"base"` calls `riesz_transform` directly, `"log"` dispatches to `riesz_log` (requires `sigma_mm`), `"simoncelli"` dispatches to `riesz_simoncelli`. |
 
 ### Usage
 
@@ -263,7 +267,8 @@ The Riesz transform provides a steerable filter bank. It can be combined with ot
     {"step": "filter", "params": {
         "type": "riesz",
         "order": [2, 0, 0],
-        "variant": "log"
+        "variant": "log",
+        "sigma_mm": 3.0  # required by riesz_log
     }}
     ```
 
@@ -273,6 +278,24 @@ The Riesz transform provides a steerable filter bank. It can be combined with ot
     from pictologics.filters import riesz_transform
     
     response = riesz_transform(image_array, order=(2, 0, 0))
+    ```
+
+    The `"log"` and `"simoncelli"` variants dispatched by the Pipeline's `variant` parameter are
+    also directly callable — `riesz_log()` requires `sigma_mm`:
+
+    ```python
+    from pictologics.filters import riesz_log, riesz_simoncelli
+
+    # Riesz transform of a LoG-filtered image
+    response = riesz_log(
+        image_array,
+        sigma_mm=3.0,
+        spacing_mm=(1.0, 1.0, 1.0),
+        order=(1, 0, 0),
+    )
+
+    # Riesz transform of a Simoncelli-wavelet-filtered image
+    response = riesz_simoncelli(image_array, level=1, order=(1, 0, 0))
     ```
 
 ## Source Masking for Sentinel Values

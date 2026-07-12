@@ -59,7 +59,7 @@ from ._utils import compute_nonzero_bbox
 def _accumulate_moments_from_mask_numba(
     mask: npt.NDArray[np.floating[Any]],
 ) -> tuple[int, float, float, float, float, float, float, float, float, float]:
-    """Accumulate first/second moments of voxel indices for mask>0."""
+    """Accumulate first/second moments of voxel indices for mask != 0."""
     n = 0
     s0 = 0.0
     s1 = 0.0
@@ -76,7 +76,7 @@ def _accumulate_moments_from_mask_numba(
     for i in prange(d0):
         for j in range(d1):
             for k in range(d2):
-                if mask[i, j, k] > 0:
+                if mask[i, j, k] != 0:
                     n += 1
                     fi = float(i)
                     fj = float(j)
@@ -98,7 +98,7 @@ def _accumulate_moments_from_mask_numba(
 def _accumulate_intensity_weighted_moments_numba(
     mask: npt.NDArray[np.floating[Any]], image: npt.NDArray[np.floating[Any]]
 ) -> tuple[int, float, float, float, float]:
-    """Accumulate intensity-weighted index sums over mask>0."""
+    """Accumulate intensity-weighted index sums over mask != 0."""
     count = 0
     sum_w = 0.0
     sum_i0_w = 0.0
@@ -109,7 +109,7 @@ def _accumulate_intensity_weighted_moments_numba(
     for i in prange(d0):
         for j in range(d1):
             for k in range(d2):
-                if mask[i, j, k] > 0:
+                if mask[i, j, k] != 0:
                     w = float(image[i, j, k])
                     count += 1
                     sum_w += w
@@ -450,6 +450,7 @@ def _calculate_ellipsoid_surface_area(a: float, b: float, c: float) -> float:
 
 def _get_mesh_features(
     mask: Image,
+    roi_bbox: Optional[tuple[slice, slice, slice]] = None,
 ) -> tuple[
     dict[str, float],
     Optional[npt.NDArray[np.floating[Any]]],
@@ -462,16 +463,17 @@ def _get_mesh_features(
     results for the digital phantom.
 
     Optimization: Crops mask to bounding box before mesh generation for large sparse ROIs.
+    `roi_bbox` may pass a precomputed nonzero bounding box to skip the scan.
     """
     features: dict[str, float] = {}
-    mask_arr = (mask.array > 0).astype(np.uint8, copy=False)
 
-    # Crop to bounding box for performance on large sparse ROIs
-    bbox = compute_nonzero_bbox(mask_arr)  # type: ignore[arg-type]
+    # Scan the original mask for the bbox, then binarise only the cropped region:
+    # this avoids the two full-volume temporaries of binarising up front.
+    bbox = roi_bbox if roi_bbox is not None else compute_nonzero_bbox(mask.array)
     if bbox is None:
         return {}, None, None
 
-    mask_cropped = mask_arr[bbox]
+    mask_cropped = (mask.array[bbox] != 0).astype(np.uint8)
     origin_offset = np.array([bbox[0].start, bbox[1].start, bbox[2].start], dtype=np.float64)
 
     mask_padded_u8 = np.pad(mask_cropped, 1, mode="constant", constant_values=0)
@@ -538,6 +540,8 @@ def _get_pca_features(
     features: dict[str, float] = {}
 
     if mask_moments is not None:
+        # The moments may come from a bbox-cropped scan; only the covariance is
+        # used below, which is invariant to that index translation.
         n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = mask_moments
     else:
         n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = _accumulate_moments_from_mask_numba(
@@ -726,13 +730,30 @@ def _get_intensity_morphology_features(
     mask_moments: Optional[
         tuple[float, float, float, float, float, float, float, float, float, float]
     ] = None,
+    mask_bbox: Optional[tuple[slice, slice, slice]] = None,
 ) -> dict[str, float]:
-    """Calculate intensity-weighted morphological features."""
+    """Calculate intensity-weighted morphological features.
+
+    When `mask_bbox` is given, `mask_moments` must have been computed on
+    `mask.array[mask_bbox]`; the bbox offset is added back to the geometric
+    center of mass here.
+    """
     features: dict[str, float] = {}
 
+    # Crop to the intensity mask's nonzero bbox before scanning: this avoids a
+    # full read of the (large, float64) image. Reuse the morph bbox when the
+    # masks are the same object; otherwise scan the mask for its own bbox.
+    i_bbox: Optional[tuple[slice, slice, slice]]
+    if intensity_mask is mask and mask_bbox is not None:
+        i_bbox = mask_bbox
+    else:
+        i_bbox = compute_nonzero_bbox(intensity_mask.array)
+    if i_bbox is None:
+        return features
+
     count_i, sum_w, sum_i0_w, sum_i1_w, sum_i2_w = _accumulate_intensity_weighted_moments_numba(
-        intensity_mask.array,
-        image.array,
+        intensity_mask.array[i_bbox],
+        image.array[i_bbox],
     )
     if count_i > 0:
         mean_intensity = sum_w / float(count_i)
@@ -748,12 +769,20 @@ def _get_intensity_morphology_features(
             )
         else:
             n_m, s0_m, s1_m, s2_m, _, _, _, _, _, _ = _accumulate_moments_from_mask_numba(
-                mask.array
+                mask.array[mask_bbox] if mask_bbox is not None else mask.array
             )
         if n_m > 0:
-            m0 = s0_m / float(n_m)
-            m1 = s1_m / float(n_m)
-            m2 = s2_m / float(n_m)
+            # Moment means are in cropped index space; shift back to full-array
+            # indices before applying the geometry.
+            if mask_bbox is not None:
+                m_off0 = float(mask_bbox[0].start)
+                m_off1 = float(mask_bbox[1].start)
+                m_off2 = float(mask_bbox[2].start)
+            else:
+                m_off0 = m_off1 = m_off2 = 0.0
+            m0 = s0_m / float(n_m) + m_off0
+            m1 = s1_m / float(n_m) + m_off1
+            m2 = s2_m / float(n_m) + m_off2
             sp_m = np.asarray(mask.spacing, dtype=np.float64)
             org_m = np.asarray(mask.origin, dtype=np.float64)
             com_geom0 = m0 * sp_m[0] + org_m[0]
@@ -762,9 +791,9 @@ def _get_intensity_morphology_features(
 
             # CoM_gl (from intensity mask; intensity-weighted)
             if sum_w != 0.0:
-                w0 = sum_i0_w / sum_w
-                w1 = sum_i1_w / sum_w
-                w2 = sum_i2_w / sum_w
+                w0 = sum_i0_w / sum_w + float(i_bbox[0].start)
+                w1 = sum_i1_w / sum_w + float(i_bbox[1].start)
+                w2 = sum_i2_w / sum_w + float(i_bbox[2].start)
                 sp_i = np.asarray(intensity_mask.spacing, dtype=np.float64)
                 org_i = np.asarray(intensity_mask.origin, dtype=np.float64)
                 com_gl0 = w0 * sp_i[0] + org_i[0]
@@ -782,7 +811,10 @@ def _get_intensity_morphology_features(
 
 
 def calculate_morphology_features(
-    mask: Image, image: Optional[Image] = None, intensity_mask: Optional[Image] = None
+    mask: Image,
+    image: Optional[Image] = None,
+    intensity_mask: Optional[Image] = None,
+    roi_bbox: Optional[tuple[slice, slice, slice]] = None,
 ) -> dict[str, float]:
     """
     Calculate morphological features from the ROI mask.
@@ -795,20 +827,54 @@ def calculate_morphology_features(
         intensity_mask: Optional Image object containing the intensity mask (e.g. after outlier filtering).
                         If provided, used for intensity-weighted features (99N0, KLMA).
                         If None, defaults to `mask`.
+        roi_bbox: Optional precomputed tight bounding box of the mask's nonzero voxels
+                  (tuple of slices, as returned by an internal bbox scan). Skips
+                  rescanning the full mask volume. If None, computed internally.
 
     Returns:
         Dictionary of calculated features.
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.loader import Image
+        from pictologics.features.morphology import calculate_morphology_features
+
+        mask_arr = np.zeros((50, 50, 50), dtype=np.uint8)
+        mask_arr[10:40, 10:40, 10:40] = 1
+        mask = Image(array=mask_arr, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+
+        features = calculate_morphology_features(mask)
+        print(round(features["volume_voxel_counting_YEKZ"], 1))
+        # 27000.0
+        print(round(features["sphericity_QCFX"], 2))
+        # 0.82
+        ```
     """
     features: dict[str, float] = {}
     i_mask = intensity_mask if intensity_mask is not None else mask
 
-    # 1. Voxel Based Features
     voxel_volume = np.prod(mask.spacing)
-    n_voxels = np.count_nonzero(mask.array)
+
+    # Compute the ROI bounding box once; the scans below run on the cropped region
+    # instead of the full volume, which dominates runtime for sparse ROIs.
+    bbox = roi_bbox if roi_bbox is not None else compute_nonzero_bbox(mask.array)
+    if bbox is None:
+        # Empty mask: no ROI voxels.
+        features["volume_voxel_counting_YEKZ"] = 0.0
+        return features
+
+    # 1. Voxel Based Features + mask moments (shared by PCA and intensity
+    # morphology features). The moments are computed in cropped index space: the
+    # PCA covariance is translation-invariant, and the center-of-mass consumer
+    # adds the bbox offset back. The kernel's voxel count doubles as the count
+    # for the voxel-counting volume.
+    mask_moments = _accumulate_moments_from_mask_numba(mask.array[bbox])
+    n_voxels = mask_moments[0]
     features["volume_voxel_counting_YEKZ"] = float(n_voxels * voxel_volume)
 
     # 2. Mesh Based Features
-    mesh_feats, verts, faces = _get_mesh_features(mask)
+    mesh_feats, verts, faces = _get_mesh_features(mask, roi_bbox=bbox)
     features.update(mesh_feats)
 
     if verts is None or faces is None:
@@ -819,9 +885,6 @@ def calculate_morphology_features(
 
     # 3. Shape Features
     features.update(_get_shape_features(surface_area, mesh_volume))
-
-    # Pre-compute mask moments once (used by PCA and intensity morphology features)
-    mask_moments = _accumulate_moments_from_mask_numba(mask.array)
 
     # 4. PCA Based Features
     pca_feats, evals, evecs = _get_pca_features(
@@ -843,7 +906,7 @@ def calculate_morphology_features(
     if image is not None:
         features.update(
             _get_intensity_morphology_features(
-                mask, image, i_mask, mesh_volume, mask_moments=mask_moments
+                mask, image, i_mask, mesh_volume, mask_moments=mask_moments, mask_bbox=bbox
             )
         )
 

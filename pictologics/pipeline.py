@@ -42,6 +42,7 @@ from .deduplication import (
     get_default_rules,
 )
 from .features import FEATURE_NAMES
+from .features._utils import compute_nonzero_bbox, merge_bboxes
 from .features.intensity import (
     calculate_intensity_features,
     calculate_intensity_histogram_features,
@@ -523,6 +524,11 @@ class RadiomicsPipeline:
             sentinel_value: If specified, explicitly set the sentinel value instead
                 of auto-detecting. Only used when source_mode is "roi_only" or "auto".
 
+        Raises:
+            ValueError: If `steps` is not a list, if `source_mode` is not one of
+                "full_image", "roi_only", "auto", or if any step is not a dict
+                or is missing the 'step' key.
+
         Note:
             - Texture features require a prior 'discretise' step.
             - IVH features are configured via 'ivh_params' dict.
@@ -629,6 +635,14 @@ class RadiomicsPipeline:
             - If the entire configuration fails (empty ROI or unexpected error),
                 all values are ``NaN``.
 
+        Raises:
+            ValueError: If the loaded mask does not match the image's geometry
+                (shape, spacing, origin, or direction), or if `config_names`
+                includes a name that is not registered (and is not
+                "all_standard"). Errors raised while executing an individual
+                configuration's steps are caught internally and reported as
+                ``NaN`` features for that configuration instead of propagating.
+
         Example:
             Run standard pipeline components:
 
@@ -723,6 +737,8 @@ class RadiomicsPipeline:
             source_mask: Optional[Image] = None
             sentinel_detected = False
             detected_sentinel_value: Optional[float] = None
+            sentinel_auto_detected = False
+            sentinel_proportion: Optional[float] = None
 
             if source_mode == SourceMode.FULL_IMAGE:
                 # Default: all voxels valid, no source_mask needed
@@ -741,7 +757,8 @@ class RadiomicsPipeline:
             elif source_mode == SourceMode.AUTO:
                 # Auto-detect sentinel values
                 if explicit_sentinel is not None:
-                    # User provided explicit sentinel value
+                    # User provided explicit sentinel value: accept it regardless
+                    # of how much of the image it covers.
                     detected_sentinel_value = explicit_sentinel
                     sentinel_detected = True
                 else:
@@ -752,15 +769,34 @@ class RadiomicsPipeline:
                     if detected is not None:
                         detected_sentinel_value = detected
                         sentinel_detected = True
+                        sentinel_auto_detected = True
+                        sentinel_proportion = float(np.mean(orig_img.array == detected))
 
-                        # Log info instead of warning (user request)
-                        # Changed to DEBUG level to avoid console spam in default logging configuration
-                        logging.debug(
-                            f"Auto-detected sentinel value {detected} in image. "
-                            f"Using source validity mask for config '{config_name}'. "
-                            f"Voxels with value {detected} will be excluded from "
-                            f"resampling/filtering."
+                        # Prominent warning: auto-detection is a heuristic. The user
+                        # should confirm the value is a genuine fill/padding value and
+                        # not real image data.
+                        msg = (
+                            f"Auto-detected sentinel value {detected} "
+                            f"({sentinel_proportion * 100.0:.1f}% of voxels) for config "
+                            f"'{config_name}'; these voxels will be excluded from "
+                            f"resampling/filtering. Verify this is a padding value and "
+                            f"not real image data, or set sentinel_value explicitly."
                         )
+                        logging.warning(msg)
+                        warnings.warn(msg, stacklevel=2)
+                    else:
+                        # Nothing crossed the threshold. Warn and continue treating
+                        # the whole image as valid (no source mask), so batch runs do
+                        # not break on images that simply have no sentinel.
+                        msg = (
+                            f"No sentinel value auto-detected for config "
+                            f"'{config_name}' (no candidate reached the presence "
+                            f"threshold). Proceeding with the full image; set "
+                            f"sentinel_value explicitly if the image is pre-masked "
+                            f"with a padding value."
+                        )
+                        logging.warning(msg)
+                        warnings.warn(msg, stacklevel=2)
 
                 if sentinel_detected and detected_sentinel_value is not None:
                     source_mask = create_source_mask_from_sentinel(
@@ -773,8 +809,12 @@ class RadiomicsPipeline:
                 image=orig_img,
                 raw_image=orig_img,  # Track non-discretised image
                 morph_mask=orig_mask,
+                # Share the same array object as morph_mask (rather than a copy) so an
+                # `is`-identity check can detect when the masks are still in sync; no
+                # code in this package mutates mask/image arrays in place, so aliasing
+                # is safe (see _execute_preprocessing_step's resample branch).
                 intensity_mask=Image(
-                    array=orig_mask.array.copy(),
+                    array=orig_mask.array,
                     spacing=orig_mask.spacing,
                     origin=orig_mask.origin,
                     direction=orig_mask.direction,
@@ -798,6 +838,8 @@ class RadiomicsPipeline:
                 "source_mode": source_mode.value,
                 "sentinel_detected": sentinel_detected,
                 "sentinel_value": detected_sentinel_value,
+                "sentinel_auto_detected": sentinel_auto_detected,
+                "sentinel_proportion": sentinel_proportion,
                 "mask_roi_semantics": "nonzero_values_are_roi_membership",
                 "config_snapshot": self._make_serializable(
                     {
@@ -911,14 +953,14 @@ class RadiomicsPipeline:
         The pipeline treats any nonzero mask value as ROI membership unless a
         step explicitly binarizes/selects labels first.
         """
-        has_intensity_roi = bool(np.any(state.intensity_mask.array != 0))
+        has_intensity_roi = bool(state.intensity_mask.array.any())
         if not has_intensity_roi:
             raise EmptyROIMaskError(
                 "ROI is empty after preprocessing "
                 f"({context}). Ensure your mask contains at least one nonzero voxel, "
                 "or relax resegmentation/outlier filtering thresholds."
             )
-        has_morph_roi = bool(np.any(state.morph_mask.array != 0))
+        has_morph_roi = bool(state.morph_mask.array.any())
         if not has_morph_roi:
             raise EmptyROIMaskError(
                 "ROI is empty after preprocessing "
@@ -970,18 +1012,26 @@ class RadiomicsPipeline:
 
             # Update Masks
             thresh_arg = mask_thresh if interp_mask != "nearest" else None
+            # morph_mask and intensity_mask are resampled with identical params
+            # (resample has no apply_to), so when they still share the same array
+            # object (no preceding step diverged them), resample once and reuse
+            # the result for both instead of repeating the work.
+            masks_in_sync = state.morph_mask.array is state.intensity_mask.array
             state.morph_mask = resample_image(
                 state.morph_mask,
                 spacing,
                 interpolation=interp_mask,
                 mask_threshold=thresh_arg,
             )
-            state.intensity_mask = resample_image(
-                state.intensity_mask,
-                spacing,
-                interpolation=interp_mask,
-                mask_threshold=thresh_arg,
-            )
+            if masks_in_sync:
+                state.intensity_mask = state.morph_mask
+            else:
+                state.intensity_mask = resample_image(
+                    state.intensity_mask,
+                    spacing,
+                    interpolation=interp_mask,
+                    mask_threshold=thresh_arg,
+                )
 
             # CRITICAL: If valid source mask exists, apply it to both masks.
             # This prevents background (often 0 after resampling) from being
@@ -989,8 +1039,12 @@ class RadiomicsPipeline:
             if state.source_mask is not None:
                 # Ensure binary mask semantics
                 valid_mask = state.source_mask.array > 0
+                masks_in_sync = state.morph_mask.array is state.intensity_mask.array
                 state.morph_mask = _intersect_mask(state.morph_mask, valid_mask)
-                state.intensity_mask = _intersect_mask(state.intensity_mask, valid_mask)
+                if masks_in_sync:
+                    state.intensity_mask = state.morph_mask
+                else:
+                    state.intensity_mask = _intersect_mask(state.intensity_mask, valid_mask)
 
             self._ensure_nonempty_roi(state, context="resample")
 
@@ -1107,6 +1161,12 @@ class RadiomicsPipeline:
                         "ROI is empty after preprocessing (discretise). "
                         "Cannot infer FBS bin count from an empty ROI."
                     )
+            elif method == "FIXED_CUTOFFS":
+                cutoffs_param = params.get("cutoffs")
+                if cutoffs_param is not None:
+                    # N_g = len(cutoffs) + 1: values below the first cutoff map to
+                    # bin 1, values >= the last cutoff to bin len(cutoffs) + 1.
+                    state.n_bins = len(cutoffs_param) + 1
 
         elif step_name == "filter":
             # Apply image filter
@@ -1129,110 +1189,59 @@ class RadiomicsPipeline:
             # Extract filter-specific params (exclude type and boundary)
             filter_params = {k: v for k, v in params.items() if k not in ("type", "boundary")}
 
-            # Apply filter based on type
-            filtered_array: npt.NDArray[np.floating[Any]]
+            # Inject the source mask once for every filter. Outside FULL_IMAGE mode the
+            # filters exclude sentinel voxels (normalized convolution for mean/log/laws,
+            # zero-fill for the FFT-based ones).
+            if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
+                filter_params["source_mask"] = state.source_mask.array > 0
 
+            img_arr = state.image.array
+
+            # Each branch calls its filter; mean/log/laws return (result, valid_mask)
+            # when a source mask is supplied, the others return a bare array. The
+            # tuple is unwrapped uniformly below.
+            result: npt.NDArray[np.floating[Any]] | tuple[npt.NDArray[np.floating[Any]], Any]
             if filter_type == "mean":
                 filter_params["boundary"] = boundary
-                # Pass source_mask if not in FULL_IMAGE mode
-                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
-                    source_arr = state.source_mask.array > 0
-                    result_tuple = mean_filter(
-                        state.image.array, source_mask=source_arr, **filter_params
-                    )
-                    # mean_filter returns tuple[NDArray, NDArray] when source_mask is used
-                    if isinstance(result_tuple, tuple):
-                        filtered_array = result_tuple[0]
-                    else:
-                        filtered_array = result_tuple
-                else:
-                    filtered_array = mean_filter(state.image.array, **filter_params)
-
+                result = mean_filter(img_arr, **filter_params)
             elif filter_type == "log":
                 filter_params["boundary"] = boundary
-                # Use image spacing if not provided
-                if "spacing_mm" not in filter_params:
-                    filter_params["spacing_mm"] = state.image.spacing
-                # Pass source_mask if not in FULL_IMAGE mode
-                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
-                    source_arr = state.source_mask.array > 0
-                    result_tuple_log = laplacian_of_gaussian(
-                        state.image.array, source_mask=source_arr, **filter_params
-                    )
-                    if isinstance(result_tuple_log, tuple):
-                        filtered_array = result_tuple_log[0]
-                    else:
-                        filtered_array = result_tuple_log
-                else:
-                    filtered_array = laplacian_of_gaussian(state.image.array, **filter_params)
-
+                filter_params.setdefault("spacing_mm", state.image.spacing)
+                result = laplacian_of_gaussian(img_arr, **filter_params)
             elif filter_type == "laws":
                 filter_params["boundary"] = boundary
                 # 'kernel' param maps to first positional arg
                 kernel = filter_params.pop("kernel", "L5E5E5")
-                # Pass source_mask if not in FULL_IMAGE mode
-                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
-                    source_arr = state.source_mask.array > 0
-                    result_laws = laws_filter(
-                        state.image.array,
-                        kernel,
-                        source_mask=source_arr,
-                        **filter_params,
-                    )
-                    if isinstance(result_laws, tuple):
-                        filtered_array = result_laws[0]
-                    else:
-                        filtered_array = result_laws
-                else:
-                    filtered_array = laws_filter(state.image.array, kernel, **filter_params)
-
+                result = laws_filter(img_arr, kernel, **filter_params)
             elif filter_type == "gabor":
                 filter_params["boundary"] = boundary
-                if "spacing_mm" not in filter_params:
-                    filter_params["spacing_mm"] = state.image.spacing
-                # Pass source_mask if not in FULL_IMAGE mode
-                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
-                    source_arr = state.source_mask.array > 0
-                    filter_params["source_mask"] = source_arr
-                filtered_array = gabor_filter(state.image.array, **filter_params)
-
+                filter_params.setdefault("spacing_mm", state.image.spacing)
+                result = gabor_filter(img_arr, **filter_params)
             elif filter_type == "wavelet":
                 filter_params["boundary"] = boundary
-                # Pass source_mask if not in FULL_IMAGE mode
-                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
-                    source_arr = state.source_mask.array > 0
-                    filter_params["source_mask"] = source_arr
-                filtered_array = wavelet_transform(state.image.array, **filter_params)
-
+                result = wavelet_transform(img_arr, **filter_params)
             elif filter_type == "simoncelli":
-                # Simoncelli doesn't use boundary param
-                # Pass source_mask if not in FULL_IMAGE mode
-                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
-                    source_arr = state.source_mask.array > 0
-                    filter_params["source_mask"] = source_arr
-                filtered_array = simoncelli_wavelet(state.image.array, **filter_params)
-
+                # Simoncelli doesn't use the boundary param (FFT is inherently periodic)
+                result = simoncelli_wavelet(img_arr, **filter_params)
             elif filter_type == "riesz":
-                # Riesz transform variants
+                # Riesz transform variants (also do not take a boundary param)
                 variant = filter_params.pop("variant", "base")
-                # Pass source_mask if not in FULL_IMAGE mode
-                if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
-                    source_arr = state.source_mask.array > 0
-                    filter_params["source_mask"] = source_arr
                 if variant == "log":
-                    if "spacing_mm" not in filter_params:
-                        filter_params["spacing_mm"] = state.image.spacing
-                    filtered_array = riesz_log(state.image.array, **filter_params)
+                    filter_params.setdefault("spacing_mm", state.image.spacing)
+                    result = riesz_log(img_arr, **filter_params)
                 elif variant == "simoncelli":
-                    filtered_array = riesz_simoncelli(state.image.array, **filter_params)
+                    result = riesz_simoncelli(img_arr, **filter_params)
                 else:
-                    filtered_array = riesz_transform(state.image.array, **filter_params)
-
+                    result = riesz_transform(img_arr, **filter_params)
             else:
                 raise ValueError(
                     f"Unknown filter type: {filter_type}. "
                     "Supported: mean, log, laws, gabor, wavelet, simoncelli, riesz"
                 )
+
+            filtered_array: npt.NDArray[np.floating[Any]] = (
+                result[0] if isinstance(result, tuple) else result
+            )
 
             # Update state with filtered image
             state.image = Image(
@@ -1358,8 +1367,11 @@ class RadiomicsPipeline:
         if not isinstance(texture_matrix_params, dict):
             raise ValueError("texture_matrix_params must be a dict")
 
+        # Nonzero mask bboxes are memoised per extraction pass, so morphology and
+        # repeated (single-family) texture calls don't rescan the full volume.
+        bbox_cache: dict[int, Optional[tuple[slice, slice, slice]]] = {}
         for family in families:
-            results.update(self._extract_single_family(state, family, params))
+            results.update(self._extract_single_family(state, family, params, bbox_cache))
 
         # Ensure every expected feature key is present (NaN for partial failures)
         self._fill_missing_features(results, families, params)
@@ -1393,6 +1405,8 @@ class RadiomicsPipeline:
         results: dict[str, Any] = {}
         families = params.get("families", _DEFAULT_FEATURE_FAMILIES)
 
+        # Nonzero mask bboxes are memoised per extraction pass (see _extract_features).
+        bbox_cache: dict[int, Optional[tuple[slice, slice, slice]]] = {}
         for family in families:
             # Normalize texture aliases so raw subfamily and texture_* requests
             # share the same signature/cache behavior.
@@ -1409,7 +1423,7 @@ class RadiomicsPipeline:
                 self._dedup_reused_count += 1
             else:
                 # Compute this family
-                family_results = self._extract_single_family(state, family, params)
+                family_results = self._extract_single_family(state, family, params, bbox_cache)
                 results.update(family_results)
 
                 # Cache if we have a signature
@@ -1421,11 +1435,42 @@ class RadiomicsPipeline:
         self._fill_missing_features(results, families, params)
         return results
 
+    @staticmethod
+    def _cached_nonzero_bbox(
+        arr: npt.NDArray[np.floating[Any]],
+        cache: dict[int, Optional[tuple[slice, slice, slice]]],
+    ) -> Optional[tuple[slice, slice, slice]]:
+        """Nonzero bbox of `arr`, memoised by array identity for one extraction pass."""
+        key = id(arr)
+        if key not in cache:
+            cache[key] = compute_nonzero_bbox(arr)
+        return cache[key]
+
+    def _masked_values(
+        self,
+        image: Image | npt.NDArray[Any],
+        mask: Image,
+        bbox_cache: dict[int, Optional[tuple[slice, slice, slice]]],
+    ) -> npt.NDArray[np.floating[Any]]:
+        """ROI voxel values, equivalent to ``apply_mask(image, mask)``.
+
+        Crops both arrays to the mask's cached nonzero bbox before gathering, so the
+        scan and boolean gather touch only the ROI bounding box rather than the full
+        volume. The gathered values (and their order) are bit-identical, since
+        cropping only removes voxels that are outside the mask anyway.
+        """
+        bbox = self._cached_nonzero_bbox(mask.array, bbox_cache)
+        if bbox is None:
+            return apply_mask(image, mask)
+        img_arr = image.array if isinstance(image, Image) else image
+        return apply_mask(img_arr[bbox], mask.array[bbox])
+
     def _extract_single_family(
         self,
         state: PipelineState,
         family: str,
         params: dict[str, Any],
+        bbox_cache: Optional[dict[int, Optional[tuple[slice, slice, slice]]]] = None,
     ) -> dict[str, Any]:
         """
         Extract features for a single family.
@@ -1433,6 +1478,8 @@ class RadiomicsPipeline:
         This is a refactored helper to enable per-family deduplication.
         """
         results: dict[str, Any] = {}
+        if bbox_cache is None:
+            bbox_cache = {}
 
         # Optional kwargs pass-through
         spatial_intensity_params = params.get("spatial_intensity_params", {}) or {}
@@ -1446,11 +1493,12 @@ class RadiomicsPipeline:
                     state.morph_mask,
                     state.raw_image,
                     intensity_mask=state.intensity_mask,
+                    roi_bbox=self._cached_nonzero_bbox(state.morph_mask.array, bbox_cache),
                 )
             )
 
         elif family == "intensity":
-            masked_values = apply_mask(state.raw_image, state.intensity_mask)
+            masked_values = self._masked_values(state.raw_image, state.intensity_mask, bbox_cache)
             results.update(calculate_intensity_features(masked_values))
 
             include_spatial = bool(params.get("include_spatial_intensity", False))
@@ -1493,15 +1541,24 @@ class RadiomicsPipeline:
                     UserWarning,
                     stacklevel=2,
                 )
-            masked_values = apply_mask(state.image, state.intensity_mask)
-            results.update(calculate_intensity_histogram_features(masked_values))
+            masked_values = self._masked_values(state.image, state.intensity_mask, bbox_cache)
+            results.update(
+                calculate_intensity_histogram_features(
+                    masked_values,
+                    # IBSI: the histogram spans the full discretisation range
+                    # [1, N_g], not just the observed values.
+                    n_bins=state.n_bins if state.is_discretised else None,
+                )
+            )
 
         elif family == "ivh":
-            results.update(self._compute_ivh_features(state, params, ivh_params))
+            results.update(self._compute_ivh_features(state, params, ivh_params, bbox_cache))
 
         elif (texture_family := _normalize_texture_family(family)) is not None:
             results.update(
-                self._compute_texture_features(state, texture_family, texture_matrix_params)
+                self._compute_texture_features(
+                    state, texture_family, texture_matrix_params, bbox_cache
+                )
             )
 
         return results
@@ -1511,8 +1568,11 @@ class RadiomicsPipeline:
         state: PipelineState,
         params: dict[str, Any],
         ivh_params: dict[str, Any],
+        bbox_cache: Optional[dict[int, Optional[tuple[slice, slice, slice]]]] = None,
     ) -> dict[str, Any]:
         """Compute IVH features (helper for _extract_single_family)."""
+        if bbox_cache is None:
+            bbox_cache = {}
         ivh_use_continuous = params.get("ivh_use_continuous", False)
         ivh_discretisation = params.get("ivh_discretisation", None)
 
@@ -1520,7 +1580,7 @@ class RadiomicsPipeline:
         ivh_disc_min_val: Optional[float] = None
 
         if ivh_use_continuous:
-            ivh_values = apply_mask(state.raw_image, state.intensity_mask)
+            ivh_values = self._masked_values(state.raw_image, state.intensity_mask, bbox_cache)
         elif ivh_discretisation:
             ivh_disc_params = ivh_discretisation.copy()
             ivh_method = ivh_disc_params.pop("method", "FBS")
@@ -1532,9 +1592,9 @@ class RadiomicsPipeline:
                 roi_mask=state.intensity_mask,
                 **ivh_disc_params,
             )
-            ivh_values = apply_mask(temp_ivh_disc, state.intensity_mask)
+            ivh_values = self._masked_values(temp_ivh_disc, state.intensity_mask, bbox_cache)
         else:
-            ivh_values = apply_mask(state.image, state.intensity_mask)
+            ivh_values = self._masked_values(state.image, state.intensity_mask, bbox_cache)
 
         ivh_kwargs: dict[str, Any] = {}
         if ivh_disc_bin_width is not None:
@@ -1568,9 +1628,12 @@ class RadiomicsPipeline:
         state: PipelineState,
         family: str,
         texture_matrix_params: dict[str, Any],
+        bbox_cache: Optional[dict[int, Optional[tuple[slice, slice, slice]]]] = None,
     ) -> dict[str, Any]:
         """Compute texture features (helper for _extract_single_family)."""
         results: dict[str, Any] = {}
+        if bbox_cache is None:
+            bbox_cache = {}
 
         if not state.is_discretised:
             raise ValueError(
@@ -1585,57 +1648,90 @@ class RadiomicsPipeline:
         if "ngldm_alpha" in texture_matrix_params:
             matrix_kwargs["ngldm_alpha"] = texture_matrix_params["ngldm_alpha"]
 
+        # Crop once to the ROI bounding box (union of intensity and morph masks, to
+        # preserve GLDZM distance-map correctness) and use the cropped arrays for the
+        # matrix calculation and every feature family below. The feature functions scan
+        # the mask (ROI voxel counts, GLCM Ng_eff), so passing full-volume arrays would
+        # repeat full-volume scans per family. Feature values are unchanged: cropping
+        # only removes zero-mask voxels. The per-mask bboxes are memoised per
+        # extraction pass, so repeated single-family calls scan each mask only once.
+        bbox = merge_bboxes(
+            self._cached_nonzero_bbox(state.intensity_mask.array, bbox_cache),
+            self._cached_nonzero_bbox(state.morph_mask.array, bbox_cache),
+        )
+        if bbox is None:
+            disc_c = disc_image.array
+            intensity_mask_c = state.intensity_mask.array
+            morph_mask_c = state.morph_mask.array
+        else:
+            disc_c = disc_image.array[bbox]
+            intensity_mask_c = state.intensity_mask.array[bbox]
+            morph_mask_c = state.morph_mask.array[bbox]
+
+        # If a specific texture family is requested, only compute its matrix.
+        want_glcm = family in ("texture", "texture_glcm", "glcm")
+        want_glrlm = family in ("texture", "texture_glrlm", "glrlm")
+        want_glszm = family in ("texture", "texture_glszm", "glszm")
+        want_gldzm = family in ("texture", "texture_gldzm", "gldzm")
+        want_ngtdm = family in ("texture", "texture_ngtdm", "ngtdm")
+        want_ngldm = family in ("texture", "texture_ngldm", "ngldm")
+
         texture_matrices = calculate_all_texture_matrices(
-            disc_image.array,
-            state.intensity_mask.array,
+            disc_c,
+            intensity_mask_c,
             n_bins,
-            distance_mask=state.morph_mask.array,
+            distance_mask=morph_mask_c,
+            calc_glcm=want_glcm,
+            calc_glrlm=want_glrlm,
+            calc_ngtdm=want_ngtdm,
+            calc_ngldm=want_ngldm,
+            calc_glszm=want_glszm,
+            calc_gldzm=want_gldzm,
             **matrix_kwargs,
         )
 
-        # If specific texture family requested, only compute that
-        if family == "texture" or family == "texture_glcm" or family == "glcm":
+        if want_glcm:
             results.update(
                 calculate_glcm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
+                    disc_c,
+                    intensity_mask_c,
                     n_bins,
                     glcm_matrix=texture_matrices["glcm"],
                 )
             )
-        if family == "texture" or family == "texture_glrlm" or family == "glrlm":
+        if want_glrlm:
             results.update(
                 calculate_glrlm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
+                    disc_c,
+                    intensity_mask_c,
                     n_bins,
                     glrlm_matrix=texture_matrices["glrlm"],
                 )
             )
-        if family == "texture" or family == "texture_glszm" or family == "glszm":
+        if want_glszm:
             results.update(
                 calculate_glszm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
+                    disc_c,
+                    intensity_mask_c,
                     n_bins,
                     glszm_matrix=texture_matrices["glszm"],
                 )
             )
-        if family == "texture" or family == "texture_gldzm" or family == "gldzm":
+        if want_gldzm:
             results.update(
                 calculate_gldzm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
+                    disc_c,
+                    intensity_mask_c,
                     n_bins,
                     gldzm_matrix=texture_matrices["gldzm"],
-                    distance_mask=state.morph_mask.array,
+                    distance_mask=morph_mask_c,
                 )
             )
-        if family == "texture" or family == "texture_ngtdm" or family == "ngtdm":
+        if want_ngtdm:
             results.update(
                 calculate_ngtdm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
+                    disc_c,
+                    intensity_mask_c,
                     n_bins,
                     ngtdm_matrices=(
                         texture_matrices["ngtdm_s"],
@@ -1643,11 +1739,11 @@ class RadiomicsPipeline:
                     ),
                 )
             )
-        if family == "texture" or family == "texture_ngldm" or family == "ngldm":
+        if want_ngldm:
             results.update(
                 calculate_ngldm_features(
-                    disc_image.array,
-                    state.intensity_mask.array,
+                    disc_c,
+                    intensity_mask_c,
                     n_bins,
                     ngldm_matrix=texture_matrices["ngldm"],
                 )

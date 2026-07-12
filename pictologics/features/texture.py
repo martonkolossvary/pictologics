@@ -92,7 +92,7 @@ from numba.np.ufunc.parallel import get_thread_id
 from numpy import typing as npt
 from scipy.ndimage import distance_transform_cdt
 
-from ._utils import compute_nonzero_bbox
+from ._utils import compute_nonzero_bbox, merge_bboxes, roi_min_max
 
 
 def _maybe_crop_to_bbox(
@@ -122,11 +122,10 @@ def _maybe_crop_to_bbox(
             f"got {distance_mask.shape!r} vs {mask.shape!r}"
         )
 
-    union = mask != 0
+    bbox = compute_nonzero_bbox(mask)
     if distance_mask is not None:
-        union = union | (distance_mask != 0)
+        bbox = merge_bboxes(bbox, compute_nonzero_bbox(distance_mask))
 
-    bbox = compute_nonzero_bbox(union)
     if bbox is None:
         return data, mask, distance_mask
 
@@ -138,7 +137,107 @@ def _maybe_crop_to_bbox(
 
 def _roi_voxel_count(mask: npt.NDArray[np.floating[Any]]) -> int:
     """Count ROI voxels using nonzero mask membership semantics."""
+    # np.count_nonzero has no fast path for float dtypes (it inspects each 8-byte
+    # value), so on a float mask it is ~5x slower than counting a bool array.
+    # `mask != 0` yields the identical count (NaN/Inf -> True, -0.0 -> False) via the
+    # fast bool popcount path; integer/bool masks already hit that path directly.
+    if mask.dtype.kind == "f":
+        return int(np.count_nonzero(mask != 0))
     return int(np.count_nonzero(mask))
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _chamfer_distance_taxicab_numba(
+    mask_bool: npt.NDArray[np.floating[Any]],
+) -> npt.NDArray[np.floating[Any]]:
+    """
+    Exact 2-pass raster chamfer distance transform (taxicab/cityblock metric, 6-connectivity).
+
+    Forward and backward raster sweeps propagate distance-to-background using unit-weight
+    face-neighbour steps. This is mathematically exact (not approximate) for the L1 metric
+    with a connectivity-1 structuring element. Out-of-bounds neighbours are treated as
+    background, matching the effect of the one-voxel zero-padding used by the
+    `distance_transform_cdt` call this replaces.
+
+    Returns a `(depth+2, height+2, width+2)` int32 array; the caller slices
+    `[1:-1, 1:-1, 1:-1]` to recover the unpadded distance map, matching the layout the
+    scipy-based padded-then-sliced code previously produced.
+    """
+    depth, height, width = mask_bool.shape
+    p_depth, p_height, p_width = depth + 2, height + 2, width + 2
+    dist = np.zeros((p_depth, p_height, p_width), dtype=np.int32)
+    inf = np.int32(depth + height + width + 1)
+
+    for z in range(depth):
+        for y in range(height):
+            for x in range(width):
+                if mask_bool[z, y, x]:
+                    dist[z + 1, y + 1, x + 1] = inf
+
+    # Forward pass: increasing z, y, x. Predecessor neighbours are already-visited
+    # positions in raster order; the padding border (still 0) supplies the background
+    # distance for voxels touching the array edge.
+    for z in range(1, p_depth - 1):
+        for y in range(1, p_height - 1):
+            for x in range(1, p_width - 1):
+                if dist[z, y, x] == 0:
+                    continue
+                best = dist[z, y, x]
+                cand = dist[z - 1, y, x] + 1
+                if cand < best:
+                    best = cand
+                cand = dist[z, y - 1, x] + 1
+                if cand < best:
+                    best = cand
+                cand = dist[z, y, x - 1] + 1
+                if cand < best:
+                    best = cand
+                dist[z, y, x] = best
+
+    # Backward pass: decreasing z, y, x. Successor neighbours.
+    for z in range(p_depth - 2, 0, -1):
+        for y in range(p_height - 2, 0, -1):
+            for x in range(p_width - 2, 0, -1):
+                if dist[z, y, x] == 0:
+                    continue
+                best = dist[z, y, x]
+                cand = dist[z + 1, y, x] + 1
+                if cand < best:
+                    best = cand
+                cand = dist[z, y + 1, x] + 1
+                if cand < best:
+                    best = cand
+                cand = dist[z, y, x + 1] + 1
+                if cand < best:
+                    best = cand
+                dist[z, y, x] = best
+
+    return dist  # type: ignore[return-value]
+
+
+def _gldzm_distance_map(
+    mask_bool: npt.NDArray[Any],
+) -> npt.NDArray[Any]:
+    """
+    Compute the GLDZM distance-to-border map for a binary ROI mask.
+
+    Equivalent to `scipy.ndimage.distance_transform_cdt(mask, metric="taxicab")` on `mask`
+    zero-padded by one voxel on every side, sliced back to the original shape: background
+    voxels get distance 0, foreground voxels get the taxicab (cityblock) distance to the
+    nearest background voxel, and voxels outside the array are treated as background.
+
+    3D masks (the only shape the texture pipeline produces) use the exact numba chamfer
+    kernel `_chamfer_distance_taxicab_numba`. Any other dimensionality falls back to the
+    original scipy-based implementation.
+    """
+    if mask_bool.ndim == 3:
+        dist_padded = _chamfer_distance_taxicab_numba(mask_bool)
+        return cast(npt.NDArray[Any], dist_padded[1:-1, 1:-1, 1:-1])
+
+    mask_padded = np.pad(mask_bool, 1, mode="constant", constant_values=0)
+    dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.int32)
+    unpad = tuple(slice(1, -1) for _ in range(mask_bool.ndim))
+    return cast(npt.NDArray[Any], dist_map_padded[unpad])
 
 
 # --- Zone Features Buffer Pool ---
@@ -186,14 +285,8 @@ class _ZoneBufferPool:
             self._res_size = np.zeros(max_zones, dtype=np.int32)
             self._res_dist = np.zeros(max_zones, dtype=np.float64)
             self._stack = np.zeros(max_zones, dtype=np.int32)
-        else:
-            # Reuse existing buffers - just reset to zero
-            assert self._res_gl is not None
-            self._res_gl[:max_zones] = 0
-            assert self._res_size is not None
-            self._res_size[:max_zones] = 0
-            assert self._res_dist is not None
-            self._res_dist[:max_zones] = 0.0
+        # On reuse no reset is needed: the buffers are scratch space, and the kernel
+        # writes every entry (index < zone_count) before the build phase reads it.
 
         assert self._res_gl is not None
         assert self._res_size is not None
@@ -634,6 +727,12 @@ def calculate_all_texture_matrices(
     n_bins: int,
     distance_mask: Optional[npt.NDArray[np.floating[Any]]] = None,
     ngldm_alpha: int = 0,
+    calc_glcm: bool = True,
+    calc_glrlm: bool = True,
+    calc_ngtdm: bool = True,
+    calc_ngldm: bool = True,
+    calc_glszm: bool = True,
+    calc_gldzm: bool = True,
 ) -> dict[str, Any]:
     """
     Calculate all texture matrices (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM) in an optimized single pass.
@@ -655,6 +754,14 @@ def calculate_all_texture_matrices(
         ngldm_alpha (int): The coarseness parameter α for NGLDM calculation. Two grey levels are
             considered dependent if their absolute difference is ≤ α. Default is 0 (exact match),
             which is the IBSI standard. Use α=1 for tolerance of ±1 grey level difference.
+        calc_glcm (bool): Whether to compute the GLCM. Default True.
+        calc_glrlm (bool): Whether to compute the GLRLM. Default True.
+        calc_ngtdm (bool): Whether to compute the NGTDM. Default True.
+        calc_ngldm (bool): Whether to compute the NGLDM. Default True.
+        calc_glszm (bool): Whether to compute the GLSZM. Default True.
+        calc_gldzm (bool): Whether to compute the GLDZM (skipping it also skips the
+            distance transform). Default True.
+            Disabled matrices are returned as zero-filled placeholders of minimal shape.
 
     Returns:
         dict[str, Any]: A dictionary containing the calculated texture matrices:
@@ -683,8 +790,13 @@ def calculate_all_texture_matrices(
         # (13, 32, 32)
         ```
     """
-    # Fast exit for empty ROI
-    if not bool(np.any(mask != 0)):
+    # Crop to ROI bounding box (union with distance_mask when provided) to reduce memory traffic.
+    data_c, mask_c, distmask_c = _maybe_crop_to_bbox(data, mask, distance_mask)
+
+    # Fast exit for empty ROI. Checked on the cropped mask so the common non-empty case
+    # avoids a second full-volume scan; mask_c can still be empty when only distance_mask
+    # has nonzero voxels.
+    if not bool(np.any(mask_c != 0)):
         return {
             "glcm": np.zeros((13, n_bins, n_bins), dtype=np.uint64),
             "glrlm": np.zeros((13, n_bins, 1), dtype=np.uint64),
@@ -695,58 +807,76 @@ def calculate_all_texture_matrices(
             "gldzm": np.zeros((n_bins, 1), dtype=np.uint32),
         }
 
-    # Crop to ROI bounding box (union with distance_mask when provided) to reduce memory traffic.
-    data_c, mask_c, distmask_c = _maybe_crop_to_bbox(data, mask, distance_mask)
-
     # Use a compact binary mask representation for kernels. Label values are
     # membership markers, not weights.
     mask_u8 = (mask_c != 0).astype(np.uint8)
     # 1. Local Features (GLCM, GLRLM, NGTDM, NGLDM)
-    # Pre-cast data to smallest possible int type (0-based)
-    # Input data is 1-based, so we subtract 1.
-    if n_bins <= 256:
-        data_int = (data_c - 1).astype(np.uint8)
+    if calc_glcm or calc_glrlm or calc_ngtdm or calc_ngldm:
+        # Pre-cast data to smallest possible int type (0-based)
+        # Input data is 1-based, so we subtract 1. Fused into a single pass via
+        # out=, writing straight into the target-dtype buffer instead of allocating
+        # a same-dtype-as-input intermediate for the subtraction and casting it after.
+        if n_bins <= 256:
+            data_int = np.empty(data_c.shape, dtype=np.uint8)
+        else:
+            data_int = np.empty(data_c.shape, dtype=np.int32)
+        np.subtract(data_c, 1, out=data_int, casting="unsafe")
+
+        try:
+            n_threads = int(numba.config.NUMBA_NUM_THREADS)
+        except (ValueError, TypeError):
+            n_threads = 1  # Fallback
+
+        glcm, glrlm, ngtdm_s, ngtdm_n, ngldm = _calculate_local_features_numba(
+            data_int,
+            mask_u8,
+            n_bins,
+            calc_glcm=calc_glcm,
+            calc_glrlm=calc_glrlm,
+            calc_ngtdm=calc_ngtdm,
+            calc_ngldm=calc_ngldm,
+            offsets_26=OFFSETS_26,
+            directions_13=DIRECTIONS_13,
+            ngldm_alpha=ngldm_alpha,
+            n_threads=n_threads,
+        )
     else:
-        data_int = (data_c - 1).astype(np.int32)
-
-    try:
-        n_threads = int(numba.config.NUMBA_NUM_THREADS)
-    except (ValueError, TypeError):
-        n_threads = 1  # Fallback
-
-    glcm, glrlm, ngtdm_s, ngtdm_n, ngldm = _calculate_local_features_numba(
-        data_int,
-        mask_u8,
-        n_bins,
-        calc_glcm=True,
-        calc_glrlm=True,
-        calc_ngtdm=True,
-        calc_ngldm=True,
-        offsets_26=OFFSETS_26,
-        directions_13=DIRECTIONS_13,
-        ngldm_alpha=ngldm_alpha,
-        n_threads=n_threads,
-    )
+        glcm = np.zeros((13, n_bins, n_bins), dtype=np.uint64)
+        glrlm = np.zeros((13, n_bins, 1), dtype=np.uint64)
+        ngtdm_s = np.zeros((n_bins,), dtype=np.float64)
+        ngtdm_n = np.zeros((n_bins,), dtype=np.float64)
+        ngldm = np.zeros((n_bins, 27), dtype=np.uint64)
 
     # 2. Zone Features (GLSZM, GLDZM)
-    # Pre-calculate distance map for GLDZM
-    # Use distance_mask if provided, else mask
-    d_mask = (distmask_c != 0).astype(np.uint8) if distmask_c is not None else mask_u8
+    if calc_glszm or calc_gldzm:
+        if calc_gldzm:
+            # Pre-calculate distance map for GLDZM
+            # Use distance_mask if provided, else mask
+            d_mask = (distmask_c != 0).astype(np.uint8) if distmask_c is not None else mask_u8
 
-    # Pad the mask with 0s to ensure the image border is treated as an edge.
-    mask_bool = d_mask > 0
-    mask_padded = np.pad(mask_bool, 1, mode="constant", constant_values=0)
-    dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.int32)
-    dist_map = dist_map_padded[1:-1, 1:-1, 1:-1]
+            # Distance-to-border map, with the image border treated as an edge.
+            mask_bool = d_mask > 0
+            dist_map = _gldzm_distance_map(mask_bool)
+        else:
+            # The zone kernel needs a distance array either way; match the dtype AND
+            # layout of the real distance map (an int32 strided view of a padded
+            # array) so no extra JIT specialization is compiled. Never read when
+            # calc_gldzm is False.
+            dist_map = np.zeros(tuple(s + 2 for s in data_c.shape), dtype=np.int32)[
+                1:-1, 1:-1, 1:-1
+            ]
 
-    glszm, gldzm = calculate_zone_features(
-        data_c,
-        mask_u8,
-        dist_map,
-        n_bins,
-        calc_glszm=True,
-        calc_gldzm=True,
-    )
+        glszm, gldzm = calculate_zone_features(
+            data_c,
+            mask_u8,
+            dist_map,
+            n_bins,
+            calc_glszm=calc_glszm,
+            calc_gldzm=calc_gldzm,
+        )
+    else:
+        glszm = np.zeros((n_bins, 1), dtype=np.uint32)
+        gldzm = np.zeros((n_bins, 1), dtype=np.uint32)
 
     return {
         "glcm": glcm,
@@ -829,16 +959,21 @@ def calculate_glcm_features(
             12.5
     """
     if glcm_matrix is None:
-        data_c, mask_c, _ = _maybe_crop_to_bbox(data, mask, None)
-        if mask_c.dtype == np.uint8:
-            mask_u8 = mask_c
+        # Standalone path: crop to the ROI bbox and rebind, so the kernel and the
+        # Ng_eff scan below run on the cropped arrays instead of the full volume.
+        data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
+        if mask.dtype == np.uint8:
+            # Normalize to C-contiguous: the crop above yields a strided view, which
+            # would otherwise compile a second (strided) specialization of the kernel.
+            mask_u8 = np.ascontiguousarray(mask)
         else:
-            mask_u8 = (mask_c != 0).astype(np.uint8)
+            mask_u8 = (mask != 0).astype(np.uint8)
 
         if n_bins <= 256:
-            data_int = (data_c - 1).astype(np.uint8)
+            data_int = np.empty(data.shape, dtype=np.uint8)
         else:
-            data_int = (data_c - 1).astype(np.int32)
+            data_int = np.empty(data.shape, dtype=np.int32)
+        np.subtract(data, 1, out=data_int, casting="unsafe")
 
         # Determine n_threads for JIT call
         try:
@@ -938,29 +1073,32 @@ def calculate_glcm_features(
     features["angular_second_moment_8ZQL"] = np.sum(P**2)
 
     # Contrast - ACUI
-    features["contrast_ACUI"] = np.sum(((I - J) ** 2) * P)
+    sq_diff = (I - J) ** 2
+    features["contrast_ACUI"] = np.sum(sq_diff * P)
 
     # Dissimilarity - 8S9J
-    features["dissimilarity_8S9J"] = np.sum(np.abs(I - J) * P)
+    features["dissimilarity_8S9J"] = np.sum(k_diff * P)
 
     # Inverse Difference - IB1Z
-    features["inverse_difference_IB1Z"] = np.sum(P / (1 + np.abs(I - J)))
+    features["inverse_difference_IB1Z"] = np.sum(P / (1 + k_diff))
 
-    roi_data = data[mask > 0]
-    if len(roi_data) > 0:
-        Ng_eff = int(np.max(roi_data) - np.min(roi_data) + 1)
+    # Ng_eff is the ROI grey-level span; only ROI min/max are needed. Fused single-pass
+    # kernel: no bbox rescan and no boolean-gather temporaries.
+    roi_span = roi_min_max(data, mask)
+    if roi_span is not None:
+        Ng_eff = int(roi_span[1] - roi_span[0] + 1)
     else:
         Ng_eff = 1  # Fallback
 
     # Normalised Inverse Difference - NDRX
-    features["normalised_inverse_difference_NDRX"] = np.sum(P / (1 + np.abs(I - J) / Ng_eff))
+    features["normalised_inverse_difference_NDRX"] = np.sum(P / (1 + k_diff / Ng_eff))
 
     # Inverse Difference Moment - WF0Z
-    features["inverse_difference_moment_WF0Z"] = np.sum(P / (1 + (I - J) ** 2))
+    features["inverse_difference_moment_WF0Z"] = np.sum(P / (1 + sq_diff))
 
     # Normalised Inverse Difference Moment - 1QCO
     features["normalised_inverse_difference_moment_1QCO"] = np.sum(
-        P / (1 + ((I - J) ** 2) / (Ng_eff**2))
+        P / (1 + sq_diff / (Ng_eff**2))
     )
 
     # Inverse Variance - E8JP
@@ -978,13 +1116,14 @@ def calculate_glcm_features(
     features["autocorrelation_QWB0"] = np.sum(I * J * P)
 
     # Cluster Tendency - DG8W
-    features["cluster_tendency_DG8W"] = np.sum(((I + J - 2 * mu) ** 2) * P)
+    sum_diff2mu = I + J - 2 * mu
+    features["cluster_tendency_DG8W"] = np.sum((sum_diff2mu**2) * P)
 
     # Cluster Shade - 7NFM
-    features["cluster_shade_7NFM"] = np.sum(((I + J - 2 * mu) ** 3) * P)
+    features["cluster_shade_7NFM"] = np.sum((sum_diff2mu**3) * P)
 
     # Cluster Prominence - AE86
-    features["cluster_prominence_AE86"] = np.sum(((I + J - 2 * mu) ** 4) * P)
+    features["cluster_prominence_AE86"] = np.sum((sum_diff2mu**4) * P)
 
     # Information Correlation 1 - R8DG
     HXY = features["joint_entropy_TU9B"]
@@ -1032,10 +1171,21 @@ def calculate_glrlm_features(
             Example keys: 'short_runs_emphasis_22OV', 'grey_level_non_uniformity_R5YN'.
     """
     if glrlm_matrix is None:
-        if n_bins <= 256:
-            data_int = (data - 1).astype(np.uint8)
+        # Standalone path: crop to the ROI bbox and rebind, so the kernel and the
+        # run-percentage voxel count below run on the cropped arrays.
+        data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
+        if mask.dtype == np.uint8:
+            # Normalize to C-contiguous: the crop above yields a strided view, which
+            # would otherwise compile a second (strided) specialization of the kernel.
+            mask_u8 = np.ascontiguousarray(mask)
         else:
-            data_int = (data - 1).astype(np.int32)  # pragma: no cover
+            mask_u8 = (mask != 0).astype(np.uint8)
+
+        if n_bins <= 256:
+            data_int = np.empty(data.shape, dtype=np.uint8)
+        else:
+            data_int = np.empty(data.shape, dtype=np.int32)  # pragma: no cover
+        np.subtract(data, 1, out=data_int, casting="unsafe")
 
         # Determine n_threads for JIT call
         try:
@@ -1046,7 +1196,7 @@ def calculate_glrlm_features(
         # Call combined kernel
         _, glrlm, _, _, _ = _calculate_local_features_numba(
             data_int,
-            mask,
+            mask_u8,
             n_bins,
             calc_glcm=False,
             calc_glrlm=True,
@@ -1076,14 +1226,16 @@ def calculate_glrlm_features(
     i_idx, j_idx = np.indices((n_g, n_r))
     I = i_idx + 1  # noqa: E741
     J = j_idx + 1
+    I2 = I**2
+    J2 = J**2
 
     features = {}
 
     # Short Run Emphasis (SRE) - 22OV
-    features["short_runs_emphasis_22OV"] = np.sum(P / (J**2))
+    features["short_runs_emphasis_22OV"] = np.sum(P / J2)
 
     # Long Run Emphasis (LRE) - W4KF
-    features["long_runs_emphasis_W4KF"] = np.sum(P * (J**2))
+    features["long_runs_emphasis_W4KF"] = np.sum(P * J2)
 
     # Grey Level Non-Uniformity (GLNU) - R5YN
     s_i = np.sum(glrlm, axis=1)
@@ -1117,22 +1269,22 @@ def calculate_glrlm_features(
     features["run_entropy_HJ9O"] = -np.sum(P[mask_p] * np.log2(P[mask_p]))
 
     # Low Grey Level Run Emphasis (LGLRE) - V3SW
-    features["low_grey_level_run_emphasis_V3SW"] = np.sum(P / (I**2))
+    features["low_grey_level_run_emphasis_V3SW"] = np.sum(P / I2)
 
     # High Grey Level Run Emphasis (HGLRE) - G3QZ
-    features["high_grey_level_run_emphasis_G3QZ"] = np.sum(P * (I**2))
+    features["high_grey_level_run_emphasis_G3QZ"] = np.sum(P * I2)
 
     # Short Run Low Grey Level Emphasis (SRLGLE) - HTZT
-    features["short_run_low_grey_level_emphasis_HTZT"] = np.sum(P / ((I**2) * (J**2)))
+    features["short_run_low_grey_level_emphasis_HTZT"] = np.sum(P / (I2 * J2))
 
     # Short Run High Grey Level Emphasis (SRHGLE) - GD3A
-    features["short_run_high_grey_level_emphasis_GD3A"] = np.sum(P * (I**2) / (J**2))
+    features["short_run_high_grey_level_emphasis_GD3A"] = np.sum(P * I2 / J2)
 
     # Long Run Low Grey Level Emphasis (LRLGLE) - IVPO
-    features["long_run_low_grey_level_emphasis_IVPO"] = np.sum(P * (J**2) / (I**2))
+    features["long_run_low_grey_level_emphasis_IVPO"] = np.sum(P * J2 / I2)
 
     # Long Run High Grey Level Emphasis (LRHGLE) - 3KUM
-    features["long_run_high_grey_level_emphasis_3KUM"] = np.sum(P * (I**2) * (J**2))
+    features["long_run_high_grey_level_emphasis_3KUM"] = np.sum(P * I2 * J2)
 
     return features
 
@@ -1141,7 +1293,7 @@ def calculate_glrlm_features(
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
-def _calculate_zone_features_numba(
+def _calculate_zone_features_serial_numba(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[np.floating[Any]],
     dist_map: npt.NDArray[np.floating[Any]],
@@ -1154,27 +1306,13 @@ def _calculate_zone_features_numba(
     calc_gldzm: bool = True,
 ) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
     """
-    Calculate GLSZM and GLDZM in a single pass using an optimized 1D flattened approach.
+    Serial single-pass GLSZM/GLDZM kernel for small volumes.
 
-    Optimization Strategy:
-    1. Flatten 3D arrays to 1D with 1-voxel padding.
-       - Padding avoids boundary checks in the inner loop.
-       - Flattening improves cache locality and simplifies indexing.
-    2. Reuse the mask array to track visited voxels.
-       - Sets mask to 0 after visiting, avoiding a separate boolean array.
-    3. Accept pre-allocated result buffers to minimize allocation overhead.
+    Identical algorithm to `_calculate_zone_features_numba` with one chunk, but
+    compiled without `parallel=True`: the parallel kernel pays a fixed threading
+    dispatch cost per call that dominates on small inputs.
 
-    Args:
-        data: 3D discretized image data.
-        mask: 3D mask array (will be modified - set voxels to 0 when visited).
-        dist_map: 3D distance map for GLDZM.
-        n_bins: Number of grey level bins.
-        res_gl: Pre-allocated buffer for zone grey levels (size: max_zones).
-        res_size: Pre-allocated buffer for zone sizes (size: max_zones).
-        res_dist: Pre-allocated buffer for zone distances (size: max_zones).
-        stack: Pre-allocated DFS stack (size: max_zones).
-        calc_glszm: Whether to calculate GLSZM.
-        calc_gldzm: Whether to calculate GLDZM.
+    See `_calculate_zone_features_numba` for the argument description.
     """
     depth, height, width = data.shape
 
@@ -1216,13 +1354,9 @@ def _calculate_zone_features_numba(
                 offsets[idx] = dz * stride_z + dy * stride_y + dx
                 idx += 1
 
-    # 4. Use pre-allocated result buffers (passed as arguments)
+    # 4. Main Loop: flood-fill zones over the flattened array. Padding ensures we
+    # don't need bounds checks for neighbors; the mask tracks visited voxels.
     zone_count = 0
-
-    # 5. Main Loop
-    # Iterate over the flattened array.
-    # Padding ensures we don't need to check bounds for neighbors.
-    # Mask ensures we only process valid ROI voxels.
 
     for i in range(flat_size):
         # Skip background or already visited
@@ -1275,7 +1409,7 @@ def _calculate_zone_features_numba(
             res_dist[zone_count] = min_dist
         zone_count += 1
 
-    # 6. Build Output Matrices
+    # 5. Build Output Matrices
 
     # Build GLSZM
     glszm = np.zeros((n_bins, 1), dtype=np.uint32)
@@ -1314,6 +1448,289 @@ def _calculate_zone_features_numba(
     return glszm, gldzm  # type: ignore[return-value]
 
 
+@jit(nopython=True, cache=True)  # type: ignore
+def _uf_find(parent: npt.NDArray[np.floating[Any]], a: int) -> int:
+    """Union-find root lookup with full path compression."""
+    root = a
+    while parent[root] != root:
+        root = parent[root]
+    while parent[a] != root:
+        nxt = parent[a]
+        parent[a] = root
+        a = nxt
+    return root
+
+
+@jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
+def _calculate_zone_features_numba(
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
+    dist_map: npt.NDArray[np.floating[Any]],
+    n_bins: int,
+    res_gl: npt.NDArray[np.floating[Any]],
+    res_size: npt.NDArray[np.floating[Any]],
+    res_dist: npt.NDArray[np.floating[Any]],
+    stack: npt.NDArray[np.floating[Any]],
+    n_chunks: int,
+    calc_glszm: bool = True,
+    calc_gldzm: bool = True,
+) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
+    """
+    Calculate GLSZM and GLDZM with a chunk-parallel connected-component labelling.
+
+    Optimization Strategy:
+    1. Flatten 3D arrays to 1D with 1-voxel padding.
+       - Padding avoids boundary checks in the inner loop.
+       - Flattening improves cache locality and simplifies indexing.
+    2. Split the volume into `n_chunks` contiguous z-ranges; each thread flood-fills
+       (DFS) strictly inside its own chunk, writing zone labels. Threads touch
+       disjoint voxel and buffer ranges, so no synchronisation is needed.
+    3. Zones spanning chunks are merged afterwards with a serial union-find pass over
+       the thin chunk-boundary faces (26-connectivity only crosses adjacent z-slices,
+       so those faces contain every possible cross-chunk link). Merged zone size is
+       the sum, merged zone distance the min — both order-independent, so the output
+       matrices are identical to the single-threaded result.
+    4. Reuse the mask array to track visited voxels; accept pre-allocated buffers.
+
+    Args:
+        data: 3D discretized image data.
+        mask: 3D mask array (will be modified - set voxels to 0 when visited).
+        dist_map: 3D distance map for GLDZM.
+        n_bins: Number of grey level bins.
+        res_gl: Pre-allocated buffer for zone grey levels (size: max_zones).
+        res_size: Pre-allocated buffer for zone sizes (size: max_zones).
+        res_dist: Pre-allocated buffer for zone distances (size: max_zones).
+        stack: Pre-allocated DFS stack (size: max_zones).
+        n_chunks: Number of parallel z-chunks (clamped to [1, depth]).
+        calc_glszm: Whether to calculate GLSZM.
+        calc_gldzm: Whether to calculate GLDZM.
+    """
+    depth, height, width = data.shape
+
+    # 1. Setup Padded Dimensions
+    p_depth = depth + 2
+    p_height = height + 2
+    p_width = width + 2
+    flat_size = p_depth * p_height * p_width
+
+    # Strides for the padded array
+    stride_z = p_height * p_width
+    stride_y = p_width
+
+    # 2. Allocate and Populate Padded Arrays
+    padded_mask = np.zeros((p_depth, p_height, p_width), dtype=np.uint8)
+    padded_mask[1:-1, 1:-1, 1:-1] = mask
+    flat_mask = padded_mask.ravel()
+
+    padded_data = np.zeros((p_depth, p_height, p_width), dtype=data.dtype)
+    padded_data[1:-1, 1:-1, 1:-1] = data
+    flat_data = padded_data.ravel()
+
+    if calc_gldzm:
+        padded_dist = np.zeros((p_depth, p_height, p_width), dtype=dist_map.dtype)
+        padded_dist[1:-1, 1:-1, 1:-1] = dist_map
+        flat_dist = padded_dist.ravel()
+    else:
+        # Dummy array to satisfy type checker
+        flat_dist = np.zeros(1, dtype=dist_map.dtype)
+
+    # 3. Pre-calculate 1D Offsets for 26-connectivity
+    offsets = np.zeros(26, dtype=np.int32)
+    idx = 0
+    for dz in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dz == 0 and dy == 0 and dx == 0:
+                    continue
+                offsets[idx] = dz * stride_z + dy * stride_y + dx
+                idx += 1
+
+    # 4. Chunk boundaries in padded z-coordinates: chunk c covers padded
+    # z in [bounds[c], bounds[c+1]); equivalently flat indices in
+    # [bounds[c] * stride_z, bounds[c+1] * stride_z) since z is the outer dimension.
+    if n_chunks < 1:
+        n_chunks = 1
+    if n_chunks > depth:
+        n_chunks = depth
+    bounds = np.empty(n_chunks + 1, dtype=np.int64)
+    for c in range(n_chunks + 1):
+        bounds[c] = 1 + (depth * c) // n_chunks
+
+    # Phase 0: per-chunk ROI voxel counts -> disjoint zone-slot / stack ranges.
+    # Zones and DFS depth per chunk are both bounded by the chunk's ROI voxel count.
+    roi_counts = np.zeros(n_chunks, dtype=np.int64)
+    for c in prange(n_chunks):
+        cnt = 0
+        for i in range(bounds[c] * stride_z, bounds[c + 1] * stride_z):
+            if flat_mask[i] != 0:
+                cnt += 1
+        roi_counts[c] = cnt
+
+    roi_base = np.zeros(n_chunks + 1, dtype=np.int64)
+    for c in range(n_chunks):
+        roi_base[c + 1] = roi_base[c] + roi_counts[c]
+    total_capacity = roi_base[n_chunks]
+
+    # Zone label per padded voxel (zone id + 1; 0 = background). Only read on the
+    # chunk-boundary faces during the merge phase.
+    labels = np.zeros(flat_size, dtype=np.int32)
+    parent = np.empty(max(total_capacity, 1), dtype=np.int32)
+    zone_counts = np.zeros(n_chunks, dtype=np.int64)
+
+    # Phase 1: chunk-local DFS labelling (parallel; disjoint ranges per chunk)
+    for c in prange(n_chunks):
+        lo = bounds[c] * stride_z
+        hi = bounds[c + 1] * stride_z
+        sbase = roi_base[c]
+        zcount = 0
+
+        for i in range(lo, hi):
+            # Skip background or already visited
+            if flat_mask[i] == 0:
+                continue
+
+            # Found a new zone
+            gl = flat_data[i]
+
+            # Check grey level validity (1 to n_bins)
+            if gl < 1 or gl > n_bins:
+                flat_mask[i] = 0  # Mark as visited/invalid
+                continue
+
+            zid = sbase + zcount
+            parent[zid] = zid
+
+            # Start DFS (stack region [sbase, sbase + roi_counts[c]) is chunk-private)
+            stack_ptr = sbase
+            stack[stack_ptr] = i
+            stack_ptr += 1
+            flat_mask[i] = 0  # Mark visited
+            labels[i] = zid + 1
+
+            size = 0
+            min_dist = flat_dist[i] if calc_gldzm else 0
+
+            while stack_ptr > sbase:
+                stack_ptr -= 1
+                curr_idx = stack[stack_ptr]
+                size += 1
+
+                if calc_gldzm:
+                    d = flat_dist[curr_idx]
+                    if d < min_dist:
+                        min_dist = d
+
+                # Check all 26 neighbors, never expanding outside the chunk's z-range
+                for k in range(26):
+                    neighbor_idx = curr_idx + offsets[k]
+                    if neighbor_idx < lo or neighbor_idx >= hi:
+                        continue
+
+                    # If mask is non-zero, it's a valid unvisited voxel
+                    if flat_mask[neighbor_idx] != 0:
+                        if flat_data[neighbor_idx] == gl:
+                            flat_mask[neighbor_idx] = 0  # Mark visited
+                            labels[neighbor_idx] = zid + 1
+                            stack[stack_ptr] = neighbor_idx
+                            stack_ptr += 1
+
+            # Store zone properties
+            res_gl[zid] = gl
+            if calc_glszm:
+                res_size[zid] = size
+            if calc_gldzm:
+                res_dist[zid] = min_dist
+            zcount += 1
+
+        zone_counts[c] = zcount
+
+    # Phase 2: union zones that touch across chunk-boundary faces (serial; the faces
+    # are thin, so this is cheap relative to the labelling).
+    for c in range(n_chunks - 1):
+        base_lo = (bounds[c + 1] - 1) * stride_z  # last slice of chunk c
+        base_hi = bounds[c + 1] * stride_z  # first slice of chunk c+1
+        for y in range(1, p_height - 1):
+            row_lo = base_lo + y * stride_y
+            for x in range(1, p_width - 1):
+                i_lo = row_lo + x
+                la = labels[i_lo]
+                if la == 0:
+                    continue
+                gl = flat_data[i_lo]
+                for dy in range(-1, 2):
+                    for dx in range(-1, 2):
+                        j = base_hi + (y + dy) * stride_y + (x + dx)
+                        lb = labels[j]
+                        if lb != 0 and flat_data[j] == gl:
+                            ra = _uf_find(parent, la - 1)
+                            rb = _uf_find(parent, lb - 1)
+                            if ra != rb:
+                                if ra < rb:
+                                    parent[rb] = ra
+                                else:
+                                    parent[ra] = rb
+
+    # Phase 3: fold merged zones into their roots (sum of sizes, min of distances)
+    for c in range(n_chunks):
+        for t in range(zone_counts[c]):
+            zid = roi_base[c] + t
+            r = _uf_find(parent, zid)
+            if r != zid:
+                if calc_glszm:
+                    res_size[r] += res_size[zid]
+                if calc_gldzm and res_dist[zid] < res_dist[r]:
+                    res_dist[r] = res_dist[zid]
+
+    n_zones_total = 0
+    for c in range(n_chunks):
+        n_zones_total += zone_counts[c]
+
+    # 6. Build Output Matrices (over root zones only)
+
+    # Build GLSZM
+    glszm = np.zeros((n_bins, 1), dtype=np.uint32)
+    if calc_glszm and n_zones_total > 0:
+        max_sz = 0
+        for c in range(n_chunks):
+            for t in range(zone_counts[c]):
+                zid = roi_base[c] + t
+                if parent[zid] == zid and res_size[zid] > max_sz:
+                    max_sz = res_size[zid]
+
+        glszm = np.zeros((n_bins, max_sz), dtype=np.uint32)
+        for c in range(n_chunks):
+            for t in range(zone_counts[c]):
+                zid = roi_base[c] + t
+                if parent[zid] == zid:
+                    glszm[res_gl[zid] - 1, res_size[zid] - 1] += 1
+
+    # Build GLDZM
+    gldzm = np.zeros((n_bins, 1), dtype=np.uint32)
+    if calc_gldzm and n_zones_total > 0:
+        max_dist_val = 0
+        for c in range(n_chunks):
+            for t in range(zone_counts[c]):
+                zid = roi_base[c] + t
+                if parent[zid] == zid:
+                    d = int(res_dist[zid])
+                    if d > max_dist_val:
+                        max_dist_val = d
+
+        if max_dist_val == 0:
+            max_dist_val = 1
+
+        gldzm = np.zeros((n_bins, max_dist_val), dtype=np.uint32)
+        for c in range(n_chunks):
+            for t in range(zone_counts[c]):
+                zid = roi_base[c] + t
+                if parent[zid] == zid:
+                    d = int(res_dist[zid])
+                    if d > 0:
+                        gldzm[res_gl[zid] - 1, d - 1] += 1
+
+    return glszm, gldzm  # type: ignore[return-value]
+
+
 def calculate_zone_features(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[np.floating[Any]],
@@ -1338,6 +1755,21 @@ def calculate_zone_features(
 
     Returns:
         Tuple of (glszm, gldzm) matrices.
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.features.texture import calculate_zone_features
+
+        rng = np.random.default_rng(0)
+        data = rng.integers(1, 5, size=(8, 8, 8)).astype(np.float64)
+        mask = np.ones((8, 8, 8), dtype=np.uint8)
+        dist_map = np.zeros((8, 8, 8), dtype=np.int32)
+
+        glszm, gldzm = calculate_zone_features(data, mask, dist_map, n_bins=4, calc_gldzm=False)
+        print(int(glszm.sum()))
+        # 13
+        ```
     """
     # For zone features, the worst-case number of zones is bounded by ROI voxel count.
     # Sizing buffers to full image volume is extremely costly for sparse ROIs.
@@ -1348,6 +1780,30 @@ def calculate_zone_features(
     # Get pre-allocated buffers from pool
     pool = _ZoneBufferPool.get_instance()
     res_gl, res_size, res_dist, stack = pool.get_buffers(max_zones)
+
+    try:
+        n_chunks = int(numba.config.NUMBA_NUM_THREADS)
+    except (ValueError, TypeError):
+        n_chunks = 1  # Fallback
+
+    # The parallel kernel pays a fixed threading-dispatch cost per call (~1.5 ms at
+    # 14 threads); below the measured crossover volume the serial kernel is faster.
+    if n_chunks == 1 or mask.size < 1 << 17:
+        return cast(
+            tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]],
+            _calculate_zone_features_serial_numba(
+                data,
+                mask,
+                dist_map,
+                n_bins,
+                res_gl,
+                res_size,
+                res_dist,
+                stack,
+                calc_glszm,
+                calc_gldzm,
+            ),
+        )
 
     return cast(
         tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]],
@@ -1360,6 +1816,7 @@ def calculate_zone_features(
             res_size,
             res_dist,
             stack,
+            n_chunks,
             calc_glszm,
             calc_gldzm,
         ),
@@ -1390,17 +1847,25 @@ def calculate_glszm_features(
             Example keys: 'small_zone_emphasis_P001', 'zone_percentage_P30P'.
     """
     if glszm_matrix is None:
-        data_c, mask_c, _ = _maybe_crop_to_bbox(data, mask, None)
-        if mask_c.dtype == np.uint8:
-            mask_u8 = mask_c
+        # Standalone path: crop to the ROI bbox and rebind, so the zone kernel and the
+        # zone-percentage voxel count below run on the cropped arrays.
+        data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
+        if mask.dtype == np.uint8:
+            # Normalize to C-contiguous: the crop above yields a strided view, which
+            # would otherwise compile a second (strided) specialization of the kernel.
+            mask_u8 = np.ascontiguousarray(mask)
         else:
-            mask_u8 = (mask_c != 0).astype(np.uint8)
+            mask_u8 = (mask != 0).astype(np.uint8)
 
-        # We need dist_map for the combined kernel signature, even if unused for GLSZM
-        dummy_dist = np.zeros_like(data_c)
+        # We need dist_map for the combined kernel signature, even if unused for
+        # GLSZM; match the dtype AND layout of the real distance map (an int32
+        # strided view of a padded array) so no extra JIT specialization is compiled.
+        dummy_dist: npt.NDArray[Any] = np.zeros(tuple(s + 2 for s in data.shape), dtype=np.int32)[
+            1:-1, 1:-1, 1:-1
+        ]
 
         glszm, _ = calculate_zone_features(
-            data_c,
+            data,
             mask_u8,
             dummy_dist,
             n_bins,
@@ -1410,38 +1875,48 @@ def calculate_glszm_features(
     else:
         glszm = glszm_matrix
 
-    N_zones = np.sum(glszm)
-    if N_zones == 0:
+    # The GLSZM is extremely sparse in the zone-size dimension (a single large zone
+    # can push n_s into the tens of thousands while only a few hundred cells are
+    # non-zero). Operating on the non-zero cells avoids materialising the dense
+    # (n_g, n_s) index grids and is arithmetically identical (every term carries a
+    # factor of P, so zero cells contribute exactly zero).
+    n_g, n_s = glszm.shape
+    gl_idx, sz_idx = np.nonzero(glszm)
+    if gl_idx.size == 0:
         return {}
 
-    P = glszm / N_zones
+    c = glszm[gl_idx, sz_idx].astype(np.float64)
+    N_zones = c.sum()
 
-    n_g, n_s = glszm.shape
-    i_idx, j_idx = np.indices((n_g, n_s))
-    I = i_idx + 1  # noqa: E741
-    J = j_idx + 1  # Zone size
+    I = (gl_idx + 1).astype(np.float64)  # noqa: E741
+    J = (sz_idx + 1).astype(np.float64)  # Zone size
+    I2 = I * I
+    J2 = J * J
+    P = c / N_zones
 
     features = {}
 
     # Small Zone Emphasis (SZE) - P001
-    features["small_zone_emphasis_P001"] = np.sum(P / (J**2))
+    features["small_zone_emphasis_P001"] = np.sum(P / J2)
 
     # Large Zone Emphasis (LZE) - 48P8
-    features["large_zone_emphasis_48P8"] = np.sum(P * (J**2))
+    features["large_zone_emphasis_48P8"] = np.sum(P * J2)
 
     # Grey Level Non-Uniformity (GLNU) - JNSA
-    s_i = np.sum(glszm, axis=1)
-    features["grey_level_non_uniformity_JNSA"] = np.sum(s_i**2) / N_zones
+    s_i = np.bincount(gl_idx, weights=c)
+    sum_si2 = np.sum(s_i**2)
+    features["grey_level_non_uniformity_JNSA"] = sum_si2 / N_zones
 
     # Normalised Grey Level Non-Uniformity (GLNN) - Y1RO
-    features["normalised_grey_level_non_uniformity_Y1RO"] = np.sum(s_i**2) / (N_zones**2)
+    features["normalised_grey_level_non_uniformity_Y1RO"] = sum_si2 / (N_zones**2)
 
     # Zone Size Non-Uniformity (ZSNU) - 4JP3
-    s_j = np.sum(glszm, axis=0)
-    features["zone_size_non_uniformity_4JP3"] = np.sum(s_j**2) / N_zones
+    s_j = np.bincount(sz_idx, weights=c)
+    sum_sj2 = np.sum(s_j**2)
+    features["zone_size_non_uniformity_4JP3"] = sum_sj2 / N_zones
 
     # Normalised Zone Size Non-Uniformity (ZSNN) - VB3A
-    features["normalised_zone_size_non_uniformity_VB3A"] = np.sum(s_j**2) / (N_zones**2)
+    features["normalised_zone_size_non_uniformity_VB3A"] = sum_sj2 / (N_zones**2)
 
     # Zone Percentage (ZP) - P30P
     n_voxels = _roi_voxel_count(mask)
@@ -1456,26 +1931,25 @@ def calculate_glszm_features(
     features["zone_size_variance_3NSA"] = np.sum(((J - mu_j) ** 2) * P)
 
     # Zone Size Entropy (ZSE) - GU8N
-    mask_p = P > 0
-    features["zone_size_entropy_GU8N"] = -np.sum(P[mask_p] * np.log2(P[mask_p]))
+    features["zone_size_entropy_GU8N"] = -np.sum(P * np.log2(P))
 
     # Low Grey Level Zone Emphasis (LGLZE) - XMSY
-    features["low_grey_level_zone_emphasis_XMSY"] = np.sum(P / (I**2))
+    features["low_grey_level_zone_emphasis_XMSY"] = np.sum(P / I2)
 
     # High Grey Level Zone Emphasis (HGLZE) - 5GN9
-    features["high_grey_level_zone_emphasis_5GN9"] = np.sum(P * (I**2))
+    features["high_grey_level_zone_emphasis_5GN9"] = np.sum(P * I2)
 
     # Small Zone Low Grey Level Emphasis (SZLGLE) - 5RAI
-    features["small_zone_low_grey_level_emphasis_5RAI"] = np.sum(P / ((I**2) * (J**2)))
+    features["small_zone_low_grey_level_emphasis_5RAI"] = np.sum(P / (I2 * J2))
 
     # Small Zone High Grey Level Emphasis (SZHGLE) - HW1V
-    features["small_zone_high_grey_level_emphasis_HW1V"] = np.sum(P * (I**2) / (J**2))
+    features["small_zone_high_grey_level_emphasis_HW1V"] = np.sum(P * I2 / J2)
 
     # Large Zone Low Grey Level Emphasis (LZLGLE) - YH51
-    features["large_zone_low_grey_level_emphasis_YH51"] = np.sum(P * (J**2) / (I**2))
+    features["large_zone_low_grey_level_emphasis_YH51"] = np.sum(P * J2 / I2)
 
     # Large Zone High Grey Level Emphasis (LZHGLE) - J17V
-    features["large_zone_high_grey_level_emphasis_J17V"] = np.sum(P * (I**2) * (J**2))
+    features["large_zone_high_grey_level_emphasis_J17V"] = np.sum(P * I2 * J2)
 
     return features
 
@@ -1511,19 +1985,23 @@ def calculate_gldzm_features(
             Example keys: 'small_distance_emphasis_0GBI', 'zone_distance_entropy_GBDU'.
     """
     if gldzm_matrix is None:
+        # Standalone path: crop to the bbox of mask ∪ distance_mask and rebind. The
+        # union keeps the distance map identical (the distance region is fully inside
+        # the bbox), and the voxel count below runs on the cropped mask.
+        data, mask, distance_mask = _maybe_crop_to_bbox(data, mask, distance_mask)
+        mask_u8 = (mask != 0).astype(np.uint8)
+
         # Calculate distance map
         # Use distance_mask if provided, else mask
         d_mask = distance_mask if distance_mask is not None else mask
 
-        # Pad the mask with 0s to ensure the image border is treated as an edge.
+        # Distance-to-border map, with the image border treated as an edge.
         mask_bool = d_mask > 0
-        mask_padded = np.pad(mask_bool, 1, mode="constant", constant_values=0)
-        dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.int32)
-        dist_map = dist_map_padded[1:-1, 1:-1, 1:-1]
+        dist_map = _gldzm_distance_map(mask_bool)
 
         _, gldzm = calculate_zone_features(  # type: ignore[arg-type]
             data,
-            mask,
+            mask_u8,
             dist_map,
             n_bins,
             calc_glszm=False,
@@ -1542,14 +2020,16 @@ def calculate_gldzm_features(
     i_idx, j_idx = np.indices((n_g, n_d))
     I = i_idx + 1  # noqa: E741
     J = j_idx + 1  # Distance
+    I2 = I**2
+    J2 = J**2
 
     features = {}
 
     # Small Distance Emphasis (SDE) - 0GBI
-    features["small_distance_emphasis_0GBI"] = np.sum(P / (J**2))
+    features["small_distance_emphasis_0GBI"] = np.sum(P / J2)
 
     # Large Distance Emphasis (LDE) - MB4I
-    features["large_distance_emphasis_MB4I"] = np.sum(P * (J**2))
+    features["large_distance_emphasis_MB4I"] = np.sum(P * J2)
 
     # Grey Level Non-Uniformity (GLNU) - VFT7
     s_i = np.sum(gldzm, axis=1)
@@ -1582,22 +2062,22 @@ def calculate_gldzm_features(
     features["zone_distance_entropy_GBDU"] = -np.sum(P[mask_p] * np.log2(P[mask_p]))
 
     # Low Grey Level Zone Emphasis (LGLZE) - S1RA
-    features["low_grey_level_zone_emphasis_S1RA"] = np.sum(P / (I**2))
+    features["low_grey_level_zone_emphasis_S1RA"] = np.sum(P / I2)
 
     # High Grey Level Zone Emphasis (HGLZE) - K26C
-    features["high_grey_level_zone_emphasis_K26C"] = np.sum(P * (I**2))
+    features["high_grey_level_zone_emphasis_K26C"] = np.sum(P * I2)
 
     # Small Distance Low Grey Level Emphasis (SDLGLE) - RUVG
-    features["small_distance_low_grey_level_emphasis_RUVG"] = np.sum(P / ((I**2) * (J**2)))
+    features["small_distance_low_grey_level_emphasis_RUVG"] = np.sum(P / (I2 * J2))
 
     # Small Distance High Grey Level Emphasis (SDHGLE) - DKNJ
-    features["small_distance_high_grey_level_emphasis_DKNJ"] = np.sum(P * (I**2) / (J**2))
+    features["small_distance_high_grey_level_emphasis_DKNJ"] = np.sum(P * I2 / J2)
 
     # Large Distance Low Grey Level Emphasis (LDLGLE) - A7WM
-    features["large_distance_low_grey_level_emphasis_A7WM"] = np.sum(P * (J**2) / (I**2))
+    features["large_distance_low_grey_level_emphasis_A7WM"] = np.sum(P * J2 / I2)
 
     # Large Distance High Grey Level Emphasis (LDHGLE) - KLTH
-    features["large_distance_high_grey_level_emphasis_KLTH"] = np.sum(P * (I**2) * (J**2))
+    features["large_distance_high_grey_level_emphasis_KLTH"] = np.sum(P * I2 * J2)
 
     return features
 
@@ -1631,12 +2111,20 @@ def calculate_ngtdm_features(
             Example keys: 'coarseness_QCDE', 'contrast_65HE', 'busyness_NQ30'.
     """
     if ngtdm_matrices is None:
-        if n_bins <= 256:
-            data_int = (data - 1).astype(np.uint8)
-        elif n_bins <= 65536:
-            data_int = (data - 1).astype(np.uint16)
+        # Standalone path: crop to the ROI bbox so the kernel runs on the cropped arrays.
+        data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
+        if mask.dtype == np.uint8:
+            # Normalize to C-contiguous: the crop above yields a strided view, which
+            # would otherwise compile a second (strided) specialization of the kernel.
+            mask_u8 = np.ascontiguousarray(mask)
         else:
-            data_int = (data - 1).astype(np.int32)  # pragma: no cover
+            mask_u8 = (mask != 0).astype(np.uint8)
+
+        if n_bins <= 256:
+            data_int = np.empty(data.shape, dtype=np.uint8)
+        else:
+            data_int = np.empty(data.shape, dtype=np.int32)  # pragma: no cover
+        np.subtract(data, 1, out=data_int, casting="unsafe")
 
         # Determine n_threads for JIT call
         try:
@@ -1646,7 +2134,7 @@ def calculate_ngtdm_features(
 
         _, _, s, n, _ = _calculate_local_features_numba(
             data_int,
-            mask,
+            mask_u8,
             n_bins,
             calc_glcm=False,
             calc_glrlm=False,
@@ -1681,6 +2169,11 @@ def calculate_ngtdm_features(
     s_nz = s[mask_p]
     I_nz = I[mask_p]
 
+    # Pairwise grids over the non-zero grey levels, shared by Contrast/Complexity/Strength.
+    Pi, Pj = np.meshgrid(p_nz, p_nz, indexing="ij")
+    Ii, Ij = np.meshgrid(I_nz, I_nz, indexing="ij")
+    Si, Sj = np.meshgrid(s_nz, s_nz, indexing="ij")
+
     # Coarseness - QCDE
     sum_ps = np.sum(p_nz * s_nz)
     if sum_ps > 1e-10:
@@ -1693,9 +2186,6 @@ def calculate_ngtdm_features(
 
     if Ng_p > 1:
         # Term 1: Dynamic range variance
-        Pi, Pj = np.meshgrid(p_nz, p_nz, indexing="ij")
-        Ii, Ij = np.meshgrid(I_nz, I_nz, indexing="ij")
-
         term1_sum = np.sum(Pi * Pj * ((Ii - Ij) ** 2))
         term1 = term1_sum / (Ng_p * (Ng_p - 1))
 
@@ -1720,10 +2210,6 @@ def calculate_ngtdm_features(
         features["busyness_NQ30"] = 0.0
 
     # Complexity - HDEZ
-    Pi, Pj = np.meshgrid(p_nz, p_nz, indexing="ij")
-    Si, Sj = np.meshgrid(s_nz, s_nz, indexing="ij")
-    Ii, Ij = np.meshgrid(I_nz, I_nz, indexing="ij")
-
     denom_comp = Pi + Pj
     term_comp = np.abs(Ii - Ij) * (Pi * Si + Pj * Sj) / denom_comp
 
@@ -1772,12 +2258,21 @@ def calculate_ngldm_features(
             Example keys: 'low_dependence_emphasis_SODN', 'dependence_count_entropy_FCBV'.
     """
     if ngldm_matrix is None:
-        if n_bins <= 256:
-            data_int = (data - 1).astype(np.uint8)
-        elif n_bins <= 65536:
-            data_int = (data - 1).astype(np.uint16)
+        # Standalone path: crop to the ROI bbox and rebind, so the kernel and the
+        # dependence-count-percentage voxel count below run on the cropped arrays.
+        data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
+        if mask.dtype == np.uint8:
+            # Normalize to C-contiguous: the crop above yields a strided view, which
+            # would otherwise compile a second (strided) specialization of the kernel.
+            mask_u8 = np.ascontiguousarray(mask)
         else:
-            data_int = (data - 1).astype(np.int32)  # pragma: no cover
+            mask_u8 = (mask != 0).astype(np.uint8)
+
+        if n_bins <= 256:
+            data_int = np.empty(data.shape, dtype=np.uint8)
+        else:
+            data_int = np.empty(data.shape, dtype=np.int32)  # pragma: no cover
+        np.subtract(data, 1, out=data_int, casting="unsafe")
 
         # Determine n_threads for JIT call
         try:
@@ -1787,7 +2282,7 @@ def calculate_ngldm_features(
 
         _, _, _, _, ngldm = _calculate_local_features_numba(
             data_int,
-            mask,
+            mask_u8,
             n_bins,
             calc_glcm=False,
             calc_glrlm=False,
@@ -1811,32 +2306,34 @@ def calculate_ngldm_features(
     i_idx, j_idx = np.indices((n_g, n_d))
     I = i_idx + 1  # noqa: E741
     J = j_idx + 1  # Dependence count
+    I2 = I**2
+    J2 = J**2
 
     features = {}
 
     # Low Dependence Emphasis (LDE) - SODN
-    features["low_dependence_emphasis_SODN"] = np.sum(P / (J**2))
+    features["low_dependence_emphasis_SODN"] = np.sum(P / J2)
 
     # High Dependence Emphasis (HDE) - IMOQ
-    features["high_dependence_emphasis_IMOQ"] = np.sum(P * (J**2))
+    features["high_dependence_emphasis_IMOQ"] = np.sum(P * J2)
 
     # Low Grey Level Count Emphasis (LGCE) - TL9H
-    features["low_grey_level_count_emphasis_TL9H"] = np.sum(P / (I**2))
+    features["low_grey_level_count_emphasis_TL9H"] = np.sum(P / I2)
 
     # High Grey Level Count Emphasis (HGCE) - OAE7
-    features["high_grey_level_count_emphasis_OAE7"] = np.sum(P * (I**2))
+    features["high_grey_level_count_emphasis_OAE7"] = np.sum(P * I2)
 
     # Low Dependence Low Grey Level Emphasis (LDLGE) - EQ3F
-    features["low_dependence_low_grey_level_emphasis_EQ3F"] = np.sum(P / ((I**2) * (J**2)))
+    features["low_dependence_low_grey_level_emphasis_EQ3F"] = np.sum(P / (I2 * J2))
 
     # Low Dependence High Grey Level Emphasis (LDHGE) - JA6D
-    features["low_dependence_high_grey_level_emphasis_JA6D"] = np.sum(P * (I**2) / (J**2))
+    features["low_dependence_high_grey_level_emphasis_JA6D"] = np.sum(P * I2 / J2)
 
     # High Dependence Low Grey Level Emphasis (HDLGE) - NBZI
-    features["high_dependence_low_grey_level_emphasis_NBZI"] = np.sum(P * (J**2) / (I**2))
+    features["high_dependence_low_grey_level_emphasis_NBZI"] = np.sum(P * J2 / I2)
 
     # High Dependence High Grey Level Emphasis (HDHGE) - 9QMG
-    features["high_dependence_high_grey_level_emphasis_9QMG"] = np.sum(P * (I**2) * (J**2))
+    features["high_dependence_high_grey_level_emphasis_9QMG"] = np.sum(P * I2 * J2)
 
     # Grey Level Non-Uniformity - FP8K
     s_i = np.sum(ngldm, axis=1)
@@ -1898,64 +2395,78 @@ def calculate_all_texture_features(
 
     Returns:
         Dictionary of all texture features.
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.features.texture import calculate_all_texture_features
+
+        rng = np.random.default_rng(0)
+        disc_array = rng.integers(1, 9, size=(10, 10, 10)).astype(np.float64)
+        mask_array = np.ones((10, 10, 10), dtype=np.uint8)
+
+        features = calculate_all_texture_features(disc_array, mask_array, n_bins=8)
+        print(len(features))
+        # 95
+        print(round(features["contrast_ACUI"], 3))
+        # 10.526
+        ```
     """
     results = {}
 
+    # Crop once to the ROI bounding box and use the cropped arrays everywhere below.
+    # The per-family feature functions scan the mask (ROI voxel counts, GLCM Ng_eff),
+    # so passing full-volume arrays would repeat full-volume scans per family.
+    # Feature values are unchanged: cropping only removes zero-mask voxels.
+    disc_c, mask_c, distmask_c = _maybe_crop_to_bbox(disc_array, mask_array, distance_mask_array)
+
     # Calculate all matrices once
     texture_matrices = calculate_all_texture_matrices(
-        disc_array,
-        mask_array,
+        disc_c,
+        mask_c,
         n_bins,
-        distance_mask=distance_mask_array,
+        distance_mask=distmask_c,
         ngldm_alpha=ngldm_alpha,
     )
 
     # GLCM
     results.update(
-        calculate_glcm_features(
-            disc_array, mask_array, n_bins, glcm_matrix=texture_matrices["glcm"]
-        )
+        calculate_glcm_features(disc_c, mask_c, n_bins, glcm_matrix=texture_matrices["glcm"])
     )
 
     # GLRLM
     results.update(
-        calculate_glrlm_features(
-            disc_array, mask_array, n_bins, glrlm_matrix=texture_matrices["glrlm"]
-        )
+        calculate_glrlm_features(disc_c, mask_c, n_bins, glrlm_matrix=texture_matrices["glrlm"])
     )
 
     # GLSZM
     results.update(
-        calculate_glszm_features(
-            disc_array, mask_array, n_bins, glszm_matrix=texture_matrices["glszm"]
-        )
+        calculate_glszm_features(disc_c, mask_c, n_bins, glszm_matrix=texture_matrices["glszm"])
     )
 
     # GLDZM
     results.update(
         calculate_gldzm_features(
-            disc_array,
-            mask_array,
+            disc_c,
+            mask_c,
             n_bins,
             gldzm_matrix=texture_matrices["gldzm"],
-            distance_mask=(distance_mask_array if distance_mask_array is not None else mask_array),
+            distance_mask=(distmask_c if distmask_c is not None else mask_c),
         )
     )
 
     # NGTDM
     results.update(
         calculate_ngtdm_features(
-            disc_array,
-            mask_array,
+            disc_c,
+            mask_c,
             n_bins,
             ngtdm_matrices=(texture_matrices["ngtdm_s"], texture_matrices["ngtdm_n"]),
         )
     )
     # NGLDM
     results.update(
-        calculate_ngldm_features(
-            disc_array, mask_array, n_bins, ngldm_matrix=texture_matrices["ngldm"]
-        )
+        calculate_ngldm_features(disc_c, mask_c, n_bins, ngldm_matrix=texture_matrices["ngldm"])
     )
 
     return results

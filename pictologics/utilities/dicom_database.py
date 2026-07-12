@@ -281,6 +281,19 @@ class DicomDatabase:
     Attributes:
         patients: List of DicomPatient objects.
         spacing_tolerance: Tolerance for gap detection in completeness checks.
+
+    Example:
+        Build a database from folders and export summaries:
+
+        ```python
+        from pictologics.utilities.dicom_database import DicomDatabase
+
+        db = DicomDatabase.from_folders(["data/patient1", "data/patient2"])
+        print(f"Found {len(db.patients)} patients")
+
+        patients_df = db.get_patients_df()
+        db.export_csv(base_path="output/dicom_db")
+        ```
     """
 
     patients: list[DicomPatient] = field(default_factory=list)

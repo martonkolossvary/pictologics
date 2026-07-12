@@ -509,6 +509,15 @@ def get_segment_info(path: str | Path) -> list[dict[str, str | int]]:
 
     Raises:
         ValueError: If the file is not a valid DICOM SEG object.
+
+    Example:
+        ```python
+        from pictologics.loaders import get_segment_info
+
+        segments = get_segment_info("segmentation.dcm")
+        for seg in segments:
+            print(f"{seg['segment_number']}: {seg['segment_label']}")
+        ```
     """
     import highdicom as hd
 

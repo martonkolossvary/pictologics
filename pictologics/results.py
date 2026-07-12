@@ -50,6 +50,10 @@ def format_results(
     Returns:
         Formatted data in the specified output_type.
 
+    Raises:
+        ValueError: If `fmt` is not "wide" or "long", or if `output_type` is
+            not "dict", "pandas", or "json".
+
     Example:
         Format results as a single pandas DataFrame row (wide format):
 
@@ -167,6 +171,12 @@ def save_results(
               - JSON string or List[JSON strings]
         path: Output file path.
         file_format: "csv" or "json". If None, inferred from file extension.
+
+    Raises:
+        ValueError: If an explicit `file_format` is not "csv" or "json", or
+            if `data` cannot be normalized to a DataFrame (e.g. an invalid
+            JSON string, mixed types within a list, or an unsupported data
+            type).
 
     Example:
         Save formatted results to JSON:

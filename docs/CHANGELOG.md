@@ -2,6 +2,22 @@
 
 <!-- towncrier release notes start -->
 
+## [0.5.0] - 2026-07-12
+
+### Optimized
+
+- Cache the Riesz frequency-domain transfer function (depends only on shape and order), making `riesz_transform` (and riesz_log/riesz_simoncelli) ~1.9-2.5x faster on repeat same-shape calls with byte-identical output.
+- Cache the Simoncelli wavelet frequency-domain transfer function (depends only on shape and level), making `simoncelli_wavelet` ~1.8-2.9x faster on repeat same-shape calls with byte-identical output.
+- Faster Moran's I and Geary's C spatial-intensity features (about 2x on larger ROIs) by exploiting the symmetry of the inverse-distance weights and letting the O(N^2) inner loop vectorise; byte-identical.
+- Faster shared nonzero-bounding-box and ROI min/max scans via single-pass numba kernels (with numpy fallbacks for small or non-float inputs), reused across feature families and memoised per extraction pass; byte-identical.
+- Much faster preprocessing via numba kernels and ROI-bounded work: image resampling up to ~35-66x, discretise_image ~5-9x, resegment_mask ~4x, and keep_largest_component ~35x on CT-sized volumes; bit-identical for discrete outputs and within 1e-9 for linear resampling.
+- Reduce redundant array recomputation in the GLCM/GLRLM/GLDZM/NGLDM/NGTDM feature calculations (~7% faster per family); byte-identical output.
+- Replace the GLDZM distance transform with a numba chamfer kernel (~3-4x faster on that step); distances are byte-identical to the previous scipy result.
+- Share the resampled mask between the morphological and intensity masks when they are in sync (and drop a redundant mask copy), speeding multi-config pipeline runs with byte-identical output.
+- Speed up texture ROI voxel counting on float masks (~5x) with a dtype-gated nonzero count; results are byte-identical.
+- Substantially faster texture feature extraction (GLCM/GLRLM/GLSZM/GLDZM/NGTDM/NGLDM): vectorised the GLSZM matrix build, derive GLCM Ng_eff from the ROI bounding box, crop all texture work to the ROI bounding box to eliminate full-volume float64 mask scans, gate matrix computation to the requested families, and parallelise the zone-labelling kernel. Byte-identical results, roughly 1.4-15x faster on CT-sized and sparse volumes.
+
+
 ## [0.4.2] - 2026-05-16
 
 ### Changed
@@ -182,6 +198,8 @@
 
 ---
 
+[0.5.0]: https://github.com/martonkolossvary/pictologics/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/martonkolossvary/pictologics/compare/v0.4.1...v0.4.2
 [0.3.5]: https://github.com/martonkolossvary/pictologics/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/martonkolossvary/pictologics/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/martonkolossvary/pictologics/compare/v0.3.2...v0.3.3

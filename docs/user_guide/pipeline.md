@@ -634,9 +634,61 @@ print(f"Extracted {len(all_features)} features")
     deduplication, and configuration export. Manual extraction is mainly useful for debugging
     or understanding the underlying process.
 
-## Performance Tips
+## Performance & Tips
 
 - **Spatial/local intensity** can be extremely slow on large ROIs. Keep them disabled unless needed.
 - **Texture** requires discretisation. Without a `discretise` step, the pipeline raises an error.
 - For large 3D images, consider coarser spacing for exploratory work.
 - For CT in Hounsfield Units, FBS (`bin_width`) is often more interpretable; for MRI/PET, FBN (`n_bins`) may be preferable.
+
+!!! tip "JIT Warmup"
+    Numba-accelerated kernels (texture, morphology, intensity, filters) compile the first time
+    they run. `import pictologics` triggers this compilation eagerly via `warmup_jit()`, so the
+    cost is paid once at import instead of during your first extraction call. Set
+    `PICTOLOGICS_DISABLE_WARMUP=1` to skip it — faster import, but the first call to each kernel
+    will compile on demand. When timing or benchmarking, either leave warmup enabled or run one
+    untimed extraction first so compilation isn't counted in your numbers.
+
+!!! tip "Deduplication Across Configs"
+    Deduplication is on by default and is the biggest lever for multi-config batches: configs
+    that share a preprocessing prefix reuse morphology/intensity feature families instead of
+    recomputing them. Inspect `pipeline.deduplication_stats` after a `run()` call to see the
+    cache hit rate. See [Deduplication](#deduplication-performance-optimization) above for details.
+
+!!! tip "Choosing `source_mode`"
+    - `"full_image"` (default) — the image is a standard whole scan with valid data everywhere.
+    - `"roi_only"` — only ROI voxels are valid; pass `sentinel_value` for deterministic background handling.
+    - `"auto"` — scans for common sentinel values (e.g. `-2048`, `-1024`) and behaves like `roi_only`
+      if any are found, otherwise like `full_image`. Use this for cropped/pre-masked images when
+      you're unsure of the exact sentinel value.
+
+    See the [source_mode decision guide](data_loading.md#handling-sentinel-na-values) for a full comparison.
+
+!!! tip "Filtering Performance"
+    - Resample to **isotropic spacing** before applying the Gabor filter — its 2D in-plane kernel
+      assumes equal spacing along all axes and warns if it isn't.
+    - Simoncelli and Riesz cache their frequency-domain transfer functions, keyed by array
+      **shape** (plus `level`/`order`), so repeated filtering calls on same-shaped images/ROIs
+      skip that rebuild — grouping same-shape batches together avoids redundant work.
+
+!!! tip "Reproducibility"
+    Pin `deduplication_rules` explicitly (e.g. `RadiomicsPipeline(deduplication_rules="1.0.0")`) so
+    a future default-rules change can't silently alter which features get reused. Use
+    `pipeline.save_configs(...)` / `RadiomicsPipeline.load_configs(...)` to export and re-import
+    configurations verbatim — see [Configuration & Reproducibility](configurations.md) for the full workflow.
+
+## Troubleshooting
+
+**`EmptyROIMaskError`** — raised internally when preprocessing (e.g. `resegment`, `filter_outliers`)
+removes every voxel from the ROI. You won't see this exception directly: `run()` catches it and
+returns a `pandas.Series` of `NaN` for that configuration so batch runs keep going (see
+[Result Guarantees](#result-guarantees)). To resolve it, relax the offending step's thresholds or
+check `pipeline._log` for the failed step and its error message.
+
+**Spacing-mismatch `ValueError`** (`"...Resampling would be required but is not yet supported."`) —
+raised when loading/repositioning a mask whose voxel spacing differs from its reference image by
+more than 1%. Pictologics can reposition cropped masks into a reference image's coordinate space,
+but it does not resample them. Resample the mask (or image) to matching spacing before loading, or
+verify you're pointing at the correct reference image. See
+[Error Handling](data_loading.md#error-handling) in the Data Loading guide for the full table of
+loader-time errors and warnings.

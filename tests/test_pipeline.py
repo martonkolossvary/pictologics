@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 
 from pictologics.loader import Image
-from pictologics.pipeline import EmptyROIMaskError, RadiomicsPipeline
+from pictologics.pipeline import EmptyROIMaskError, PipelineState, RadiomicsPipeline
 
 # --- Fixtures ---
 
@@ -245,14 +245,16 @@ def test_step_resample_success(
             }
         ],
     )
-    # Pipeline calls resample 3 times: image, morph_mask, intensity_mask.
-    # We must properly return mask objects for the later calls to avoid EmptyROIMaskError
+    # morph_mask and intensity_mask start in sync (they alias the same array), and
+    # resample has no apply_to, so the pipeline resamples the mask once and shares the
+    # result for both -> resample is called twice (image + one shared mask call).
+    # (side_effect keeps a third entry for the diverged-mask fallback path.)
     mock_resample.side_effect = [mock_image, mock_mask, mock_mask]
 
     pipeline.run(mock_image, mock_mask, config_names=["res"])
 
-    # Called for image, morph, intensity masks
-    assert mock_resample.call_count == 3
+    # Called for the image and one shared mask (morph_mask/intensity_mask were in sync)
+    assert mock_resample.call_count == 2
     # Check image call args using ANY for image object to avoid array comparison ambiguity
     mock_resample.assert_any_call(
         ANY,
@@ -261,6 +263,82 @@ def test_step_resample_success(
         round_intensities=False,
         source_mask=None,
     )
+
+
+@patch("pictologics.pipeline.resample_image")
+def test_step_resample_diverged_masks_resamples_independently(
+    mock_resample: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    # A morph-only binarize step diverges morph_mask from intensity_mask so they no
+    # longer share an array; the following resample must therefore resample each mask
+    # independently (image + morph + intensity = 3 calls).
+    pipeline.add_config(
+        "res_div",
+        [
+            {"step": "binarize_mask", "params": {"apply_to": "morph", "threshold": 0.5}},
+            {
+                "step": "resample",
+                "params": {"new_spacing": (2, 2, 2), "interpolation": "linear"},
+            },
+        ],
+    )
+    mock_resample.side_effect = [mock_image, mock_mask, mock_mask]
+
+    pipeline.run(mock_image, mock_mask, config_names=["res_div"])
+
+    # Image, morph_mask, and intensity_mask were each resampled separately.
+    assert mock_resample.call_count == 3
+
+
+@patch("pictologics.pipeline._intersect_mask")
+@patch("pictologics.pipeline.resample_image")
+def test_step_resample_roi_only_diverged_masks_intersect_independently(
+    mock_resample: MagicMock,
+    mock_intersect: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    # With a source_mask active (source_mode="roi_only") AND the masks diverged before
+    # resample, the source-mask intersection must be applied to morph_mask and
+    # intensity_mask independently (two _intersect_mask calls).
+    pipeline.add_config(
+        "res_roi_div",
+        [
+            {"step": "binarize_mask", "params": {"apply_to": "morph", "threshold": 0.5}},
+            {
+                "step": "resample",
+                "params": {"new_spacing": (2, 2, 2), "interpolation": "linear"},
+            },
+        ],
+        source_mode="roi_only",
+    )
+
+    # Distinct mask objects so morph_mask and intensity_mask stay diverged after resample.
+    morph_res = Image(
+        array=np.ones((10, 10, 10), dtype=np.uint8),
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="mask",
+    )
+    intensity_res = Image(
+        array=np.ones((10, 10, 10), dtype=np.uint8),
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="mask",
+    )
+    mock_resample.side_effect = [mock_image, morph_res, intensity_res]
+    mock_intersect.return_value = mock_mask
+
+    pipeline.run(mock_image, mock_mask, config_names=["res_roi_div"])
+
+    # morph_mask and intensity_mask were each intersected with the source mask separately.
+    assert mock_intersect.call_count == 2
 
 
 @patch("pictologics.pipeline.resegment_mask")
@@ -414,7 +492,9 @@ def test_source_mask_after_resample_limits_morphology_mask() -> None:
         source_mode="auto",
     )
 
-    result = pipeline.run(image, mask=None, config_names=["auto_source"])["auto_source"]
+    # AUTO detection of the -2048 fill emits a UserWarning; that is expected here.
+    with pytest.warns(UserWarning, match="Auto-detected sentinel value"):
+        result = pipeline.run(image, mask=None, config_names=["auto_source"])["auto_source"]
 
     assert result["volume_voxel_counting_YEKZ"] == pytest.approx(256.0)
 
@@ -2130,6 +2210,64 @@ def test_extract_histogram_without_discretisation_warns(
         assert any("not discretised" in msg for msg in warning_messages)
 
 
+def test_extract_histogram_full_range_fbs(mock_mask: Image) -> None:
+    """Gradient features use the full IBSI [1, N_g] range with a custom FBS min_val."""
+    arr = np.full((10, 10, 10), 20.0)
+    arr[0, 0, 0] = 25.0
+    image = Image(
+        array=arr,
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="CT",
+    )
+
+    pipeline = RadiomicsPipeline()
+    pipeline.add_config(
+        "hist_fbs",
+        [
+            # min_val far below the data: bins 1..20 exist but stay empty.
+            {
+                "step": "discretise",
+                "params": {"method": "FBS", "bin_width": 1.0, "min_val": 0.0},
+            },
+            {"step": "extract_features", "params": {"families": ["histogram"]}},
+        ],
+    )
+    feats = pipeline.run(image, mock_mask, config_names=["hist_fbs"])["hist_fbs"]
+
+    # 999 voxels in bin 21, 1 voxel in bin 26, N_g = 26.
+    # Central-difference gradient peaks at (999 - 0)/2 around the occupied bin.
+    assert feats["maximum_histogram_gradient_12CE"] == pytest.approx(499.5)
+    assert feats["maximum_histogram_gradient_intensity_8E6O"] == pytest.approx(20.0)
+    assert feats["minimum_histogram_gradient_VQB3"] == pytest.approx(-499.5)
+    assert feats["minimum_histogram_gradient_intensity_RHQZ"] == pytest.approx(22.0)
+
+
+def test_extract_histogram_full_range_fixed_cutoffs(
+    mock_image: Image, mock_mask: Image
+) -> None:
+    """FIXED_CUTOFFS records N_g = len(cutoffs) + 1 for the histogram range."""
+    pipeline = RadiomicsPipeline()
+    pipeline.add_config(
+        "hist_cutoffs",
+        [
+            {
+                "step": "discretise",
+                "params": {"method": "FIXED_CUTOFFS", "cutoffs": [0, 10, 20]},
+            },
+            {"step": "extract_features", "params": {"families": ["histogram"]}},
+        ],
+    )
+    feats = pipeline.run(mock_image, mock_mask, config_names=["hist_cutoffs"])["hist_cutoffs"]
+
+    # All voxels are 0.0 -> bin 2 of N_g=4; histogram [0, 1000, 0, 0].
+    assert feats["maximum_histogram_gradient_12CE"] == pytest.approx(1000.0)
+    assert feats["maximum_histogram_gradient_intensity_8E6O"] == pytest.approx(1.0)
+    assert feats["minimum_histogram_gradient_VQB3"] == pytest.approx(-500.0)
+    assert feats["minimum_histogram_gradient_intensity_RHQZ"] == pytest.approx(3.0)
+
+
 @patch("pictologics.pipeline.calculate_ivh_features")
 def test_extract_ivh_via_dedup_path(
     mock_ivh: MagicMock,
@@ -3207,3 +3345,195 @@ def test_get_package_version_not_found():
     with patch("pictologics.pipeline.version") as mock_version:
         mock_version.side_effect = PackageNotFoundError()
         assert _get_package_version() is None
+
+
+# ===========================================================================
+# Source-mode / sentinel handling and family-helper coverage
+# (consolidated from the former test_coverage_gap_filler.py)
+# ===========================================================================
+
+
+@pytest.fixture
+def sm_image() -> Image:
+    """20^3 image used for the source-mode / sentinel tests."""
+    arr = np.random.rand(20, 20, 20).astype(np.float32)
+    return Image(arr, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+
+
+@pytest.fixture
+def sm_mask() -> Image:
+    """10^3 ROI centered in the 20^3 volume."""
+    m = np.zeros((20, 20, 20), dtype=np.uint8)
+    m[5:15, 5:15, 5:15] = 1
+    return Image(m, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+
+
+def _sentinel_image() -> Image:
+    """20^3 image with a -1000 sentinel background and valid tissue in the ROI."""
+    arr = np.full((20, 20, 20), -1000.0, dtype=np.float32)
+    arr[5:15, 5:15, 5:15] = 100.0
+    return Image(arr, (1, 1, 1), (0, 0, 0))
+
+
+def _filter_config(include_resample: bool) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    if include_resample:
+        steps.append({"step": "resample", "params": {"new_spacing": (1, 1, 1)}})
+    steps += [
+        {"step": "filter", "params": {"type": "mean", "support": 3}},
+        {"step": "filter", "params": {"type": "log", "sigma_mm": 1.0}},
+        {"step": "filter", "params": {"type": "laws", "kernel": "E5L5S5"}},
+        {"step": "filter", "params": {"type": "gabor", "sigma_mm": 1.0, "lambda_mm": 2.0}},
+        {
+            "step": "filter",
+            "params": {"type": "wavelet", "wavelet": "haar", "level": 1, "decomposition": "LLL"},
+        },
+        {"step": "filter", "params": {"type": "simoncelli", "level": 1}},
+        {"step": "filter", "params": {"type": "riesz", "variant": "log", "sigma_mm": 1.0}},
+        {
+            "step": "extract_features",
+            "params": {"features": ["stat_mean"], "families": ["intensity"]},
+        },
+    ]
+    return steps
+
+
+def test_pipeline_invalid_source_mode() -> None:
+    pipeline = RadiomicsPipeline()
+    config = [{"step": "resample", "params": {"new_spacing": (1, 1, 1)}}]
+    with pytest.raises(ValueError, match="Invalid source_mode"):
+        pipeline.add_config("bad", config, source_mode="invalid_mode")
+
+
+def test_pipeline_roi_only_and_auto_modes(sm_image: Image, sm_mask: Image) -> None:
+    pipeline = RadiomicsPipeline()
+    config = _filter_config(include_resample=True)
+
+    pipeline.add_config("roi_config", config, source_mode="roi_only")
+    assert "roi_config" in pipeline.run(sm_image, sm_mask, config_names=["roi_config"])
+
+    # AUTO mode detects the sentinel background and warns.
+    pipeline.add_config("auto_config", config, source_mode="auto")
+    with pytest.warns(UserWarning, match="Auto-detected sentinel value"):
+        results_auto = pipeline.run(_sentinel_image(), sm_mask, config_names=["auto_config"])
+    assert "auto_config" in results_auto
+
+    auto_logs = [e for e in pipeline._log if e["config_name"] == "auto_config"]
+    assert auto_logs
+    assert auto_logs[-1]["sentinel_detected"] is True
+    assert auto_logs[-1]["sentinel_value"] == -1000.0
+    assert auto_logs[-1]["sentinel_auto_detected"] is True
+    assert auto_logs[-1]["sentinel_proportion"] > 0.05
+
+
+def test_pipeline_auto_no_sentinel_warns_and_continues(sm_image: Image, sm_mask: Image) -> None:
+    pipeline = RadiomicsPipeline()
+    config = [{"step": "extract_features", "params": {"features": ["stat_mean"]}}]
+    pipeline.add_config("auto_none", config, source_mode="auto")
+
+    with pytest.warns(UserWarning, match="No sentinel value auto-detected"):
+        results = pipeline.run(sm_image, sm_mask, config_names=["auto_none"])
+    assert "auto_none" in results
+
+    logs = [e for e in pipeline._log if e["config_name"] == "auto_none"]
+    assert logs[-1]["sentinel_detected"] is False
+    assert logs[-1]["sentinel_value"] is None
+    assert logs[-1]["sentinel_auto_detected"] is False
+
+
+def test_pipeline_defensive_filter_return_branches(sm_image: Image, sm_mask: Image) -> None:
+    # A filter that returns a bare ndarray (not a (result, valid) tuple) even though a
+    # source_mask is active exercises the pipeline's defensive non-tuple branches.
+    pipeline = RadiomicsPipeline()
+    pipeline.add_config(
+        "mean_cfg", [{"step": "filter", "params": {"type": "mean"}}], source_mode="roi_only"
+    )
+    pipeline.add_config(
+        "log_cfg",
+        [{"step": "filter", "params": {"type": "log", "sigma_mm": 1.0}}],
+        source_mode="roi_only",
+    )
+
+    with patch("pictologics.pipeline.mean_filter", return_value=np.zeros((20, 20, 20))) as mock_mean:
+        pipeline.run(sm_image, sm_mask, config_names=["mean_cfg"])
+        mock_mean.assert_called()
+
+    with patch(
+        "pictologics.pipeline.laplacian_of_gaussian", return_value=np.zeros((20, 20, 20))
+    ) as mock_log:
+        pipeline.run(sm_image, sm_mask, config_names=["log_cfg"])
+        mock_log.assert_called()
+
+
+def test_pipeline_explicit_sentinel(sm_mask: Image) -> None:
+    pipeline = RadiomicsPipeline()
+    config = [{"step": "filter", "params": {"type": "mean"}}]
+    pipeline.add_config("explicit_sent", config, source_mode="auto", sentinel_value=-1000)
+
+    results = pipeline.run(_sentinel_image(), sm_mask, config_names=["explicit_sent"])
+    assert "explicit_sent" in results
+
+    exported_cfg = pipeline.to_dict(config_names=["explicit_sent"])["configs"]["explicit_sent"]
+    assert exported_cfg["source_mode"] == "auto"
+    assert exported_cfg["sentinel_value"] == -1000
+
+
+def test_pipeline_filters_with_source_mask_no_resample(sm_image: Image, sm_mask: Image) -> None:
+    pipeline = RadiomicsPipeline()
+    pipeline.add_config("nore_config", _filter_config(include_resample=False), source_mode="roi_only")
+    results = pipeline.run(sm_image, sm_mask, config_names=["nore_config"])
+    assert "nore_config" in results
+    assert not any("error" in entry for entry in pipeline._log)
+
+
+def test_pipeline_laws_rotation_invariant_source_mask(sm_image: Image, sm_mask: Image) -> None:
+    # rotation_invariant laws returns a single array even with a source_mask active.
+    pipeline = RadiomicsPipeline()
+    config = [
+        {
+            "step": "filter",
+            "params": {"type": "laws", "rotation_invariant": True, "kernel": "E5L5S5"},
+        },
+        {
+            "step": "extract_features",
+            "params": {"features": ["stat_mean"], "families": ["intensity"]},
+        },
+    ]
+    pipeline.add_config("laws_rot", config, source_mode="roi_only")
+    assert "laws_rot" in pipeline.run(sm_image, sm_mask, config_names=["laws_rot"])
+
+
+def _basic_state(image: Image, mask: Image, **kwargs: Any) -> PipelineState:
+    return PipelineState(
+        image=image, raw_image=image, morph_mask=mask, intensity_mask=mask, **kwargs
+    )
+
+
+def test_extract_family_helpers_default_bbox_cache() -> None:
+    # The family helpers lazily create a bbox cache when called with the default None.
+    img = Image(np.random.rand(6, 6, 6).astype(np.float32), (1, 1, 1), (0, 0, 0))
+    mask_arr = np.zeros((6, 6, 6), np.uint8)
+    mask_arr[1:5, 1:5, 1:5] = 1
+    mask = Image(mask_arr, (1, 1, 1), (0, 0, 0))
+    pipeline = RadiomicsPipeline()
+    state = _basic_state(img, mask)
+
+    assert pipeline._extract_single_family(state, "intensity", {})
+    assert isinstance(pipeline._compute_ivh_features(state, {}, {}), dict)
+
+
+def test_masked_values_empty_mask() -> None:
+    # An empty mask has no nonzero bbox, so _masked_values falls back to apply_mask.
+    img = Image(np.random.rand(5, 5, 5).astype(np.float32), (1, 1, 1), (0, 0, 0))
+    empty = Image(np.zeros((5, 5, 5), np.uint8), (1, 1, 1), (0, 0, 0))
+    pipeline = RadiomicsPipeline()
+    assert isinstance(pipeline._masked_values(img, empty, {}), np.ndarray)
+
+
+def test_compute_texture_features_default_cache_empty_mask() -> None:
+    # Discretised state + empty masks: default bbox cache and the empty-bbox branch.
+    disc = Image(np.ones((5, 5, 5), dtype=np.int32), (1, 1, 1), (0, 0, 0))
+    empty = Image(np.zeros((5, 5, 5), np.uint8), (1, 1, 1), (0, 0, 0))
+    pipeline = RadiomicsPipeline()
+    state = _basic_state(disc, empty, is_discretised=True, n_bins=8)
+    assert isinstance(pipeline._compute_texture_features(state, "glcm", {}), dict)

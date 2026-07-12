@@ -44,7 +44,7 @@ pipeline.add_config("my_analysis", [
 # Step 3: Run the pipeline
 # The pipeline applies each step in order: resample → discretise → extract.
 # "subject_id" is an optional label recorded in the processing log.
-results = pipeline.run(image=image, mask=mask, subject_id="patient_001")
+results = pipeline.run(image=image, mask=mask, subject_id="patient_001", config_names=["my_analysis"])
 
 # Step 4: Save the extracted features to a CSV file
 # Each feature becomes a column; each subject becomes a row.

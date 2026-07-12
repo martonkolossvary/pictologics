@@ -94,6 +94,13 @@ jobs:
         run: |
           cmp -s CHANGELOG.md docs/CHANGELOG.md
 
+      - name: Docs strict build
+        if: matrix.python-version == '3.12'
+        env:
+          PICTOLOGICS_DISABLE_WARMUP: "1"
+        run: |
+          poetry run mkdocs build --strict
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
         with:
@@ -132,7 +139,7 @@ jobs:
 
       - name: Build documentation
         run: |
-          poetry run mkdocs build
+          poetry run mkdocs build --strict
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

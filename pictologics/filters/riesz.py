@@ -1,13 +1,57 @@
 # pictologics/filters/riesz.py
 """Riesz transform implementation (IBSI code: AYRS)."""
 
+from functools import lru_cache
 from math import factorial, sqrt
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union, cast
 
 import numpy as np
+import scipy.fft
 from numpy import typing as npt
 
 from .base import _prepare_masked_image, ensure_float32
+
+
+@lru_cache(maxsize=64)
+def _riesz_transfer(
+    shape: Tuple[int, ...], order: Tuple[int, ...]
+) -> npt.NDArray[np.complexfloating[Any, Any]]:
+    """Riesz frequency-domain transfer function (IBSI 2 Eq. 34).
+
+    Depends only on ``shape`` and ``order`` (never on image values or the source
+    mask), so it is cached and reused across calls with identical geometry —
+    including the many order tuples from ``get_riesz_orders`` that share one image
+    shape. The returned array is marked read-only; callers must not mutate it.
+    """
+    ndim = len(shape)
+    L = sum(order)
+
+    # Frequency coordinates for rfftn: the last axis is non-negative freqs only.
+    freqs = []
+    for i, s in enumerate(shape):
+        if i == ndim - 1:
+            freqs.append(np.fft.rfftfreq(s) * 2 * np.pi)
+        else:
+            freqs.append(np.fft.fftfreq(s) * 2 * np.pi)
+
+    # Broadcast (sparse) grid to avoid a full meshgrid the size of the input.
+    nu_vectors = np.meshgrid(*freqs, indexing="ij", sparse=True)
+    nu_sq_norm = np.asarray(sum(n**2 for n in nu_vectors), dtype=np.float64)
+    nu_norm = np.sqrt(nu_sq_norm)
+    nu_norm_safe = np.where(nu_norm > 0, nu_norm, 1.0)  # avoid /0 at DC
+
+    norm_factor = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
+
+    numerator = np.ones(nu_norm.shape, dtype=np.float64)
+    for i, ord_val in enumerate(order):
+        if ord_val > 0:
+            numerator *= nu_vectors[i] ** ord_val
+
+    phase = np.exp(-1j * np.pi * L / 2)
+    transfer = phase * norm_factor * numerator / (nu_norm_safe**L)
+    transfer = np.where(nu_norm > 0, transfer, 0)  # DC = 0
+    transfer.flags.writeable = False  # cached array must not be mutated by callers
+    return cast(npt.NDArray[np.complexfloating[Any, Any]], transfer)
 
 
 def riesz_transform(
@@ -32,6 +76,10 @@ def riesz_transform(
 
     Returns:
         Riesz-transformed image (real part)
+
+    Raises:
+        ValueError: If `order` sums to 0 (i.e. every component is 0), which
+            would correspond to a zero-order (identity) transform.
 
     Example:
         Compute first-order Riesz transform along the k1 axis:
@@ -64,57 +112,26 @@ def riesz_transform(
     if L == 0:
         raise ValueError("At least one order component must be > 0")
 
-    shape = image.shape
-    ndim = len(shape)
+    shape = tuple(image.shape)
+    ndim = image.ndim
 
-    # Generate frequency coordinates appropriately for rfftn
-    # Last dimension uses rfftfreq, others use fftfreq
-    freqs = []
-    for i, s in enumerate(shape):
-        if i == ndim - 1:
-            # Last dimension for rfftn is non-negative frequencies only
-            freqs.append(np.fft.rfftfreq(s) * 2 * np.pi)
-        else:
-            freqs.append(np.fft.fftfreq(s) * 2 * np.pi)
+    # Transfer function depends only on (shape, order) — never on image values or the
+    # source mask — so it is built once and cached (see _riesz_transfer). Coerce order to a
+    # tuple first so a list-typed order (e.g. from a YAML/JSON pipeline config) stays
+    # hashable for the cache key.
+    order = tuple(order)
+    transfer = _riesz_transfer(shape, order)
 
-    # Create grid using broadcasting (lazy evaluation) to avoid huge meshgrid matching input size
-    # meshgrid with sparse=True returns coordinate vectors that broadcast
-    nu_vectors = np.meshgrid(*freqs, indexing="ij", sparse=True)
-
-    # Compute ||ν||^2 via broadcasting
-    nu_sq_norm = np.asarray(sum(n**2 for n in nu_vectors), dtype=np.float64)
-    nu_norm = np.sqrt(nu_sq_norm)
-
-    # Avoid division by zero at DC
-    nu_norm_safe = np.where(nu_norm > 0, nu_norm, 1.0)
-
-    # Compute normalization factor
-    norm_factor = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
-
-    # Compute numerator via broadcasting
-    numerator = np.ones(nu_norm.shape, dtype=np.float64)
-    for i, ord_val in enumerate(order):
-        if ord_val > 0:
-            numerator *= nu_vectors[i] ** ord_val
-
-    # Riesz transfer function
-    phase = np.exp(-1j * np.pi * L / 2)
-
-    transfer = phase * norm_factor * numerator / (nu_norm_safe**L)
-    transfer = np.where(nu_norm > 0, transfer, 0)  # Set DC to 0
-
-    # Apply in frequency domain using Real FFT
-    F = np.fft.rfftn(image)
-
-    # Verify shapes match (should match due to rfftfreq logic)
-    # F has shape (N1, N2, N3//2 + 1)
-    # transfer should have same shape or broadcastable
-
-    # Explicitly specify axes to avoid NumPy 2.0 DeprecationWarning
+    # Apply in frequency domain using Real FFT. scipy.fft (multithreaded via
+    # workers=-1) is several times faster than the single-threaded np.fft and
+    # matches it to float32 precision.
     axes = tuple(range(ndim))
-    response = np.fft.irfftn(F * transfer, s=shape, axes=axes)
+    F = scipy.fft.rfftn(image, workers=-1)
 
-    return response.astype(np.float32)
+    # F has shape (N1, N2, N3//2 + 1); transfer is broadcastable to it.
+    response = scipy.fft.irfftn(F * transfer, s=shape, axes=axes, workers=-1)
+
+    return cast(npt.NDArray[np.floating[Any]], response.astype(np.float32))
 
 
 def riesz_log(
@@ -231,8 +248,10 @@ def riesz_simoncelli(
     # Apply Simoncelli wavelet (already preprocessed, skip redundant work)
     sim_response = simoncelli_wavelet(image, level=level)
 
-    # Apply Riesz transform to the Simoncelli response
-    return riesz_transform(sim_response, order=order)
+    # Re-apply source_mask: Simoncelli's global FFT spreads energy back into the
+    # invalid regions, and the Riesz transform is likewise global, so re-zero
+    # before it (mirrors riesz_log).
+    return riesz_transform(sim_response, order=order, source_mask=source_mask)
 
 
 def get_riesz_orders(max_order: int, ndim: int = 3) -> Tuple[Tuple[int, ...], ...]:
@@ -250,7 +269,7 @@ def get_riesz_orders(max_order: int, ndim: int = 3) -> Tuple[Tuple[int, ...], ..
         Generate all second-order Riesz combinations for 3D:
 
         ```python
-        from pictologics.filters import get_riesz_orders
+        from pictologics.filters.riesz import get_riesz_orders
 
         orders = get_riesz_orders(max_order=2, ndim=3)
         # Returns: ((2, 0, 0), (1, 1, 0), (1, 0, 1), (0, 2, 0), ...)

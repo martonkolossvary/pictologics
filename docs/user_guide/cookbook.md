@@ -994,6 +994,7 @@ You want to:
                     "lambda_mm": 2.0,
                     "gamma": 1.5,
                     "rotation_invariant": True,
+                    "delta_theta": 0.7853981633974483,  # pi/4
                     "pooling": "average",
                 }},
                 extract_intensity,
@@ -1243,9 +1244,9 @@ This can reduce total computation time significantly—especially for morphology
         print(f"\nSaved results to {output_csv}")
     
         # Verify all configs have the same morphology features (computed once, reused)
-        ref_volume = results["fbn_8"].get("volume_mesh_ml_HTUR", None)
+        ref_volume = results["fbn_8"].get("volume_RNU0", None)
         for config in config_names[1:]:
-            vol = results[config].get("volume_mesh_ml_HTUR", None)
+            vol = results[config].get("volume_RNU0", None)
             assert vol == ref_volume, f"Volume mismatch for {config}"
         print("✓ Morphology features identical across all configurations (as expected)")
     
@@ -1446,7 +1447,8 @@ for sigma in [1.5, 3.0, 5.0]:
 pipeline.add_config("gabor", preprocess + [
     {"step": "filter", "params": {
         "type": "gabor", "sigma_mm": 5.0, "lambda_mm": 2.0, "gamma": 1.0,
-        "rotation_invariant": True, "pooling": "average",
+        "rotation_invariant": True, "delta_theta": 0.7853981633974483,  # pi/4
+        "pooling": "average",
     }},
     {"step": "extract_features", "params": {"families": ["intensity"]}},
 ])

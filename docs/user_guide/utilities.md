@@ -72,12 +72,12 @@ Medical images often contain multiple phases (e.g., dynamic contrast-enhanced MR
 By default, `split_multiseries=True`.
 
 ```python
-# Automatically splits series based on:
+# Automatically splits series based on (in priority order):
 # - Cardiac Phase
-# - Acquisition Number
 # - Temporal Position
-# - Echo Number
 # - Trigger Time
+# - Acquisition Number
+# - Echo Number
 # - Duplicate Spatial Positions (fallback)
 
 db = DicomDatabase.from_folders(["path/to/multiphase/data"])
@@ -175,7 +175,8 @@ save_slices("output/", image=img, slice_selection=[0, 50, 100])
 For CT and MR images, use window/level controls for proper contrast:
 
 ```python
-# Soft tissue window (default: center=200, width=600)
+# Soft tissue window preset (omitting window_center/window_width instead
+# defaults to min-max normalization)
 visualize_slices(image=img, window_center=40, window_width=400)
 
 # Bone window
@@ -348,9 +349,12 @@ The processing log tracks each file:
 |--------|-------------|
 | file_path | Source SR file path |
 | sop_instance_uid | SOP Instance UID |
+| patient_id | Patient ID from the SR file |
+| study_instance_uid | Study Instance UID |
 | status | "success" or "error" |
+| error_message | Error details if failed |
 | num_measurements | Count of measurements |
 | csv_path | Path to exported CSV |
 | json_path | Path to exported JSON |
-| error_message | Error details if failed |
+| processing_time_ms | Time taken to process the file, in milliseconds |
 

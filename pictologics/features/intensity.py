@@ -110,20 +110,23 @@ def _robust_mean_abs_dev(
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _calculate_spatial_features_numba(
-    x_idx: npt.NDArray[np.floating[Any]],
-    y_idx: npt.NDArray[np.floating[Any]],
-    z_idx: npt.NDArray[np.floating[Any]],
+    x_idx: npt.NDArray[np.integer[Any]],
+    y_idx: npt.NDArray[np.integer[Any]],
+    z_idx: npt.NDArray[np.integer[Any]],
     intensities: npt.NDArray[np.floating[Any]],
     mean_int: float,
     sx: float,
     sy: float,
     sz: float,
-) -> tuple[float, float, float, float]:
+) -> tuple[float, float, float]:
     """
     Calculate Moran's I and Geary's C components using Numba with Parallelization.
 
     This feature is O(N^2) complexity where N is the number of ROI voxels.
     Parallel execution significantly speeds up the outer loop.
+
+    Voxel coordinates must be pairwise distinct (guaranteed when they come from
+    np.where on a mask); duplicate coordinates would divide by zero.
 
     Args:
         x_idx: (N,) x indices for ROI voxels.
@@ -137,9 +140,8 @@ def _calculate_spatial_features_numba(
 
     Returns:
         Tuple containing:
-        - numer_moran: Numerator for Moran's I.
-        - numer_geary_term1: First term for Geary's C numerator.
-        - numer_geary_term2: Second term for Geary's C numerator.
+        - numer_moran: Numerator for Moran's I: sum of w_ij * diff_i * diff_j.
+        - numer_geary: Numerator for Geary's C: sum of w_ij * (x_i - x_j)^2.
         - sum_weights: Sum of all weights (inverse distances).
     """
     n = intensities.size
@@ -147,62 +149,77 @@ def _calculate_spatial_features_numba(
     # Reduction arrays to avoid Numba parallel reduction cycle issues
     # Allocate arrays to store partial results for each voxel
     local_moran_arr = np.zeros(n, dtype=np.float64)
-    local_geary_1_arr = np.zeros(n, dtype=np.float64)
-    local_geary_2_arr = np.zeros(n, dtype=np.float64)
+    local_geary_arr = np.zeros(n, dtype=np.float64)
     local_w_sum_arr = np.zeros(n, dtype=np.float64)
 
-    # Parallelize the outer loop
-    for i in prange(n):
+    # Pre-cast coordinates to physical (mm) float64 once (O(N)) so the O(N^2)
+    # inner loop avoids per-iteration int->float conversion, spacing multiplies,
+    # and repeated mean subtraction, which lets the compiler vectorize it.
+    xf = x_idx.astype(np.float64) * sx
+    yf = y_idx.astype(np.float64) * sy
+    zf = z_idx.astype(np.float64) * sz
+    difff = intensities.astype(np.float64) - mean_int
+
+    # The weight w_ij = 1/dist(i, j) is symmetric, so only the upper-triangular
+    # pairs (j > i) need to be visited; each pair's symmetric contribution is
+    # accumulated for both endpoints. This halves the O(N^2) inner work.
+    #
+    # Upper-triangular rows have inner length (n-1-i), which decreases with i.
+    # Under static parallel scheduling that starves later threads, so map the
+    # loop index k to a folded row index that interleaves long and short rows,
+    # keeping each chunk balanced. Every row i is still visited exactly once and
+    # results are stored by true row index, so the reduction is unchanged.
+    for k in prange(n):
+        if k % 2 == 0:
+            i = k // 2
+        else:
+            i = n - 1 - (k // 2)
+
         local_moran = 0.0
-        local_geary_2 = 0.0
+        local_geary = 0.0
         local_w_sum = 0.0
 
-        val_i = float(intensities[i])
-        diff_i = val_i - mean_int
+        diff_i = difff[i]
 
-        xi = float(x_idx[i])
-        yi = float(y_idx[i])
-        zi = float(z_idx[i])
+        xi = xf[i]
+        yi = yf[i]
+        zi = zf[i]
 
-        # Inner loop runs sequentially
-        for j in range(n):
-            if i == j:
-                continue
-
-            dx = (xi - float(x_idx[j])) * sx
-            dy = (yi - float(y_idx[j])) * sy
-            dz = (zi - float(z_idx[j])) * sz
+        # Inner loop over j > i only. Distinct ROI voxels always have distance
+        # > 0, so no divide-by-zero guard is needed (removing it enables SIMD).
+        for j in range(i + 1, n):
+            dx = xi - xf[j]
+            dy = yi - yf[j]
+            dz = zi - zf[j]
             d_sq = dx * dx + dy * dy + dz * dz
 
-            if d_sq > 0.0:
-                w = 1.0 / np.sqrt(d_sq)
-                val_j = float(intensities[j])
-                diff_j = val_j - mean_int
+            w = 1.0 / np.sqrt(d_sq)
+            diff_j = difff[j]
+            # (x_i - x_j) == (diff_i - diff_j): the mean cancels.
+            d_v = diff_i - diff_j
 
-                local_w_sum += w
-                local_moran += w * diff_i * diff_j
-                local_geary_2 += w * val_i * val_j
+            local_w_sum += w
+            local_moran += w * diff_i * diff_j
+            local_geary += w * d_v * d_v
 
-        # Store in arrays
+        # Store partial (upper-triangular) sums for this row.
         local_moran_arr[i] = local_moran
-        local_geary_1_arr[i] = (val_i * val_i) * local_w_sum
-        local_geary_2_arr[i] = local_geary_2
+        local_geary_arr[i] = local_geary
         local_w_sum_arr[i] = local_w_sum
 
-    # Sum up results
-    numer_moran = np.sum(local_moran_arr)
-    numer_geary_term1 = np.sum(local_geary_1_arr)
-    numer_geary_term2 = np.sum(local_geary_2_arr)
-    sum_weights = np.sum(local_w_sum_arr)
+    # Full sums: each unordered pair contributes twice to the ordered-pair sums.
+    numer_moran = 2.0 * np.sum(local_moran_arr)
+    numer_geary = 2.0 * np.sum(local_geary_arr)
+    sum_weights = 2.0 * np.sum(local_w_sum_arr)
 
-    return numer_moran, numer_geary_term1, numer_geary_term2, sum_weights
+    return numer_moran, numer_geary, sum_weights
 
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _calculate_local_mean_numba(
     data: npt.NDArray[np.floating[Any]],
-    mask_indices: npt.NDArray[np.floating[Any]],
-    offsets: npt.NDArray[np.floating[Any]],
+    mask_indices: npt.NDArray[np.integer[Any]],
+    offsets: npt.NDArray[np.integer[Any]],
 ) -> npt.NDArray[np.floating[Any]]:
     """Calculate local mean intensity in sphere neighborhood for each ROI voxel (parallel)."""
     n_voxels = mask_indices.shape[0]
@@ -238,7 +255,7 @@ def _calculate_local_mean_numba(
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _calculate_local_peaks_numba(
     data: npt.NDArray[np.floating[Any]],
-    mask_indices: npt.NDArray[np.floating[Any]],
+    mask_indices: npt.NDArray[np.integer[Any]],
     roi_means: npt.NDArray[np.floating[Any]],
 ) -> tuple[float, float]:
     """Compute global/local intensity peaks from pre-computed local means (IBSI 4.5)."""
@@ -266,26 +283,10 @@ def _calculate_local_peaks_numba(
     return global_peak, local_peak
 
 
-@jit(nopython=True, fastmath=True, cache=True)  # type: ignore
-def _max_mean_at_max_intensity(
-    roi_data: npt.NDArray[np.floating[Any]],
-    roi_means: npt.NDArray[np.floating[Any]],
-    max_val: float,
-) -> float:
-    """Find maximum local mean among voxels with maximum intensity (for local peak)."""
-    best = -1.0e308
-    for i in range(roi_data.size):
-        if float(roi_data[i]) == max_val:
-            m = float(roi_means[i])
-            if m > best:
-                best = m
-    return best
-
-
 @lru_cache(maxsize=32)
 def _sphere_offsets_for_radius(
     spacing: tuple[float, float, float], radius_mm: float
-) -> npt.NDArray[np.floating[Any]]:
+) -> npt.NDArray[np.int32]:
     """Generate voxel offsets for a sphere of given radius (cached for reuse)."""
     sx, sy, sz = spacing
     rx = int(np.ceil(radius_mm / sx))
@@ -361,16 +362,25 @@ def calculate_intensity_features(
         if denom != 0.0:
             features["intensity_skewness_KE2A"] = float(m3 / denom)
             features["intensity_kurtosis_IPH6"] = float((m4 / (m2 * m2)) - 3.0)
+        else:  # pragma: no cover  # unreachable: denom==0 iff var_val==0, caught above
+            features["intensity_skewness_KE2A"] = np.nan
+            features["intensity_kurtosis_IPH6"] = np.nan
+
+    # IBSI percentiles use the nearest-rank convention (the smallest value with at
+    # least p% of the data at or below it), i.e. numpy's 'inverted_cdf'. This
+    # reproduces the IBSI benchmark (e.g. P90 = 4), whereas linear interpolation
+    # would give an interpolated 4.2. The median (Y12H) is the conventional
+    # sample median, so it is computed separately.
+    p10, p25, p75, p90 = np.percentile(values, [10, 25, 75, 90], method="inverted_cdf")
+    median_val = np.median(values)
 
     # 4.1.5 Median intensity (Y12H)
-    median_val = np.median(values)
     features["median_intensity_Y12H"] = float(median_val)
 
     # 4.1.6 Minimum intensity (1GSF)
     min_val = np.min(values)
     features["minimum_intensity_1GSF"] = float(min_val)
 
-    p10, p25, p75, p90 = np.percentile(values, [10, 25, 75, 90])
     features["10th_intensity_percentile_QG58"] = float(p10)
     features["90th_intensity_percentile_8DWT"] = float(p90)
 
@@ -425,6 +435,7 @@ def calculate_intensity_features(
 
 def calculate_intensity_histogram_features(
     discretised_values: npt.NDArray[np.floating[Any]],
+    n_bins: Optional[int] = None,
 ) -> dict[str, float]:
     """
     Calculate intensity histogram features as defined in IBSI 4.2.
@@ -434,10 +445,31 @@ def calculate_intensity_histogram_features(
 
     Args:
         discretised_values: 1D array of discretised intensity values (after binning).
+        n_bins: Total number of bins N_g used at discretisation. When given, the
+            histogram spans the full IBSI range [1, N_g], including bins that are
+            empty because the data does not reach them (this only affects the
+            gradient features). When None, the histogram spans the observed value
+            range.
 
     Returns:
         Dictionary mapping feature names (with IBSI codes) to computed values.
         Empty dict if input is empty.
+
+    Raises:
+        ValueError: If n_bins is given and the values do not lie in [1, n_bins].
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.features.intensity import calculate_intensity_histogram_features
+
+        discretised_values = np.array([1, 1, 2, 2, 3, 4, 4, 4], dtype=np.float64)
+        features = calculate_intensity_histogram_features(discretised_values, n_bins=4)
+        print(features["mean_discretised_intensity_X6K6"])
+        # 2.625
+        print(features["intensity_histogram_mode_AMMC"])
+        # 4.0
+        ```
     """
     if len(discretised_values) == 0:
         return {}
@@ -447,12 +479,25 @@ def calculate_intensity_histogram_features(
     disc = np.asarray(discretised_values)
     n = disc.size
 
-    # Support negative values by shifting for bincount compatibility
     min_val_i = int(np.min(disc))
     max_val_i = int(np.max(disc))
 
-    shifted = disc.astype(np.int64) - min_val_i
-    counts_full = np.bincount(shifted, minlength=(max_val_i - min_val_i + 1))
+    if n_bins is not None:
+        # IBSI: histogram over the full discretisation range [1, N_g].
+        if min_val_i < 1 or max_val_i > n_bins:
+            raise ValueError(
+                f"discretised values must lie in [1, n_bins={n_bins}]; "
+                f"got range [{min_val_i}, {max_val_i}]"
+            )
+        hist_origin = 1
+        counts_full = np.bincount(disc.astype(np.int64) - 1, minlength=n_bins)
+    else:
+        # Observed value range; shifting also supports negative values
+        # for bincount compatibility.
+        hist_origin = min_val_i
+        counts_full = np.bincount(
+            disc.astype(np.int64) - min_val_i, minlength=(max_val_i - min_val_i + 1)
+        )
     total = float(n)
     p = counts_full[counts_full > 0].astype(np.float64) / total
 
@@ -474,8 +519,14 @@ def calculate_intensity_histogram_features(
         if denom != 0.0:
             features["discretised_intensity_skewness_88K1"] = float(m3 / denom)
             features["discretised_intensity_kurtosis_C3I7"] = float((m4 / (m2 * m2)) - 3.0)
+        else:  # pragma: no cover  # unreachable: denom==0 iff var_val==0, caught above
+            features["discretised_intensity_skewness_88K1"] = np.nan
+            features["discretised_intensity_kurtosis_C3I7"] = np.nan
 
-    p10, p25, median_val, p75, p90 = np.percentile(disc, [10, 25, 50, 75, 90])
+    # IBSI nearest-rank percentiles (see calculate_intensity_features); the
+    # discretised median (WIFQ) is the conventional sample median.
+    p10, p25, p75, p90 = np.percentile(disc, [10, 25, 75, 90], method="inverted_cdf")
+    median_val = np.median(disc)
 
     features["median_discretised_intensity_WIFQ"] = float(median_val)
     features["minimum_discretised_intensity_1PR8"] = float(min_val_i)
@@ -483,8 +534,12 @@ def calculate_intensity_histogram_features(
     features["90th_discretised_intensity_percentile_GPMT"] = float(p90)
     features["maximum_discretised_intensity_3NCY"] = float(max_val_i)
 
-    mode_index = int(np.argmax(counts_full))
-    features["intensity_histogram_mode_AMMC"] = float(min_val_i + mode_index)
+    # IBSI: with multiple modes, select the one closest to the mean discretised
+    # intensity; if two modes are equidistant from the mean, select the lower one
+    # (argmin returns the first, i.e. lowest, candidate on ties).
+    mode_candidates = np.flatnonzero(counts_full == np.max(counts_full)) + hist_origin
+    best_mode = int(np.argmin(np.abs(mode_candidates - mean_disc)))
+    features["intensity_histogram_mode_AMMC"] = float(mode_candidates[best_mode])
 
     features["discretised_intensity_interquartile_range_WR0O"] = float(p75 - p25)
 
@@ -533,10 +588,10 @@ def calculate_intensity_histogram_features(
         gradient = np.gradient(hist_counts)
         features["maximum_histogram_gradient_12CE"] = float(np.max(gradient))
         max_grad_idx = int(np.argmax(gradient))
-        features["maximum_histogram_gradient_intensity_8E6O"] = float(min_val_i + max_grad_idx)
+        features["maximum_histogram_gradient_intensity_8E6O"] = float(hist_origin + max_grad_idx)
         features["minimum_histogram_gradient_VQB3"] = float(np.min(gradient))
         min_grad_idx = int(np.argmin(gradient))
-        features["minimum_histogram_gradient_intensity_RHQZ"] = float(min_val_i + min_grad_idx)
+        features["minimum_histogram_gradient_intensity_RHQZ"] = float(hist_origin + min_grad_idx)
 
     return features
 
@@ -566,9 +621,28 @@ def calculate_ivh_features(
     Returns:
         Dictionary mapping feature names (with IBSI codes) to computed values.
         Empty dict if input is empty.
+
+    Raises:
+        ValueError: If both min_val and max_val are given and max_val < min_val.
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.features.intensity import calculate_ivh_features
+
+        discretised_values = np.arange(1, 11, dtype=np.float64)
+        features = calculate_ivh_features(
+            discretised_values, bin_width=1.0, min_val=0.0, max_val=10.0
+        )
+        print(round(features["area_under_the_ivh_curve_9CMM"], 2))
+        # 4.95
+        ```
     """
     if len(discretised_values) == 0:
         return {}
+
+    if min_val is not None and max_val is not None and max_val < min_val:
+        raise ValueError(f"max_val ({max_val}) must be >= min_val ({min_val})")
 
     features: dict[str, float] = {}
     N = len(discretised_values)
@@ -668,7 +742,9 @@ def calculate_ivh_features(
                 g_max = np.max(discretised_values)
 
             if bin_width > 0:
-                num_steps = int(np.round((g_max - g_min) / bin_width))
+                # Degenerate ranges (g_max within half a bin of g_min) would yield
+                # an empty candidate grid; keep at least one candidate.
+                num_steps = max(int(np.round((g_max - g_min) / bin_width)), 1)
                 if min_val is not None:
                     # Candidates are bin centers
                     idx = np.arange(num_steps, dtype=np.float64)
@@ -725,7 +801,15 @@ def calculate_ivh_features(
     # -------------------------------------------------------------------------
     # IVH Curve: Volume Fraction (phi) vs Intensity (I)
     # We construct the curve points from the unique values in the data.
-    unique_vals = np.unique(sorted_vals)
+    # sorted_vals is already sorted, so unique values are found in O(N) via a
+    # neighbour-difference mask instead of np.unique's redundant O(N log N) sort.
+    if sorted_vals.size == 0:  # pragma: no cover  # unreachable: empty input returns at func top
+        unique_vals = sorted_vals
+    else:
+        keep = np.empty(sorted_vals.shape, dtype=bool)
+        keep[0] = True
+        np.not_equal(sorted_vals[1:], sorted_vals[:-1], out=keep[1:])
+        unique_vals = sorted_vals[keep]
     if len(unique_vals) == 1:
         # If there is only one discretised intensity, AUC is 0 by definition.
         features["area_under_the_ivh_curve_9CMM"] = 0.0
@@ -750,21 +834,10 @@ def calculate_ivh_features(
         counts = N - indices
         fractions = counts.astype(np.float64) / float(N)
 
-        # Riemann Sum (Trapezoidal)
-        # Integrate fraction(I) over I.
-        auc = 0.0
-        for k in range(1, len(intensities_arr)):
-            i_curr = intensities_arr[k]
-            i_prev = intensities_arr[k - 1]
-            phi_curr = fractions[k]
-            phi_prev = fractions[k - 1]
-
-            # Trapezoid area
-            width = i_curr - i_prev
-            avg_height = (phi_curr + phi_prev) * 0.5
-            auc += width * avg_height
-
-        features["area_under_the_ivh_curve_9CMM"] = float(auc)
+        # Trapezoidal integration of fraction(I) over I.
+        features["area_under_the_ivh_curve_9CMM"] = float(
+            np.trapezoid(fractions, intensities_arr)
+        )
 
     return features
 
@@ -789,6 +862,24 @@ def calculate_spatial_intensity_features(
     Returns:
         Dictionary with 'morans_i_index_N365' and 'gearys_c_measure_NPT7'.
         Returns NaN values if ROI has fewer than 2 voxels or constant intensity.
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.loader import Image
+        from pictologics.features.intensity import calculate_spatial_intensity_features
+
+        data = np.random.default_rng(0).normal(size=(6, 6, 6))
+        mask_arr = np.zeros((6, 6, 6), dtype=np.uint8)
+        mask_arr[2:4, 2:4, 2:4] = 1
+
+        image = Image(array=data, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+        mask = Image(array=mask_arr, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+
+        features = calculate_spatial_intensity_features(image, mask)
+        print(sorted(features.keys()))
+        # ['gearys_c_measure_NPT7', 'morans_i_index_N365']
+        ```
     """
     if not enabled:
         return {}
@@ -804,7 +895,8 @@ def calculate_spatial_intensity_features(
     )
 
     # Get ROI indices (X, Y, Z)
-    x_idx, y_idx, z_idx = np.where(mask_array > 0)
+    roi = mask_array > 0
+    x_idx, y_idx, z_idx = np.where(roi)
 
     if len(x_idx) < 2:
         features["morans_i_index_N365"] = np.nan
@@ -815,13 +907,13 @@ def calculate_spatial_intensity_features(
     yi = np.ascontiguousarray(y_idx.astype(np.int32))
     zi = np.ascontiguousarray(z_idx.astype(np.int32))
 
-    intensities = np.ascontiguousarray(data[mask_array > 0].astype(np.float64))
+    intensities = np.ascontiguousarray(data[roi].astype(np.float64))
 
     N = len(intensities)
     mean_int = np.mean(intensities)
 
     # Calculate terms using Parallelized Numba Function
-    numer_moran, numer_geary_1, numer_geary_2, sum_weights = _calculate_spatial_features_numba(
+    numer_moran, numer_geary, sum_weights = _calculate_spatial_features_numba(
         xi, yi, zi, intensities, float(mean_int), sx, sy, sz
     )
 
@@ -836,8 +928,7 @@ def calculate_spatial_intensity_features(
 
     # Geary's C - NPT7
     if denom != 0 and sum_weights != 0:
-        numer = 2 * numer_geary_1 - 2 * numer_geary_2
-        geary_c = ((N - 1) / (2 * sum_weights)) * (numer / denom)
+        geary_c = ((N - 1) / (2 * sum_weights)) * (numer_geary / denom)
         features["gearys_c_measure_NPT7"] = float(geary_c)
     else:
         features["gearys_c_measure_NPT7"] = np.nan
@@ -864,6 +955,24 @@ def calculate_local_intensity_features(
 
     Returns:
         Dictionary with 'global_intensity_peak_0F91' and 'local_intensity_peak_VJGA'.
+
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.loader import Image
+        from pictologics.features.intensity import calculate_local_intensity_features
+
+        data = np.random.default_rng(0).normal(size=(6, 6, 6))
+        mask_arr = np.zeros((6, 6, 6), dtype=np.uint8)
+        mask_arr[2:4, 2:4, 2:4] = 1
+
+        image = Image(array=data, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+        mask = Image(array=mask_arr, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+
+        features = calculate_local_intensity_features(image, mask)
+        print(sorted(features.keys()))
+        # ['global_intensity_peak_0F91', 'local_intensity_peak_VJGA']
+        ```
     """
     if not enabled:
         return {}

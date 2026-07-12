@@ -223,6 +223,9 @@ configs:
             - intensity
             - morphology
             - texture
+deduplication:
+  enabled: true
+  rules_version: "1.0.0"
 ```
 
 ### JSON Format Specification
@@ -251,6 +254,10 @@ configs:
         }
       ]
     }
+  },
+  "deduplication": {
+    "enabled": true,
+    "rules_version": "1.0.0"
   }
 }
 ```
@@ -418,7 +425,7 @@ standard_configs = get_standard_templates()
 
 # Get metadata from a template file
 metadata = get_template_metadata("standard_configs.yaml")
-# {'schema_version': '1.0', 'description': '...', 'config_count': 6}
+# {'schema_version': '1.0', 'description': '...', 'config_names': ['standard_fbn_8', ...]}
 
 # Load a specific template file
 all_configs = load_template_file("standard_configs.yaml")
@@ -610,7 +617,7 @@ results = pipeline.run(
 config_features = results["lung_nodule_fbs25"]
 print(f"Extracted {len(config_features)} features")
 print(f"Sample features:")
-print(f"  - Volume: {config_features.get('volume_mesh_ml_HTUR', 'N/A'):.2f} mm³")
+print(f"  - Volume: {config_features.get('volume_RNU0', 'N/A'):.2f} mm³")
 print(f"  - Mean intensity: {config_features.get('mean_intensity_Q4LE', 'N/A'):.2f} HU")
 
 # Save execution log for audit
@@ -658,10 +665,8 @@ configs:
         params:
           range_min: -1000
           range_max: 400
-          apply_to: both
       - step: keep_largest_component
-        params:
-          apply_to: both
+        params: {}
       - step: discretise
         params:
           method: FBS
@@ -673,6 +678,9 @@ configs:
           include_local_intensity: false
   lung_nodule_fbs50:
     # ... similar structure with bin_width: 50.0
+deduplication:
+  enabled: true
+  rules_version: "1.0.0"
 ```
 
 ### Step 4: Load and Apply Configuration (Site B)

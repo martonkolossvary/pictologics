@@ -236,7 +236,7 @@ print(results["ibsi2_test_3b"])
 | Robust mean absolute deviation | stat_rmad | 7.2 | 7.2 | 0.1 | ✅ PASS |
 | Median absolute deviation | stat_medad | 13.4 | 13.4 | 0.2 | ✅ PASS |
 | Coefficient of variation | stat_cov | -506 | -506 | 149 | ✅ PASS |
-| Quartile coefficient of dispersion | stat_qcod | -684 | -684 | 130 | ✅ PASS |
+| Quartile coefficient of dispersion | stat_qcod | -683 | -684 | 130 | ✅ PASS |
 | Energy | stat_energy | 1.51e+08 | 1.51e+08 | 7e+06 | ✅ PASS |
 | Root mean square | stat_rms | 20.6 | 20.6 | 0.3 | ✅ PASS |
 

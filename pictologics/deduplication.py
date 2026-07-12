@@ -54,6 +54,17 @@ class DeduplicationRules:
         ivh_discretization_dependent_unless: Condition under which IVH becomes
             independent of discretization (e.g., "ivh_use_continuous=True").
         comparison_mode: How to compare preprocessing parameters ("exact_params").
+
+    Example:
+        ```python
+        from pictologics.deduplication import get_default_rules
+
+        rules = get_default_rules()
+        print(rules.version)
+        # 1.0.0
+        print(sorted(rules.family_dependencies["morphology"]))
+        # ['binarize_mask', 'filter_outliers', 'keep_largest_component', 'resample', 'resegment']
+        ```
     """
 
     version: str
@@ -263,7 +274,17 @@ CURRENT_RULES_VERSION = "1.0.0"
 
 
 def get_default_rules() -> DeduplicationRules:
-    """Get the current default deduplication rules."""
+    """Get the current default deduplication rules.
+
+    Example:
+        ```python
+        from pictologics.deduplication import get_default_rules
+
+        rules = get_default_rules()
+        print(rules.version)
+        # 1.0.0
+        ```
+    """
     return RULES_REGISTRY[CURRENT_RULES_VERSION]
 
 
@@ -283,6 +304,20 @@ class PreprocessingSignature:
     Attributes:
         hash: SHA256 hash of the normalized preprocessing steps.
         json_repr: Full JSON string of the preprocessing steps.
+
+    Example:
+        ```python
+        from pictologics.deduplication import PreprocessingSignature
+
+        steps = [
+            ("resample", {"spacing": (1.0, 1.0, 1.0)}),
+            ("discretise", {"bin_width": 25}),
+        ]
+        sig_a = PreprocessingSignature.from_steps(steps)
+        sig_b = PreprocessingSignature.from_steps(steps)
+        print(sig_a == sig_b)
+        # True
+        ```
     """
 
     hash: str
@@ -375,6 +410,23 @@ def get_ivh_dependencies(
 
     Returns:
         The set of preprocessing steps that affect IVH for this config.
+
+    Example:
+        ```python
+        from pictologics.deduplication import get_default_rules, get_ivh_dependencies
+
+        rules = get_default_rules()
+        config_steps = [
+            {"step": "discretise", "params": {"n_bins": 32}},
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_use_continuous": True},
+            },
+        ]
+        deps = get_ivh_dependencies(config_steps, rules)
+        print("discretise" in deps)
+        # False
+        ```
     """
     # Find extract_features step and check IVH continuous mode.  Runtime treats
     # ivh_use_continuous as a top-level extract_features parameter; keep the
@@ -412,6 +464,20 @@ def extract_relevant_steps(
 
     Returns:
         Ordered list of (step_name, params) tuples for relevant steps.
+
+    Example:
+        ```python
+        from pictologics.deduplication import get_default_rules, extract_relevant_steps
+
+        rules = get_default_rules()
+        config_steps = [
+            {"step": "resample", "params": {"spacing": (1.0, 1.0, 1.0)}},
+            {"step": "discretise", "params": {"n_bins": 32}},
+        ]
+        relevant = extract_relevant_steps(config_steps, "morphology", rules)
+        print(relevant)
+        # [('resample', {'spacing': (1.0, 1.0, 1.0)})]
+        ```
     """
     # Get dependencies for this family
     if family == "ivh":
@@ -445,6 +511,29 @@ class DeduplicationPlan:
         signatures: Mapping of (config_name, family) to PreprocessingSignature.
         sources: Mapping of (config_name, family) to source config name (or None if first).
         configs_hash: Hash of the configs dict to detect modifications.
+
+    Example:
+        Plans are normally produced by `ConfigurationAnalyzer.analyze()`:
+
+        ```python
+        from pictologics.deduplication import ConfigurationAnalyzer
+
+        configs = {
+            "fbn_32": [
+                {"step": "resample", "params": {"spacing": (1.0, 1.0, 1.0)}},
+                {"step": "discretise", "params": {"n_bins": 32}},
+                {"step": "extract_features", "params": {"families": ["morphology"]}},
+            ],
+            "fbn_64": [
+                {"step": "resample", "params": {"spacing": (1.0, 1.0, 1.0)}},
+                {"step": "discretise", "params": {"n_bins": 64}},
+                {"step": "extract_features", "params": {"families": ["morphology"]}},
+            ],
+        }
+        plan = ConfigurationAnalyzer(configs).analyze()
+        print(plan.get_summary())
+        # {'computed': 1, 'reused': 1, 'total': 2}
+        ```
     """
 
     rules: DeduplicationRules
@@ -556,6 +645,31 @@ class ConfigurationAnalyzer:
     Args:
         configs: Dict mapping config names to lists of step dicts.
         rules: The DeduplicationRules to use (defaults to current version).
+
+    Example:
+        ```python
+        from pictologics.deduplication import ConfigurationAnalyzer
+
+        configs = {
+            "fbn_32": [
+                {"step": "resample", "params": {"spacing": (1.0, 1.0, 1.0)}},
+                {"step": "discretise", "params": {"n_bins": 32}},
+                {"step": "extract_features", "params": {"families": ["morphology"]}},
+            ],
+            "fbn_64": [
+                {"step": "resample", "params": {"spacing": (1.0, 1.0, 1.0)}},
+                {"step": "discretise", "params": {"n_bins": 64}},
+                {"step": "extract_features", "params": {"families": ["morphology"]}},
+            ],
+        }
+
+        analyzer = ConfigurationAnalyzer(configs)
+        plan = analyzer.analyze()
+        print(plan.should_compute("fbn_64", "morphology"))
+        # False (morphology doesn't depend on discretise, so fbn_64 reuses fbn_32)
+        print(plan.get_source("fbn_64", "morphology"))
+        # fbn_32
+        ```
     """
 
     def __init__(
