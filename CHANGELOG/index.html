@@ -1449,15 +1449,43 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#042-2026-05-16" class="md-nav__link">
+  <a href="#050-2026-07-12" class="md-nav__link">
     <span class="md-ellipsis">
       
-        [0.4.2] - 2026-05-16
+        0.5.0 - 2026-07-12
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="[0.4.2] - 2026-05-16">
+    <nav class="md-nav" aria-label="0.5.0 - 2026-07-12">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#optimized" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optimized
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#042-2026-05-16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.4.2 - 2026-05-16
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.4.2 - 2026-05-16">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1483,7 +1511,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#optimized" class="md-nav__link">
+  <a href="#optimized_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Optimized
@@ -1834,7 +1862,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#optimized_1" class="md-nav__link">
+  <a href="#optimized_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Optimized
@@ -1971,15 +1999,43 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#042-2026-05-16" class="md-nav__link">
+  <a href="#050-2026-07-12" class="md-nav__link">
     <span class="md-ellipsis">
       
-        [0.4.2] - 2026-05-16
+        0.5.0 - 2026-07-12
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="[0.4.2] - 2026-05-16">
+    <nav class="md-nav" aria-label="0.5.0 - 2026-07-12">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#optimized" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optimized
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#042-2026-05-16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.4.2 - 2026-05-16
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.4.2 - 2026-05-16">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2005,7 +2061,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#optimized" class="md-nav__link">
+  <a href="#optimized_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Optimized
@@ -2356,7 +2412,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#optimized_1" class="md-nav__link">
+  <a href="#optimized_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Optimized
@@ -2427,7 +2483,21 @@
 <h1 id="changelog">Changelog</h1>
 <!-- towncrier release notes start -->
 
-<h2 id="042-2026-05-16">[0.4.2] - 2026-05-16</h2>
+<h2 id="050-2026-07-12"><a href="https://github.com/martonkolossvary/pictologics/compare/v0.4.2...v0.5.0">0.5.0</a> - 2026-07-12</h2>
+<h3 id="optimized">Optimized</h3>
+<ul>
+<li>Cache the Riesz frequency-domain transfer function (depends only on shape and order), making <code>riesz_transform</code> (and riesz_log/riesz_simoncelli) ~1.9-2.5x faster on repeat same-shape calls with byte-identical output.</li>
+<li>Cache the Simoncelli wavelet frequency-domain transfer function (depends only on shape and level), making <code>simoncelli_wavelet</code> ~1.8-2.9x faster on repeat same-shape calls with byte-identical output.</li>
+<li>Faster Moran's I and Geary's C spatial-intensity features (about 2x on larger ROIs) by exploiting the symmetry of the inverse-distance weights and letting the O(N^2) inner loop vectorise; byte-identical.</li>
+<li>Faster shared nonzero-bounding-box and ROI min/max scans via single-pass numba kernels (with numpy fallbacks for small or non-float inputs), reused across feature families and memoised per extraction pass; byte-identical.</li>
+<li>Much faster preprocessing via numba kernels and ROI-bounded work: image resampling up to ~35-66x, discretise_image ~5-9x, resegment_mask ~4x, and keep_largest_component ~35x on CT-sized volumes; bit-identical for discrete outputs and within 1e-9 for linear resampling.</li>
+<li>Reduce redundant array recomputation in the GLCM/GLRLM/GLDZM/NGLDM/NGTDM feature calculations (~7% faster per family); byte-identical output.</li>
+<li>Replace the GLDZM distance transform with a numba chamfer kernel (~3-4x faster on that step); distances are byte-identical to the previous scipy result.</li>
+<li>Share the resampled mask between the morphological and intensity masks when they are in sync (and drop a redundant mask copy), speeding multi-config pipeline runs with byte-identical output.</li>
+<li>Speed up texture ROI voxel counting on float masks (~5x) with a dtype-gated nonzero count; results are byte-identical.</li>
+<li>Substantially faster texture feature extraction (GLCM/GLRLM/GLSZM/GLDZM/NGTDM/NGLDM): vectorised the GLSZM matrix build, derive GLCM Ng_eff from the ROI bounding box, crop all texture work to the ROI bounding box to eliminate full-volume float64 mask scans, gate matrix computation to the requested families, and parallelise the zone-labelling kernel. Byte-identical results, roughly 1.4-15x faster on CT-sized and sparse volumes.</li>
+</ul>
+<h2 id="042-2026-05-16"><a href="https://github.com/martonkolossvary/pictologics/compare/v0.4.1...v0.4.2">0.4.2</a> - 2026-05-16</h2>
 <h3 id="changed">Changed</h3>
 <ul>
 <li>Extended CI to lint tests, added a separate JIT smoke check outside coverage accounting, and made the MkDocs-published changelog the towncrier source with root changelog sync support.</li>
@@ -2438,7 +2508,7 @@
 <li>Fixed compartment-specific pipeline semantics so <code>resegment</code> and <code>filter_outliers</code> update morphology masks by default, source masks constrain morphology masks after resampling, deduplication treats mask-narrowing steps as morphology dependencies, and <code>describe_features()</code> reports mask usage plus effective <code>apply_to</code> targets. Nonzero multi-label mask values are now treated as ROI membership rather than numeric weights across preprocessing, morphology, and texture calculations, while <code>binarize_mask</code> remains the explicit label-selection step. Configuration exports and processing logs now include mask semantics, package/schema metadata, configuration snapshots, deduplication settings, and effective source/sentinel details for reproducible runs on other machines.</li>
 <li>Fixed deduplication signatures to preserve preprocessing step order, corrected continuous-IVH deduplication dependency detection, applied per-frame DICOM rescale transforms for multiframe files, and propagated DICOM SEG alignment controls through reference-aware loading.</li>
 </ul>
-<h3 id="optimized">Optimized</h3>
+<h3 id="optimized_1">Optimized</h3>
 <ul>
 <li>Removed redundant initializations of <code>min_rot</code> and <code>max_rot</code> arrays in <code>_ombb_extents_numba</code> to slightly improve morphology calculation efficiency.</li>
 </ul>
@@ -2592,7 +2662,7 @@
 <li><strong>Sentinel Value Handling</strong>: Documentation and examples for handling sentinel values (e.g. -2048 in Siemens DICOMs) using the <code>resegment</code> preprocessing step</li>
 <li><strong>Dependencies</strong>: Added <code>highdicom</code>, <code>matplotlib</code>, <code>pillow</code>; updated <code>pandas&gt;=2.0.0</code></li>
 </ul>
-<h3 id="optimized_1">Optimized</h3>
+<h3 id="optimized_2">Optimized</h3>
 <ul>
 <li><strong>Morphology Speedup</strong>: Implemented bounding box cropping for morphology features (mesh/moments), significantly accelerating extraction for sparse ROIs in large volumes</li>
 <li><strong>Texture Speedup</strong>: Added slice-level skipping to texture calculation to ignore empty z-slices, vastly improving performance for disjoint ROIs (e.g. multiple tumors)</li>

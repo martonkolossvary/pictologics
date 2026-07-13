@@ -1141,7 +1141,18 @@
   <a href="#performance-tips" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Performance Tips
+        Performance &amp; Tips
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
       
     </span>
   </a>
@@ -2466,7 +2477,18 @@
   <a href="#performance-tips" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Performance Tips
+        Performance &amp; Tips
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
       
     </span>
   </a>
@@ -3511,13 +3533,70 @@ semantics used for the run, and an <code>entries</code> array. Each entry record
 deduplication, and configuration export. Manual extraction is mainly useful for debugging
 or understanding the underlying process.</p>
 </div>
-<h2 id="performance-tips">Performance Tips</h2>
+<h2 id="performance-tips">Performance &amp; Tips</h2>
 <ul>
 <li><strong>Spatial/local intensity</strong> can be extremely slow on large ROIs. Keep them disabled unless needed.</li>
 <li><strong>Texture</strong> requires discretisation. Without a <code>discretise</code> step, the pipeline raises an error.</li>
 <li>For large 3D images, consider coarser spacing for exploratory work.</li>
 <li>For CT in Hounsfield Units, FBS (<code>bin_width</code>) is often more interpretable; for MRI/PET, FBN (<code>n_bins</code>) may be preferable.</li>
 </ul>
+<div class="admonition tip">
+<p class="admonition-title">JIT Warmup</p>
+<p>Numba-accelerated kernels (texture, morphology, intensity, filters) compile the first time
+they run. <code>import pictologics</code> triggers this compilation eagerly via <code>warmup_jit()</code>, so the
+cost is paid once at import instead of during your first extraction call. Set
+<code>PICTOLOGICS_DISABLE_WARMUP=1</code> to skip it — faster import, but the first call to each kernel
+will compile on demand. When timing or benchmarking, either leave warmup enabled or run one
+untimed extraction first so compilation isn't counted in your numbers.</p>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Deduplication Across Configs</p>
+<p>Deduplication is on by default and is the biggest lever for multi-config batches: configs
+that share a preprocessing prefix reuse morphology/intensity feature families instead of
+recomputing them. Inspect <code>pipeline.deduplication_stats</code> after a <code>run()</code> call to see the
+cache hit rate. See <a href="#deduplication-performance-optimization">Deduplication</a> above for details.</p>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Choosing <code>source_mode</code></p>
+<ul>
+<li><code>"full_image"</code> (default) — the image is a standard whole scan with valid data everywhere.</li>
+<li><code>"roi_only"</code> — only ROI voxels are valid; pass <code>sentinel_value</code> for deterministic background handling.</li>
+<li><code>"auto"</code> — scans for common sentinel values (e.g. <code>-2048</code>, <code>-1024</code>) and behaves like <code>roi_only</code>
+  if any are found, otherwise like <code>full_image</code>. Use this for cropped/pre-masked images when
+  you're unsure of the exact sentinel value.</li>
+</ul>
+<p>See the <a href="../data_loading/#handling-sentinel-na-values">source_mode decision guide</a> for a full comparison.</p>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Filtering Performance</p>
+<ul>
+<li>Resample to <strong>isotropic spacing</strong> before applying the Gabor filter — its 2D in-plane kernel
+  assumes equal spacing along all axes and warns if it isn't.</li>
+<li>Simoncelli and Riesz cache their frequency-domain transfer functions, keyed by array
+  <strong>shape</strong> (plus <code>level</code>/<code>order</code>), so repeated filtering calls on same-shaped images/ROIs
+  skip that rebuild — grouping same-shape batches together avoids redundant work.</li>
+</ul>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Reproducibility</p>
+<p>Pin <code>deduplication_rules</code> explicitly (e.g. <code>RadiomicsPipeline(deduplication_rules="1.0.0")</code>) so
+a future default-rules change can't silently alter which features get reused. Use
+<code>pipeline.save_configs(...)</code> / <code>RadiomicsPipeline.load_configs(...)</code> to export and re-import
+configurations verbatim — see <a href="../configurations/">Configuration &amp; Reproducibility</a> for the full workflow.</p>
+</div>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p><strong><code>EmptyROIMaskError</code></strong> — raised internally when preprocessing (e.g. <code>resegment</code>, <code>filter_outliers</code>)
+removes every voxel from the ROI. You won't see this exception directly: <code>run()</code> catches it and
+returns a <code>pandas.Series</code> of <code>NaN</code> for that configuration so batch runs keep going (see
+<a href="#result-guarantees">Result Guarantees</a>). To resolve it, relax the offending step's thresholds or
+check <code>pipeline._log</code> for the failed step and its error message.</p>
+<p><strong>Spacing-mismatch <code>ValueError</code></strong> (<code>"...Resampling would be required but is not yet supported."</code>) —
+raised when loading/repositioning a mask whose voxel spacing differs from its reference image by
+more than 1%. Pictologics can reposition cropped masks into a reference image's coordinate space,
+but it does not resample them. Resample the mask (or image) to matching spacing before loading, or
+verify you're pointing at the correct reference image. See
+<a href="../data_loading/#error-handling">Error Handling</a> in the Data Loading guide for the full table of
+loader-time errors and warnings.</p>
 
 
 

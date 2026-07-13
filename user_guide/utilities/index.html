@@ -2111,12 +2111,12 @@
 <h3 id="multi-phase-series-splitting">Multi-Phase Series Splitting</h3>
 <p>Medical images often contain multiple phases (e.g., dynamic contrast-enhanced MRI, multiphase CT, cardiac phases) within a single "series" (sharing the same <code>SeriesInstanceUID</code>). <code>DicomDatabase</code> automatically detects and splits these into separate logical series for easier analysis.</p>
 <p>By default, <code>split_multiseries=True</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Automatically splits series based on:</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Automatically splits series based on (in priority order):</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># - Cardiac Phase</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># - Acquisition Number</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># - Temporal Position</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># - Echo Number</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="c1"># - Trigger Time</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># - Temporal Position</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># - Trigger Time</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># - Acquisition Number</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="c1"># - Echo Number</span>
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># - Duplicate Spatial Positions (fallback)</span>
 <a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
 <a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">db</span> <span class="o">=</span> <span class="n">DicomDatabase</span><span class="o">.</span><span class="n">from_folders</span><span class="p">([</span><span class="s2">&quot;path/to/multiphase/data&quot;</span><span class="p">])</span>
@@ -2216,14 +2216,15 @@
 </code></pre></div>
 <h3 id="windowlevel-normalization">Window/Level Normalization</h3>
 <p>For CT and MR images, use window/level controls for proper contrast:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Soft tissue window (default: center=200, width=600)</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">visualize_slices</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">img</span><span class="p">,</span> <span class="n">window_center</span><span class="o">=</span><span class="mi">40</span><span class="p">,</span> <span class="n">window_width</span><span class="o">=</span><span class="mi">400</span><span class="p">)</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Bone window</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">visualize_slices</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">img</span><span class="p">,</span> <span class="n">window_center</span><span class="o">=</span><span class="mi">400</span><span class="p">,</span> <span class="n">window_width</span><span class="o">=</span><span class="mi">1800</span><span class="p">)</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Lung window</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">visualize_slices</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">img</span><span class="p">,</span> <span class="n">window_center</span><span class="o">=-</span><span class="mi">600</span><span class="p">,</span> <span class="n">window_width</span><span class="o">=</span><span class="mi">1500</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Soft tissue window preset (omitting window_center/window_width instead</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># defaults to min-max normalization)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">visualize_slices</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">img</span><span class="p">,</span> <span class="n">window_center</span><span class="o">=</span><span class="mi">40</span><span class="p">,</span> <span class="n">window_width</span><span class="o">=</span><span class="mi">400</span><span class="p">)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># Bone window</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">visualize_slices</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">img</span><span class="p">,</span> <span class="n">window_center</span><span class="o">=</span><span class="mi">400</span><span class="p">,</span> <span class="n">window_width</span><span class="o">=</span><span class="mi">1800</span><span class="p">)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># Lung window</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">visualize_slices</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="n">img</span><span class="p">,</span> <span class="n">window_center</span><span class="o">=-</span><span class="mi">600</span><span class="p">,</span> <span class="n">window_width</span><span class="o">=</span><span class="mi">1500</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="colormap-options">Colormap Options</h3>
 <table>
@@ -2401,8 +2402,20 @@
 <td>SOP Instance UID</td>
 </tr>
 <tr>
+<td>patient_id</td>
+<td>Patient ID from the SR file</td>
+</tr>
+<tr>
+<td>study_instance_uid</td>
+<td>Study Instance UID</td>
+</tr>
+<tr>
 <td>status</td>
 <td>"success" or "error"</td>
+</tr>
+<tr>
+<td>error_message</td>
+<td>Error details if failed</td>
 </tr>
 <tr>
 <td>num_measurements</td>
@@ -2417,8 +2430,8 @@
 <td>Path to exported JSON</td>
 </tr>
 <tr>
-<td>error_message</td>
-<td>Error details if failed</td>
+<td>processing_time_ms</td>
+<td>Time taken to process the file, in milliseconds</td>
 </tr>
 </tbody>
 </table>
