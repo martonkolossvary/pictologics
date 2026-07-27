@@ -65,7 +65,7 @@ You want to:
         You typically need both: `source_mode="auto"` to protect preprocessing, and `resegment` to
         define the correct ROI for analysis.
     - **Automatic sentinel detection**: With `source_mode="auto"`, the pipeline scans for common sentinel values
-      (-2048, -1024, -1000, 0, -32768) and records detected values in the processing log so you can verify which
+      (-2048, -3024, -1024, -1000, 0, -32768) and records detected values in the processing log so you can verify which
       value was detected in each image.
     - **Mask generation**: When `mask` is omitted, the pipeline generates a full ROI mask. The `resegment` step
       then removes sentinel voxels from the ROI, effectively deriving the correct analysis mask automatically

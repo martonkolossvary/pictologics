@@ -25,6 +25,12 @@ Example:
 """
 
 from .base import BoundaryCondition, FilterResult
+from .capabilities import (
+    CAPABILITIES_SCHEMA_VERSION,
+    FILTER_CAPABILITIES,
+    FilterCapability,
+    get_filter_capabilities,
+)
 from .gabor import gabor_filter
 from .laws import LAWS_KERNELS, laws_filter
 from .log import laplacian_of_gaussian
@@ -47,4 +53,9 @@ __all__ = [
     "riesz_transform",
     "riesz_log",
     "riesz_simoncelli",
+    # Capability metadata
+    "CAPABILITIES_SCHEMA_VERSION",
+    "FILTER_CAPABILITIES",
+    "FilterCapability",
+    "get_filter_capabilities",
 ]

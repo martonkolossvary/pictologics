@@ -13,9 +13,11 @@ from scipy.ndimage import convolve1d
 
 from .base import (
     BoundaryCondition,
+    _apply_with_boundary_padding,
     _prepare_masked_image,
     ensure_float32,
     get_scipy_mode,
+    resolve_boundary,
 )
 
 # Threshold for enabling parallel processing (voxels)
@@ -284,6 +286,23 @@ def _simoncelli_transfer(
     return cast(npt.NDArray[np.floating[Any]], g_sim)
 
 
+def _simoncelli_pad_width(level: int) -> int:
+    """
+    Default padding (voxels, same for every axis) for boundary-aware Simoncelli
+    filtering via pad-filter-crop.
+
+    The Simoncelli transfer function (IBSI 2 Eq. 27) is smooth and band-limited to
+    [max_freq/4, max_freq] with max_freq = 1 / 2**(level - 1) (Nyquist = 1), so its
+    real-space kernel decays quickly, and — because the frequency band is a fixed
+    *fraction* of Nyquist — the kernel's voxel extent depends only on `level`, not
+    on the image shape. Empirically (via `np.fft.ifftn` of the transfer function),
+    an 8-voxel radius captures ~99.9% of the level-1 kernel's L2 energy; each extra
+    level halves the bandwidth (doubling the spatial extent), so the pad doubles
+    too.
+    """
+    return 8 * (1 << (level - 1))
+
+
 def simoncelli_wavelet(
     image: npt.NDArray[np.floating[Any]],
     level: int = 1,
@@ -304,11 +323,18 @@ def simoncelli_wavelet(
     Args:
         image: 3D input image array
         level: Decomposition level (1 = highest frequency band)
-        boundary: Boundary condition (FFT is inherently periodic)
+        boundary: Boundary condition. The filter is inherently periodic (FFT-based),
+            so `BoundaryCondition.PERIODIC` (the default) runs it directly on
+            `image`. Any other condition is approximated via pad-filter-crop (see
+            `_apply_with_boundary_padding` and `_simoncelli_pad_width`).
         source_mask: Optional boolean mask where True = valid voxel
 
     Returns:
         Band-pass response map (B map) for the specified level
+
+    Raises:
+        ValueError: If `boundary` is a string that is not a valid
+            `BoundaryCondition` member name.
 
     Example:
         Apply first-level Simoncelli wavelet (highest frequency band):
@@ -324,6 +350,8 @@ def simoncelli_wavelet(
         response = simoncelli_wavelet(image, level=1)
         ```
     """
+    boundary = resolve_boundary(boundary)
+
     # Convert to float32
     image = ensure_float32(image)
 
@@ -331,18 +359,21 @@ def simoncelli_wavelet(
     if source_mask is not None:
         image = _prepare_masked_image(image, source_mask)
 
-    shape = tuple(image.shape)
-    ndim = image.ndim
+    def _core(arr: npt.NDArray[np.floating[Any]]) -> npt.NDArray[np.floating[Any]]:
+        shape = tuple(arr.shape)
+        ndim = arr.ndim
 
-    # Transfer function depends only on (shape, level) — never on image values or the
-    # source mask — so it is built once and cached (see _simoncelli_transfer).
-    g_sim = _simoncelli_transfer(shape, level)
+        # Transfer function depends only on (shape, level) — never on image values or
+        # the source mask — so it is built once and cached (see _simoncelli_transfer).
+        g_sim = _simoncelli_transfer(shape, level)
 
-    # Apply filter in frequency domain using full FFT (full FFT required because the
-    # centered grid is non-symmetric for even N). scipy.fft with workers=-1 is
-    # multithreaded and matches np.fft to float32 precision.
-    axes = tuple(range(ndim))
-    F = scipy.fft.fftn(image, workers=-1)
-    response = scipy.fft.ifftn(F * g_sim, s=shape, axes=axes, workers=-1)
+        # Apply filter in frequency domain using full FFT (full FFT required because
+        # the centered grid is non-symmetric for even N). scipy.fft with workers=-1
+        # is multithreaded and matches np.fft to float32 precision.
+        axes = tuple(range(ndim))
+        F = scipy.fft.fftn(arr, workers=-1)
+        response = scipy.fft.ifftn(F * g_sim, s=shape, axes=axes, workers=-1)
 
-    return cast(npt.NDArray[np.floating[Any]], np.real(response).astype(np.float32))
+        return cast(npt.NDArray[np.floating[Any]], np.real(response).astype(np.float32))
+
+    return _apply_with_boundary_padding(_core, image, boundary, _simoncelli_pad_width(level))

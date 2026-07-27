@@ -625,11 +625,22 @@ pipeline.save_log("logs/test_run_001.json")
 ```
 
 `save_log()` writes a JSON object with `log_schema_version`,
-`pipeline_schema_version`, `pictologics_version`, `mask_roi_semantics`, and an
-`entries` array. Each entry includes the configuration snapshot, executed step
-parameters, source-mode and sentinel information, deduplication settings, mask
-alignment settings, and error/status fields needed to reproduce or audit the run
-on another machine.
+`pipeline_schema_version`, `pictologics_version`, `mask_roi_semantics`,
+`exported_at`, `entry_count`, and an `entries` array. Each entry includes the
+configuration snapshot, executed step parameters, source-mode and sentinel
+information, deduplication settings, mask alignment settings, and error/status
+fields needed to reproduce or audit the run on another machine.
+
+Every executed `filter` step additionally records what was **requested** versus what
+was **effective**, so a parameter that the pipeline defaults, substitutes, or cannot
+apply exactly is always visible:
+
+| Field | Meaning |
+|:------|:--------|
+| `boundary_requested` | The boundary the step asked for (or the default that applied). |
+| `boundary_effective` | The boundary actually used — e.g. `periodic` for the FFT-based filters unless a boundary was explicitly requested. |
+| `params_requested` | The filter parameters exactly as supplied in the step configuration. |
+| `params_effective` | The keyword arguments actually passed to the filter, including values the pipeline injects (such as `spacing_mm`) and dispatch keys (such as the Riesz `variant`). Arrays are recorded as compact descriptors (shape and voxel counts), never as raw data. |
 
 ### Step 3: Export Configuration for Sharing (Site A)
 

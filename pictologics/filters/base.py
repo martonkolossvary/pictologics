@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Callable, Dict, Tuple, Union
 
 import numpy as np
 from numpy import typing as npt
@@ -92,6 +92,91 @@ def ensure_float32(
 def get_scipy_mode(boundary: BoundaryCondition) -> str:
     """Convert BoundaryCondition to scipy.ndimage mode string."""
     return boundary.value
+
+
+def resolve_boundary(boundary: Union[BoundaryCondition, str]) -> BoundaryCondition:
+    """
+    Resolve a boundary condition from a `BoundaryCondition` instance or a
+    case-insensitive member name.
+
+    Args:
+        boundary: Either a `BoundaryCondition` member, or one of the
+            (case-insensitive) names "zero", "nearest", "periodic", "mirror".
+
+    Returns:
+        The resolved `BoundaryCondition`.
+
+    Raises:
+        ValueError: If `boundary` is a string that does not match any
+            `BoundaryCondition` member name.
+    """
+    if isinstance(boundary, BoundaryCondition):
+        return boundary
+    try:
+        return BoundaryCondition[str(boundary).upper()]
+    except KeyError:
+        valid = ", ".join(member.name.lower() for member in BoundaryCondition)
+        raise ValueError(
+            f"Unknown boundary condition: {boundary!r}. Valid values: {valid}"
+        ) from None
+
+
+# Boundary conditions handled by manual np.pad, keyed by scipy-style pad mode name.
+# PERIODIC is deliberately excluded: it is handled by the fast path in
+# `_apply_with_boundary_padding` (calling `func` directly, with no padding at all),
+# so it never needs a numpy pad-mode lookup.
+_NUMPY_PAD_MODE_MAP = {
+    BoundaryCondition.ZERO: "constant",
+    BoundaryCondition.NEAREST: "edge",
+    BoundaryCondition.MIRROR: "symmetric",
+}
+
+
+def _apply_with_boundary_padding(
+    func: Callable[..., npt.NDArray[np.floating[Any]]],
+    image: npt.NDArray[np.floating[Any]],
+    boundary: BoundaryCondition,
+    pad_width: Union[int, Tuple[int, ...]],
+    **kwargs: Any,
+) -> npt.NDArray[np.floating[Any]]:
+    """
+    Apply an FFT-based filter honouring a boundary condition via pad-filter-crop.
+
+    FFT-based filters (Simoncelli, Riesz) transform the whole array at once and
+    are therefore inherently periodic. To approximate any other boundary
+    condition, the image is padded using the requested condition, `func` is run
+    on the padded (still periodically-transformed) array, and the result is
+    cropped back to the original shape so only the region away from the
+    artificial periodic wrap of the padded array is returned.
+
+    Args:
+        func: FFT-based filter to apply; called as `func(image, **kwargs)`.
+        image: Input image array.
+        boundary: Requested boundary condition. For `BoundaryCondition.PERIODIC`,
+            `func` is called directly on `image` with no padding at all — this is
+            byte-identical to calling `func` without any boundary handling, i.e.
+            today's (pre-boundary-contract) behaviour.
+        pad_width: Padding added on both sides of every axis: either a single int
+            (same width for every axis) or a tuple with one width per axis of
+            `image`. Each axis's width is capped at that axis's own length, so
+            padding never blows up the array by more than 3x even for small inputs.
+        **kwargs: Additional keyword arguments forwarded to `func`.
+
+    Returns:
+        The output of `func`, cropped (if padded) to match `image`'s shape.
+    """
+    if boundary is BoundaryCondition.PERIODIC:
+        return func(image, **kwargs)
+
+    pad_mode = _NUMPY_PAD_MODE_MAP[boundary]
+    widths = (pad_width,) * image.ndim if isinstance(pad_width, int) else tuple(pad_width)
+    widths = tuple(min(w, s) for w, s in zip(widths, image.shape, strict=True))
+
+    padded = np.pad(image, [(w, w) for w in widths], mode=pad_mode)  # type: ignore[call-overload]
+    response = func(padded, **kwargs)
+
+    crop = tuple(slice(w, w + s) for w, s in zip(widths, image.shape, strict=True))
+    return response[crop]
 
 
 # ==============================================================================

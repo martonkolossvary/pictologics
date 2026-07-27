@@ -61,9 +61,18 @@ results = pipeline.run(image_path, mask_path, config_names=["ibsi2_test_3b"])
 print(results["ibsi2_test_3b"])
 ```
 
+## Provenance
+
+-   **Pictologics version**: `0.5.1`
+-   **IBSI 2 reference manual**: version 9 (the revision bundled under `dev/IBSI2/documentation/`)
+-   **Reference data**: `dev/IBSI2/references/feature_values/reference_values.csv` (IBSI 2 reference feature values, [https://github.com/theibsi/ibsi_2_reference_data](https://github.com/theibsi/ibsi_2_reference_data))
+-   **Reference data SHA-256** (first 12 hex chars): `6d1a4e7b297e`
+
 ## Phase 2 Results
 
 **Summary**: 9/9 Tests Passed (3D Configuration). Total Features: 161/161 passed.
+
+*Note*: 1 feature/filter combination(s) have no IBSI-2 standardized consensus value published (blank `consensus_value`/`tolerance` in the reference dataset) and are excluded from the pass/fail counts above. They are reported as coverage-only rows in the tables below (see Test 8.B: `stat_qcod`) and are never counted as a numerical pass or fail.
 
 ### Test 1.B: None
 
@@ -261,6 +270,7 @@ print(results["ibsi2_test_3b"])
 | Robust mean absolute deviation | stat_rmad | 11.7 | 11.7 | 0.3 | ✅ PASS |
 | Median absolute deviation | stat_medad | 25.3 | 25.3 | 0.6 | ✅ PASS |
 | Coefficient of variation | stat_cov | 133 | 134 | 27 | ✅ PASS |
+| Quartile coefficient of dispersion | stat_qcod | 1.54e+03 | N/A | N/A | ⚪ NO REFERENCE (coverage only) |
 | Energy | stat_energy | 6.48e+08 | 6.48e+08 | 3.9e+07 | ✅ PASS |
 | Root mean square | stat_rms | 42.5 | 42.5 | 0.9 | ✅ PASS |
 
@@ -293,6 +303,6 @@ print(results["ibsi2_test_3b"])
 
 ### 2D Configuration (Config A) Not Implemented
 
-The following tests check filter performance in 2D mode (Config A). These are **skipped** because Pictologics is purely a 3D radiomics library.
+The following tests check filter performance in 2D mode (Config A). These are **skipped** because Pictologics calculates radiomic features over a 3D volumetric ROI and does not provide a slice-wise 2D radiomics workflow. (Config B is the volumetric pathway reported above; the Gabor filter remains an explicit filter-level exception that uses 2D plane kernels.)
 
 -   **Tests 1.A - 9.A**: 2D versions of the above tests.

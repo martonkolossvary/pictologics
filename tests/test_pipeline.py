@@ -1816,6 +1816,423 @@ def test_step_filter_boundary_options(
         assert call_kwargs.get("boundary") == expected, f"Failed for {boundary_name}"
 
 
+@patch("pictologics.pipeline.mean_filter")
+def test_step_filter_boundary_condition_instance(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """A BoundaryCondition instance (not a string) passed as 'boundary' must resolve
+    correctly, exercising the non-string branch of boundary resolution."""
+    from pictologics.filters import BoundaryCondition
+
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_boundary_instance",
+        [
+            {
+                "step": "filter",
+                "params": {"type": "mean", "support": 3, "boundary": BoundaryCondition.NEAREST},
+            }
+        ],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_boundary_instance"])
+    call_kwargs = mock_filter.call_args.kwargs
+    assert call_kwargs.get("boundary") == BoundaryCondition.NEAREST
+
+
+def test_step_filter_unknown_boundary_raises(
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """An unrecognised boundary string must raise (never silently fall back to mirror)."""
+    pipeline.add_config(
+        "filter_bad_boundary",
+        [{"step": "filter", "params": {"type": "mean", "support": 3, "boundary": "bogus"}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_bad_boundary"])
+    log = pipeline._log[-1]
+    assert "error" in log
+    assert "Unknown boundary condition" in log["error"]
+
+
+@patch("pictologics.pipeline.simoncelli_wavelet")
+def test_step_filter_simoncelli_explicit_boundary_forwarded(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """An explicitly requested boundary must be forwarded to simoncelli_wavelet."""
+    from pictologics.filters import BoundaryCondition
+
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_simon_boundary",
+        [{"step": "filter", "params": {"type": "simoncelli", "level": 1, "boundary": "nearest"}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_simon_boundary"])
+    call_kwargs = mock_filter.call_args.kwargs
+    assert call_kwargs.get("boundary") == BoundaryCondition.NEAREST
+
+
+@patch("pictologics.pipeline.riesz_transform")
+def test_step_filter_riesz_explicit_boundary_forwarded(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """An explicitly requested boundary must be forwarded to riesz_transform."""
+    from pictologics.filters import BoundaryCondition
+
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_riesz_boundary",
+        [{"step": "filter", "params": {"type": "riesz", "order": 1, "boundary": "zero"}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_riesz_boundary"])
+    call_kwargs = mock_filter.call_args.kwargs
+    assert call_kwargs.get("boundary") == BoundaryCondition.ZERO
+
+
+@patch("pictologics.pipeline.mean_filter")
+def test_step_filter_log_boundary_metadata_spatial(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """Spatial filters (mean/log/laws/gabor/wavelet) log the resolved boundary as both
+    'requested' and 'effective', since they always honour it exactly."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_mean_meta",
+        [{"step": "filter", "params": {"type": "mean", "support": 3}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_mean_meta"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["boundary_requested"] == "mirror"
+    assert step_log["boundary_effective"] == "mirror"
+
+
+@patch("pictologics.pipeline.simoncelli_wavelet")
+def test_step_filter_log_boundary_metadata_fft_default(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """When no boundary is requested, an FFT-based filter's logged 'requested' value is
+    the pipeline default ('mirror') but 'effective' stays 'periodic' (its own default)."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_simon_meta_default",
+        [{"step": "filter", "params": {"type": "simoncelli", "level": 1}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_simon_meta_default"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["boundary_requested"] == "mirror"
+    assert step_log["boundary_effective"] == "periodic"
+
+
+@patch("pictologics.pipeline.riesz_simoncelli")
+def test_step_filter_log_boundary_metadata_fft_explicit(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """When a boundary is explicitly requested, an FFT-based filter's logged
+    'requested' and 'effective' values both match the requested boundary."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_riesz_simon_meta_explicit",
+        [
+            {
+                "step": "filter",
+                "params": {"type": "riesz", "variant": "simoncelli", "boundary": "nearest"},
+            }
+        ],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_riesz_simon_meta_explicit"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["boundary_requested"] == "nearest"
+    assert step_log["boundary_effective"] == "nearest"
+
+
+# --- params_requested / params_effective provenance (IBSI 2) ---
+
+
+@patch("pictologics.pipeline.mean_filter")
+def test_step_filter_params_requested_matches_raw_config(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """params_requested is exactly the raw step config, unmodified (including 'type')."""
+    mock_filter.return_value = mock_image.array
+    raw_params = {"type": "mean", "support": 5}
+    pipeline.add_config("filter_req_raw", [{"step": "filter", "params": raw_params}])
+    pipeline.run(mock_image, mock_mask, config_names=["filter_req_raw"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["params_requested"] == raw_params
+    # 'boundary' was never supplied, so it must be absent (not silently invented).
+    assert "boundary" not in step_log["params_requested"]
+
+
+@patch("pictologics.pipeline.mean_filter")
+def test_step_filter_params_effective_mean(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """params_effective drops 'type' (never a callable kwarg) and resolves 'boundary'
+    to its lowercase name, matching filter_boundary_effective."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_eff_mean",
+        [{"step": "filter", "params": {"type": "mean", "support": 5}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_eff_mean"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["params_effective"] == {"support": 5, "boundary": "mirror"}
+    assert "type" not in step_log["params_effective"]
+
+
+@patch("pictologics.pipeline.laplacian_of_gaussian")
+def test_step_filter_params_effective_log_spacing_injected(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """params_effective for 'log' shows the spacing_mm the pipeline injected from the
+    image, as a JSON-safe list (not the raw tuple)."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_eff_log",
+        [{"step": "filter", "params": {"type": "log", "sigma_mm": 1.5, "truncate": 4.0}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_eff_log"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert "spacing_mm" not in step_log["params_requested"]
+    assert step_log["params_effective"]["spacing_mm"] == list(mock_image.spacing)
+    assert step_log["params_effective"]["sigma_mm"] == 1.5
+    assert json.dumps(step_log)  # must be JSON-safe (list, not tuple)
+
+
+@patch("pictologics.pipeline.gabor_filter")
+def test_step_filter_params_effective_gabor_delta_theta(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """params_effective for 'gabor' carries through a caller-supplied delta_theta
+    alongside the pipeline-injected spacing_mm."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_eff_gabor",
+        [
+            {
+                "step": "filter",
+                "params": {"type": "gabor", "sigma_mm": 3.0, "lambda_mm": 2.0, "delta_theta": 45},
+            }
+        ],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_eff_gabor"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["params_effective"]["delta_theta"] == 45
+    assert step_log["params_effective"]["spacing_mm"] == list(mock_image.spacing)
+
+
+@patch("pictologics.pipeline.laws_filter")
+def test_step_filter_params_effective_laws_kernel_positional(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """'kernel' is passed positionally to laws_filter (not via **kwargs), but must
+    still be visible in params_effective so it can't silently disappear from the log."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_eff_laws",
+        [{"step": "filter", "params": {"type": "laws", "kernel": "E5L5S5"}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_eff_laws"])
+    call_kwargs = mock_filter.call_args.kwargs
+    assert "kernel" not in call_kwargs  # confirms it really is positional, not a kwarg
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["params_effective"]["kernel"] == "E5L5S5"
+
+
+@patch("pictologics.pipeline.riesz_transform")
+def test_step_filter_params_effective_riesz_variant_default(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """'variant' defaults to 'base' when omitted, and is still recorded in
+    params_effective even though it is never forwarded to riesz_transform."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_eff_riesz_base",
+        [{"step": "filter", "params": {"type": "riesz", "order": 1}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_eff_riesz_base"])
+    call_kwargs = mock_filter.call_args.kwargs
+    assert "variant" not in call_kwargs
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert "variant" not in step_log["params_requested"]
+    assert step_log["params_effective"]["variant"] == "base"
+
+
+@patch("pictologics.pipeline.riesz_log")
+def test_step_filter_params_effective_riesz_variant_log(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """The riesz 'log' variant's params_effective shows both the dispatched variant
+    and the pipeline-injected spacing_mm."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_eff_riesz_log",
+        [{"step": "filter", "params": {"type": "riesz", "variant": "log", "sigma_mm": 2.0}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_eff_riesz_log"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["params_effective"]["variant"] == "log"
+    assert step_log["params_effective"]["spacing_mm"] == list(mock_image.spacing)
+
+
+@patch("pictologics.pipeline.riesz_simoncelli")
+def test_step_filter_params_effective_simoncelli_boundary_periodic(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """When no boundary is requested, an FFT-based filter's params_effective reports
+    the true honoured boundary ('periodic'), not the unrequested pipeline default."""
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_eff_riesz_simon",
+        [{"step": "filter", "params": {"type": "riesz", "variant": "simoncelli", "level": 2}}],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_eff_riesz_simon"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["params_effective"]["variant"] == "simoncelli"
+    assert step_log["params_effective"]["boundary"] == "periodic"
+    assert "boundary" not in step_log["params_requested"]
+
+
+@patch("pictologics.pipeline.mean_filter")
+def test_step_filter_params_effective_boundary_condition_instance(
+    mock_filter: MagicMock,
+    pipeline: RadiomicsPipeline,
+    mock_image: Image,
+    mock_mask: Image,
+) -> None:
+    """A BoundaryCondition instance passed directly as 'boundary' is recorded in
+    params_effective by its lowercase name, not the enum object or scipy mode string."""
+    from pictologics.filters import BoundaryCondition
+
+    mock_filter.return_value = mock_image.array
+    pipeline.add_config(
+        "filter_eff_boundary_instance",
+        [
+            {
+                "step": "filter",
+                "params": {"type": "mean", "support": 3, "boundary": BoundaryCondition.NEAREST},
+            }
+        ],
+    )
+    pipeline.run(mock_image, mock_mask, config_names=["filter_eff_boundary_instance"])
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert step_log["params_effective"]["boundary"] == "nearest"
+    assert json.dumps(step_log)  # BoundaryCondition must not leak into the log
+
+
+def test_step_filter_params_effective_source_mask_descriptor(
+    sm_image: Image, sm_mask: Image
+) -> None:
+    """The pipeline-injected source_mask must never appear as a raw array in the log --
+    only a compact, JSON-safe shape/voxel-count descriptor."""
+    pipeline = RadiomicsPipeline()
+    pipeline.add_config(
+        "filter_source_mask_desc",
+        [{"step": "filter", "params": {"type": "mean", "support": 3}}],
+        source_mode="roi_only",
+    )
+    with patch("pictologics.pipeline.mean_filter", return_value=sm_image.array) as mock_filter:
+        pipeline.run(sm_image, sm_mask, config_names=["filter_source_mask_desc"])
+        call_kwargs = mock_filter.call_args.kwargs
+        assert isinstance(call_kwargs.get("source_mask"), np.ndarray)  # really was an array
+
+    step_log = pipeline._log[-1]["steps_executed"][0]
+    assert "source_mask" not in step_log["params_requested"]  # never user-supplied
+    mask_desc = step_log["params_effective"]["source_mask"]
+    assert isinstance(mask_desc, dict)
+    assert mask_desc["shape"] == [20, 20, 20]
+    assert mask_desc["voxel_count"] == 20 * 20 * 20
+    assert mask_desc["true_count"] == 10 * 10 * 10
+    assert json.dumps(pipeline._log)  # whole run log must round-trip through JSON
+
+
+def test_step_filter_params_provenance_full_log_json_roundtrip(
+    pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
+) -> None:
+    """A multi-config run mixing several filter types (with a source_mask active)
+    must produce a fully JSON-serializable log end to end."""
+    from pictologics.filters import BoundaryCondition
+
+    pipeline.add_config(
+        "prov_log",
+        [{"step": "filter", "params": {"type": "log", "sigma_mm": 1.0}}],
+    )
+    pipeline.add_config(
+        "prov_riesz",
+        [
+            {
+                "step": "filter",
+                "params": {"type": "riesz", "variant": "log", "boundary": BoundaryCondition.ZERO},
+            }
+        ],
+        source_mode="roi_only",
+    )
+    pipeline.add_config(
+        "prov_laws",
+        [{"step": "filter", "params": {"type": "laws", "kernel": "L5E5E5"}}],
+    )
+
+    with (
+        patch("pictologics.pipeline.laplacian_of_gaussian", return_value=mock_image.array),
+        patch("pictologics.pipeline.riesz_log", return_value=mock_image.array),
+        patch("pictologics.pipeline.laws_filter", return_value=mock_image.array),
+    ):
+        pipeline.run(
+            mock_image, mock_mask, config_names=["prov_log", "prov_riesz", "prov_laws"]
+        )
+
+    serialized = json.dumps(pipeline._log)
+    assert serialized  # no exception; every entry is JSON-safe
+    reloaded = json.loads(serialized)
+    assert len(reloaded) == 3
+    for entry in reloaded:
+        step_log = entry["steps_executed"][0]
+        assert "params_requested" in step_log
+        assert "params_effective" in step_log
+
+
 def test_step_resample_missing_param(
     pipeline: RadiomicsPipeline,
     mock_image: Image,
@@ -3424,6 +3841,66 @@ def test_pipeline_roi_only_and_auto_modes(sm_image: Image, sm_mask: Image) -> No
     assert auto_logs[-1]["sentinel_value"] == -1000.0
     assert auto_logs[-1]["sentinel_auto_detected"] is True
     assert auto_logs[-1]["sentinel_proportion"] > 0.05
+
+
+def test_pipeline_auto_sentinel_percentage_never_rounds_up_to_100() -> None:
+    """A near-total sentinel fraction must not be reported as '100.0% of voxels'.
+
+    Plain ``:.1f`` rounding turns 99.999% into "100.0%", which wrongly implies no
+    voxels remain for feature extraction -- yet features are still produced from the
+    surviving ROI. The warning must say ">99.9%" and state the valid voxel count.
+    """
+    shape = (40, 40, 40)
+    array = np.full(shape, -2048.0)
+    mask_array = np.zeros(shape, dtype=np.uint8)
+    # Exactly one real voxel: 99.998% sentinel -- rounds up to 100.0% naively.
+    array.reshape(-1)[0] = 50.0
+    mask_array.reshape(-1)[0] = 1
+    image = Image(array, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+    mask = Image(mask_array, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "near_total",
+        [{"step": "extract_features", "params": {"families": ["intensity"]}}],
+        source_mode="auto",
+    )
+    with pytest.warns(UserWarning, match="Auto-detected sentinel value") as record:
+        results = pipeline.run(image, mask, config_names=["near_total"])
+
+    message = str(record[0].message)
+    assert "100.0%" not in message
+    assert ">99.9%" in message
+    assert "1 of 64,000 voxels remain valid" in message
+    # The stored proportion keeps full precision even though the display is clamped.
+    log_entry = [e for e in pipeline._log if e["config_name"] == "near_total"][-1]
+    assert 0.9999 < log_entry["sentinel_proportion"] < 1.0
+    # Features are still produced -- the whole point of not claiming 100%.
+    assert len(results["near_total"]) > 0
+
+
+def test_pipeline_auto_sentinel_percentage_reports_exact_value_below_threshold() -> None:
+    """Below the rounding-hazard threshold the true percentage is shown verbatim."""
+    shape = (40, 40, 40)
+    array = np.full(shape, -2048.0)
+    mask_array = np.zeros(shape, dtype=np.uint8)
+    array.reshape(-1)[:6400] = 50.0  # 90% sentinel
+    mask_array.reshape(-1)[:6400] = 1
+    image = Image(array, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+    mask = Image(mask_array, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
+
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "ninety",
+        [{"step": "extract_features", "params": {"families": ["intensity"]}}],
+        source_mode="auto",
+    )
+    with pytest.warns(UserWarning, match="Auto-detected sentinel value") as record:
+        pipeline.run(image, mask, config_names=["ninety"])
+
+    message = str(record[0].message)
+    assert "90.0% of voxels" in message
+    assert "6,400 of 64,000 voxels remain valid" in message
 
 
 def test_pipeline_auto_no_sentinel_warns_and_continues(sm_image: Image, sm_mask: Image) -> None:

@@ -147,6 +147,8 @@ Gabor filters are sinusoidal waves modulated by a Gaussian envelope. They are ex
 | `theta` | `float` | Orientation angle (if not rotation invariant). |
 | `rotation_invariant` | `bool` | If `True`, aggregates responses over multiple orientations. |
 | `delta_theta` | `float` | Orientation step in radians. **Required** when `rotation_invariant=True` (raises `ValueError` otherwise). |
+| `average_over_planes` | `bool` | If `True`, averages the response over the three orthogonal planes. Default: `False` (axial plane only). |
+| `spacing_mm` | `float` or `tuple` | Voxel spacing. The 2D kernel is scaled using the **true in-plane spacing of each plane**, so anisotropic voxels are handled correctly (this matters mainly when `average_over_planes=True`, where two of the three planes contain the through-plane axis). |
 
 ### Usage
 
@@ -228,6 +230,7 @@ The Simoncelli wavelet (non-separable) provides isotropic texture analysis. It i
 | Parameter | Type | Description |
 |:----------|:-----|:------------|
 | `level` | `int` | Decomposition level (1, 2, ...). |
+| `boundary` | `str` | Boundary condition (`"periodic"`, `"zero"`, `"nearest"`, `"mirror"`). Default: `"periodic"`. See [FFT filter boundaries](#fft-filter-boundaries) below. |
 
 ### Usage
 
@@ -258,6 +261,7 @@ The Riesz transform provides a steerable filter bank. It can be combined with ot
 |:----------|:-----|:------------|
 | `order` | `Tuple[int, ...]` | Order tuple `(l1, l2, l3)` specifying derivative order per axis, e.g. `(1, 0, 0)`. |
 | `variant` | `str` | Pipeline-level dispatch key (not a `riesz_transform` kwarg): `"base"` calls `riesz_transform` directly, `"log"` dispatches to `riesz_log` (requires `sigma_mm`), `"simoncelli"` dispatches to `riesz_simoncelli`. |
+| `boundary` | `str` | Boundary condition (`"periodic"`, `"zero"`, `"nearest"`, `"mirror"`). Default: `"periodic"`. Accepted by all three variants; for `"log"` it is also forwarded to the internal LoG stage. See [FFT filter boundaries](#fft-filter-boundaries) below. |
 
 ### Usage
 
@@ -297,6 +301,42 @@ The Riesz transform provides a steerable filter bank. It can be combined with ot
     # Riesz transform of a Simoncelli-wavelet-filtered image
     response = riesz_simoncelli(image_array, level=1, order=(1, 0, 0))
     ```
+
+## FFT Filter Boundaries
+
+The Simoncelli and Riesz filters operate in the Fourier domain, which is inherently
+periodic. They still accept a `boundary` argument, honoured as follows:
+
+- **`"periodic"` (default)** — the FFT is applied directly to the image. This is the
+  fastest path and the one IBSI specifies for the Simoncelli tests.
+- **`"zero"` / `"nearest"` / `"mirror"`** — the volume is padded with the requested
+  mode, filtered, and cropped back (a *pad-filter-crop* procedure). For composite
+  filters (`riesz_log`, `riesz_simoncelli`) the padding is applied once around the
+  whole chain.
+
+!!! note "Requested vs. effective boundary"
+    Because the transform remains periodic on the *padded* domain, a non-periodic
+    boundary is honoured **approximately** rather than exactly — the Riesz kernel in
+    particular has power-law tails, so no finite pad removes truncation error
+    entirely. The capability metadata reports this as `as_specified_via_padding`
+    (see [`FILTER_CAPABILITIES`](../api/filters.md#capability-metadata)), and each
+    pipeline filter step records both the requested and the effective boundary in the
+    run log.
+
+    Requesting the boundary a test specifies measurably improves agreement with the
+    IBSI reference response maps — for example, using nearest-value padding for IBSI 2
+    Phase 1 test `10.b.1` reduces the maximum absolute error roughly four-fold.
+
+An unsupported boundary value raises `ValueError` rather than silently falling back.
+
+!!! warning "Cost of a non-periodic boundary"
+    Padding enlarges the array before the transform, so a non-periodic boundary is
+    substantially slower than the periodic default — on a 64³ input the padded volume
+    is roughly 5× the voxels and the call takes about 3–4× as long. The padding width
+    grows with the filter's scale (Simoncelli level, LoG sigma), and accuracy improves
+    steadily with it, so this is a genuine accuracy-versus-speed trade rather than
+    avoidable overhead. Leave the boundary periodic unless you specifically need
+    another one.
 
 ## Source Masking for Sentinel Values
 

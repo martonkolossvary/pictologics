@@ -1,7 +1,6 @@
 # pictologics/filters/gabor.py
 """Gabor filter implementation (IBSI code: Q88H)."""
 
-import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional, Tuple, Union, cast
 
@@ -48,7 +47,11 @@ def gabor_filter(
         lambda_mm: Wavelength in mm (S4N6)
         gamma: Spatial aspect ratio (GDR5), typically 0.5 to 2.0
         theta: Orientation angle in radians (FQER), clockwise in (k1,k2)
-        spacing_mm: Voxel spacing in mm (scalar or tuple)
+        spacing_mm: Voxel spacing in mm (scalar or per-axis tuple). Each
+            plane's kernel is built from that plane's own two in-plane
+            axis spacings, so anisotropic spacing (including anisotropic
+            z, relevant when `average_over_planes=True`) is handled
+            correctly rather than approximated from a single axis.
         boundary: Boundary condition for padding (GBYQ)
         rotation_invariant: If True, average over orientations
         delta_theta: Orientation step for rotation invariance (XTGK)
@@ -95,6 +98,13 @@ def gabor_filter(
         - Returns modulus |h| = |g ⊗ f| for feature extraction
         - 2D filter applied slice-by-slice, then optionally over planes
         - Uses single complex FFT convolution for ~2x speedup
+        - Each plane's kernel uses that plane's own two in-plane spacings.
+          When they are equal (the isotropic-in-plane case, including the
+          default axial-only plane under typical (x, y, z) spacing with
+          x == y), the kernel is built on a voxel-unit grid. When they
+          differ, the kernel is built on a physical-coordinate (mm) grid
+          with a per-axis radius, giving a rectangular kernel that is
+          physically correct rather than warning and guessing.
     """
     # Convert to float32
     image = ensure_float32(image)
@@ -103,23 +113,11 @@ def gabor_filter(
     if source_mask is not None:
         image = _prepare_masked_image(image, source_mask)
 
-    # Handle spacing
+    # Handle spacing. The mm -> voxel/physical conversion is deferred to
+    # _apply_gabor_to_plane, which is per-plane: each plane's in-plane axes
+    # (and therefore in-plane spacings) depend on plane_axis.
     if isinstance(spacing_mm, (int, float)):
         spacing_mm = (float(spacing_mm),) * 3
-
-    # The 2D kernel is built in voxel units from a single spacing value, which is
-    # only correct for isotropic voxels (IBSI expects isotropic resampling first).
-    if not (np.isclose(spacing_mm[0], spacing_mm[1]) and np.isclose(spacing_mm[1], spacing_mm[2])):
-        warnings.warn(
-            "gabor_filter assumes isotropic voxel spacing; the kernel is built from "
-            f"the first-axis spacing ({spacing_mm[0]}) only. Resample to isotropic "
-            "spacing first for IBSI-compliant results.",
-            stacklevel=2,
-        )
-
-    # Convert mm to voxels (use in-plane spacing for 2D filter)
-    sigma_voxels = sigma_mm / spacing_mm[0]  # Assume isotropic in-plane
-    lambda_voxels = lambda_mm / spacing_mm[0]
 
     # Handle boundary
     if isinstance(boundary, str):
@@ -158,11 +156,12 @@ def gabor_filter(
         for plane_axis in range(3):
             plane_response = _apply_gabor_to_plane(
                 image,
-                sigma_voxels,
-                lambda_voxels,
+                sigma_mm,
+                lambda_mm,
                 gamma,
                 thetas,
                 plane_axis,
+                spacing_mm,
                 mode,
                 pooling,
                 use_parallel,
@@ -180,11 +179,12 @@ def gabor_filter(
         # Apply only to axial plane (axis 2 = k3 slices)
         return _apply_gabor_to_plane(
             image,
-            sigma_voxels,
-            lambda_voxels,
+            sigma_mm,
+            lambda_mm,
             gamma,
             thetas,
             plane_axis=2,
+            spacing_mm=spacing_mm,
             mode=mode,
             pooling=pooling,
             use_parallel=use_parallel,
@@ -193,11 +193,12 @@ def gabor_filter(
 
 def _apply_gabor_to_plane(
     image: npt.NDArray[np.floating[Any]],
-    sigma_voxels: float,
-    lambda_voxels: float,
+    sigma_mm: float,
+    lambda_mm: float,
     gamma: float,
     thetas: list[float],
     plane_axis: int,
+    spacing_mm: Tuple[float, float, float],
     mode: str,
     pooling: str,
     use_parallel: bool = True,
@@ -208,10 +209,29 @@ def _apply_gabor_to_plane(
         use_parallel: If True, process slices in parallel using ThreadPoolExecutor.
             For small images, sequential may be faster due to thread overhead.
     """
-    # Pre-compute all kernels for efficiency
-    kernels = [
-        _create_gabor_kernel_2d(sigma_voxels, lambda_voxels, gamma, theta) for theta in thetas
-    ]
+    # This plane's two in-plane axes (the axes the 2D kernel actually acts on;
+    # plane_axis itself is only sliced over, see moveaxis below) and their spacings.
+    in_plane_axes = [a for a in range(3) if a != plane_axis]
+    s1, s2 = spacing_mm[in_plane_axes[0]], spacing_mm[in_plane_axes[1]]
+
+    if np.isclose(s1, s2):
+        # In-plane isotropic: build the kernel on a voxel-unit grid exactly as
+        # before (preserved verbatim so isotropic-spacing results stay
+        # byte-identical; the physical-grid formulation below is mathematically
+        # equivalent here but differs at the ~1e-15 level due to a different
+        # floating-point evaluation order).
+        sigma_voxels = sigma_mm / s1
+        lambda_voxels = lambda_mm / s1
+        kernels = [
+            _create_gabor_kernel_2d(sigma_voxels, lambda_voxels, gamma, theta) for theta in thetas
+        ]
+    else:
+        # In-plane anisotropic: build the kernel on a physical (mm) grid with a
+        # per-axis voxel radius, so each axis is scaled by its own true spacing.
+        kernels = [
+            _create_gabor_kernel_2d_anisotropic(sigma_mm, lambda_mm, gamma, theta, s1, s2)
+            for theta in thetas
+        ]
 
     # Move the plane axis to position 0 so each image_reordered[i] is a 2D slice
     # (a view; the copy happens later in np.pad).
@@ -329,6 +349,45 @@ def _create_gabor_kernel_2d(
     # Gabor formula
     gaussian = np.exp(-(k1_rot**2 + gamma**2 * k2_rot**2) / (2 * sigma**2))
     sinusoid = np.exp(1j * 2 * np.pi * k1_rot / wavelength)
+
+    kernel = gaussian * sinusoid
+    return kernel.astype(np.complex64)  # type: ignore[no-any-return]
+
+
+def _create_gabor_kernel_2d_anisotropic(
+    sigma_mm: float,
+    wavelength_mm: float,
+    gamma: float,
+    theta: float,
+    s1: float,
+    s2: float,
+) -> npt.NDArray[np.floating[Any]]:
+    """
+    Create a 2D Gabor kernel for a plane whose two in-plane axes have different
+    physical spacing (s1, s2, in mm). Unlike `_create_gabor_kernel_2d`, the
+    kernel is built on a physical-coordinate (mm) grid rather than a voxel grid,
+    with a per-axis voxel radius, so the result is a rectangular kernel that
+    reflects each axis's true spacing rather than assuming a single scale.
+    """
+    # Per-axis radius (voxels) for 6σ truncation along each physical axis.
+    radius1 = int(np.ceil(6.0 * sigma_mm / s1))
+    radius2 = int(np.ceil(6.0 * sigma_mm / s2))
+
+    # Voxel-index grid, then converted to physical (mm) coordinates per axis.
+    k1, k2 = np.mgrid[-radius1 : radius1 + 1, -radius2 : radius2 + 1].astype(np.float64)
+    p1 = k1 * s1
+    p2 = k2 * s2
+
+    # Rotate physical coordinates per IBSI convention (clockwise), same as the
+    # isotropic kernel but in mm rather than voxels.
+    cos_t = np.cos(theta)
+    sin_t = np.sin(theta)
+    p1_rot = p1 * cos_t + p2 * sin_t  # p̃₁
+    p2_rot = -p1 * sin_t + p2 * cos_t  # p̃₂
+
+    # Gabor formula, directly in mm (sigma_mm, wavelength_mm used as-is).
+    gaussian = np.exp(-(p1_rot**2 + gamma**2 * p2_rot**2) / (2 * sigma_mm**2))
+    sinusoid = np.exp(1j * 2 * np.pi * p1_rot / wavelength_mm)
 
     kernel = gaussian * sinusoid
     return kernel.astype(np.complex64)  # type: ignore[no-any-return]

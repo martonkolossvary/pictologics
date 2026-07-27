@@ -18,6 +18,7 @@ from numpy.testing import assert_array_equal
 
 from pictologics.loader import Image
 from pictologics.preprocessing import (
+    COMMON_SENTINEL_VALUES,
     apply_mask,
     create_source_mask_from_sentinel,
     detect_sentinel_value,
@@ -533,6 +534,14 @@ def test_detect_sentinel_value_basic() -> None:
     arr = np.full((10, 10, 10), -2048.0, dtype=np.float32)
     arr[2:8, 2:8, 2:8] = 100.0
     assert detect_sentinel_value(Image(arr, (1, 1, 1), (0, 0, 0))) == -2048.0
+
+
+def test_detect_sentinel_value_minus_3024() -> None:
+    """-3024 HU (outside the CT reconstruction FOV) is a recognised sentinel."""
+    assert -3024.0 in COMMON_SENTINEL_VALUES
+    arr = np.full((10, 10, 10), -3024.0, dtype=np.float32)
+    arr[2:8, 2:8, 2:8] = 100.0
+    assert detect_sentinel_value(Image(arr, (1, 1, 1), (0, 0, 0))) == -3024.0
 
 
 def test_detect_sentinel_value_none() -> None:

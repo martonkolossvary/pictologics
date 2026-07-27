@@ -27,6 +27,28 @@ response = laplacian_of_gaussian(image.array, sigma_mm=1.5, spacing_mm=image.spa
 | Simoncelli | `simoncelli_wavelet` | Non-separable wavelet |
 | Riesz | `riesz_transform`, `riesz_log`, `riesz_simoncelli` | Rotation-equivariant transforms |
 
+## Capability Metadata
+
+Versioned, machine-readable descriptions of what each filter supports — input and
+kernel dimensionality, plane-wise execution, orthogonal-plane averaging, rotation
+pooling, supported and *effective* boundary handling, Riesz orders, structure-tensor
+steering, and anisotropic-spacing behaviour. Intended for compliance tooling, so
+support can be determined without inspecting signatures or private source.
+
+Note the distinction between `supported_boundaries` (what the function accepts) and
+`effective_boundary` (what physically happens at the border): the FFT-based filters
+report `as_specified_via_padding`, because a requested non-periodic boundary is
+realised by a defined pad-filter-crop procedure and the transform itself remains
+periodic on the padded domain.
+
+::: pictologics.filters.CAPABILITIES_SCHEMA_VERSION
+
+::: pictologics.filters.FilterCapability
+
+::: pictologics.filters.FILTER_CAPABILITIES
+
+::: pictologics.filters.get_filter_capabilities
+
 ## Boundary Conditions
 
 ::: pictologics.filters.BoundaryCondition

@@ -28,7 +28,14 @@ from .features._utils import compute_nonzero_bbox
 from .loader import Image, _direction_matrix, _validate_geometry
 
 # Common sentinel values used in medical imaging to denote "no data" or "background"
-COMMON_SENTINEL_VALUES: tuple[float, ...] = (-2048.0, -1024.0, -1000.0, 0.0, -32768.0)
+COMMON_SENTINEL_VALUES: tuple[float, ...] = (
+    -2048.0,
+    -3024.0,
+    -1024.0,
+    -1000.0,
+    0.0,
+    -32768.0,
+)
 
 # Below this size the numba parallel-launch overhead exceeds the scan itself;
 # the numpy fallback paths are kept for small arrays (same convention as
@@ -329,7 +336,8 @@ def detect_sentinel_value(
     Args:
         image: Input Image object.
         candidate_values: Values to check for sentinel patterns.
-            Defaults to common medical imaging sentinels: -2048, -1024, -1000, 0, -32768.
+            Defaults to common medical imaging sentinels: -2048, -3024, -1024,
+            -1000, 0, -32768.
         min_presence_fraction: Minimum fraction of voxels that must equal
             the candidate to consider it a sentinel. Default is 5%.
         roi_mask: Optional ROI mask. If provided, checks that sentinel values

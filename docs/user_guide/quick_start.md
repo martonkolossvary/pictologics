@@ -135,6 +135,7 @@ results = pipeline.run(image=image)
 | Modality | Common Sentinel | Meaning |
 |:---------|:----------------|:--------|
 | CT | -2048 HU | Outside value range |
+| CT | -3024 HU | Outside reconstruction field of view |
 | CT | -1024 HU | Missing data |
 | MRI | 0 | Background |
 

@@ -2,6 +2,27 @@
 
 <!-- towncrier release notes start -->
 
+## [0.5.1] - 2026-07-26
+
+### Added
+
+- Added -3024 HU (outside the CT reconstruction field of view) to the pool of sentinel values recognised by automatic sentinel detection, alongside the existing -2048, -1024, -1000, 0 and -32768.
+- Added versioned, machine-readable filter capability metadata (`FILTER_CAPABILITIES`, `get_filter_capabilities`, `CAPABILITIES_SCHEMA_VERSION`) describing input/kernel dimensionality, plane execution and averaging, rotation pooling, supported and effective boundaries, Riesz orders, structure-tensor steering, and anisotropic-spacing behaviour, so compliance tooling no longer has to infer them from signatures.
+- Every executed pipeline `filter` step now records `params_requested` (the parameters as supplied) and `params_effective` (the arguments actually passed to the filter, including pipeline-injected values such as `spacing_mm` and the Riesz `variant` dispatch) in the run log, so a parameter that is defaulted, substituted, or cannot be applied exactly is always visible. Arrays are recorded as compact shape descriptors rather than raw data.
+- The FFT-based filters (`simoncelli_wavelet`, `riesz_transform`, `riesz_log`, `riesz_simoncelli`) now honour the `boundary` parameter through a defined pad-filter-crop procedure instead of always being periodic. Periodic remains the default, so existing results are unchanged; `riesz_transform`, `riesz_log` and `riesz_simoncelli` gain a `boundary` argument.
+
+### Changed
+
+- Corrected the IBSI 2 compliance reporting: test 10.a is no longer described as structure-tensor aligned (it is unsteered), a skipped test can no longer be reported as passing, Phase 1 results now separate the strict 3D total from the broader volumetric total with the four 2D Gabor tests named, and the single Phase 2 feature with no published consensus value (8.B `stat_qcod`) is shown explicitly as coverage-only instead of being silently omitted. Both compliance pages now record provenance (package version, IBSI 2 reference manual version, reference dataset source and content hashes) and Phase 1 documents one exact, reproducible named test.
+
+### Fixed
+
+- Gabor filtering now scales its 2D kernel using the true in-plane voxel spacing of each plane instead of deriving every scale from the first spacing component. This corrects results for anisotropic voxels when `average_over_planes=True` (the planes containing the through-plane axis were previously computed with the wrong physical scale). Isotropic in-plane spacing keeps the existing code path and is bit-for-bit unchanged, so IBSI Gabor results are unaffected. The anisotropic-spacing warning has been removed because the case is now handled correctly rather than approximated.
+- IBSI 2 Phase 1 verification now requests the padding each test specifies for the Riesz filters (zero padding for 9.a/9.b.1/10.a, nearest for 10.b.1) instead of relying on the periodic default, measurably improving agreement with the published reference response maps.
+- The auto-detected sentinel warning no longer rounds a near-total sentinel fraction up to "100.0% of voxels", which wrongly implied that no voxels remained for feature extraction. Fractions above 99.95% are now reported as ">99.9%" (a literal 100.0% is shown only when every voxel is the sentinel), and the message states how many voxels remain valid. The full-precision `sentinel_proportion` recorded in the run log is unchanged.
+- The pipeline no longer silently discards a requested `boundary` for the Simoncelli and Riesz filters, and an unsupported boundary value now raises a clear error instead of falling back to mirror padding. Each filter step records both the requested and the effective boundary in the run log.
+
+
 ## [0.5.0] - 2026-07-12
 
 ### Optimized
@@ -209,3 +230,4 @@
 [0.2.0]: https://github.com/martonkolossvary/pictologics/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/martonkolossvary/pictologics/releases/tag/v0.1.0
 [0.4.1]: https://github.com/martonkolossvary/pictologics/compare/v0.3.5...v0.4.1
+[0.5.1]: https://github.com/martonkolossvary/pictologics/compare/v0.5.0...v0.5.1

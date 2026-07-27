@@ -19,6 +19,7 @@ from pictologics.filters import (
     wavelet_transform,
 )
 from pictologics.filters.base import (
+    _apply_with_boundary_padding,
     _normalized_convolve1d,
     _normalized_gaussian_laplace,
     _normalized_separable_convolve_3d,
@@ -26,6 +27,12 @@ from pictologics.filters.base import (
     _prepare_masked_image,
     ensure_float32,
     get_scipy_mode,
+    resolve_boundary,
+)
+from pictologics.filters.gabor import (
+    _apply_gabor_to_plane,
+    _create_gabor_kernel_2d,
+    _create_gabor_kernel_2d_anisotropic,
 )
 
 # =============================================================================
@@ -121,6 +128,115 @@ class TestGetScipyMode:
         assert get_scipy_mode(BoundaryCondition.NEAREST) == "nearest"
         assert get_scipy_mode(BoundaryCondition.PERIODIC) == "wrap"
         assert get_scipy_mode(BoundaryCondition.MIRROR) == "reflect"
+
+
+class TestResolveBoundary:
+    """Tests for resolve_boundary function."""
+
+    def test_boundary_condition_returned_unchanged(self):
+        assert resolve_boundary(BoundaryCondition.MIRROR) is BoundaryCondition.MIRROR
+
+    def test_case_insensitive_string(self):
+        assert resolve_boundary("NEAREST") == BoundaryCondition.NEAREST
+        assert resolve_boundary("nearest") == BoundaryCondition.NEAREST
+
+    def test_all_member_names_resolve(self):
+        for member in BoundaryCondition:
+            assert resolve_boundary(member.name.lower()) is member
+
+    def test_invalid_string_raises_value_error(self):
+        with pytest.raises(ValueError, match="Unknown boundary condition"):
+            resolve_boundary("bogus")
+
+
+class TestApplyWithBoundaryPadding:
+    """Tests for _apply_with_boundary_padding function."""
+
+    def test_periodic_calls_func_directly(self):
+        # PERIODIC must be the exact current (no boundary handling) code path:
+        # no padding, no copy, `func` called on `image` itself.
+        image = np.arange(8, dtype=np.float32).reshape(2, 2, 2)
+        calls = []
+
+        def func(arr, add=0.0):
+            calls.append(arr)
+            return arr + add
+
+        result = _apply_with_boundary_padding(func, image, BoundaryCondition.PERIODIC, 5, add=3.0)
+        assert calls[0] is image
+        assert_array_equal(result, image + 3.0)
+
+    def test_non_periodic_crops_back_to_original_shape(self):
+        image = np.ones((4, 4, 4), dtype=np.float32)
+
+        def func(arr):
+            assert arr.shape == (8, 8, 8)  # 4 + 2*2 padding
+            return arr
+
+        result = _apply_with_boundary_padding(func, image, BoundaryCondition.ZERO, 2)
+        assert_array_equal(result, image)
+
+    def test_pad_width_as_tuple(self):
+        image = np.ones((4, 6, 8), dtype=np.float32)
+
+        def func(arr):
+            assert arr.shape == (6, 8, 10)
+            return arr
+
+        result = _apply_with_boundary_padding(func, image, BoundaryCondition.NEAREST, (1, 1, 1))
+        assert result.shape == image.shape
+
+    def test_pad_width_capped_to_axis_length(self):
+        image = np.ones((3, 3, 3), dtype=np.float32)
+
+        def func(arr):
+            # Requested pad of 100 is capped to the axis length (3), so the
+            # padded shape is 3 + 2*3 = 9 per axis, not 3 + 2*100.
+            assert arr.shape == (9, 9, 9)
+            return arr
+
+        result = _apply_with_boundary_padding(func, image, BoundaryCondition.MIRROR, 100)
+        assert result.shape == image.shape
+
+    def test_zero_padding_fills_with_zero(self):
+        image = np.array([[[1.0, 2.0, 3.0, 4.0]]], dtype=np.float32)  # shape (1, 1, 4)
+        captured = {}
+
+        def func(arr):
+            captured["arr"] = arr.copy()
+            return arr
+
+        result = _apply_with_boundary_padding(func, image, BoundaryCondition.ZERO, (0, 0, 2))
+        assert_array_equal(
+            captured["arr"][0, 0], np.array([0, 0, 1, 2, 3, 4, 0, 0], dtype=np.float32)
+        )
+        assert_array_equal(result, image)
+
+    def test_nearest_padding_replicates_edge(self):
+        image = np.array([[[1.0, 2.0, 3.0, 4.0]]], dtype=np.float32)
+        captured = {}
+
+        def func(arr):
+            captured["arr"] = arr.copy()
+            return arr
+
+        _apply_with_boundary_padding(func, image, BoundaryCondition.NEAREST, (0, 0, 2))
+        assert_array_equal(
+            captured["arr"][0, 0], np.array([1, 1, 1, 2, 3, 4, 4, 4], dtype=np.float32)
+        )
+
+    def test_mirror_padding_reflects(self):
+        image = np.array([[[1.0, 2.0, 3.0, 4.0]]], dtype=np.float32)
+        captured = {}
+
+        def func(arr):
+            captured["arr"] = arr.copy()
+            return arr
+
+        _apply_with_boundary_padding(func, image, BoundaryCondition.MIRROR, (0, 0, 2))
+        assert_array_equal(
+            captured["arr"][0, 0], np.array([2, 1, 1, 2, 3, 4, 4, 3], dtype=np.float32)
+        )
 
 
 class TestBaseInternalHelpers:
@@ -479,6 +595,125 @@ class TestGaborFilter:
         )
         assert result.shape == small_3d_image.shape
 
+    def test_no_warning_for_default_axial_only_with_anisotropic_z(self, small_3d_image, recwarn):
+        """average_over_planes=False (default) only ever uses plane_axis=2, whose
+        in-plane axes are 0 and 1. Anisotropy in z (axis 2) is irrelevant to that
+        plane, so this must not emit the old (over-eager) anisotropy warning, and
+        the result must be identical to genuinely isotropic (1, 1, 1) spacing."""
+        result_aniso_z = gabor_filter(
+            small_3d_image, sigma_mm=2.0, lambda_mm=1.0, gamma=0.5, spacing_mm=(1.0, 1.0, 3.0)
+        )
+        assert len(recwarn) == 0
+
+        result_iso = gabor_filter(
+            small_3d_image, sigma_mm=2.0, lambda_mm=1.0, gamma=0.5, spacing_mm=(1.0, 1.0, 1.0)
+        )
+        assert_array_equal(result_aniso_z, result_iso)
+
+    def test_anisotropic_kernel_matches_closed_form_physical_grid(self):
+        """`_create_gabor_kernel_2d_anisotropic` must build a rectangular kernel
+        with an independent 6*sigma_mm/s_i radius per axis, evaluated on a
+        physical (mm) coordinate grid. Recompute the expected kernel from the
+        Gabor formula directly (not by calling the function under test) to
+        catch implementation bugs rather than just echoing them back."""
+        sigma_mm, lambda_mm, gamma, theta = 5.0, 2.0, 0.5, np.pi / 6
+        s1, s2 = 1.0, 3.0
+
+        kernel = _create_gabor_kernel_2d_anisotropic(sigma_mm, lambda_mm, gamma, theta, s1, s2)
+
+        radius1 = int(np.ceil(6.0 * sigma_mm / s1))
+        radius2 = int(np.ceil(6.0 * sigma_mm / s2))
+        assert kernel.shape == (2 * radius1 + 1, 2 * radius2 + 1)
+        # Per-axis radii differ because s1 != s2, so the kernel is rectangular,
+        # unlike the old single-scalar approach, which would reuse s1 for both
+        # axes and produce a square kernel (via _create_gabor_kernel_2d, the
+        # isotropic-path builder, called with sigma_mm/s1 for both dimensions).
+        assert radius1 != radius2
+        old_wrong_square_kernel = _create_gabor_kernel_2d(
+            sigma_mm / s1, lambda_mm / s1, gamma, theta
+        )
+        assert old_wrong_square_kernel.shape != kernel.shape
+        assert old_wrong_square_kernel.shape[0] == old_wrong_square_kernel.shape[1]
+
+        k1, k2 = np.mgrid[-radius1 : radius1 + 1, -radius2 : radius2 + 1].astype(np.float64)
+        p1, p2 = k1 * s1, k2 * s2
+        cos_t, sin_t = np.cos(theta), np.sin(theta)
+        p1_rot = p1 * cos_t + p2 * sin_t
+        p2_rot = -p1 * sin_t + p2 * cos_t
+        expected = np.exp(-(p1_rot**2 + gamma**2 * p2_rot**2) / (2 * sigma_mm**2)) * np.exp(
+            1j * 2 * np.pi * p1_rot / lambda_mm
+        )
+        np.testing.assert_allclose(kernel, expected.astype(np.complex64), rtol=1e-6)
+
+    def test_anisotropic_in_plane_scaling_replaces_old_single_scalar_behaviour(
+        self, small_3d_image
+    ):
+        """Before the fix, `sigma_voxels`/`lambda_voxels` were computed once from
+        `spacing_mm[0]` and reused for every plane, so a plane's response never
+        depended on `spacing_mm[1]`/`spacing_mm[2]`. That is reproducible today by
+        calling `_apply_gabor_to_plane` for `plane_axis=0` with `spacing_mm=(1, 1,
+        1)`: axis 0's in-plane spacing is still 1.0 either way, so this call is
+        exactly what the old code computed for `plane_axis=0` when the real
+        spacing was `(1, 1, 3)` (it only ever looked at index 0). The new,
+        physically-correct call instead passes the true spacing `(1, 1, 3)`, so
+        axis 0's plane now sees its real in-plane spacings (1.0, 3.0). These two
+        must now differ -- the fix's whole point is that plane 0 (and 1) can no
+        longer ignore z-anisotropy."""
+        sigma_mm, lambda_mm, gamma, theta = 2.0, 1.0, 0.5, 0.0
+        mode = get_scipy_mode(BoundaryCondition.ZERO)
+
+        old_wrong_response = _apply_gabor_to_plane(
+            small_3d_image,
+            sigma_mm,
+            lambda_mm,
+            gamma,
+            [theta],
+            plane_axis=0,
+            spacing_mm=(1.0, 1.0, 1.0),
+            mode=mode,
+            pooling="average",
+            use_parallel=False,
+        )
+        new_correct_response = _apply_gabor_to_plane(
+            small_3d_image,
+            sigma_mm,
+            lambda_mm,
+            gamma,
+            [theta],
+            plane_axis=0,
+            spacing_mm=(1.0, 1.0, 3.0),
+            mode=mode,
+            pooling="average",
+            use_parallel=False,
+        )
+        assert not np.array_equal(old_wrong_response, new_correct_response)
+
+    def test_average_over_planes_anisotropic_spacing_is_now_handled_correctly(
+        self, small_3d_image
+    ):
+        """End-to-end: with average_over_planes=True and anisotropic z spacing,
+        the overall result must differ from what pure isotropic (1, 1, 1) spacing
+        would produce, since planes 0 and 1 (which contain the z axis) now
+        correctly incorporate the true z spacing rather than silently treating
+        the volume as isotropic."""
+        result_aniso = gabor_filter(
+            small_3d_image,
+            sigma_mm=2.0,
+            lambda_mm=1.0,
+            gamma=0.5,
+            spacing_mm=(1.0, 1.0, 3.0),
+            average_over_planes=True,
+        )
+        result_iso = gabor_filter(
+            small_3d_image,
+            sigma_mm=2.0,
+            lambda_mm=1.0,
+            gamma=0.5,
+            spacing_mm=(1.0, 1.0, 1.0),
+            average_over_planes=True,
+        )
+        assert not np.array_equal(result_aniso, result_iso)
+
 
 # =============================================================================
 # Test wavelets.py
@@ -575,6 +810,34 @@ class TestSimoncelliWavelet:
             result = simoncelli_wavelet(small_3d_image, level=level)
             assert result.shape == small_3d_image.shape
 
+    def test_default_boundary_is_periodic(self, small_3d_image):
+        # No boundary argument must be identical to explicit PERIODIC.
+        default = simoncelli_wavelet(small_3d_image, level=1)
+        explicit = simoncelli_wavelet(small_3d_image, level=1, boundary=BoundaryCondition.PERIODIC)
+        assert_array_equal(default, explicit)
+
+    def test_all_boundary_conditions(self, small_3d_image):
+        for boundary in BoundaryCondition:
+            result = simoncelli_wavelet(small_3d_image, level=1, boundary=boundary)
+            assert result.shape == small_3d_image.shape
+
+    def test_string_boundary_condition(self, small_3d_image):
+        result = simoncelli_wavelet(small_3d_image, level=1, boundary="nearest")
+        assert result.shape == small_3d_image.shape
+
+    def test_invalid_boundary_raises(self, small_3d_image):
+        with pytest.raises(ValueError, match="Unknown boundary condition"):
+            simoncelli_wavelet(small_3d_image, level=1, boundary="bogus")
+
+    def test_boundary_changes_response(self, small_3d_image):
+        # A non-periodic boundary must actually change the (edge-sensitive)
+        # response, proving the requested boundary is honoured rather than
+        # silently discarded.
+        periodic = simoncelli_wavelet(small_3d_image, level=1, boundary="periodic")
+        nearest = simoncelli_wavelet(small_3d_image, level=1, boundary="nearest")
+        assert not np.array_equal(periodic, nearest)
+        assert nearest.shape == small_3d_image.shape
+
 
 # =============================================================================
 # Test riesz.py
@@ -608,6 +871,31 @@ class TestRieszTransform:
             got = riesz_transform(small_3d_image, order=list(order))
             assert_array_equal(got, expected)
 
+    def test_default_boundary_is_periodic(self, small_3d_image):
+        default = riesz_transform(small_3d_image, order=(1, 0, 0))
+        explicit = riesz_transform(
+            small_3d_image, order=(1, 0, 0), boundary=BoundaryCondition.PERIODIC
+        )
+        assert_array_equal(default, explicit)
+
+    def test_all_boundary_conditions(self, small_3d_image):
+        for boundary in BoundaryCondition:
+            result = riesz_transform(small_3d_image, order=(1, 0, 0), boundary=boundary)
+            assert result.shape == small_3d_image.shape
+
+    def test_string_boundary_condition(self, small_3d_image):
+        result = riesz_transform(small_3d_image, order=(1, 0, 0), boundary="mirror")
+        assert result.shape == small_3d_image.shape
+
+    def test_invalid_boundary_raises(self, small_3d_image):
+        with pytest.raises(ValueError, match="Unknown boundary condition"):
+            riesz_transform(small_3d_image, order=(1, 0, 0), boundary="bogus")
+
+    def test_boundary_changes_response(self, small_3d_image):
+        periodic = riesz_transform(small_3d_image, order=(1, 0, 0), boundary="periodic")
+        nearest = riesz_transform(small_3d_image, order=(1, 0, 0), boundary="nearest")
+        assert not np.array_equal(periodic, nearest)
+
 
 class TestRieszLog:
     """Tests for riesz_log function."""
@@ -625,6 +913,43 @@ class TestRieszLog:
         for order in orders:
             result = riesz_log(small_3d_image, sigma_mm=2.0, order=order)
             assert result.shape == small_3d_image.shape
+
+    def test_default_boundary_is_periodic(self, small_3d_image):
+        default = riesz_log(small_3d_image, sigma_mm=2.0, order=(1, 0, 0))
+        explicit = riesz_log(
+            small_3d_image, sigma_mm=2.0, order=(1, 0, 0), boundary=BoundaryCondition.PERIODIC
+        )
+        assert_array_equal(default, explicit)
+
+    def test_all_boundary_conditions(self, small_3d_image):
+        for boundary in BoundaryCondition:
+            result = riesz_log(small_3d_image, sigma_mm=2.0, order=(1, 0, 0), boundary=boundary)
+            assert result.shape == small_3d_image.shape
+
+    def test_string_boundary_condition(self, small_3d_image):
+        result = riesz_log(small_3d_image, sigma_mm=2.0, order=(1, 0, 0), boundary="zero")
+        assert result.shape == small_3d_image.shape
+
+    def test_invalid_boundary_raises(self, small_3d_image):
+        with pytest.raises(ValueError, match="Unknown boundary condition"):
+            riesz_log(small_3d_image, sigma_mm=2.0, order=(1, 0, 0), boundary="bogus")
+
+    def test_boundary_changes_response(self, small_3d_image):
+        periodic = riesz_log(small_3d_image, sigma_mm=2.0, order=(1, 0, 0), boundary="periodic")
+        nearest = riesz_log(small_3d_image, sigma_mm=2.0, order=(1, 0, 0), boundary="nearest")
+        assert not np.array_equal(periodic, nearest)
+
+    def test_tuple_spacing_with_boundary(self, small_3d_image):
+        # Anisotropic (tuple) spacing exercises the per-axis pad-width branch of
+        # _riesz_log_pad_width.
+        result = riesz_log(
+            small_3d_image,
+            sigma_mm=2.0,
+            order=(1, 0, 0),
+            spacing_mm=(1.0, 1.5, 2.0),
+            boundary="nearest",
+        )
+        assert result.shape == small_3d_image.shape
 
 
 class TestRieszSimoncelli:
@@ -649,6 +974,31 @@ class TestRieszSimoncelli:
         """riesz_simoncelli should raise ValueError when all order components are 0."""
         with pytest.raises(ValueError, match="At least one order component must be > 0"):
             riesz_simoncelli(small_3d_image, level=1, order=(0, 0, 0))
+
+    def test_default_boundary_is_periodic(self, small_3d_image):
+        default = riesz_simoncelli(small_3d_image, level=1, order=(1, 0, 0))
+        explicit = riesz_simoncelli(
+            small_3d_image, level=1, order=(1, 0, 0), boundary=BoundaryCondition.PERIODIC
+        )
+        assert_array_equal(default, explicit)
+
+    def test_all_boundary_conditions(self, small_3d_image):
+        for boundary in BoundaryCondition:
+            result = riesz_simoncelli(small_3d_image, level=1, order=(1, 0, 0), boundary=boundary)
+            assert result.shape == small_3d_image.shape
+
+    def test_string_boundary_condition(self, small_3d_image):
+        result = riesz_simoncelli(small_3d_image, level=1, order=(1, 0, 0), boundary="nearest")
+        assert result.shape == small_3d_image.shape
+
+    def test_invalid_boundary_raises(self, small_3d_image):
+        with pytest.raises(ValueError, match="Unknown boundary condition"):
+            riesz_simoncelli(small_3d_image, level=1, order=(1, 0, 0), boundary="bogus")
+
+    def test_boundary_changes_response(self, small_3d_image):
+        periodic = riesz_simoncelli(small_3d_image, level=1, order=(0, 2, 0), boundary="periodic")
+        nearest = riesz_simoncelli(small_3d_image, level=1, order=(0, 2, 0), boundary="nearest")
+        assert not np.array_equal(periodic, nearest)
 
 
 class TestGetRieszOrders:
@@ -736,6 +1086,36 @@ class TestFilterSourceMask:
         assert res.shape == small_3d_image.shape
         res2 = riesz_simoncelli(small_3d_image, source_mask=source_mask_3d)
         assert res2.shape == small_3d_image.shape
+
+    def test_simoncelli_with_non_periodic_boundary(self, small_3d_image, source_mask_3d):
+        # source_mask has the *original* (unpadded) shape; combined with a
+        # non-periodic boundary this exercises the pad-filter-crop path and must
+        # not raise a shape-mismatch error.
+        res = simoncelli_wavelet(
+            small_3d_image, level=1, boundary="nearest", source_mask=source_mask_3d
+        )
+        assert res.shape == small_3d_image.shape
+
+    def test_riesz_transform_with_non_periodic_boundary(self, small_3d_image, source_mask_3d):
+        res = riesz_transform(
+            small_3d_image, order=(1, 0, 0), boundary="nearest", source_mask=source_mask_3d
+        )
+        assert res.shape == small_3d_image.shape
+
+    def test_riesz_log_with_non_periodic_boundary(self, small_3d_image, source_mask_3d):
+        # riesz_log re-masks the final, cropped response once (see its
+        # docstring), so masked-out voxels are exactly zero even though padding
+        # made the mask's shape mismatch the intermediate arrays mid-chain.
+        res = riesz_log(
+            small_3d_image, sigma_mm=1.0, boundary="nearest", source_mask=source_mask_3d
+        )
+        assert res.shape == small_3d_image.shape
+        assert np.all(res[~source_mask_3d] == 0.0)
+
+    def test_riesz_simoncelli_with_non_periodic_boundary(self, small_3d_image, source_mask_3d):
+        res = riesz_simoncelli(small_3d_image, boundary="nearest", source_mask=source_mask_3d)
+        assert res.shape == small_3d_image.shape
+        assert np.all(res[~source_mask_3d] == 0.0)
 
 
 class TestModuleImports:

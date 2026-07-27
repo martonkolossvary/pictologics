@@ -72,6 +72,7 @@ from .filters import (
     simoncelli_wavelet,
     wavelet_transform,
 )
+from .filters.base import resolve_boundary
 from .loader import Image, _validate_geometry, create_full_mask, load_image
 from .preprocessing import (
     apply_mask,
@@ -284,6 +285,17 @@ class PipelineState:
         mask_was_generated: Whether the mask was auto-generated (no mask provided).
         is_filtered: Whether a filter has been applied.
         filter_type: Type of filter applied (if any).
+        filter_boundary_requested: Boundary condition requested for the most
+            recent filter step (or the default that applied, if omitted).
+        filter_boundary_effective: Boundary condition actually honoured by the
+            most recent filter step (may be "periodic" for an FFT-based filter
+            even when a different boundary was requested but not explicitly set).
+        filter_params_requested: The most recent filter step's raw ``params``
+            dict, exactly as supplied in the step config (JSON-safe).
+        filter_params_effective: The keyword arguments actually honoured for
+            the most recent filter step after the pipeline's dispatch logic
+            (injected defaults such as ``spacing_mm``, the resolved boundary,
+            the ``variant``/``kernel`` dispatch, etc.); JSON-safe.
         source_mode: How source voxel validity is handled.
         source_mask: Computed validity mask (where real data exists).
         sentinel_detected: True if AUTO mode detected sentinel values.
@@ -303,6 +315,10 @@ class PipelineState:
     mask_was_generated: bool = False
     is_filtered: bool = False
     filter_type: Optional[str] = None
+    filter_boundary_requested: Optional[str] = None
+    filter_boundary_effective: Optional[str] = None
+    filter_params_requested: Optional[dict[str, Any]] = None
+    filter_params_effective: Optional[dict[str, Any]] = None
     # Source tracking for sentinel value handling
     source_mode: SourceMode = SourceMode.FULL_IMAGE
     source_mask: Optional[Image] = None
@@ -770,14 +786,29 @@ class RadiomicsPipeline:
                         detected_sentinel_value = detected
                         sentinel_detected = True
                         sentinel_auto_detected = True
-                        sentinel_proportion = float(np.mean(orig_img.array == detected))
+                        n_total = int(orig_img.array.size)
+                        n_sentinel = int(np.count_nonzero(orig_img.array == detected))
+                        sentinel_proportion = n_sentinel / n_total
+
+                        # Only ever print "100.0%" when literally every voxel is the
+                        # sentinel. Plain rounding turns e.g. 99.999% into "100.0%",
+                        # which wrongly implies no voxels remain for feature
+                        # extraction. Report the surviving voxel count too, so the
+                        # amount of usable data is unambiguous.
+                        percent = sentinel_proportion * 100.0
+                        percent_str = (
+                            f"{percent:.1f}%"
+                            if n_sentinel == n_total or percent < 99.95
+                            else ">99.9%"
+                        )
 
                         # Prominent warning: auto-detection is a heuristic. The user
                         # should confirm the value is a genuine fill/padding value and
                         # not real image data.
                         msg = (
                             f"Auto-detected sentinel value {detected} "
-                            f"({sentinel_proportion * 100.0:.1f}% of voxels) for config "
+                            f"({percent_str} of voxels; {n_total - n_sentinel:,} of "
+                            f"{n_total:,} voxels remain valid) for config "
                             f"'{config_name}'; these voxels will be excluded from "
                             f"resampling/filtering. Verify this is a padding value and "
                             f"not real image data, or set sentinel_value explicitly."
@@ -892,13 +923,17 @@ class RadiomicsPipeline:
                         self._execute_preprocessing_step(state, step_name, params)
 
                     # Log
-                    config_log["steps_executed"].append(
-                        {
-                            "step": step_name,
-                            "params": self._make_serializable(params),
-                            "status": "completed",
-                        }
-                    )
+                    step_log_entry: dict[str, Any] = {
+                        "step": step_name,
+                        "params": self._make_serializable(params),
+                        "status": "completed",
+                    }
+                    if step_name == "filter":
+                        step_log_entry["boundary_requested"] = state.filter_boundary_requested
+                        step_log_entry["boundary_effective"] = state.filter_boundary_effective
+                        step_log_entry["params_requested"] = state.filter_params_requested
+                        step_log_entry["params_effective"] = state.filter_params_effective
+                    config_log["steps_executed"].append(step_log_entry)
                 config_log["status"] = "completed"
                 config_log["result_feature_count"] = len(config_features)
 
@@ -1174,17 +1209,16 @@ class RadiomicsPipeline:
             if not filter_type:
                 raise ValueError("Filter step requires 'type' parameter.")
 
-            # Get boundary condition (default: mirror per IBSI 2)
+            # Get boundary condition (default: mirror per IBSI 2). `constant` and
+            # `wrap` are accepted aliases for `zero`/`periodic`; anything else
+            # unrecognised raises (never a silent fallback to mirror).
+            boundary_requested = "boundary" in params
             boundary_str = params.get("boundary", "mirror")
-            boundary_map = {
-                "mirror": BoundaryCondition.MIRROR,
-                "nearest": BoundaryCondition.NEAREST,
-                "constant": BoundaryCondition.ZERO,
-                "wrap": BoundaryCondition.PERIODIC,
-                "zero": BoundaryCondition.ZERO,
-                "periodic": BoundaryCondition.PERIODIC,
-            }
-            boundary = boundary_map.get(boundary_str, BoundaryCondition.MIRROR)
+            boundary_aliases = {"constant": "zero", "wrap": "periodic"}
+            if isinstance(boundary_str, str):
+                boundary = resolve_boundary(boundary_aliases.get(boundary_str.lower(), boundary_str))
+            else:
+                boundary = resolve_boundary(boundary_str)
 
             # Extract filter-specific params (exclude type and boundary)
             filter_params = {k: v for k, v in params.items() if k not in ("type", "boundary")}
@@ -1201,6 +1235,8 @@ class RadiomicsPipeline:
             # when a source mask is supplied, the others return a bare array. The
             # tuple is unwrapped uniformly below.
             result: npt.NDArray[np.floating[Any]] | tuple[npt.NDArray[np.floating[Any]], Any]
+            # Boundary actually honoured by this step, recorded for run-log metadata.
+            boundary_effective = boundary.name.lower()
             if filter_type == "mean":
                 filter_params["boundary"] = boundary
                 result = mean_filter(img_arr, **filter_params)
@@ -1221,11 +1257,22 @@ class RadiomicsPipeline:
                 filter_params["boundary"] = boundary
                 result = wavelet_transform(img_arr, **filter_params)
             elif filter_type == "simoncelli":
-                # Simoncelli doesn't use the boundary param (FFT is inherently periodic)
+                # FFT-based: only forward a boundary the step explicitly requested;
+                # otherwise keep simoncelli_wavelet's own PERIODIC default so that
+                # IBSI 2 Phase 1 8.a.1-3 / Phase 2 8.B (periodic) stay unaffected.
+                if boundary_requested:
+                    filter_params["boundary"] = boundary
+                else:
+                    boundary_effective = "periodic"
                 result = simoncelli_wavelet(img_arr, **filter_params)
             elif filter_type == "riesz":
-                # Riesz transform variants (also do not take a boundary param)
+                # Riesz transform variants: same explicit-only forwarding as simoncelli
+                # (IBSI 2 Phase 2 9.B).
                 variant = filter_params.pop("variant", "base")
+                if boundary_requested:
+                    filter_params["boundary"] = boundary
+                else:
+                    boundary_effective = "periodic"
                 if variant == "log":
                     filter_params.setdefault("spacing_mm", state.image.spacing)
                     result = riesz_log(img_arr, **filter_params)
@@ -1243,6 +1290,23 @@ class RadiomicsPipeline:
                 result[0] if isinstance(result, tuple) else result
             )
 
+            # Snapshot of the parameters actually honoured by this step, for IBSI 2
+            # provenance (params_requested / params_effective in the run log).
+            # `filter_params` mirrors the kwargs the branch above passed via
+            # **filter_params; `kernel` (laws) and `variant` (riesz) are added back
+            # even though they were popped for positional use / dispatch selection
+            # rather than forwarded as keyword arguments, and `boundary` is
+            # normalised to the effective value (covering the FFT-based filters'
+            # own "periodic" default when no boundary was explicitly requested).
+            effective_params = dict(filter_params)
+            effective_params["boundary"] = boundary_effective
+            if filter_type == "laws":
+                effective_params["kernel"] = kernel
+            elif filter_type == "riesz":
+                effective_params["variant"] = variant
+            state.filter_params_requested = self._sanitize_filter_params(params)
+            state.filter_params_effective = self._sanitize_filter_params(effective_params)
+
             # Update state with filtered image
             state.image = Image(
                 array=filtered_array,
@@ -1254,6 +1318,8 @@ class RadiomicsPipeline:
             state.raw_image = state.image  # Update raw_image post-filter
             state.is_filtered = True
             state.filter_type = filter_type
+            state.filter_boundary_requested = boundary.name.lower()
+            state.filter_boundary_effective = boundary_effective
 
         else:
             raise ValueError(f"Unknown preprocessing step: {step_name}")
@@ -2280,6 +2346,30 @@ class RadiomicsPipeline:
         elif isinstance(obj, Enum):
             return obj.value
         return obj
+
+    def _sanitize_filter_param_value(self, value: Any) -> Any:
+        """Make a filter-step parameter value JSON-safe for provenance logging.
+
+        Two cases are handled before falling back to ``_make_serializable``: a raw
+        array (e.g. the pipeline-injected ``source_mask``) is never logged in full,
+        only as a compact shape/voxel-count descriptor; and ``BoundaryCondition`` is
+        recorded by its lowercase name (matching ``filter_boundary_effective``), not
+        scipy's numeric mode string (``BoundaryCondition.value``).
+        """
+        if isinstance(value, BoundaryCondition):
+            return value.name.lower()
+        elif isinstance(value, np.ndarray):
+            return {
+                "shape": list(value.shape),
+                "voxel_count": int(value.size),
+                "true_count": int(np.count_nonzero(value)),
+            }
+        return self._make_serializable(value)
+
+    def _sanitize_filter_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        """JSON-safe copy of a filter step's parameter dict, for the run log's
+        ``params_requested`` / ``params_effective`` provenance fields."""
+        return {k: self._sanitize_filter_param_value(v) for k, v in params.items()}
 
     def to_json(
         self,
