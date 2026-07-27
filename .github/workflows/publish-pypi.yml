@@ -55,12 +55,9 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         # No password/token needed - uses Trusted Publisher (OIDC)
 
-      - name: Build documentation
-        run: |
-          poetry run mkdocs build
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./site
+      # Documentation is NOT deployed here. GitHub Pages is served from the
+      # `github-pages` environment, which the CI workflow publishes via
+      # actions/upload-pages-artifact + actions/deploy-pages on every push to
+      # main. Pushing a built site to a `gh-pages` branch from here would write
+      # to a branch that is never served, and is blocked by the repository
+      # ruleset requiring code-scanning results on that branch.
