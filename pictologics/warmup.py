@@ -114,18 +114,21 @@ def _warmup_texture() -> None:
             directions_13=texture.DIRECTIONS_13,
             ngldm_alpha=0,
             n_threads=n_threads,
+            merge_directions=True,
         )
 
-    # GLDZM distance-transform kernel: mask_bool is always a fresh, C-contiguous bool
-    # array (the `> 0` comparison that produces it always allocates a C-contiguous
-    # output, regardless of the input mask's dtype or memory layout).
+    # GLDZM distance-transform kernel: its input is always a fresh bool array from a
+    # comparison (`mask != 0` in the matrix path, `mask > 0` in the standalone GLDZM
+    # path). A comparison keeps the memory order of its input: C-ordered masks give a
+    # C-contiguous array.
     texture._chamfer_distance_taxicab_numba(mask.astype(np.bool_))
 
     # Zone features warmup (GLSZM/GLDZM). Numba's lazy dispatch specializes on the
     # exact dtype AND layout of every array argument, so mirror the production calls
     # exactly: the discretised image (int32) is a strided bbox-cropped view in the
-    # common case but C-contiguous for full-volume ROIs — compile both. The mask is
-    # always a C-contiguous uint8 copy and the distance map is always an int32
+    # common case but C-contiguous for full-volume ROIs — compile both. For C-ordered
+    # masks the mask is a C-contiguous uint8 array (a view of the bool ROI in the matrix
+    # path, a copy in the standalone paths) and the distance map is always an int32
     # strided view (real GLDZM maps and the GLSZM-only dummy alike). Grey levels are
     # 1-based in [1, n_bins]. The kernels pad-and-copy their inputs; nothing is
     # modified in place.
@@ -152,6 +155,7 @@ def _warmup_texture() -> None:
             stack,
             calc_glszm=True,
             calc_gldzm=True,
+            dense_glszm=False,  # the pipeline asks for GLSZM cells
         )
         texture._calculate_zone_features_numba(
             zone_data,
@@ -165,6 +169,7 @@ def _warmup_texture() -> None:
             n_chunks=2,  # >1 so the cross-chunk merge path is compiled too
             calc_glszm=True,
             calc_gldzm=True,
+            dense_glszm=False,
         )
 
 

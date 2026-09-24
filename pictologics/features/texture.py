@@ -336,6 +336,7 @@ def _calculate_local_features_numba(
     directions_13: npt.NDArray[np.floating[Any]],
     ngldm_alpha: int,
     n_threads: int,
+    merge_directions: bool = False,
 ) -> tuple[
     npt.NDArray[np.floating[Any]],
     npt.NDArray[np.floating[Any]],
@@ -347,9 +348,13 @@ def _calculate_local_features_numba(
     Calculate GLCM, GLRLM, NGTDM, and NGLDM in a single pass.
     Optimized with parallel execution, thread-local storage, and interior loop optimization.
 
+    With `merge_directions`, GLCM and GLRLM keep one table per thread (the sum over the 13
+    directions) instead of 13. The features use only that sum, so they stay the same, and
+    the thread-local tables need 13x less memory.
+
     Returns:
-        glcm: (n_dirs, n_bins, n_bins)
-        glrlm: (n_dirs, n_bins, max_run_length)
+        glcm: (n_dirs, n_bins, n_bins), n_dirs = 1 with merge_directions
+        glrlm: (n_dirs, n_bins, max_run_length), n_dirs = 1 with merge_directions
         ngtdm_s: (n_bins,)
         ngtdm_n: (n_bins,)
         ngldm: (n_bins, n_dependence)
@@ -357,15 +362,17 @@ def _calculate_local_features_numba(
     depth, height, width = data_int.shape
     n_dirs = 13
     max_dim = max(depth, height, width)
+    n_tables = 1 if merge_directions else n_dirs
+    dir_step = 0 if merge_directions else 1  # table index = direction * dir_step
 
     # Initialize thread-local result arrays conditionally.
     if calc_glcm:
-        glcm_local = np.zeros((n_threads, n_dirs, n_bins, n_bins), dtype=np.uint32)
+        glcm_local = np.zeros((n_threads, n_tables, n_bins, n_bins), dtype=np.uint32)
     else:
         glcm_local = np.zeros((1, 1, 1, 1), dtype=np.uint32)
 
     if calc_glrlm:
-        glrlm_local = np.zeros((n_threads, n_dirs, n_bins, max_dim + 1), dtype=np.uint32)
+        glrlm_local = np.zeros((n_threads, n_tables, n_bins, max_dim + 1), dtype=np.uint32)
     else:
         glrlm_local = np.zeros((1, 1, 1, 1), dtype=np.uint32)
 
@@ -446,6 +453,7 @@ def _calculate_local_features_numba(
                         max_dim,
                         False,
                         ngldm_alpha,
+                        dir_step,
                     )
 
                 # 2. Interior (Safe)
@@ -475,6 +483,7 @@ def _calculate_local_features_numba(
                         max_dim,
                         True,
                         ngldm_alpha,
+                        dir_step,
                     )
 
                 # 3. Right Boundary
@@ -504,6 +513,7 @@ def _calculate_local_features_numba(
                         max_dim,
                         False,
                         ngldm_alpha,
+                        dir_step,
                     )
             else:
                 # Full Boundary Row (Z or Y is boundary, or margin is 0)
@@ -533,6 +543,7 @@ def _calculate_local_features_numba(
                         max_dim,
                         False,
                         ngldm_alpha,
+                        dir_step,
                     )
 
     # Aggregate results from all threads.
@@ -588,6 +599,7 @@ def _process_voxel(
     max_dim: int,
     is_safe: bool,
     ngldm_alpha: int = 0,
+    dir_step: int = 1,
 ) -> None:
     """Process single voxel for GLCM/GLRLM/NGTDM/NGLDM; inlined for performance."""
     if mask[z, y, x] == 0:
@@ -664,13 +676,13 @@ def _process_voxel(
                     if mask[nz, ny, nx]:
                         j_val = data_int[nz, ny, nx]
                         if 0 <= j_val < n_bins:
-                            glcm_local[tid, d, i_val, j_val] += 1
+                            glcm_local[tid, d * dir_step, i_val, j_val] += 1
                 else:
                     if 0 <= nz < depth and 0 <= ny < height and 0 <= nx < width:
                         if mask[nz, ny, nx]:
                             j_val = data_int[nz, ny, nx]
                             if 0 <= j_val < n_bins:
-                                glcm_local[tid, d, i_val, j_val] += 1
+                                glcm_local[tid, d * dir_step, i_val, j_val] += 1
 
             # GLRLM
             if calc_glrlm:
@@ -718,7 +730,7 @@ def _process_voxel(
                             cx += dx
 
                     if length <= max_dim:
-                        glrlm_local[tid, d, i_val, length] += 1
+                        glrlm_local[tid, d * dir_step, i_val, length] += 1
 
 
 def calculate_all_texture_matrices(
@@ -790,26 +802,73 @@ def calculate_all_texture_matrices(
         # (13, 32, 32)
         ```
     """
-    # Crop to ROI bounding box (union with distance_mask when provided) to reduce memory traffic.
-    data_c, mask_c, distmask_c = _maybe_crop_to_bbox(data, mask, distance_mask)
+    return _texture_matrices(
+        data,
+        mask,
+        n_bins,
+        distance_mask,
+        ngldm_alpha,
+        calc_glcm,
+        calc_glrlm,
+        calc_ngtdm,
+        calc_ngldm,
+        calc_glszm,
+        calc_gldzm,
+        compact=False,
+    )
 
-    # Fast exit for empty ROI. Checked on the cropped mask so the common non-empty case
-    # avoids a second full-volume scan; mask_c can still be empty when only distance_mask
-    # has nonzero voxels.
-    if not bool(np.any(mask_c != 0)):
+
+def _texture_matrices(
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
+    n_bins: int,
+    distance_mask: Optional[npt.NDArray[np.floating[Any]]] = None,
+    ngldm_alpha: int = 0,
+    calc_glcm: bool = True,
+    calc_glrlm: bool = True,
+    calc_ngtdm: bool = True,
+    calc_ngldm: bool = True,
+    calc_glszm: bool = True,
+    calc_gldzm: bool = True,
+    compact: bool = False,
+) -> dict[str, Any]:
+    """Body of `calculate_all_texture_matrices`, with a private `compact` mode.
+
+    `compact=True` returns smaller matrices that give the same features: 'glcm' and
+    'glrlm' hold one table (the sum over the 13 directions) instead of 13, and
+    'glszm_cells' (in place of 'glszm') holds only the non-zero GLSZM cells, as the
+    (3, n_cells) array of `_glszm_cells`. It also returns 'roi', the bool ROI mask, so the
+    callers count ROI voxels without one more pass over the mask. The pipeline and
+    `calculate_all_texture_features` use it. They crop their arrays to the ROI box before
+    the call, so the compact mode does not crop again.
+    """
+    # Crop to ROI bounding box (union with distance_mask when provided) to reduce memory traffic.
+    if compact:
+        data_c, mask_c, distmask_c = data, mask, distance_mask
+    else:
+        data_c, mask_c, distmask_c = _maybe_crop_to_bbox(data, mask, distance_mask)
+
+    # One pass over the mask gives the ROI. Label values are membership markers, not
+    # weights. The kernels read the ROI as uint8 without a copy.
+    roi = mask_c != 0
+    extra = {"roi": roi} if compact else {}
+
+    # Fast exit for empty ROI. Checked on the cropped mask; mask_c can still be empty
+    # when only distance_mask has nonzero voxels.
+    glszm_key = "glszm_cells" if compact else "glszm"
+    if not roi.any():
         return {
             "glcm": np.zeros((13, n_bins, n_bins), dtype=np.uint64),
             "glrlm": np.zeros((13, n_bins, 1), dtype=np.uint64),
             "ngtdm_s": np.zeros((n_bins,), dtype=np.float64),
             "ngtdm_n": np.zeros((n_bins,), dtype=np.float64),
             "ngldm": np.zeros((n_bins, 27), dtype=np.uint64),
-            "glszm": np.zeros((n_bins, 1), dtype=np.uint32),
+            glszm_key: np.zeros((3, 0) if compact else (n_bins, 1), dtype=np.uint32),
             "gldzm": np.zeros((n_bins, 1), dtype=np.uint32),
+            **extra,
         }
 
-    # Use a compact binary mask representation for kernels. Label values are
-    # membership markers, not weights.
-    mask_u8 = (mask_c != 0).astype(np.uint8)
+    mask_u8 = roi.view(np.uint8)
     # 1. Local Features (GLCM, GLRLM, NGTDM, NGLDM)
     if calc_glcm or calc_glrlm or calc_ngtdm or calc_ngldm:
         # Pre-cast data to smallest possible int type (0-based)
@@ -839,6 +898,7 @@ def calculate_all_texture_matrices(
             directions_13=DIRECTIONS_13,
             ngldm_alpha=ngldm_alpha,
             n_threads=n_threads,
+            merge_directions=compact,
         )
     else:
         glcm = np.zeros((13, n_bins, n_bins), dtype=np.uint64)
@@ -852,11 +912,10 @@ def calculate_all_texture_matrices(
         if calc_gldzm:
             # Pre-calculate distance map for GLDZM
             # Use distance_mask if provided, else mask
-            d_mask = (distmask_c != 0).astype(np.uint8) if distmask_c is not None else mask_u8
+            d_roi = distmask_c != 0 if distmask_c is not None else roi
 
             # Distance-to-border map, with the image border treated as an edge.
-            mask_bool = d_mask > 0
-            dist_map = _gldzm_distance_map(mask_bool)
+            dist_map = _gldzm_distance_map(d_roi)
         else:
             # The zone kernel needs a distance array either way; match the dtype AND
             # layout of the real distance map (an int32 strided view of a padded
@@ -866,16 +925,11 @@ def calculate_all_texture_matrices(
                 1:-1, 1:-1, 1:-1
             ]
 
-        glszm, gldzm = calculate_zone_features(
-            data_c,
-            mask_u8,
-            dist_map,
-            n_bins,
-            calc_glszm=calc_glszm,
-            calc_gldzm=calc_gldzm,
+        glszm, gldzm = _zone_features(
+            data_c, mask_u8, dist_map, n_bins, calc_glszm, calc_gldzm, dense_glszm=not compact
         )
     else:
-        glszm = np.zeros((n_bins, 1), dtype=np.uint32)
+        glszm = np.zeros((3, 0) if compact else (n_bins, 1), dtype=np.uint32)
         gldzm = np.zeros((n_bins, 1), dtype=np.uint32)
 
     return {
@@ -884,8 +938,9 @@ def calculate_all_texture_matrices(
         "ngtdm_s": ngtdm_s,
         "ngtdm_n": ngtdm_n,
         "ngldm": ngldm,
-        "glszm": glszm,
+        glszm_key: glszm,
         "gldzm": gldzm,
+        **extra,
     }
 
 
@@ -994,6 +1049,7 @@ def calculate_glcm_features(
             directions_13=DIRECTIONS_13,
             ngldm_alpha=0,
             n_threads=n_threads,
+            merge_directions=True,  # features use only the direction sum
         )
     else:
         glcm = glcm_matrix
@@ -1097,9 +1153,7 @@ def calculate_glcm_features(
     features["inverse_difference_moment_WF0Z"] = np.sum(P / (1 + sq_diff))
 
     # Normalised Inverse Difference Moment - 1QCO
-    features["normalised_inverse_difference_moment_1QCO"] = np.sum(
-        P / (1 + sq_diff / (Ng_eff**2))
-    )
+    features["normalised_inverse_difference_moment_1QCO"] = np.sum(P / (1 + sq_diff / (Ng_eff**2)))
 
     # Inverse Variance - E8JP
     mask_neq = I != J
@@ -1206,6 +1260,7 @@ def calculate_glrlm_features(
             directions_13=DIRECTIONS_13,
             ngldm_alpha=0,
             n_threads=n_threads,
+            merge_directions=True,  # features use only the direction sum
         )
     else:
         glrlm = glrlm_matrix
@@ -1291,6 +1346,77 @@ def calculate_glrlm_features(
 
 # --- Combined Zone Features Kernel ---
 
+# The GLSZM cell builder counts zones in a small dense table of about this many cells
+# (grey levels x zone sizes). The few larger zones are sorted instead.
+_GLSZM_DENSE_CELLS = 1 << 18
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _glszm_cells(
+    zone_gl: npt.NDArray[np.int32],
+    zone_size: npt.NDArray[np.int32],
+    n_bins: int,
+    dense_cells: int,
+) -> npt.NDArray[np.uint32]:
+    """Non-zero GLSZM cells from the grey level (1-based) and size of every zone.
+
+    Returns a (3, n_cells) uint32 array: grey level index, size index (both 0-based) and
+    count. The cells come in row-major order: the same cells, in the same order, that
+    np.nonzero gives on the dense (n_bins, largest zone) GLSZM. That dense matrix is
+    mostly zeros (one large zone makes it very wide), so this function does not make it.
+    """
+    n = zone_gl.shape[0]
+    max_sz = 0
+    for t in range(n):
+        if zone_size[t] > max_sz:
+            max_sz = zone_size[t]
+    width = min(max_sz, max(1, dense_cells // n_bins))
+    dense = np.zeros((n_bins, width), dtype=np.int64)
+    n_large = 0
+    for t in range(n):
+        if zone_size[t] <= width:
+            dense[zone_gl[t] - 1, zone_size[t] - 1] += 1
+        else:
+            n_large += 1
+    # Zones wider than the table: sort a (grey level, size) key, so equal cells touch.
+    stride = np.int64(max_sz) + 1
+    large = np.empty(n_large, dtype=np.int64)
+    k = 0
+    for t in range(n):
+        if zone_size[t] > width:
+            large[k] = (np.int64(zone_gl[t]) - 1) * stride + (zone_size[t] - 1)
+            k += 1
+    large.sort()
+    n_cells = 0
+    for g in range(n_bins):
+        for s in range(width):
+            if dense[g, s] > 0:
+                n_cells += 1
+    for k in range(n_large):
+        if k == 0 or large[k] != large[k - 1]:
+            n_cells += 1
+    cells = np.empty((3, n_cells), dtype=np.uint32)
+    c = 0
+    p = 0
+    for g in range(n_bins):
+        for s in range(width):
+            if dense[g, s] > 0:
+                cells[0, c] = g
+                cells[1, c] = s
+                cells[2, c] = dense[g, s]
+                c += 1
+        while p < n_large and large[p] // stride == g:  # sizes above the table width
+            key = large[p]
+            run = 0
+            while p < n_large and large[p] == key:
+                run += 1
+                p += 1
+            cells[0, c] = g
+            cells[1, c] = key % stride
+            cells[2, c] = run
+            c += 1
+    return cells
+
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _calculate_zone_features_serial_numba(
@@ -1304,6 +1430,7 @@ def _calculate_zone_features_serial_numba(
     stack: npt.NDArray[np.floating[Any]],
     calc_glszm: bool = True,
     calc_gldzm: bool = True,
+    dense_glszm: bool = True,
 ) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
     """
     Serial single-pass GLSZM/GLDZM kernel for small volumes.
@@ -1411,9 +1538,15 @@ def _calculate_zone_features_serial_numba(
 
     # 5. Build Output Matrices
 
-    # Build GLSZM
+    # Build GLSZM: the dense (n_bins, largest zone) matrix, or only its non-zero cells.
     glszm = np.zeros((n_bins, 1), dtype=np.uint32)
-    if calc_glszm and zone_count > 0:
+    if not dense_glszm:
+        glszm = np.zeros((3, 0), dtype=np.uint32)
+        if calc_glszm:
+            glszm = _glszm_cells(
+                res_gl[:zone_count], res_size[:zone_count], n_bins, _GLSZM_DENSE_CELLS
+            )
+    elif calc_glszm and zone_count > 0:
         max_sz = 0
         for i in range(zone_count):
             s = res_size[i]
@@ -1474,6 +1607,7 @@ def _calculate_zone_features_numba(
     n_chunks: int,
     calc_glszm: bool = True,
     calc_gldzm: bool = True,
+    dense_glszm: bool = True,
 ) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
     """
     Calculate GLSZM and GLDZM with a chunk-parallel connected-component labelling.
@@ -1504,6 +1638,8 @@ def _calculate_zone_features_numba(
         n_chunks: Number of parallel z-chunks (clamped to [1, depth]).
         calc_glszm: Whether to calculate GLSZM.
         calc_gldzm: Whether to calculate GLDZM.
+        dense_glszm: If False, the first output holds only the non-zero GLSZM cells, as the
+            (3, n_cells) array of `_glszm_cells`, instead of the dense matrix.
     """
     depth, height, width = data.shape
 
@@ -1687,9 +1823,28 @@ def _calculate_zone_features_numba(
 
     # 6. Build Output Matrices (over root zones only)
 
-    # Build GLSZM
+    # Build GLSZM: the dense (n_bins, largest zone) matrix, or only its non-zero cells.
     glszm = np.zeros((n_bins, 1), dtype=np.uint32)
-    if calc_glszm and n_zones_total > 0:
+    if not dense_glszm:
+        glszm = np.zeros((3, 0), dtype=np.uint32)
+        if calc_glszm:
+            n_roots = 0
+            for c in range(n_chunks):
+                for t in range(zone_counts[c]):
+                    if parent[roi_base[c] + t] == roi_base[c] + t:
+                        n_roots += 1
+            root_gl = np.empty(n_roots, dtype=np.int32)
+            root_size = np.empty(n_roots, dtype=np.int32)
+            r = 0
+            for c in range(n_chunks):
+                for t in range(zone_counts[c]):
+                    zid = roi_base[c] + t
+                    if parent[zid] == zid:
+                        root_gl[r] = res_gl[zid]
+                        root_size[r] = res_size[zid]
+                        r += 1
+            glszm = _glszm_cells(root_gl, root_size, n_bins, _GLSZM_DENSE_CELLS)
+    elif calc_glszm and n_zones_total > 0:
         max_sz = 0
         for c in range(n_chunks):
             for t in range(zone_counts[c]):
@@ -1771,6 +1926,20 @@ def calculate_zone_features(
         # 13
         ```
     """
+    return _zone_features(data, mask, dist_map, n_bins, calc_glszm, calc_gldzm, dense_glszm=True)
+
+
+def _zone_features(
+    data: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.floating[Any]],
+    dist_map: npt.NDArray[np.floating[Any]],
+    n_bins: int,
+    calc_glszm: bool,
+    calc_gldzm: bool,
+    dense_glszm: bool,
+) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
+    """Body of `calculate_zone_features`. With `dense_glszm=False`, the first output holds
+    only the non-zero GLSZM cells (the (3, n_cells) array of `_glszm_cells`)."""
     # For zone features, the worst-case number of zones is bounded by ROI voxel count.
     # Sizing buffers to full image volume is extremely costly for sparse ROIs.
     max_zones = int(np.count_nonzero(mask))
@@ -1802,6 +1971,7 @@ def calculate_zone_features(
                 stack,
                 calc_glszm,
                 calc_gldzm,
+                dense_glszm,
             ),
         )
 
@@ -1819,6 +1989,7 @@ def calculate_zone_features(
             n_chunks,
             calc_glszm,
             calc_gldzm,
+            dense_glszm,
         ),
     )
 
@@ -1864,28 +2035,40 @@ def calculate_glszm_features(
             1:-1, 1:-1, 1:-1
         ]
 
-        glszm, _ = calculate_zone_features(
-            data,
-            mask_u8,
-            dummy_dist,
-            n_bins,
-            calc_glszm=True,
-            calc_gldzm=False,  # type: ignore[arg-type]
-        )
-    else:
-        glszm = glszm_matrix
+        # The kernel returns only the non-zero cells: no dense (n_bins, largest zone) matrix.
+        cells, _ = _zone_features(data, mask_u8, dummy_dist, n_bins, True, False, False)
+        return _glszm_features_from_cells(cells, mask)
 
-    # The GLSZM is extremely sparse in the zone-size dimension (a single large zone
-    # can push n_s into the tens of thousands while only a few hundred cells are
-    # non-zero). Operating on the non-zero cells avoids materialising the dense
-    # (n_g, n_s) index grids and is arithmetically identical (every term carries a
-    # factor of P, so zero cells contribute exactly zero).
-    n_g, n_s = glszm.shape
-    gl_idx, sz_idx = np.nonzero(glszm)
+    gl_idx, sz_idx = np.nonzero(glszm_matrix)
+    return _glszm_features(gl_idx, sz_idx, glszm_matrix[gl_idx, sz_idx].astype(np.float64), mask)
+
+
+def _glszm_features_from_cells(
+    cells: npt.NDArray[Any], mask: npt.NDArray[np.floating[Any]]
+) -> dict[str, float]:
+    """GLSZM features from the (3, n_cells) cell array of `_glszm_cells`."""
+    return _glszm_features(
+        cells[0].astype(np.int64), cells[1].astype(np.int64), cells[2].astype(np.float64), mask
+    )
+
+
+def _glszm_features(
+    gl_idx: npt.NDArray[np.int64],
+    sz_idx: npt.NDArray[np.int64],
+    c: npt.NDArray[np.float64],
+    mask: npt.NDArray[np.floating[Any]],
+) -> dict[str, float]:
+    """GLSZM features from the non-zero cells: 0-based grey level and size, and count.
+
+    The GLSZM is extremely sparse in the zone-size dimension (a single large zone can push
+    the size axis into the tens of thousands while only a few hundred cells are non-zero).
+    Working on the non-zero cells is arithmetically identical (every term carries a factor
+    of P, so zero cells contribute exactly zero). The cells must come in row-major order,
+    as np.nonzero gives them.
+    """
     if gl_idx.size == 0:
         return {}
 
-    c = glszm[gl_idx, sz_idx].astype(np.float64)
     N_zones = c.sum()
 
     I = (gl_idx + 1).astype(np.float64)  # noqa: E741
@@ -2144,6 +2327,7 @@ def calculate_ngtdm_features(
             directions_13=DIRECTIONS_13,
             ngldm_alpha=0,
             n_threads=n_threads,
+            merge_directions=True,  # features use only the direction sum
         )
     else:
         s, n = ngtdm_matrices
@@ -2292,6 +2476,7 @@ def calculate_ngldm_features(
             directions_13=DIRECTIONS_13,
             ngldm_alpha=ngldm_alpha,
             n_threads=n_threads,
+            merge_directions=True,  # features use only the direction sum
         )
     else:
         ngldm = ngldm_matrix
@@ -2420,14 +2605,18 @@ def calculate_all_texture_features(
     # Feature values are unchanged: cropping only removes zero-mask voxels.
     disc_c, mask_c, distmask_c = _maybe_crop_to_bbox(disc_array, mask_array, distance_mask_array)
 
-    # Calculate all matrices once
-    texture_matrices = calculate_all_texture_matrices(
+    # Calculate all matrices once (compact: same features, smaller matrices)
+    texture_matrices = _texture_matrices(
         disc_c,
         mask_c,
         n_bins,
         distance_mask=distmask_c,
         ngldm_alpha=ngldm_alpha,
+        compact=True,
     )
+    # The bool ROI gives the same ROI voxel counts as mask_c, from a fast count. GLCM
+    # keeps mask_c: its grey-level range uses `mask > 0`.
+    roi = texture_matrices["roi"]
 
     # GLCM
     results.update(
@@ -2436,19 +2625,17 @@ def calculate_all_texture_features(
 
     # GLRLM
     results.update(
-        calculate_glrlm_features(disc_c, mask_c, n_bins, glrlm_matrix=texture_matrices["glrlm"])
+        calculate_glrlm_features(disc_c, roi, n_bins, glrlm_matrix=texture_matrices["glrlm"])
     )
 
     # GLSZM
-    results.update(
-        calculate_glszm_features(disc_c, mask_c, n_bins, glszm_matrix=texture_matrices["glszm"])
-    )
+    results.update(_glszm_features_from_cells(texture_matrices["glszm_cells"], roi))
 
     # GLDZM
     results.update(
         calculate_gldzm_features(
             disc_c,
-            mask_c,
+            roi,
             n_bins,
             gldzm_matrix=texture_matrices["gldzm"],
             distance_mask=(distmask_c if distmask_c is not None else mask_c),
@@ -2466,7 +2653,7 @@ def calculate_all_texture_features(
     )
     # NGLDM
     results.update(
-        calculate_ngldm_features(disc_c, mask_c, n_bins, ngldm_matrix=texture_matrices["ngldm"])
+        calculate_ngldm_features(disc_c, roi, n_bins, ngldm_matrix=texture_matrices["ngldm"])
     )
 
     return results

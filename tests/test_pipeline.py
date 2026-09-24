@@ -904,7 +904,7 @@ def test_extract_ivh_full_params(
 
 
 @patch("pictologics.pipeline.calculate_glcm_features")
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline._texture_matrices")
 def test_extract_texture_error_no_discretise(
     mock_matrices: MagicMock,
     mock_glcm: MagicMock,
@@ -925,7 +925,7 @@ def test_extract_texture_error_no_discretise(
 
 
 @patch("pictologics.pipeline.discretise_image")
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline._texture_matrices")
 @patch("pictologics.pipeline.calculate_glcm_features")
 # ... mock others if needed ...
 def test_extract_texture_success(
@@ -941,6 +941,8 @@ def test_extract_texture_success(
         "glcm": 1,
         "glrlm": 1,
         "glszm": 1,
+        "glszm_cells": 1,
+        "roi": 1,
         "gldzm": 1,
         "ngtdm_s": 1,
         "ngtdm_n": 1,
@@ -962,7 +964,7 @@ def test_extract_texture_success(
     # I'll rely on patching calculation functions to prevent errors.
     with (
         patch("pictologics.pipeline.calculate_glrlm_features") as mr,
-        patch("pictologics.pipeline.calculate_glszm_features") as ms,
+        patch("pictologics.pipeline._glszm_features_from_cells") as ms,
         patch("pictologics.pipeline.calculate_gldzm_features") as md,
         patch("pictologics.pipeline.calculate_ngtdm_features") as mt,
         patch("pictologics.pipeline.calculate_ngldm_features") as mn,
@@ -1324,10 +1326,10 @@ def test_params_explicit_none_all(
     # Test ivh and texture matrix params explicit None
     with (
         patch("pictologics.pipeline.calculate_ivh_features") as mock_ivh,
-        patch("pictologics.pipeline.calculate_all_texture_matrices") as mock_tex,
+        patch("pictologics.pipeline._texture_matrices") as mock_tex,
         patch("pictologics.pipeline.calculate_glcm_features"),
         patch("pictologics.pipeline.calculate_glrlm_features"),
-        patch("pictologics.pipeline.calculate_glszm_features"),
+        patch("pictologics.pipeline._glszm_features_from_cells"),
         patch("pictologics.pipeline.calculate_gldzm_features"),
         patch("pictologics.pipeline.calculate_ngtdm_features"),
         patch("pictologics.pipeline.calculate_ngldm_features"),
@@ -1338,6 +1340,8 @@ def test_params_explicit_none_all(
             "glcm": 1,
             "glrlm": 1,
             "glszm": 1,
+            "glszm_cells": 1,
+            "roi": 1,
             "gldzm": 1,
             "ngtdm_s": 1,
             "ngtdm_n": 1,
@@ -1420,10 +1424,10 @@ def test_step_discretise_fbs_success(
     )
 
     with (
-        patch("pictologics.pipeline.calculate_all_texture_matrices") as mock_tex,
+        patch("pictologics.pipeline._texture_matrices") as mock_tex,
         patch("pictologics.pipeline.calculate_glcm_features", return_value={}),
         patch("pictologics.pipeline.calculate_glrlm_features", return_value={}),
-        patch("pictologics.pipeline.calculate_glszm_features", return_value={}),
+        patch("pictologics.pipeline._glszm_features_from_cells", return_value={}),
         patch("pictologics.pipeline.calculate_gldzm_features", return_value={}),
         patch("pictologics.pipeline.calculate_ngtdm_features", return_value={}),
         patch("pictologics.pipeline.calculate_ngldm_features", return_value={}),
@@ -1432,6 +1436,8 @@ def test_step_discretise_fbs_success(
             "glcm": 1,
             "glrlm": 1,
             "glszm": 1,
+            "glszm_cells": 1,
+            "roi": 1,
             "gldzm": 1,
             "ngtdm_s": 1,
             "ngtdm_n": 1,
@@ -1495,12 +1501,12 @@ def test_texture_matrix_params_explicit(
     )
 
     with (
-        patch("pictologics.pipeline.calculate_all_texture_matrices") as mock_tex,
+        patch("pictologics.pipeline._texture_matrices") as mock_tex,
         patch("pictologics.pipeline.discretise_image", return_value=mock_image),
         patch("pictologics.pipeline.apply_mask", return_value=[1]),
         patch("pictologics.pipeline.calculate_glcm_features", return_value={}),
         patch("pictologics.pipeline.calculate_glrlm_features", return_value={}),
-        patch("pictologics.pipeline.calculate_glszm_features", return_value={}),
+        patch("pictologics.pipeline._glszm_features_from_cells", return_value={}),
         patch("pictologics.pipeline.calculate_gldzm_features", return_value={}),
         patch("pictologics.pipeline.calculate_ngtdm_features", return_value={}),
         patch("pictologics.pipeline.calculate_ngldm_features", return_value={}),
@@ -1509,6 +1515,8 @@ def test_texture_matrix_params_explicit(
             "glcm": 1,
             "glrlm": 1,
             "glszm": 1,
+            "glszm_cells": 1,
+            "roi": 1,
             "gldzm": 1,
             "ngtdm_s": 1,
             "ngtdm_n": 1,
@@ -2219,9 +2227,7 @@ def test_step_filter_params_provenance_full_log_json_roundtrip(
         patch("pictologics.pipeline.riesz_log", return_value=mock_image.array),
         patch("pictologics.pipeline.laws_filter", return_value=mock_image.array),
     ):
-        pipeline.run(
-            mock_image, mock_mask, config_names=["prov_log", "prov_riesz", "prov_laws"]
-        )
+        pipeline.run(mock_image, mock_mask, config_names=["prov_log", "prov_riesz", "prov_laws"])
 
     serialized = json.dumps(pipeline._log)
     assert serialized  # no exception; every entry is JSON-safe
@@ -2341,7 +2347,7 @@ def test_last_deduplication_plan_property(pipeline: RadiomicsPipeline) -> None:
 
 
 @patch("pictologics.pipeline.discretise_image")
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline._texture_matrices")
 @patch("pictologics.pipeline.calculate_glrlm_features")
 def test_extract_single_family_texture_glrlm(
     mock_glrlm: MagicMock,
@@ -2358,6 +2364,8 @@ def test_extract_single_family_texture_glrlm(
         "glcm": np.zeros((32, 32, 13)),
         "glrlm": np.zeros((32, 10, 13)),
         "glszm": np.zeros((32, 10)),
+        "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
+        "roi": np.zeros((1, 1, 1), dtype=bool),
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -2387,8 +2395,8 @@ def test_extract_single_family_texture_glrlm(
 
 
 @patch("pictologics.pipeline.discretise_image")
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
-@patch("pictologics.pipeline.calculate_glszm_features")
+@patch("pictologics.pipeline._texture_matrices")
+@patch("pictologics.pipeline._glszm_features_from_cells")
 def test_extract_single_family_texture_glszm(
     mock_glszm: MagicMock,
     mock_matrices: MagicMock,
@@ -2403,6 +2411,8 @@ def test_extract_single_family_texture_glszm(
         "glcm": np.zeros((32, 32, 13)),
         "glrlm": np.zeros((32, 10, 13)),
         "glszm": np.zeros((32, 10)),
+        "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
+        "roi": np.zeros((1, 1, 1), dtype=bool),
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -2431,7 +2441,7 @@ def test_extract_single_family_texture_glszm(
 
 
 @patch("pictologics.pipeline.discretise_image")
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline._texture_matrices")
 @patch("pictologics.pipeline.calculate_gldzm_features")
 def test_extract_single_family_texture_gldzm(
     mock_gldzm: MagicMock,
@@ -2447,6 +2457,8 @@ def test_extract_single_family_texture_gldzm(
         "glcm": np.zeros((32, 32, 13)),
         "glrlm": np.zeros((32, 10, 13)),
         "glszm": np.zeros((32, 10)),
+        "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
+        "roi": np.zeros((1, 1, 1), dtype=bool),
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -2475,7 +2487,7 @@ def test_extract_single_family_texture_gldzm(
 
 
 @patch("pictologics.pipeline.discretise_image")
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline._texture_matrices")
 @patch("pictologics.pipeline.calculate_ngtdm_features")
 def test_extract_single_family_texture_ngtdm(
     mock_ngtdm: MagicMock,
@@ -2491,6 +2503,8 @@ def test_extract_single_family_texture_ngtdm(
         "glcm": np.zeros((32, 32, 13)),
         "glrlm": np.zeros((32, 10, 13)),
         "glszm": np.zeros((32, 10)),
+        "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
+        "roi": np.zeros((1, 1, 1), dtype=bool),
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -2519,7 +2533,7 @@ def test_extract_single_family_texture_ngtdm(
 
 
 @patch("pictologics.pipeline.discretise_image")
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline._texture_matrices")
 @patch("pictologics.pipeline.calculate_ngldm_features")
 def test_extract_single_family_texture_ngldm(
     mock_ngldm: MagicMock,
@@ -2535,6 +2549,8 @@ def test_extract_single_family_texture_ngldm(
         "glcm": np.zeros((32, 32, 13)),
         "glrlm": np.zeros((32, 10, 13)),
         "glszm": np.zeros((32, 10)),
+        "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
+        "roi": np.zeros((1, 1, 1), dtype=bool),
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -2661,9 +2677,7 @@ def test_extract_histogram_full_range_fbs(mock_mask: Image) -> None:
     assert feats["minimum_histogram_gradient_intensity_RHQZ"] == pytest.approx(22.0)
 
 
-def test_extract_histogram_full_range_fixed_cutoffs(
-    mock_image: Image, mock_mask: Image
-) -> None:
+def test_extract_histogram_full_range_fixed_cutoffs(mock_image: Image, mock_mask: Image) -> None:
     """FIXED_CUTOFFS records N_g = len(cutoffs) + 1 for the histogram range."""
     pipeline = RadiomicsPipeline()
     pipeline.add_config(
@@ -2990,7 +3004,7 @@ def test_extract_local_intensity_via_dedup(
 
 
 @patch("pictologics.pipeline.discretise_image")
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline._texture_matrices")
 @patch("pictologics.pipeline.calculate_glcm_features")
 def test_extract_texture_glcm_via_dedup(
     mock_glcm: MagicMock,
@@ -3006,6 +3020,8 @@ def test_extract_texture_glcm_via_dedup(
         "glcm": np.zeros((32, 32, 13)),
         "glrlm": np.zeros((32, 10, 13)),
         "glszm": np.zeros((32, 10)),
+        "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
+        "roi": np.zeros((1, 1, 1), dtype=bool),
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -3034,7 +3050,7 @@ def test_extract_texture_glcm_via_dedup(
 
 
 @patch("pictologics.pipeline.discretise_image")
-@patch("pictologics.pipeline.calculate_all_texture_matrices")
+@patch("pictologics.pipeline._texture_matrices")
 @patch("pictologics.pipeline.calculate_ngldm_features")
 def test_extract_texture_with_ngldm_alpha(
     mock_ngldm: MagicMock,
@@ -3050,6 +3066,8 @@ def test_extract_texture_with_ngldm_alpha(
         "glcm": np.zeros((32, 32, 13)),
         "glrlm": np.zeros((32, 10, 13)),
         "glszm": np.zeros((32, 10)),
+        "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
+        "roi": np.zeros((1, 1, 1), dtype=bool),
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -3931,7 +3949,9 @@ def test_pipeline_defensive_filter_return_branches(sm_image: Image, sm_mask: Ima
         source_mode="roi_only",
     )
 
-    with patch("pictologics.pipeline.mean_filter", return_value=np.zeros((20, 20, 20))) as mock_mean:
+    with patch(
+        "pictologics.pipeline.mean_filter", return_value=np.zeros((20, 20, 20))
+    ) as mock_mean:
         pipeline.run(sm_image, sm_mask, config_names=["mean_cfg"])
         mock_mean.assert_called()
 
@@ -3957,7 +3977,9 @@ def test_pipeline_explicit_sentinel(sm_mask: Image) -> None:
 
 def test_pipeline_filters_with_source_mask_no_resample(sm_image: Image, sm_mask: Image) -> None:
     pipeline = RadiomicsPipeline()
-    pipeline.add_config("nore_config", _filter_config(include_resample=False), source_mode="roi_only")
+    pipeline.add_config(
+        "nore_config", _filter_config(include_resample=False), source_mode="roi_only"
+    )
     results = pipeline.run(sm_image, sm_mask, config_names=["nore_config"])
     assert "nore_config" in results
     assert not any("error" in entry for entry in pipeline._log)

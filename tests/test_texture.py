@@ -385,7 +385,14 @@ class TestTextureFeatures(unittest.TestCase):
     # Parallel zone kernel (n_chunks > 1) branch coverage
     # ------------------------------------------------------------------
     def _run_parallel_zone_kernel(
-        self, data, mask, dist_map, n_chunks, calc_glszm=True, calc_gldzm=True
+        self,
+        data,
+        mask,
+        dist_map,
+        n_chunks,
+        calc_glszm=True,
+        calc_gldzm=True,
+        dense_glszm=True,
     ):
         texture_module._ZoneBufferPool._instance = None
         pool = texture_module._ZoneBufferPool.get_instance()
@@ -403,6 +410,7 @@ class TestTextureFeatures(unittest.TestCase):
             n_chunks,
             calc_glszm,
             calc_gldzm,
+            dense_glszm,
         )
 
     def test_parallel_zone_kernel_merge(self):
@@ -458,6 +466,109 @@ class TestTextureFeatures(unittest.TestCase):
         dist = np.zeros((2, 4, 4), dtype=np.int32)
         glszm, _ = self._run_parallel_zone_kernel(data, mask, dist, n_chunks=2)
         self.assertEqual(int(glszm.sum()), 1)  # A, B and C all merge into one zone
+
+    def test_compact_matrices_give_the_same_features(self):
+        """compact=True keeps one GLCM/GLRLM table (the sum over the 13 directions); the
+        other matrices and every feature must stay the same, bit for bit."""
+        rng = np.random.default_rng(3)
+        data = rng.integers(1, 7, (6, 7, 8))
+        mask = (rng.random((6, 7, 8)) > 0.3).astype(float) * 2.0  # label 2, with holes
+        full = texture_module.calculate_all_texture_matrices(data, mask, 6)
+        compact = texture_module._texture_matrices(data, mask, 6, compact=True)
+        self.assertNotIn("roi", full)
+        np.testing.assert_array_equal(compact["roi"], mask != 0)
+        self.assertEqual(full["glcm"].shape[0], 13)
+        for key in ("glcm", "glrlm"):
+            self.assertEqual(compact[key].shape[0], 1)
+            np.testing.assert_array_equal(compact[key][0], full[key].sum(axis=0))
+        for key in ("ngtdm_s", "ngtdm_n", "ngldm", "gldzm"):
+            np.testing.assert_array_equal(compact[key], full[key])
+        gl_idx, sz_idx = np.nonzero(full["glszm"])
+        np.testing.assert_array_equal(
+            compact["glszm_cells"], np.stack([gl_idx, sz_idx, full["glszm"][gl_idx, sz_idx]])
+        )
+        for family, key in (("glcm", "glcm_matrix"), ("glrlm", "glrlm_matrix")):
+            calc = getattr(texture_module, f"calculate_{family}_features")
+            ref = calc(data, mask, 6, **{key: full[family]})
+            self.assertEqual(calc(data, mask, 6, **{key: compact[family]}), ref)
+            self.assertEqual(calc(data, mask, 6), ref)  # standalone path: merged kernel
+        self.assertEqual(
+            texture_module.calculate_all_texture_features(data, mask, 6),
+            {
+                **texture_module.calculate_glcm_features(data, mask, 6, glcm_matrix=full["glcm"]),
+                **texture_module.calculate_glrlm_features(
+                    data, mask, 6, glrlm_matrix=full["glrlm"]
+                ),
+                **texture_module.calculate_glszm_features(
+                    data, mask, 6, glszm_matrix=full["glszm"]
+                ),
+                **texture_module.calculate_gldzm_features(
+                    data, mask, 6, gldzm_matrix=full["gldzm"], distance_mask=mask
+                ),
+                **texture_module.calculate_ngtdm_features(
+                    data, mask, 6, ngtdm_matrices=(full["ngtdm_s"], full["ngtdm_n"])
+                ),
+                **texture_module.calculate_ngldm_features(
+                    data, mask, 6, ngldm_matrix=full["ngldm"]
+                ),
+            },
+        )
+
+    @staticmethod
+    def _dense_cells(glszm):
+        gl_idx, sz_idx = np.nonzero(glszm)
+        return np.stack([gl_idx, sz_idx, glszm[gl_idx, sz_idx]]).astype(np.uint32)
+
+    def test_glszm_cells_match_dense_matrix(self):
+        """Cell mode lists the non-zero GLSZM cells in np.nonzero order, in both zone
+        kernels, also when the few large zones go through the sorted path."""
+        data = np.ones((3, 15, 15), dtype=int)
+        mask_u8 = np.zeros((3, 15, 15), dtype=np.uint8)
+        # Separate zones (26-connectivity): three equal bars (grey 2, size 3), one of size 4,
+        # a size-3 bar in grey 3, and single voxels in grey levels 1 and 3.
+        for y, gl, length in ((1, 2, 3), (4, 2, 3), (7, 2, 3), (10, 2, 4), (13, 3, 3)):
+            data[1, y, 1 : 1 + length] = gl
+            mask_u8[1, y, 1 : 1 + length] = 1
+        for y, gl in ((1, 1), (4, 1), (7, 3)):
+            data[1, y, 10] = gl
+            mask_u8[1, y, 10] = 1
+        dist = np.zeros((3, 15, 15), dtype=np.int32)
+        dense, _ = texture_module.calculate_zone_features(data, mask_u8, dist, self.n_bins)
+        self.assertEqual(int(dense[1, 2]), 3)  # the repeated (grey 2, size 3) cell
+        for dense_cells in (1 << 18, 2 * self.n_bins):  # table only; table width 2 + sorting
+            with patch("pictologics.features.texture._GLSZM_DENSE_CELLS", dense_cells):
+                cells, _ = texture_module._zone_features(
+                    data, mask_u8, dist, self.n_bins, True, True, False
+                )
+                np.testing.assert_array_equal(cells, self._dense_cells(dense))
+                par_dense, _ = self._run_parallel_zone_kernel(data, mask_u8, dist, n_chunks=3)
+                par_cells, _ = self._run_parallel_zone_kernel(
+                    data, mask_u8, dist, n_chunks=3, dense_glszm=False
+                )
+                np.testing.assert_array_equal(par_cells, self._dense_cells(par_dense))
+        # No GLSZM requested: an empty cell array from both kernels.
+        cells, _ = texture_module._zone_features(
+            data, mask_u8, dist, self.n_bins, False, True, False
+        )
+        self.assertEqual(cells.shape, (3, 0))
+        par_cells, _ = self._run_parallel_zone_kernel(
+            data, mask_u8, dist, n_chunks=3, calc_glszm=False, dense_glszm=False
+        )
+        self.assertEqual(par_cells.shape, (3, 0))
+
+    def test_compact_matrices_empty_and_zone_placeholder(self):
+        empty = texture_module._texture_matrices(
+            self.data, np.zeros(self.shape), self.n_bins, compact=True
+        )
+        self.assertEqual(empty["glszm_cells"].shape, (3, 0))
+        self.assertFalse(empty["roi"].any())
+        self.assertEqual(
+            texture_module._glszm_features_from_cells(empty["glszm_cells"], self.mask), {}
+        )
+        no_zones = texture_module._texture_matrices(
+            self.data, self.mask, self.n_bins, calc_glszm=False, calc_gldzm=False, compact=True
+        )
+        self.assertEqual(no_zones["glszm_cells"].shape, (3, 0))
 
     def test_parallel_zone_dispatch(self):
         """>= 2^17 voxels with >1 thread routes calculate_zone_features to the parallel kernel."""

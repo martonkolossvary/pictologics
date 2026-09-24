@@ -52,11 +52,11 @@ from .features.intensity import (
 )
 from .features.morphology import calculate_morphology_features
 from .features.texture import (
-    calculate_all_texture_matrices,
+    _glszm_features_from_cells,
+    _texture_matrices,
     calculate_glcm_features,
     calculate_gldzm_features,
     calculate_glrlm_features,
-    calculate_glszm_features,
     calculate_ngldm_features,
     calculate_ngtdm_features,
 )
@@ -1216,7 +1216,9 @@ class RadiomicsPipeline:
             boundary_str = params.get("boundary", "mirror")
             boundary_aliases = {"constant": "zero", "wrap": "periodic"}
             if isinstance(boundary_str, str):
-                boundary = resolve_boundary(boundary_aliases.get(boundary_str.lower(), boundary_str))
+                boundary = resolve_boundary(
+                    boundary_aliases.get(boundary_str.lower(), boundary_str)
+                )
             else:
                 boundary = resolve_boundary(boundary_str)
 
@@ -1742,19 +1744,26 @@ class RadiomicsPipeline:
         want_ngtdm = family in ("texture", "texture_ngtdm", "ngtdm")
         want_ngldm = family in ("texture", "texture_ngldm", "ngldm")
 
-        texture_matrices = calculate_all_texture_matrices(
+        # Compact matrices: the same features from smaller tables. When the two masks are
+        # one array, the distance map uses the ROI of the intensity mask, which is the same.
+        masks_in_sync = state.morph_mask.array is state.intensity_mask.array
+        texture_matrices = _texture_matrices(
             disc_c,
             intensity_mask_c,
             n_bins,
-            distance_mask=morph_mask_c,
+            distance_mask=None if masks_in_sync else morph_mask_c,
             calc_glcm=want_glcm,
             calc_glrlm=want_glrlm,
             calc_ngtdm=want_ngtdm,
             calc_ngldm=want_ngldm,
             calc_glszm=want_glszm,
             calc_gldzm=want_gldzm,
+            compact=True,
             **matrix_kwargs,
         )
+        # The bool ROI gives the same ROI voxel counts as intensity_mask_c, from a fast
+        # count. GLCM keeps intensity_mask_c: its grey-level range uses `mask > 0`.
+        roi = texture_matrices["roi"]
 
         if want_glcm:
             results.update(
@@ -1769,25 +1778,18 @@ class RadiomicsPipeline:
             results.update(
                 calculate_glrlm_features(
                     disc_c,
-                    intensity_mask_c,
+                    roi,
                     n_bins,
                     glrlm_matrix=texture_matrices["glrlm"],
                 )
             )
         if want_glszm:
-            results.update(
-                calculate_glszm_features(
-                    disc_c,
-                    intensity_mask_c,
-                    n_bins,
-                    glszm_matrix=texture_matrices["glszm"],
-                )
-            )
+            results.update(_glszm_features_from_cells(texture_matrices["glszm_cells"], roi))
         if want_gldzm:
             results.update(
                 calculate_gldzm_features(
                     disc_c,
-                    intensity_mask_c,
+                    roi,
                     n_bins,
                     gldzm_matrix=texture_matrices["gldzm"],
                     distance_mask=morph_mask_c,
@@ -1809,7 +1811,7 @@ class RadiomicsPipeline:
             results.update(
                 calculate_ngldm_features(
                     disc_c,
-                    intensity_mask_c,
+                    roi,
                     n_bins,
                     ngldm_matrix=texture_matrices["ngldm"],
                 )
