@@ -272,12 +272,16 @@ def _warmup_morphology() -> None:
 
 
 def _warmup_filters() -> None:
-    """Warmup filter and preprocessing operations."""
+    """Warmup filter, preprocessing and loader operations."""
     # Import here to avoid circular dependencies
     from scipy.ndimage import affine_transform
     from scipy.signal import fftconvolve
 
-    from . import preprocessing
+    from . import loader, preprocessing
+
+    # 0. Loader: the column-order to row-order copy for NIfTI data.
+    col = np.asfortranarray(np.ones((4, 4, 4), dtype=np.float64))
+    loader._to_row_order_numba(col, np.empty((4, 4, 4), dtype=np.float64))
 
     # 1. Preprocessing kernels (discretise / resegment / resample). The
     # dispatch code always feeds C-contiguous arrays (via ravel /

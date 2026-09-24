@@ -64,6 +64,7 @@ from typing import Any, Optional, cast
 import nibabel as nib
 import numpy as np
 import pydicom
+from numba import jit, prange
 from numpy import typing as npt
 from numpy.typing import DTypeLike
 
@@ -1240,6 +1241,44 @@ def _ensure_3d(
         raise ValueError(f"Unsupported array dimensionality: {ndim}. Expected 2, 3, or 4.")
 
 
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _to_row_order_numba(src: npt.NDArray[np.float64], out: npt.NDArray[np.float64]) -> None:
+    """Copy a column-order 3D array into a row-order array of the same shape.
+
+    32 x 32 tiles keep the reads (fast along axis 0) and the writes (fast along axis 2) in
+    cache. numpy's own copy reads across the cache for this layout and is 4-15x slower.
+    """
+    nx, ny, nz = src.shape
+    tile = 32
+    for j in prange(ny):
+        for i0 in range(0, nx, tile):
+            i1 = min(i0 + tile, nx)
+            for k0 in range(0, nz, tile):
+                k1 = min(k0 + tile, nz)
+                for i in range(i0, i1):
+                    for k in range(k0, k1):
+                        out[i, j, k] = src[i, j, k]
+
+
+# Same size gate as the preprocessing kernels (preprocessing._KERNEL_MIN_SIZE). Below it,
+# discretise, resegment and resample use plain numpy code, which gains nothing from row order.
+_ROW_ORDER_MIN_SIZE = 1 << 20
+
+
+def _row_order(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """Return a large `array` in row (C) order, with the same values.
+
+    Row-order arrays and arrays below `_ROW_ORDER_MIN_SIZE` voxels are returned as they are.
+    """
+    if array.flags.c_contiguous or array.size < _ROW_ORDER_MIN_SIZE:
+        return array
+    if array.ndim == 3 and array.dtype == np.float64 and array.flags.f_contiguous:
+        out = np.empty(array.shape, dtype=np.float64)
+        _to_row_order_numba(array, out)
+        return out
+    return np.ascontiguousarray(array)
+
+
 def _load_nifti(path: str, dataset_index: int = 0) -> Image:
     """
     Load a NIfTI file (.nii or .nii.gz) using the nibabel library.
@@ -1264,7 +1303,9 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
 
     # Load image data as float64 to preserve precision
     array = nii_img.get_fdata()  # type: ignore
-    array = _ensure_3d(array, dataset_index)
+    # nibabel returns column-order (Fortran) arrays. The kernels read in row order, and the
+    # discretise, resegment and resample steps copy other layouts on every call. Convert once.
+    array = _row_order(_ensure_3d(array, dataset_index))
 
     # Extract metadata
     header = nii_img.header  # type: ignore

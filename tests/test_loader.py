@@ -22,6 +22,7 @@ from pictologics.loader import (
     _load_dicom_file,
     _load_dicom_series,
     _load_nifti,
+    _row_order,
     _warn_if_mixed_coordinate_frames,
     create_full_mask,
     load_and_merge_images,
@@ -349,6 +350,34 @@ class TestLoader(unittest.TestCase):
         img = _load_nifti("test.nii")
         self.assertEqual(img.array.shape, (10, 10, 1))  # Promoted to 3D
         self.assertEqual(img.spacing, (0.5, 0.5, 1.0))  # Padded spacing
+
+    @patch("pictologics.loader.nib.load")
+    def test_load_nifti_returns_row_order_array(self, mock_nib_load: MagicMock) -> None:
+        # nibabel gives column-order (Fortran) data. A large array must come back in row
+        # order with the same values; row-order and small arrays must not be copied.
+        data_f = np.asfortranarray(np.arange(60, dtype=np.float64).reshape(3, 4, 5))
+        mock_img = MagicMock()
+        mock_img.get_fdata.return_value = data_f
+        mock_img.header.get_zooms.return_value = (1.0, 1.0, 1.0)
+        mock_img.affine = np.eye(4)
+        mock_nib_load.return_value = mock_img
+
+        self.assertIs(_load_nifti("test.nii").array, data_f)  # below the size gate
+
+        with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
+            img = _load_nifti("test.nii")
+            self.assertTrue(img.array.flags.c_contiguous)
+            np.testing.assert_array_equal(img.array, data_f)
+
+            data_c = np.zeros((3, 4, 5))
+            mock_img.get_fdata.return_value = data_c
+            self.assertIs(_load_nifti("test.nii").array, data_c)
+
+            # Any other layout (here a strided view) takes the plain numpy copy.
+            strided = np.arange(120, dtype=np.float64).reshape(6, 4, 5)[::2]
+            out = _row_order(strided)
+            self.assertTrue(out.flags.c_contiguous)
+            np.testing.assert_array_equal(out, strided)
 
     @patch("pictologics.loader.nib.load")
     def test_load_nifti_failure(self, mock_nib_load: MagicMock) -> None:
