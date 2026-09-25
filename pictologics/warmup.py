@@ -264,6 +264,7 @@ def _warmup_morphology() -> None:
     evecs = np.ascontiguousarray(np.eye(3, dtype=np.float64))
     morphology._ombb_extents_numba(verts, center, evecs)
     morphology._max_pairwise_distance_numba(verts)
+    morphology._hull_candidates_numba(verts, np.ones(3, dtype=np.float64))
 
     tet_verts = verts[:4]  # First 4 verts form a tet
     tet_faces = np.ascontiguousarray(

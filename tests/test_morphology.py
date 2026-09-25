@@ -204,14 +204,35 @@ class TestMorphologyFeatures(unittest.TestCase):
     def test_convex_hull_few_points(self):
         # 3 points -> ConvexHull needs 4 for 3D
         verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
-        features, hull = _get_convex_hull_features(verts, 1.0, 1.0)
+        features, hull = _get_convex_hull_features(verts, 1.0, 1.0, (1.0, 1.0, 1.0))
         self.assertIsNone(hull)
         self.assertEqual(features, {})
+
+    def test_hull_candidates_keep_the_hull(self):
+        # Qhull on the candidate vertices finds the same hull vertices, in the same order,
+        # and the same volume and area (to rounding), as Qhull on all mesh vertices.
+        from scipy.spatial import ConvexHull
+
+        from pictologics.features.morphology import _hull_candidates_numba
+
+        rng = np.random.default_rng(2)
+        box = np.zeros((9, 10, 8))
+        box[2:7, 3:8, 2:6] = 1  # flat faces: many coplanar vertices
+        blob = (rng.random((9, 10, 8)) < 0.5).astype(float)
+        blob[[0, -1]] = blob[:, [0, -1]] = blob[:, :, [0, -1]] = 0
+        for arr, spacing in ((box, (1.0, 1.0, 1.0)), (blob, (0.8, 0.9, 2.5))):
+            _, verts, _ = _get_mesh_features(self._create_image(arr, spacing))
+            candidates = _hull_candidates_numba(verts, np.asarray(spacing))
+            self.assertLess(len(candidates), len(verts))
+            full, reduced = ConvexHull(verts), ConvexHull(verts[candidates])
+            np.testing.assert_array_equal(reduced.points[reduced.vertices], verts[full.vertices])
+            self.assertAlmostEqual(reduced.volume, full.volume, delta=1e-12 * full.volume)
+            self.assertAlmostEqual(reduced.area, full.area, delta=1e-12 * full.area)
 
     def test_convex_hull_coplanar(self):
         # 4 points on a plane -> Volume 0, scipy might error or return flat hull.
         verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float)
-        features, hull = _get_convex_hull_features(verts, 1.0, 1.0)
+        features, hull = _get_convex_hull_features(verts, 1.0, 1.0, (1.0, 1.0, 1.0))
         # Should catch exception or return None
         self.assertIsNone(hull)
 
@@ -228,7 +249,7 @@ class TestMorphologyFeatures(unittest.TestCase):
         self.assertIsNone(c)
 
     def test_mvee_features_none_hull(self):
-        features = _get_mvee_features(None, np.array([]), 1.0, 1.0)
+        features = _get_mvee_features(None, 1.0, 1.0)
         self.assertEqual(features, {})
 
     @patch("mcubes.marching_cubes")
@@ -350,7 +371,8 @@ class TestMorphologyFeatures(unittest.TestCase):
             dtype=float,
         )
 
-        features = _get_mvee_features(mock_instance, verts, 1.0, 1.0)
+        mock_instance.points = verts
+        features = _get_mvee_features(mock_instance, 1.0, 1.0)
         self.assertIn("volume_density_mvee_SWZ1", features)
         self.assertIn("area_density_mvee_BRI8", features)
 
@@ -364,7 +386,8 @@ class TestMorphologyFeatures(unittest.TestCase):
         mock_hull_cls.return_value = mock_instance
 
         verts = np.random.rand(8, 3)
-        features, hull = _get_convex_hull_features(verts, 1.0, 1.0)
+        mock_instance.points = verts
+        features, hull = _get_convex_hull_features(verts, 1.0, 1.0, (1.0, 1.0, 1.0))
 
         self.assertIsNotNone(hull)
         self.assertEqual(features["volume_density_convex_hull_R3ER"], 1.0 / 123.0)
