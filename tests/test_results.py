@@ -63,19 +63,18 @@ class TestFormatResults:
         result = format_results(sample_results, fmt="long")
         assert isinstance(result, list)
         assert len(result) == 4  # 2 configs * 2 features
-        # Check structure of one item
-        assert "config" in result[0]
-        assert "feature_name" in result[0]
-        assert "value" in result[0]
+        # Check structure of one item: the full feature key is named feature_key
+        assert list(result[0]) == ["config", "feature_key", "value"]
+        assert result[0] == {"config": "config_a", "feature_key": "feature1", "value": 1.0}
+        assert all("feature_name" not in row for row in result)
 
     def test_long_format_pandas(self, sample_results: dict[str, pd.Series]) -> None:
         """Test long format as pandas DataFrame."""
         result = format_results(sample_results, fmt="long", output_type="pandas")
         assert isinstance(result, pd.DataFrame)
         assert len(result) == 4
-        assert "config" in result.columns
-        assert "feature_name" in result.columns
-        assert "value" in result.columns
+        assert list(result.columns) == ["config", "feature_key", "value"]
+        assert list(result["feature_key"]) == ["feature1", "feature2", "feature1", "feature2"]
 
     def test_long_format_custom_config_col(self, sample_results: dict[str, pd.Series]) -> None:
         """Test long format with a custom config column name."""
@@ -83,15 +82,14 @@ class TestFormatResults:
             sample_results, fmt="long", output_type="pandas", config_col="configuration"
         )
         assert isinstance(result, pd.DataFrame)
-        assert "configuration" in result.columns
-        assert "config" not in result.columns
+        assert list(result.columns) == ["configuration", "feature_key", "value"]
 
     def test_long_format_with_metadata(self, sample_results: dict[str, pd.Series]) -> None:
         """Test long format with metadata included in every row."""
         meta = {"subject_id": "sub-001"}
         result = format_results(sample_results, fmt="long", output_type="pandas", meta=meta)
         assert isinstance(result, pd.DataFrame)
-        assert "subject_id" in result.columns
+        assert list(result.columns) == ["subject_id", "config", "feature_key", "value"]
         assert (result["subject_id"] == "sub-001").all()
 
     def test_long_format_json(self, sample_results: dict[str, pd.Series]) -> None:
@@ -101,7 +99,7 @@ class TestFormatResults:
         data = json.loads(result)
         assert isinstance(data, list)
         assert len(data) == 4
-        assert "config" in data[0]
+        assert data[0] == {"config": "config_a", "feature_key": "feature1", "value": 1.0}
 
     def test_empty_results(self) -> None:
         """Test handling of empty input results."""
@@ -109,7 +107,7 @@ class TestFormatResults:
         result_df = format_results({}, fmt="long", output_type="pandas")
         assert isinstance(result_df, pd.DataFrame)
         assert result_df.empty
-        assert "feature_name" in result_df.columns
+        assert list(result_df.columns) == ["config", "feature_key", "value"]
 
         # dict
         result_dict = format_results({}, fmt="long", output_type="dict")

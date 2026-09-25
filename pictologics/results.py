@@ -42,7 +42,9 @@ def format_results(
                  (the standard output of RadiomicsPipeline.run).
         fmt: "wide" or "long".
              - "wide": Flattens keys to '{config}__{feature}'. Returns 1 row (dict/df).
-             - "long": Tidy format with columns for config, feature_name, and value.
+             - "long": Tidy format with columns for config, feature_key, and value.
+               feature_key is the full feature key with its IBSI code (for example
+               mean_intensity_Q4LE), as in describe_features().
         meta: Optional dictionary of metadata to prepend to the result (e.g., subject ID).
         output_type: Format of the returned object: "dict", "pandas", or "json".
         config_col: Name of the column holding the configuration name (only used if fmt="long").
@@ -90,13 +92,13 @@ def format_results(
             raise ValueError(f"Unknown output_type: {output_type}")
 
     elif fmt == "long":
-        # Long format: Rows of [meta_cols..., config, feature_name, value]
+        # Long format: Rows of [meta_cols..., config, feature_key, value]
         rows = []
         for config_name, series in results.items():
-            for feature_name, value in series.items():
+            for feature_key, value in series.items():
                 row = meta.copy()
                 row[config_col] = config_name
-                row["feature_name"] = feature_name
+                row["feature_key"] = feature_key
                 row["value"] = value
                 rows.append(row)
 
@@ -110,13 +112,13 @@ def format_results(
                 elif output_type == "json":
                     return "[]"
 
-            df = pd.DataFrame(columns=list(meta.keys()) + [config_col, "feature_name", "value"])
+            df = pd.DataFrame(columns=list(meta.keys()) + [config_col, "feature_key", "value"])
             return df  # Columns are already in order
 
         # Reorder keys/columns
         # Determine strict order
         meta_keys = list(meta.keys())
-        standard_cols = [config_col, "feature_name", "value"]
+        standard_cols = [config_col, "feature_key", "value"]
         # Ensure we don't duplicate keys
         cols_order = meta_keys + [c for c in standard_cols if c not in meta_keys]
 

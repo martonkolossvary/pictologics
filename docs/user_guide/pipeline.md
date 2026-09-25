@@ -281,7 +281,7 @@ The `format_results()` function converts pipeline output into different formats 
 
     ```python
     df = format_results(results, fmt="long", meta={"subject_id": "case1"}, output_type="pandas")
-    # Returns DataFrame: [subject_id, config, feature_name, value]
+    # Returns DataFrame: [subject_id, config, feature_key, value]
     ```
 
 ### Output Types
@@ -334,7 +334,7 @@ There are no ragged rows, no missing columns, and no unexpected exceptions.
     `format_results()` and `save_results()` always merge results by **column name**,
     never by position.  Even though all configurations now produce the same set of
     feature names, the merging logic is inherently name-based — columns are identified
-    by their `{config}__{feature}` key (wide format) or `feature_name` value (long
+    by their `{config}__{feature}` key (wide format) or `feature_key` value (long
     format), so results are always aligned correctly.
 
 #### How It Works Internally

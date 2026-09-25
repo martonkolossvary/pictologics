@@ -357,7 +357,7 @@ You want to:
             # Format results and store
             row = format_results(
                 results,
-                fmt="long",  # Tidy format: [subject_id, config, feature_name, value]
+                fmt="long",  # Tidy format: [subject_id, config, feature_key, value]
                 meta={
                     "subject_id": subject_id,
                     "image_root": str(image_root),
