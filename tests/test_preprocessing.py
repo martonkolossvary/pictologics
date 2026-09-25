@@ -628,9 +628,10 @@ def test_resample_with_source_mask() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Numba kernel paths (float64, size >= _KERNEL_MIN_SIZE). _KERNEL_MIN_SIZE is
-# patched small so tiny arrays exercise the single-pass kernels; the optimization
-# work proved these bit-identical to the numpy fallback.
+# Numba kernel paths (float64, size >= _KERNEL_MIN_SIZE, or
+# _DISCRETISE_KERNEL_MIN_SIZE for discretise). The limits are patched small so tiny
+# arrays exercise the single-pass kernels; the optimization work proved these
+# bit-identical to the numpy fallback.
 # ---------------------------------------------------------------------------
 
 
@@ -644,7 +645,7 @@ def test_discretise_fbn_kernel_clamps() -> None:
     img = Image(arr, (1, 1, 1), (0, 0, 0))
     # Explicit range narrower than the data: values below it clamp to bin 1,
     # values above clamp to n_bins.
-    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+    with patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8):
         out = discretise_image(img, method="FBN", n_bins=8, min_val=20.0, max_val=40.0)
     assert out.array[0, 0, 0] == 0
     assert out.array.min() >= 0
@@ -655,9 +656,34 @@ def test_discretise_fbs_kernel_clamps() -> None:
     arr = _f64((4, 4, 4))
     arr[0, 0, 0] = np.nan
     img = Image(arr, (1, 1, 1), (0, 0, 0))
-    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+    with patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8):
         out = discretise_image(img, method="FBS", bin_width=5.0, min_val=20.0, max_val=40.0)
     assert out.array[0, 0, 0] == 0
+
+
+def test_discretise_kernel_keeps_array_order() -> None:
+    # The kernels give the numpy chain's bins and layout, for row- and column-order input.
+    # The DICOM loader's layout (neither) needs a copy: below _KERNEL_MIN_SIZE it keeps
+    # the numpy chain.
+    rng = np.random.default_rng(5)
+    row_order = rng.normal(0.0, 50.0, (5, 6, 7))
+    row_order[1, 2, 3] = np.nan
+    dicom_layout = np.swapaxes(row_order, 0, 1)
+    for arr in (row_order, np.asfortranarray(row_order), dicom_layout):
+        for method, kw in (("FBN", {"n_bins": 8}), ("FBS", {"bin_width": 10.0})):
+            ref = discretise_image(arr, method, **kw)
+            with (
+                patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8),
+                patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8),
+            ):
+                out = discretise_image(arr, method, **kw)
+            assert_array_equal(out, ref)
+            assert out.flags.f_contiguous == ref.flags.f_contiguous == arr.flags.f_contiguous
+    with (
+        patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8),
+        patch("pictologics.preprocessing._discretise_fbs_numba", side_effect=AssertionError),
+    ):
+        discretise_image(dicom_layout, "FBS", bin_width=10.0)
 
 
 def test_discretise_roi_search_only_for_missing_bounds() -> None:

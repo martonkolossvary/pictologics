@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any, Optional, cast
+from typing import Any, Literal, Optional, cast
 
 import numpy as np
 from numba import jit, prange
@@ -40,7 +40,8 @@ COMMON_SENTINEL_VALUES: tuple[float, ...] = (
 
 # Below this size the numba parallel-launch overhead exceeds the scan itself;
 # the numpy fallback paths are kept for small arrays (same convention as
-# features._utils). Discretise/resegment dispatch on it; both paths are
+# features._utils). Resegment, filter_outliers, sentinel detection and the
+# discretise of an array that needs a copy dispatch on it; both paths are
 # bit-identical, so the switch is purely a performance decision.
 _KERNEL_MIN_SIZE = 1 << 20
 
@@ -50,6 +51,10 @@ _KERNEL_MIN_SIZE = 1 << 20
 _NEAREST_KERNEL_MIN_SIZE = 25_000
 _LINEAR_KERNEL_MIN_SIZE = 4_500
 _MASKED_KERNEL_MIN_SIZE = 1_800
+
+# Measured crossover (14-core M4 Pro), in voxels: below this size the discretise
+# kernels' start-up cost (about 0.07 ms) is more than the numpy chain's whole run.
+_DISCRETISE_KERNEL_MIN_SIZE = 80_000
 
 
 # ---------------------------------------------------------------------------
@@ -927,7 +932,15 @@ def discretise_image(
 
     # The bin maths below run densely on the full array (no boolean
     # gather/scatter): NaN voxels propagate through the float ops and are
-    # mapped to bin 0 (invalid) at the end.
+    # mapped to bin 0 (invalid) at the end. The kernels read and write a row- or
+    # column-order array in its own order, with no copy. Another layout (for
+    # example a DICOM series) needs a copy, which pays off only from
+    # _KERNEL_MIN_SIZE voxels.
+    order: Literal["C", "F"] = "F" if array.flags.f_contiguous else "C"
+    dense = array.flags.c_contiguous or array.flags.f_contiguous
+    use_kernel = array.dtype == np.float64 and array.size >= (
+        _DISCRETISE_KERNEL_MIN_SIZE if dense else _KERNEL_MIN_SIZE
+    )
     if method == "FBN":
         if n_bins is None:
             raise ValueError("n_bins required for FBN")
@@ -941,14 +954,14 @@ def discretise_image(
         if current_max <= current_min:
             # Edge case: flat region or invalid range
             discretised = (~np.isnan(array)).astype(np.int32)
-        elif array.dtype == np.float64 and array.size >= _KERNEL_MIN_SIZE:
+        elif use_kernel:
             # Single-pass kernel; bit-identical to the numpy chain below
-            flat = array.ravel()
+            flat = array.ravel(order)
             binned: npt.NDArray[Any] = np.empty(flat.size, dtype=np.int32)
             _discretise_fbn_numba(
                 flat, float(n_bins), float(current_min), float(current_max), binned
             )
-            discretised = binned.reshape(array.shape)
+            discretised = binned.reshape(array.shape, order=order)
         else:
             # IBSI FBN: floor(N_g * (X - X_min) / (X_max - X_min)) + 1
             # (same operation order as before, so bins are bit-identical)
@@ -977,12 +990,12 @@ def discretise_image(
 
         current_min = min_val if min_val is not None else _default_bound(np.min, np.nanmin)
 
-        if array.dtype == np.float64 and array.size >= _KERNEL_MIN_SIZE:
+        if use_kernel:
             # Single-pass kernel; bit-identical to the numpy chain below
-            flat = array.ravel()
+            flat = array.ravel(order)
             fbs_binned: npt.NDArray[Any] = np.empty(flat.size, dtype=np.int32)
             _discretise_fbs_numba(flat, float(bin_width), float(current_min), fbs_binned)
-            discretised = fbs_binned.reshape(array.shape)
+            discretised = fbs_binned.reshape(array.shape, order=order)
         else:
             # IBSI FBS: floor((X - X_min) / w_b) + 1
             temp = array - current_min
