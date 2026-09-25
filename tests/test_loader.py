@@ -379,6 +379,82 @@ class TestLoader(unittest.TestCase):
             self.assertTrue(out.flags.c_contiguous)
             np.testing.assert_array_equal(out, strided)
 
+    def test_row_order_copies_every_loaded_type(self) -> None:
+        # The tiled copy takes the NIfTI, DICOM and SEG types; another type takes numpy's
+        # copy. Both give row order with the same values and type.
+        from pictologics import loader
+
+        with (
+            patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8),
+            patch(
+                "pictologics.loader._to_row_order_numba", wraps=loader._to_row_order_numba
+            ) as tiled,
+        ):
+            for dtype in (np.float64, np.int16, np.uint16, np.uint8, np.float32):
+                col = np.asfortranarray(np.arange(60).reshape(3, 4, 5).astype(dtype))
+                out = _row_order(col)
+                self.assertTrue(out.flags.c_contiguous)
+                self.assertEqual(out.dtype, dtype)
+                np.testing.assert_array_equal(out, col)
+        self.assertEqual(tiled.call_count, 4)
+
+    @patch("pictologics.loader.Path")
+    @patch("pictologics.loader.pydicom.dcmread")
+    @patch("pictologics.utilities.dicom_utils.split_dicom_phases")
+    def test_load_dicom_series_memory_order(
+        self,
+        mock_split_phases: MagicMock,
+        mock_dcmread: MagicMock,
+        mock_Path_cls: MagicMock,
+    ) -> None:
+        # The slices stack on a new first axis: a small volume comes back in column order
+        # and a large one in row order, with the same (X, Y, Z) values and type.
+        files = [MagicMock() for _ in range(3)]
+        for f in files:
+            f.is_file.return_value = True
+        mock_Path_cls.return_value.iterdir.return_value = files
+        mock_split_phases.return_value = [[{"file_path": f} for f in files]]
+        slices = []
+        for z in range(3):
+            s = MagicMock()
+            s.pixel_array = np.arange(6, dtype=np.int16).reshape(2, 3) + 10 * z  # (Y, X)
+            s.ImagePositionPatient = [0.0, 0.0, float(z)]
+            s.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+            s.PixelSpacing = [1.0, 1.0]
+            s.SliceThickness = 1.0
+            s.RescaleSlope = 1.0
+            s.RescaleIntercept = 0.0
+            s.Modality = "MR"
+            del s.SpacingBetweenSlices
+            slices.append(s)
+        expected = np.stack([s.pixel_array.T for s in slices], axis=-1)  # (X, Y, Z)
+        for limit, order in ((1 << 20, "f_contiguous"), (8, "c_contiguous")):
+            mock_dcmread.side_effect = slices + slices  # header reads, then full reads
+            with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", limit):
+                img = _load_dicom_series("dicom_dir")
+            np.testing.assert_array_equal(img.array, expected)
+            self.assertEqual(img.array.dtype, np.int16)
+            self.assertTrue(getattr(img.array.flags, order))
+
+    @patch("pictologics.loader.pydicom.dcmread")
+    def test_load_dicom_file_large_volume_row_order(self, mock_dcmread: MagicMock) -> None:
+        # A large multiframe (Z, Y, X) volume comes back as (X, Y, Z) in row order.
+        frames = np.arange(60, dtype=np.float64).reshape(3, 4, 5)
+        mock_dcm = MagicMock()
+        mock_dcm.pixel_array = frames
+        mock_dcm.PixelSpacing = [0.5, 0.5]
+        mock_dcm.SliceThickness = 1.0
+        mock_dcm.ImagePositionPatient = [0.0, 0.0, 0.0]
+        mock_dcm.RescaleSlope = 1.0
+        mock_dcm.RescaleIntercept = 0.0
+        del mock_dcm.SpacingBetweenSlices
+        mock_dcmread.return_value = mock_dcm
+
+        with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
+            img = _load_dicom_file("test.dcm")
+        self.assertTrue(img.array.flags.c_contiguous)
+        np.testing.assert_array_equal(img.array, frames.transpose(2, 1, 0))
+
     @patch("pictologics.loader.nib.load")
     def test_load_nifti_failure(self, mock_nib_load: MagicMock) -> None:
         mock_nib_load.side_effect = Exception("Corrupt file")

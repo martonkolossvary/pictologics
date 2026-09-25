@@ -288,9 +288,10 @@ def _warmup_filters() -> None:
 
     from . import loader, preprocessing
 
-    # 0. Loader: the column-order to row-order copy for NIfTI data.
-    col = np.asfortranarray(np.ones((4, 4, 4), dtype=np.float64))
-    loader._to_row_order_numba(col, np.empty((4, 4, 4), dtype=np.float64))
+    # 0. Loader: the column-order to row-order copy for NIfTI, DICOM and SEG data.
+    for dtype in loader._ROW_ORDER_DTYPES:
+        col = np.asfortranarray(np.ones((4, 4, 4), dtype=dtype))
+        loader._to_row_order_numba(col, np.empty((4, 4, 4), dtype=dtype))
 
     # 1. Preprocessing kernels (discretise / resegment / resample). The
     # dispatch code always feeds C-contiguous arrays (via ravel /

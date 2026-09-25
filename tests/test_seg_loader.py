@@ -325,6 +325,28 @@ class TestLoadSeg:
                 assert isinstance(img, Image)
                 assert img.modality == "SEG"
 
+    def test_load_seg_large_masks_row_order(self, tmp_path: Path) -> None:
+        """Large combined and separate SEG masks come back in row order, same values."""
+        dummy_file = tmp_path / "seg.dcm"
+        dummy_file.write_bytes(b"dummy")
+
+        with patch("highdicom.seg.segread") as mock_read:
+            mock_read.return_value = create_mock_seg_dataset(n_segments=2)
+            ref_combined = load_seg(str(dummy_file), combine_segments=True)
+            ref_separate = load_seg(str(dummy_file), combine_segments=False)
+            with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
+                combined = load_seg(str(dummy_file), combine_segments=True)
+                separate = load_seg(str(dummy_file), combine_segments=False)
+
+        assert isinstance(combined, Image) and isinstance(ref_combined, Image)
+        assert combined.array.flags.c_contiguous
+        np.testing.assert_array_equal(combined.array, ref_combined.array)
+        assert isinstance(separate, dict) and isinstance(ref_separate, dict)
+        for seg_num, img in separate.items():
+            assert img.array.flags.c_contiguous
+            assert img.array.dtype == np.uint8
+            np.testing.assert_array_equal(img.array, ref_separate[seg_num].array)
+
     def test_load_seg_specific_segments(self, tmp_path: Path) -> None:
         """Test loading specific segments."""
         dummy_file = tmp_path / "seg.dcm"

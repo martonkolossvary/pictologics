@@ -119,7 +119,7 @@ def load_seg(
     """
     import highdicom as hd
 
-    from pictologics.loader import Image
+    from pictologics.loader import Image, _row_order
 
     path_obj = Path(path)
     if not path_obj.exists():
@@ -163,8 +163,9 @@ def load_seg(
         # Create combined label image
         combined_array = _extract_combined_segments(seg, pixel_array, target_segments, n_frames)
 
-        # Reorder axes from (Z, Y, X) or (frames, rows, cols) to (X, Y, Z)
-        combined_array = np.transpose(combined_array, (2, 1, 0))
+        # Reorder axes from (Z, Y, X) or (frames, rows, cols) to (X, Y, Z); a large mask
+        # goes to row order, like the images.
+        combined_array = _row_order(np.transpose(combined_array, (2, 1, 0)))
 
         result = Image(
             array=combined_array,
@@ -197,7 +198,7 @@ def load_seg(
             mask_array = np.transpose(mask_array, (2, 1, 0))
 
             mask_image = Image(
-                array=mask_array.astype(np.uint8),
+                array=_row_order(mask_array.astype(np.uint8)),
                 spacing=spacing,
                 origin=origin,
                 direction=direction,

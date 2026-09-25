@@ -1242,8 +1242,8 @@ def _ensure_3d(
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
-def _to_row_order_numba(src: npt.NDArray[np.float64], out: npt.NDArray[np.float64]) -> None:
-    """Copy a column-order 3D array into a row-order array of the same shape.
+def _to_row_order_numba(src: npt.NDArray[Any], out: npt.NDArray[Any]) -> None:
+    """Copy a column-order 3D array into a row-order array of the same shape and type.
 
     32 x 32 tiles keep the reads (fast along axis 0) and the writes (fast along axis 2) in
     cache. numpy's own copy reads across the cache for this layout and is 4-15x slower.
@@ -1260,9 +1260,13 @@ def _to_row_order_numba(src: npt.NDArray[np.float64], out: npt.NDArray[np.float6
                         out[i, j, k] = src[i, j, k]
 
 
-# Same size gate as the preprocessing kernels (preprocessing._KERNEL_MIN_SIZE). Below it,
-# discretise, resegment and resample use plain numpy code, which gains nothing from row order.
+# Below this size the copy costs more than row order saves (small NIfTI images got 7.5%
+# slower without this limit), and the preprocessing kernels read column order without a copy.
 _ROW_ORDER_MIN_SIZE = 1 << 20
+
+# Types that take the tiled copy (warmed in warmup._warmup_filters): NIfTI data (float64),
+# rescaled DICOM (float64), stored DICOM pixels (int16, uint16) and SEG masks (uint8).
+_ROW_ORDER_DTYPES = (np.float64, np.int16, np.uint16, np.uint8)
 
 
 def _row_order(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
@@ -1272,8 +1276,8 @@ def _row_order(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
     """
     if array.flags.c_contiguous or array.size < _ROW_ORDER_MIN_SIZE:
         return array
-    if array.ndim == 3 and array.dtype == np.float64 and array.flags.f_contiguous:
-        out = np.empty(array.shape, dtype=np.float64)
+    if array.ndim == 3 and array.dtype in _ROW_ORDER_DTYPES and array.flags.f_contiguous:
+        out = np.empty(array.shape, dtype=array.dtype)
         _to_row_order_numba(array, out)
         return out
     return np.ascontiguousarray(array)
@@ -1475,9 +1479,12 @@ def _load_dicom_series(
     except Exception as e:
         raise ValueError("Failed to extract pixel arrays from DICOM slices.") from e
 
-    volume = np.stack(pixel_data, axis=-1)  # Result: (Y, X, Z)
+    # Stacking on a new first axis copies each slice in one piece. The (X, Y, Z) view of
+    # the result is in column order, and a large volume goes to row order, like NIfTI data.
+    volume = np.moveaxis(np.stack(pixel_data), 0, -1)  # Result: (Y, X, Z)
+    pixel_data.clear()  # the stack holds the slices now; free them before the copy
     volume = np.swapaxes(volume, 0, 1)  # Result: (X, Y, Z)
-    volume = _ensure_3d(volume)
+    volume = _row_order(_ensure_3d(volume))
 
     # Extract metadata from the first slice (reference)
     ref = slices[0]
@@ -1622,7 +1629,7 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
         # From (Z, Y, X) to (X, Y, Z): swap 0<->2
         data = np.swapaxes(data, 0, 2)  # (Z, Y, X) -> (X, Y, Z)
 
-    data = _ensure_3d(data)
+    data = _row_order(_ensure_3d(data))
 
     # Metadata extraction
     try:
