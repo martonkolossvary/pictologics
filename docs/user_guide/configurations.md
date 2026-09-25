@@ -163,7 +163,7 @@ standard_fbs_16:
 
 The standard configurations have `include_spatial_intensity` and `include_local_intensity` set to `false` for performance:
 
-- **Spatial intensity features**: Require distance calculations to ROI boundary (computationally expensive)
+- **Spatial intensity features**: Compare all pairs of ROI voxels. Large ROIs use FFT convolutions, which are fast but need about 32 bytes per point of a grid twice the ROI box along each axis
 - **Local intensity features**: Require local neighborhood analysis
 
 To enable these features, create a custom configuration variant:

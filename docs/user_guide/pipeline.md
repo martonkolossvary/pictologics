@@ -636,7 +636,7 @@ print(f"Extracted {len(all_features)} features")
 
 ## Performance & Tips
 
-- **Spatial/local intensity** can be extremely slow on large ROIs. Keep them disabled unless needed.
+- **Spatial/local intensity** add time on large ROIs. Keep them disabled unless needed. Spatial intensity uses FFT convolutions on large ROIs. If the FFT needs more than 16 GB, or more than half of the memory, a slow pair loop runs instead, with a warning.
 - **Texture** requires discretisation. Without a `discretise` step, the pipeline raises an error.
 - For large 3D images, consider coarser spacing for exploratory work.
 - For CT in Hounsfield Units, FBS (`bin_width`) is often more interpretable; for MRI/PET, FBN (`n_bins`) may be preferable.
