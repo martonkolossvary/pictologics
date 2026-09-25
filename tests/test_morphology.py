@@ -252,28 +252,33 @@ class TestMorphologyFeatures(unittest.TestCase):
         features = _get_mvee_features(None, 1.0, 1.0)
         self.assertEqual(features, {})
 
-    @patch("mcubes.marching_cubes")
-    def test_marching_cubes_failure(self, mock_mc):
-        mock_mc.side_effect = ValueError("Marching cubes failed")
-        arr = np.zeros((5, 5, 5), dtype=int)
-        arr[2, 2, 2] = 1
-        mask = self._create_image(arr)
-        features = calculate_morphology_features(mask)
-        # Voxel volume logic is separate, so it should exist
-        self.assertIn("volume_voxel_counting_YEKZ", features)
-        self.assertNotIn("volume_RNU0", features)
+    def test_marching_cubes_matches_pymcubes(self):
+        # The kernel gives the PyMCubes mesh: the same vertices and faces, in the same order.
+        import mcubes
+        from scipy.ndimage import gaussian_filter
 
-    @patch("mcubes.marching_cubes")
-    def test_marching_cubes_empty(self, mock_mc):
-        mock_mc.return_value = (
-            np.array([]).reshape(0, 3),
-            np.array([], dtype=int).reshape(0, 3),
-        )
-        arr = np.zeros((5, 5, 5), dtype=int)
-        arr[2, 2, 2] = 1
-        mask = self._create_image(arr)
-        features = calculate_morphology_features(mask)
-        self.assertNotIn("volume_RNU0", features)
+        from pictologics.features._mc_tables import EDGE_TABLE, TRIANGLE_COUNT, TRIANGLE_TABLE
+        from pictologics.features.morphology import _marching_cubes_numba
+
+        rng = np.random.default_rng(3)
+        masks = [np.ones((1, 1, 1)), np.ones((3, 1, 2))]
+        for n in range(30):
+            field = rng.random(tuple(int(s) for s in rng.integers(1, 12, 3)))
+            masks.append(field < 0.5 if n % 2 else gaussian_filter(field, 1.0) > 0.5)
+        for m in masks:
+            padded = np.pad(m.astype(np.uint8), 1)
+            ref_verts, ref_faces = mcubes.marching_cubes(padded.astype(np.float32), 0.5)
+            verts, faces = _marching_cubes_numba(padded, EDGE_TABLE, TRIANGLE_TABLE, TRIANGLE_COUNT)
+            np.testing.assert_array_equal(verts, ref_verts)
+            np.testing.assert_array_equal(faces, ref_faces.astype(np.int64))
+
+    def test_mesh_features_empty_bbox(self):
+        # A given bbox with no ROI voxel gives no mesh features.
+        arr = np.zeros((5, 5, 5), dtype=np.uint8)
+        arr[4, 4, 4] = 1
+        box = (slice(0, 2), slice(0, 2), slice(0, 2))
+        features = calculate_morphology_features(self._create_image(arr), roi_bbox=box)
+        self.assertEqual(features, {"volume_voxel_counting_YEKZ": 0.0})
 
     @patch("pictologics.features.morphology._get_mesh_features")
     def test_shape_features_zero_volume_positive_area(self, mock_get_mesh):

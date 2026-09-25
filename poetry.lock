@@ -1754,7 +1754,7 @@ version = "2.2.6"
 description = "Fundamental package for array computing in Python"
 optional = false
 python-versions = ">=3.10"
-groups = ["main"]
+groups = ["main", "dev"]
 files = [
     {file = "numpy-2.2.6-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:b412caa66f72040e6d268491a59f2c43bf03eb6c96dd8f0307829feb7fa2b6fb"},
     {file = "numpy-2.2.6-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:8e41fd67c52b86603a91c1a505ebaef50b3314de0213461c7a6e99c9a3beff90"},
@@ -2256,7 +2256,7 @@ version = "0.1.6"
 description = "Marching cubes for Python"
 optional = false
 python-versions = "*"
-groups = ["main"]
+groups = ["dev"]
 files = [
     {file = "PyMCubes-0.1.6-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:8b66c714abb554dbb0cc3fa75fc1fd24e27dc2cc618a2685832b825156848792"},
     {file = "PyMCubes-0.1.6-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:e37a81ffff099e8d275c4c973f34978934720120a02d06198c410f48c9f6b7d0"},
@@ -2704,7 +2704,7 @@ version = "1.17.0"
 description = "Fundamental algorithms for scientific computing in Python"
 optional = false
 python-versions = ">=3.11"
-groups = ["main"]
+groups = ["main", "dev"]
 files = [
     {file = "scipy-1.17.0-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:2abd71643797bd8a106dff97894ff7869eeeb0af0f7a5ce02e4227c6a2e9d6fd"},
     {file = "scipy-1.17.0-cp311-cp311-macosx_12_0_arm64.whl", hash = "sha256:ef28d815f4d2686503e5f4f00edc387ae58dfd7a2f42e348bb53359538f01558"},
@@ -3035,4 +3035,4 @@ watchmedo = ["PyYAML (>=3.10)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "af6937ffb93235bf2d027ae07559960456857ab1260795a0af49e75ababa9e11"
+content-hash = "fb2d04792a288941de4e4e19c176edfa8a4dd22150bebacebf216d5887fd1010"

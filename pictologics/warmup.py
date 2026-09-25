@@ -21,7 +21,7 @@ import numpy as np
 import numpy.typing as npt
 
 # Private imports to access Numba kernels directly
-from .features import _utils, intensity, morphology, texture
+from .features import _mc_tables, _utils, intensity, morphology, texture
 
 
 def warmup_jit() -> None:
@@ -243,6 +243,11 @@ def _warmup_morphology() -> None:
     morphology._accumulate_moments_from_mask_numba(mask[1:, 1:, 1:])
     morphology._accumulate_intensity_weighted_moments_numba(mask, img)
     morphology._accumulate_intensity_weighted_moments_numba(mask[1:, 1:, 1:], img[1:, 1:, 1:])
+
+    # Marching cubes (the mask with its zero border)
+    morphology._marching_cubes_numba(
+        np.pad(mask, 1), _mc_tables.EDGE_TABLE, _mc_tables.TRIANGLE_TABLE, _mc_tables.TRIANGLE_COUNT
+    )
 
     # 2. Point Cloud / Mesh Operations
     # Simple pyramid (5 verts)

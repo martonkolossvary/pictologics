@@ -44,7 +44,6 @@ from __future__ import annotations
 import math
 from typing import Any, Optional
 
-import mcubes
 import numpy as np
 from numba import jit, prange
 from numpy import typing as npt
@@ -52,6 +51,7 @@ from scipy.spatial import ConvexHull
 from scipy.special import eval_legendre
 
 from ..loader import Image
+from ._mc_tables import EDGE_TABLE, TRIANGLE_COUNT, TRIANGLE_TABLE
 from ._utils import compute_nonzero_bbox
 
 
@@ -249,6 +249,107 @@ def _hull_candidates_numba(
             keep[m] = i
             m += 1
     return keep[:m]
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _mc_corners(vol: npt.NDArray[np.uint8], i: int, j: int, k: int) -> int:
+    """Bits of the four cube corners in the plane z = k that are 0, in PyMCubes' order."""
+    c = 0
+    if vol[i, j, k] == 0:
+        c |= 1
+    if vol[i + 1, j, k] == 0:
+        c |= 2
+    if vol[i + 1, j + 1, k] == 0:
+        c |= 4
+    if vol[i, j + 1, k] == 0:
+        c |= 8
+    return c
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _marching_cubes_numba(
+    vol: npt.NDArray[np.uint8],
+    edge_table: npt.NDArray[np.int32],
+    tri_table: npt.NDArray[np.int8],
+    tri_count: npt.NDArray[np.int32],
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]]:
+    """Marching cubes of a 0/1 volume with a zero border, at the isovalue 0.5.
+
+    Gives the mesh of mc::marching_cubes in PyMCubes 0.1.6 (marchingcubes.h; BSD 3-Clause,
+    Copyright (c) 2012-2015, P. M. Neila; see NOTICE): the same vertices and faces, in the
+    same order. It walks the cubes in the same order and keeps PyMCubes' vertex numbers of
+    the edges on the last two x planes. The zero border makes two steps simpler: no
+    surface crosses an edge on the first x, y or z face, so only edges 5, 6 and 10 make new
+    vertices; and each vertex is the midpoint of its 0/1 edge, which is exactly the value
+    of PyMCubes' interpolation. A first pass counts the vertices and the faces, so the
+    arrays get their final size at once.
+    """
+    nx, ny, nz = vol.shape[0] - 1, vol.shape[1] - 1, vol.shape[2] - 1
+    n_v = 0
+    n_f = 0
+    for i in range(nx):
+        for j in range(ny):
+            c = _mc_corners(vol, i, j, 0) << 4
+            for k in range(nz):
+                c = (c >> 4) | (_mc_corners(vol, i, j, k + 1) << 4)
+                e = edge_table[c]
+                n_v += ((e >> 5) & 1) + ((e >> 6) & 1) + ((e >> 10) & 1)
+                n_f += tri_count[c]
+    verts = np.empty((n_v, 3), dtype=np.float64)
+    faces = np.empty(n_f, dtype=np.int64)
+    # Vertex numbers of the edges on the two latest x planes (index: i % 2, j, k).
+    sx = np.zeros((2, ny + 1, nz + 1), dtype=np.int64)
+    sy = np.zeros((2, ny + 1, nz + 1), dtype=np.int64)
+    sz = np.zeros((2, ny + 1, nz + 1), dtype=np.int64)
+    idx = np.zeros(12, dtype=np.int64)
+    nv = 0
+    nf = 0
+    for i in range(nx):
+        p = i % 2
+        q = 1 - p
+        for j in range(ny):
+            c = _mc_corners(vol, i, j, 0) << 4
+            for k in range(nz):
+                c = (c >> 4) | (_mc_corners(vol, i, j, k + 1) << 4)
+                e = edge_table[c]
+                if e == 0:
+                    continue
+                if e & 0x040:
+                    verts[nv, 0] = i + 0.5
+                    verts[nv, 1] = j + 1.0
+                    verts[nv, 2] = k + 1.0
+                    idx[6] = nv
+                    sx[q, j + 1, k + 1] = nv
+                    nv += 1
+                if e & 0x020:
+                    verts[nv, 0] = i + 1.0
+                    verts[nv, 1] = j + 0.5
+                    verts[nv, 2] = k + 1.0
+                    idx[5] = nv
+                    sy[q, j + 1, k + 1] = nv
+                    nv += 1
+                if e & 0x400:
+                    verts[nv, 0] = i + 1.0
+                    verts[nv, 1] = j + 1.0
+                    verts[nv, 2] = k + 0.5
+                    idx[10] = nv
+                    sz[q, j + 1, k + 1] = nv
+                    nv += 1
+                # The other edges were numbered by an earlier cube; the triangle
+                # table reads only the crossed ones.
+                idx[0] = sx[q, j, k]
+                idx[1] = sy[q, j + 1, k]
+                idx[2] = sx[q, j + 1, k]
+                idx[3] = sy[p, j + 1, k]
+                idx[4] = sx[q, j, k + 1]
+                idx[7] = sy[p, j + 1, k + 1]
+                idx[8] = sz[p, j, k + 1]
+                idx[9] = sz[q, j, k + 1]
+                idx[11] = sz[p, j + 1, k + 1]
+                for m in range(tri_count[c]):
+                    faces[nf] = idx[tri_table[c, m]]
+                    nf += 1
+    return verts, faces.reshape(-1, 3)
 
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
@@ -512,8 +613,8 @@ def _get_mesh_features(
     """
     Calculate mesh-based features (Surface Area, Volume) and return mesh data.
 
-    Uses PyMCubes for marching cubes mesh generation, which produces IBSI-compliant
-    results for the digital phantom.
+    The marching cubes kernel gives the PyMCubes mesh (the same vertices and faces, in
+    the same order), which produces IBSI-compliant results for the digital phantom.
 
     Optimization: Crops mask to bounding box before mesh generation for large sparse ROIs.
     `roi_bbox` may pass a precomputed nonzero bounding box to skip the scan.
@@ -529,32 +630,20 @@ def _get_mesh_features(
     mask_cropped = (mask.array[bbox] != 0).astype(np.uint8)
     origin_offset = np.array([bbox[0].start, bbox[1].start, bbox[2].start], dtype=np.float64)
 
-    mask_padded_u8 = np.pad(mask_cropped, 1, mode="constant", constant_values=0)
-    mask_padded = np.ascontiguousarray(mask_padded_u8.astype(np.float32, copy=False))
-
-    try:
-        # Use PyMCubes marching cubes implementation
-        verts, faces = mcubes.marching_cubes(mask_padded, 0.5)
-
-        if len(verts) == 0 or len(faces) == 0:
-            return {}, None, None
-
-        # Adjust vertices: account for padding (-1) and bbox offset
-        spacing = np.asarray(mask.spacing, dtype=np.float64)
-        verts = np.asarray(verts, dtype=np.float64)
-        # Subtract 1 for padding, add origin_offset for bbox cropping
-        verts = (verts - 1.0 + origin_offset) * spacing
-
-        faces_i64 = np.asarray(faces, dtype=np.int64)
-
-        surface_area, mesh_volume = _mesh_area_volume_numba(verts, faces_i64)
-        features["surface_area_C0JK"] = float(surface_area)
-        features["volume_RNU0"] = float(mesh_volume)
-
-        return features, verts, faces_i64  # type: ignore[return-value]
-    except (ValueError, RuntimeError):
-        # Marching cubes failed
+    mask_padded = np.pad(mask_cropped, 1)
+    verts, faces = _marching_cubes_numba(mask_padded, EDGE_TABLE, TRIANGLE_TABLE, TRIANGLE_COUNT)
+    if len(faces) == 0:  # a bbox with no ROI voxel
         return {}, None, None
+
+    # Adjust vertices: account for padding (-1) and bbox offset
+    spacing = np.asarray(mask.spacing, dtype=np.float64)
+    verts = (verts - 1.0 + origin_offset) * spacing
+
+    surface_area, mesh_volume = _mesh_area_volume_numba(verts, faces)
+    features["surface_area_C0JK"] = float(surface_area)
+    features["volume_RNU0"] = float(mesh_volume)
+
+    return features, verts, faces  # type: ignore[return-value]
 
 
 def _get_shape_features(surface_area: float, mesh_volume: float) -> dict[str, float]:
