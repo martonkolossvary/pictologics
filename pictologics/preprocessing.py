@@ -40,8 +40,8 @@ COMMON_SENTINEL_VALUES: tuple[float, ...] = (
 
 # Below this size the numba parallel-launch overhead exceeds the scan itself;
 # the numpy fallback paths are kept for small arrays (same convention as
-# features._utils). Resegment, filter_outliers, sentinel detection and the
-# discretise of an array that needs a copy dispatch on it; both paths are
+# features._utils). filter_outliers dispatches on it, and so do the kernels below
+# for arrays that share no memory order (they need a copy); both paths are
 # bit-identical, so the switch is purely a performance decision.
 _KERNEL_MIN_SIZE = 1 << 20
 
@@ -52,9 +52,21 @@ _NEAREST_KERNEL_MIN_SIZE = 25_000
 _LINEAR_KERNEL_MIN_SIZE = 4_500
 _MASKED_KERNEL_MIN_SIZE = 1_800
 
-# Measured crossover (14-core M4 Pro), in voxels: below this size the discretise
-# kernels' start-up cost (about 0.07 ms) is more than the numpy chain's whole run.
+# Measured crossovers (14-core M4 Pro), in voxels: below these sizes the kernels'
+# start-up cost (0.07-0.2 ms) is more than the numpy code's whole run.
 _DISCRETISE_KERNEL_MIN_SIZE = 80_000
+_RESEGMENT_KERNEL_MIN_SIZE = 80_000
+_SENTINEL_KERNEL_MIN_SIZE = 200_000
+
+
+def _shared_order(*arrays: npt.NDArray[Any]) -> Optional[Literal["C", "F"]]:
+    """The memory order that all arrays share: "C" (row) or "F" (column), else None.
+    In a shared order, ravel and reshape copy nothing."""
+    if all(a.flags.c_contiguous for a in arrays):
+        return "C"
+    if all(a.flags.f_contiguous for a in arrays):
+        return "F"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -400,10 +412,17 @@ def detect_sentinel_value(
     # instead of one pass per candidate. The counts are the same.
     counts: Optional[npt.NDArray[np.int64]] = None
     inside_counts: Optional[npt.NDArray[np.int64]] = None
-    if array.dtype == np.float64 and array.size >= _KERNEL_MIN_SIZE:
-        roi_flat = roi_mask.array.ravel() if roi_mask is not None else np.empty(0, np.uint8)
+    order = _shared_order(array) if roi_mask is None else _shared_order(array, roi_mask.array)
+    if (
+        array.dtype == np.float64
+        and array.size >= (_SENTINEL_KERNEL_MIN_SIZE if order else _KERNEL_MIN_SIZE)
+        and (roi_mask is None or roi_mask.array.dtype in (np.float64, np.uint8, np.bool_))
+    ):
+        roi_flat = (
+            roi_mask.array.ravel(order or "C") if roi_mask is not None else np.empty(0, np.uint8)
+        )
         counts, inside_counts = _sentinel_counts_numba(
-            array.ravel(), roi_flat, np.asarray(candidate_values, dtype=np.float64)
+            array.ravel(order or "C"), roi_flat, np.asarray(candidate_values, dtype=np.float64)
         )
     elif roi_mask is not None:
         roi_arr = roi_mask.array > 0
@@ -933,13 +952,10 @@ def discretise_image(
     # The bin maths below run densely on the full array (no boolean
     # gather/scatter): NaN voxels propagate through the float ops and are
     # mapped to bin 0 (invalid) at the end. The kernels read and write a row- or
-    # column-order array in its own order, with no copy. Another layout (for
-    # example a DICOM series) needs a copy, which pays off only from
-    # _KERNEL_MIN_SIZE voxels.
-    order: Literal["C", "F"] = "F" if array.flags.f_contiguous else "C"
-    dense = array.flags.c_contiguous or array.flags.f_contiguous
+    # column-order array in its own order, with no copy.
+    order = _shared_order(array)
     use_kernel = array.dtype == np.float64 and array.size >= (
-        _DISCRETISE_KERNEL_MIN_SIZE if dense else _KERNEL_MIN_SIZE
+        _DISCRETISE_KERNEL_MIN_SIZE if order else _KERNEL_MIN_SIZE
     )
     if method == "FBN":
         if n_bins is None:
@@ -956,12 +972,12 @@ def discretise_image(
             discretised = (~np.isnan(array)).astype(np.int32)
         elif use_kernel:
             # Single-pass kernel; bit-identical to the numpy chain below
-            flat = array.ravel(order)
+            flat = array.ravel(order or "C")
             binned: npt.NDArray[Any] = np.empty(flat.size, dtype=np.int32)
             _discretise_fbn_numba(
                 flat, float(n_bins), float(current_min), float(current_max), binned
             )
-            discretised = binned.reshape(array.shape, order=order)
+            discretised = binned.reshape(array.shape, order=order or "C")
         else:
             # IBSI FBN: floor(N_g * (X - X_min) / (X_max - X_min)) + 1
             # (same operation order as before, so bins are bit-identical)
@@ -992,10 +1008,10 @@ def discretise_image(
 
         if use_kernel:
             # Single-pass kernel; bit-identical to the numpy chain below
-            flat = array.ravel(order)
+            flat = array.ravel(order or "C")
             fbs_binned: npt.NDArray[Any] = np.empty(flat.size, dtype=np.int32)
             _discretise_fbs_numba(flat, float(bin_width), float(current_min), fbs_binned)
-            discretised = fbs_binned.reshape(array.shape, order=order)
+            discretised = fbs_binned.reshape(array.shape, order=order or "C")
         else:
             # IBSI FBS: floor((X - X_min) / w_b) + 1
             temp = array - current_min
@@ -1214,17 +1230,21 @@ def resegment_mask(
             ) from exc
         raise
 
+    order = _shared_order(image.array, mask.array)
     if (
         image.array.dtype == np.float64
-        and image.array.size >= _KERNEL_MIN_SIZE
+        and image.array.size >= (_RESEGMENT_KERNEL_MIN_SIZE if order else _KERNEL_MIN_SIZE)
         and mask.array.dtype in (np.float64, np.uint8, np.bool_)
     ):
-        # Single-pass kernel; bit-identical to the numpy chain below
+        # Single-pass kernel; bit-identical to the numpy chain below. It keeps the
+        # memory order that the image and the mask share.
         lo = float("-inf") if range_min is None else float(range_min)
         hi = float("inf") if range_max is None else float(range_max)
         flat_out = np.empty(mask.array.size, dtype=mask.array.dtype)
-        _resegment_numba(image.array.ravel(), mask.array.ravel(), lo, hi, flat_out)
-        new_mask_array = flat_out.reshape(mask.array.shape)
+        _resegment_numba(
+            image.array.ravel(order or "C"), mask.array.ravel(order or "C"), lo, hi, flat_out
+        )
+        new_mask_array = flat_out.reshape(mask.array.shape, order=order or "C")
     else:
         new_mask_array = mask.array.copy()
 

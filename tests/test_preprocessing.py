@@ -628,10 +628,10 @@ def test_resample_with_source_mask() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Numba kernel paths (float64, size >= _KERNEL_MIN_SIZE, or
-# _DISCRETISE_KERNEL_MIN_SIZE for discretise). The limits are patched small so tiny
-# arrays exercise the single-pass kernels; the optimization work proved these
-# bit-identical to the numpy fallback.
+# Numba kernel paths (float64, size >= a kernel's limit, for example
+# _DISCRETISE_KERNEL_MIN_SIZE, or _KERNEL_MIN_SIZE for arrays that share no memory
+# order). The limits are patched small so tiny arrays exercise the single-pass
+# kernels; the optimization work proved these bit-identical to the numpy fallback.
 # ---------------------------------------------------------------------------
 
 
@@ -853,14 +853,79 @@ def test_detect_sentinel_one_pass_matches_numpy() -> None:
     for roi_arr in (None, roi, roi.astype(np.uint8), roi > 0):
         roi_img = None if roi_arr is None else Image(roi_arr, (1, 1, 1), (0, 0, 0))
         ref = detect_sentinel_value(img, candidates, roi_mask=roi_img)
-        with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+        with patch("pictologics.preprocessing._SENTINEL_KERNEL_MIN_SIZE", 8):
             assert detect_sentinel_value(img, candidates, roi_mask=roi_img) == ref
         assert ref == -2048.0
+
+
+def test_detect_sentinel_kernel_pairs_every_layout() -> None:
+    # The kernel pairs each voxel with its own ROI value: in a shared column order with
+    # no copy, and for an image and an ROI in different orders with a copy. An int32 ROI
+    # keeps the numpy loop.
+    from pictologics import preprocessing as pp
+
+    rng = np.random.default_rng(12)
+    arr = np.where(rng.random((6, 7, 8)) < 0.5, -1000.0, 5.0)
+    roi = (rng.random(arr.shape) < 0.5).astype(np.uint8)
+    seen: list[tuple[np.ndarray, np.ndarray]] = []
+    kernel = pp._sentinel_counts_numba
+
+    def spy(*args: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        seen.append(kernel(*args))
+        return seen[-1]
+
+    def image(a: np.ndarray) -> Image:
+        return Image(a, (1, 1, 1), (0, 0, 0))
+
+    layouts = [
+        (np.asfortranarray(arr), np.asfortranarray(roi)),
+        (arr, np.asfortranarray(roi)),
+        (arr, roi.astype(np.int32)),
+    ]
+    with patch.multiple(
+        pp, _SENTINEL_KERNEL_MIN_SIZE=8, _KERNEL_MIN_SIZE=8, _sentinel_counts_numba=spy
+    ):
+        for a, r in layouts:
+            pp.detect_sentinel_value(image(a), (-1000.0,), roi_mask=image(r))
+    assert len(seen) == 2
+    for counts, inside in seen:
+        assert counts[0] == np.count_nonzero(arr == -1000.0)
+        assert inside[0] == np.count_nonzero((arr == -1000.0) & (roi > 0))
 
 
 def test_resegment_kernel() -> None:
     img = Image(_f64((4, 4, 4)), (1, 1, 1), (0, 0, 0))
     mask = Image(np.ones((4, 4, 4), dtype=np.uint8), (1, 1, 1), (0, 0, 0))
-    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+    with patch("pictologics.preprocessing._RESEGMENT_KERNEL_MIN_SIZE", 8):
         out = resegment_mask(img, mask, range_min=5.0, range_max=50.0)
     assert out.array.shape == (4, 4, 4)
+
+
+def test_resegment_kernel_keeps_array_order() -> None:
+    # The kernel gives the numpy chain's mask bit for bit (label values, -0.0, NaN
+    # intensities) for row, column and mixed order. A shared column order stays column
+    # order; an image and a mask in different orders need a copy.
+    rng = np.random.default_rng(13)
+    image = rng.normal(0.0, 50.0, (5, 6, 7))
+    image[1, 2, 3] = np.nan
+    labels = np.where(rng.random(image.shape) < 0.7, 3.0, -0.0)
+
+    def image_of(a: np.ndarray) -> Image:
+        return Image(a, (1, 1, 1), (0, 0, 0))
+
+    for mask_arr in (labels, (labels != 0).astype(np.uint8), labels != 0):
+        ref = resegment_mask(image_of(image), image_of(mask_arr), -40.0, 60.0).array
+        for img_arr, m_arr in (
+            (image, mask_arr),
+            (np.asfortranarray(image), np.asfortranarray(mask_arr)),
+            (image, np.asfortranarray(mask_arr)),
+        ):
+            with patch.multiple(
+                "pictologics.preprocessing", _RESEGMENT_KERNEL_MIN_SIZE=8, _KERNEL_MIN_SIZE=8
+            ):
+                out = resegment_mask(image_of(img_arr), image_of(m_arr), -40.0, 60.0).array
+            assert out.dtype == ref.dtype
+            bits = np.ascontiguousarray(out).view(np.uint8)
+            assert np.array_equal(bits, np.ascontiguousarray(ref).view(np.uint8))
+            both_f = img_arr.flags.f_contiguous and m_arr.flags.f_contiguous
+            assert out.flags.f_contiguous == both_f
