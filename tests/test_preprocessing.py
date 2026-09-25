@@ -660,6 +660,29 @@ def test_discretise_fbs_kernel_clamps() -> None:
     assert out.array[0, 0, 0] == 0
 
 
+def test_discretise_roi_search_only_for_missing_bounds() -> None:
+    # Default bounds come from the ROI values; given bounds skip the ROI search.
+    rng = np.random.default_rng(9)
+    arr = rng.normal(0.0, 50.0, (6, 7, 8))
+    arr[2, 3, 4] = np.nan
+    mask = np.zeros(arr.shape)
+    mask[1:4, 2:6, 3:7] = rng.random((3, 4, 4)) < 0.7
+    values = arr[mask > 0]
+    values = values[~np.isnan(values)]
+    expected = discretise_image(arr, "FBN", n_bins=8, min_val=values.min(), max_val=values.max())
+    assert_array_equal(discretise_image(arr, "FBN", roi_mask=mask, n_bins=8), expected)
+
+    class NoSearch(np.ndarray):
+        def __gt__(self, other: object) -> np.ndarray:
+            raise AssertionError("the ROI search ran")
+
+    no_search = mask.view(NoSearch)
+    discretise_image(arr, "FBS", roi_mask=no_search, bin_width=10.0, min_val=-100.0)
+    discretise_image(arr, "FBN", roi_mask=no_search, n_bins=8, min_val=-9.0, max_val=9.0)
+    with pytest.raises(AssertionError, match="the ROI search ran"):
+        discretise_image(arr, "FBN", roi_mask=no_search, n_bins=8)
+
+
 def test_discretise_integer_input() -> None:
     # Integer input takes the out-of-place (promoting) division branch.
     img = Image(np.arange(27, dtype=np.int32).reshape(3, 3, 3), (1, 1, 1), (0, 0, 0))
@@ -676,14 +699,14 @@ def test_discretise_empty_image_returns_image() -> None:
 
 def test_resample_nearest_kernel() -> None:
     img = Image(np.random.rand(8, 8, 8).astype(np.float64), (1, 1, 1), (0, 0, 0))
-    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+    with patch("pictologics.preprocessing._NEAREST_KERNEL_MIN_SIZE", 1):
         assert resample_image(img, (0.7, 0.7, 0.7), interpolation="nearest").array.ndim == 3
         assert resample_image(img, (1.3, 1.3, 1.3), interpolation="nearest").array.ndim == 3
 
 
 def test_resample_linear_kernel_and_all_valid_source() -> None:
     img = Image(np.random.rand(8, 8, 8).astype(np.float64), (1, 1, 1), (0, 0, 0))
-    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+    with patch("pictologics.preprocessing._LINEAR_KERNEL_MIN_SIZE", 1):
         resample_image(img, (0.7, 0.7, 0.7), interpolation="linear")
         # An all-valid source mask collapses to "no mask", but the resampled image
         # still carries an all-valid source mask.
@@ -695,16 +718,118 @@ def test_resample_linear_kernel_and_all_valid_source() -> None:
     assert bool(r.source_mask.all())
 
 
+def test_resample_kernels_match_scipy() -> None:
+    # The kernels give scipy's output bit for bit: -0.0 values, rounding, mask
+    # thresholds, uint8 input, the source-mask path, and nearest mode. Small outputs
+    # go to scipy itself; gates of 1 force the kernels.
+    from unittest.mock import patch as patch_attrs
+
+    from scipy.ndimage import affine_transform
+
+    from pictologics.preprocessing import _resample_with_source_mask
+
+    rng = np.random.default_rng(6)
+    spacing, new_spacing = (3.27, 5.0, 0.8), (2.2, 4.0, 2.0)
+    image = np.round(rng.normal(0.0, 3.0, (7, 6, 9)))  # has -0.0 values
+    mask = (rng.random((7, 6, 9)) < 0.5).astype(np.uint8)
+    source = rng.random((7, 6, 9)) < 0.7
+    uint8_img = rng.integers(0, 256, image.shape).astype(np.uint8)
+    shape = (11, 8, 4)
+    matrix = np.array(new_spacing) / np.array(spacing)
+    offset = (np.array(image.shape) - 1) / 2.0 - matrix * (np.array(shape) - 1) / 2.0
+
+    def scipy_out(arr: np.ndarray, order: int = 1) -> np.ndarray:
+        return affine_transform(
+            arr, matrix=matrix, offset=offset, output_shape=shape, order=order, mode="nearest"
+        )
+
+    def same(a: np.ndarray, b: np.ndarray) -> bool:
+        return a.dtype == b.dtype and np.array_equal(a.view(np.uint8), b.view(np.uint8))
+
+    img = Image(image, spacing, (0, 0, 0))
+    masked = img.with_source_mask(Image(source.astype(np.uint8), spacing, (0, 0, 0)))
+    ref, ref_valid = _resample_with_source_mask(
+        image, source, matrix, offset, shape, 1, "nearest", 0.5
+    )
+    for gate in (1, 1 << 20):
+        gates = {f"_{name}_KERNEL_MIN_SIZE": gate for name in ("LINEAR", "NEAREST", "MASKED")}
+        with patch_attrs.multiple("pictologics.preprocessing", **gates):
+            assert same(resample_image(img, new_spacing).array, scipy_out(image))
+            rounded = resample_image(img, new_spacing, round_intensities=True).array
+            assert same(rounded, np.round(scipy_out(image)))
+            for arr in (mask, mask.astype(np.float64)):
+                out = resample_image(
+                    Image(arr, spacing, (0, 0, 0)), new_spacing, mask_threshold=0.5
+                )
+                assert same(out.array, (scipy_out(arr) >= 0.5).astype(np.uint8))
+            uint8_out = resample_image(Image(uint8_img, spacing, (0, 0, 0)), new_spacing).array
+            assert same(uint8_out, scipy_out(uint8_img))
+            nearest = resample_image(img, new_spacing, interpolation="nearest").array
+            assert same(nearest, scipy_out(image, order=0))
+            out = resample_image(masked, new_spacing)
+            assert same(out.array, ref)
+            assert_array_equal(out.source_mask, ref_valid)
+
+
 def test_resample_masked_linear_kernel() -> None:
     # A partial source mask + float64 + linear routes to the fused masked kernel.
     img = Image(np.random.rand(8, 8, 8).astype(np.float64), (1, 1, 1), (0, 0, 0))
     src = np.ones((8, 8, 8), dtype=np.uint8)
     src[3:5, 3:5, 3:5] = 0
     masked = img.with_source_mask(Image(src, img.spacing, img.origin))
-    with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+    with patch("pictologics.preprocessing._MASKED_KERNEL_MIN_SIZE", 1):
         r = resample_image(masked, (0.7, 0.7, 0.7), interpolation="linear")
     assert r.array.ndim == 3
     assert r.source_mask is not None
+
+
+def test_filter_outliers_kernels_match_numpy() -> None:
+    # The two parallel passes give the numpy path's ROI values (same order) and mask,
+    # bit for bit: label values, NaN intensities, and -0.0 outside the ROI.
+    from pictologics.preprocessing import _roi_values_numba
+
+    rng = np.random.default_rng(10)
+    image = rng.normal(0.0, 10.0, (6, 7, 8))
+    image[0, :3, 0] = np.nan
+    image[2, 3, 4] = 80.0  # an outlier
+    labels = np.where(rng.random(image.shape) < 0.6, 2.0, -0.0)
+    img = Image(image, (1, 1, 1), (0, 0, 0))
+    for mask_arr in (labels, (labels != 0).astype(np.uint8), labels != 0):
+        np.testing.assert_array_equal(
+            _roi_values_numba(image.ravel(), mask_arr.ravel()), image[mask_arr != 0]
+        )
+        mask = Image(mask_arr, (1, 1, 1), (0, 0, 0))
+        ref = filter_outliers(img, mask, 2.0).array
+        with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+            out = filter_outliers(img, mask, 2.0).array
+        assert out.dtype == ref.dtype
+        assert np.array_equal(out.view(np.uint8), ref.view(np.uint8))
+        assert int(np.count_nonzero(out)) < int(np.count_nonzero(mask_arr))
+
+
+def test_detect_sentinel_one_pass_matches_numpy() -> None:
+    # The one-pass count gives the per-candidate loop's answer, with and without an ROI
+    # mask, also for a repeated candidate.
+    from pictologics.preprocessing import _sentinel_counts_numba
+
+    rng = np.random.default_rng(11)
+    arr = rng.normal(0.0, 100.0, (8, 8, 8))
+    arr[:, :, :3] = -2048.0
+    arr[:2, :, 3:] = -1000.0
+    img = Image(arr, (1, 1, 1), (0, 0, 0))
+    roi = np.zeros(arr.shape)
+    roi[:, :, 5:] = 1.0  # -2048 lies outside it; -1000 mostly inside
+    candidates = (-1000.0, -2048.0, -1000.0)
+    counts, inside = _sentinel_counts_numba(arr.ravel(), roi.ravel(), np.array(candidates))
+    for k, value in enumerate(candidates):
+        assert counts[k] == np.count_nonzero(arr == value)
+        assert inside[k] == np.count_nonzero((arr == value) & (roi > 0))
+    for roi_arr in (None, roi, roi.astype(np.uint8), roi > 0):
+        roi_img = None if roi_arr is None else Image(roi_arr, (1, 1, 1), (0, 0, 0))
+        ref = detect_sentinel_value(img, candidates, roi_mask=roi_img)
+        with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+            assert detect_sentinel_value(img, candidates, roi_mask=roi_img) == ref
+        assert ref == -2048.0
 
 
 def test_resegment_kernel() -> None:

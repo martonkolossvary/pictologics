@@ -16,6 +16,7 @@ Key Features:
 
 from __future__ import annotations
 
+import math
 import warnings
 from typing import Any, Optional, cast
 
@@ -42,6 +43,13 @@ COMMON_SENTINEL_VALUES: tuple[float, ...] = (
 # features._utils). Discretise/resegment dispatch on it; both paths are
 # bit-identical, so the switch is purely a performance decision.
 _KERNEL_MIN_SIZE = 1 << 20
+
+# Measured crossovers (14-core M4 Pro), in output voxels: below these sizes the
+# resample kernels' start-up cost (about 0.1 ms) is more than scipy's whole run.
+# Both give the same output, so the switch is purely a performance decision.
+_NEAREST_KERNEL_MIN_SIZE = 25_000
+_LINEAR_KERNEL_MIN_SIZE = 4_500
+_MASKED_KERNEL_MIN_SIZE = 1_800
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +138,8 @@ def _resample_nearest_numba(
     Replicates scipy's zoom_shift path (used by affine_transform for 1-D
     matrices) exactly: the coordinate is (idx + shift) * scale with
     shift = offset / scale, clipped to the volume, then floor(coord + 0.5)
-    selects the voxel. Same expressions and order -> identical output.
+    selects the voxel. scipy adds the value to a sum that starts at 0.0, so a
+    -0.0 comes out as +0.0. Same expressions and order -> identical output.
     """
     nz, ny, nx = src.shape
     oz, oy, ox = out.shape
@@ -155,68 +164,81 @@ def _resample_nearest_numba(
                 elif xc > nx - 1:
                     xc = float(nx - 1)
                 ix = int(np.floor(xc + 0.5))
-                out[k, j, i] = src[iz, iy, ix]
+                out[k, j, i] = 0.0 + src[iz, iy, ix]
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _linear_axis_numba(
+    n_out: int, n_in: int, shift: float, scale: float
+) -> tuple[
+    npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.float64], npt.NDArray[np.float64]
+]:
+    """Support indices and weights of trilinear resampling along one axis, as scipy's
+    zoom_shift computes them in 'nearest' mode.
+
+    The coordinate (idx + shift) * scale is not clipped: the weights come from the
+    coordinate itself (w0 = 1 - t, and w1 = 1 - w0 as scipy sets the last weight), and
+    only the two support indices are clamped to the volume.
+    """
+    lo = np.empty(n_out, dtype=np.int64)
+    hi = np.empty(n_out, dtype=np.int64)
+    w0 = np.empty(n_out, dtype=np.float64)
+    w1 = np.empty(n_out, dtype=np.float64)
+    for k in range(n_out):
+        c = (k + shift) * scale
+        f = np.floor(c)
+        w0[k] = 1.0 - (c - f)
+        w1[k] = 1.0 - w0[k]
+        lo[k] = min(max(int(f), 0), n_in - 1)
+        hi[k] = min(max(int(f) + 1, 0), n_in - 1)
+    return lo, hi, w0, w1
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
 def _resample_trilinear_numba(
-    src: npt.NDArray[np.float64],
+    src: npt.NDArray[Any],
     scale: npt.NDArray[np.float64],
     shift: npt.NDArray[np.float64],
-    out: npt.NDArray[np.float64],
+    unsigned_out: bool,
+    out: npt.NDArray[Any],
 ) -> None:
     """Trilinear resampling for a diagonal transform, 'nearest' boundary.
 
-    Replicates scipy's zoom_shift path: coordinate (idx + shift) * scale
-    (shift = offset / scale) clipped to the volume, base index floor(coord),
-    upper support index clamped to the edge, and the 8 support terms
-    accumulated in scipy's point order with left-to-right weight products.
+    Replicates scipy's zoom_shift path bit for bit: the per-axis indices and weights
+    of `_linear_axis_numba`, and the 8 support terms added in scipy's point order,
+    each with left-to-right weight products. With `unsigned_out`, the value is
+    stored as scipy stores it in an unsigned integer output: t + 0.5 for t > 0,
+    else 0, truncated.
     """
     nz, ny, nx = src.shape
     oz, oy, ox = out.shape
+    zlo, zhi, zw0, zw1 = _linear_axis_numba(oz, nz, shift[0], scale[0])
+    ylo, yhi, yw0, yw1 = _linear_axis_numba(oy, ny, shift[1], scale[1])
+    xlo, xhi, xw0, xw1 = _linear_axis_numba(ox, nx, shift[2], scale[2])
     for k in prange(oz):
-        zc = (k + shift[0]) * scale[0]
-        if zc < 0.0:
-            zc = 0.0
-        elif zc > nz - 1:
-            zc = float(nz - 1)
-        z0 = int(np.floor(zc))
-        tz = zc - z0
-        z1 = z0 + 1 if z0 + 1 <= nz - 1 else nz - 1
-        wz0 = 1.0 - tz
+        z0, z1, wz0, wz1 = zlo[k], zhi[k], zw0[k], zw1[k]
         for j in range(oy):
-            yc = (j + shift[1]) * scale[1]
-            if yc < 0.0:
-                yc = 0.0
-            elif yc > ny - 1:
-                yc = float(ny - 1)
-            y0 = int(np.floor(yc))
-            ty = yc - y0
-            y1 = y0 + 1 if y0 + 1 <= ny - 1 else ny - 1
-            wy0 = 1.0 - ty
+            y0, y1, wy0, wy1 = ylo[j], yhi[j], yw0[j], yw1[j]
             for i in range(ox):
-                xc = (i + shift[2]) * scale[2]
-                if xc < 0.0:
-                    xc = 0.0
-                elif xc > nx - 1:
-                    xc = float(nx - 1)
-                x0 = int(np.floor(xc))
-                tx = xc - x0
-                x1 = x0 + 1 if x0 + 1 <= nx - 1 else nx - 1
-                wx0 = 1.0 - tx
+                x0, x1, wx0, wx1 = xlo[i], xhi[i], xw0[i], xw1[i]
 
-                # scipy multiplies each coefficient by the per-axis weights
+                # scipy starts the sum at 0.0 (so -0.0 terms give +0.0) and
+                # multiplies each coefficient by the per-axis weights
                 # sequentially (value * wz * wy * wx, left-associated); keep
                 # that exact order so the result is bit-identical.
-                acc = src[z0, y0, x0] * wz0 * wy0 * wx0
-                acc += src[z0, y0, x1] * wz0 * wy0 * tx
-                acc += src[z0, y1, x0] * wz0 * ty * wx0
-                acc += src[z0, y1, x1] * wz0 * ty * tx
-                acc += src[z1, y0, x0] * tz * wy0 * wx0
-                acc += src[z1, y0, x1] * tz * wy0 * tx
-                acc += src[z1, y1, x0] * tz * ty * wx0
-                acc += src[z1, y1, x1] * tz * ty * tx
-                out[k, j, i] = acc
+                acc = 0.0
+                acc += src[z0, y0, x0] * wz0 * wy0 * wx0
+                acc += src[z0, y0, x1] * wz0 * wy0 * wx1
+                acc += src[z0, y1, x0] * wz0 * wy1 * wx0
+                acc += src[z0, y1, x1] * wz0 * wy1 * wx1
+                acc += src[z1, y0, x0] * wz1 * wy0 * wx0
+                acc += src[z1, y0, x1] * wz1 * wy0 * wx1
+                acc += src[z1, y1, x0] * wz1 * wy1 * wx0
+                acc += src[z1, y1, x1] * wz1 * wy1 * wx1
+                if unsigned_out:
+                    out[k, j, i] = acc + 0.5 if acc > 0 else 0.0
+                else:
+                    out[k, j, i] = acc
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
@@ -235,41 +257,20 @@ def _resample_trilinear_masked_numba(
     affine_transform calls: per output voxel, the trilinear weights of the 8
     neighbours are accumulated only over valid source voxels; the value is the
     weight-normalized sum, and the voxel is valid iff the accumulated weight
-    reaches weight_threshold. Coordinates use scipy's zoom_shift formula (see
-    _resample_trilinear_numba).
+    reaches weight_threshold. Coordinates and weights follow scipy's zoom_shift
+    path (see _resample_trilinear_numba).
     """
     nz, ny, nx = src.shape
     oz, oy, ox = out.shape
+    zlo, zhi, zw0, zw1 = _linear_axis_numba(oz, nz, shift[0], scale[0])
+    ylo, yhi, yw0, yw1 = _linear_axis_numba(oy, ny, shift[1], scale[1])
+    xlo, xhi, xw0, xw1 = _linear_axis_numba(ox, nx, shift[2], scale[2])
     for k in prange(oz):
-        zc = (k + shift[0]) * scale[0]
-        if zc < 0.0:
-            zc = 0.0
-        elif zc > nz - 1:
-            zc = float(nz - 1)
-        z0 = int(np.floor(zc))
-        tz = zc - z0
-        z1 = z0 + 1 if z0 + 1 <= nz - 1 else nz - 1
-        wz0 = 1.0 - tz
+        z0, z1, wz0, tz = zlo[k], zhi[k], zw0[k], zw1[k]
         for j in range(oy):
-            yc = (j + shift[1]) * scale[1]
-            if yc < 0.0:
-                yc = 0.0
-            elif yc > ny - 1:
-                yc = float(ny - 1)
-            y0 = int(np.floor(yc))
-            ty = yc - y0
-            y1 = y0 + 1 if y0 + 1 <= ny - 1 else ny - 1
-            wy0 = 1.0 - ty
+            y0, y1, wy0, ty = ylo[j], yhi[j], yw0[j], yw1[j]
             for i in range(ox):
-                xc = (i + shift[2]) * scale[2]
-                if xc < 0.0:
-                    xc = 0.0
-                elif xc > nx - 1:
-                    xc = float(nx - 1)
-                x0 = int(np.floor(xc))
-                tx = xc - x0
-                x1 = x0 + 1 if x0 + 1 <= nx - 1 else nx - 1
-                wx0 = 1.0 - tx
+                x0, x1, wx0, tx = xlo[i], xhi[i], xw0[i], xw1[i]
 
                 # Accumulation mirrors the two affine_transform calls of the
                 # scipy path bit-for-bit: values multiply the per-axis weights
@@ -309,6 +310,32 @@ def _resample_trilinear_masked_numba(
                 else:
                     out[k, j, i] = 0.0
                     out_valid[k, j, i] = False
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _sentinel_counts_numba(
+    flat: npt.NDArray[np.float64],
+    roi_flat: npt.NDArray[Any],
+    candidates: npt.NDArray[np.float64],
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """Voxels equal to each candidate, in the image and in the ROI (roi > 0), in one
+    pass. An empty `roi_flat` means no ROI mask (the ROI counts stay 0)."""
+    n = flat.size
+    n_c = candidates.size
+    n_chunks = 64
+    step = (n + n_chunks - 1) // n_chunks
+    total = np.zeros((n_chunks, n_c), dtype=np.int64)
+    inside = np.zeros((n_chunks, n_c), dtype=np.int64)
+    has_roi = roi_flat.size == n
+    for c in prange(n_chunks):
+        for i in range(c * step, min(n, (c + 1) * step)):
+            v = flat[i]
+            for k in range(n_c):
+                if v == candidates[k]:
+                    total[c, k] += 1
+                    if has_roi and roi_flat[i] > 0:
+                        inside[c, k] += 1
+    return total.sum(axis=0), inside.sum(axis=0)
 
 
 def detect_sentinel_value(
@@ -363,22 +390,39 @@ def detect_sentinel_value(
     roi_arr: Optional[npt.NDArray[np.bool_]] = None
     if roi_mask is not None:
         _validate_geometry(roi_mask, image, "ROI mask", "image")
+
+    # Large images: one parallel pass counts every candidate (and its ROI voxels),
+    # instead of one pass per candidate. The counts are the same.
+    counts: Optional[npt.NDArray[np.int64]] = None
+    inside_counts: Optional[npt.NDArray[np.int64]] = None
+    if array.dtype == np.float64 and array.size >= _KERNEL_MIN_SIZE:
+        roi_flat = roi_mask.array.ravel() if roi_mask is not None else np.empty(0, np.uint8)
+        counts, inside_counts = _sentinel_counts_numba(
+            array.ravel(), roi_flat, np.asarray(candidate_values, dtype=np.float64)
+        )
+    elif roi_mask is not None:
         roi_arr = roi_mask.array > 0
 
     best_candidate: Optional[float] = None
     best_fraction = 0.0
 
-    for candidate in candidate_values:
-        sentinel_mask = array == candidate
-        count = np.count_nonzero(sentinel_mask)
+    for k, candidate in enumerate(candidate_values):
+        if counts is None:
+            sentinel_mask = array == candidate
+            count = np.count_nonzero(sentinel_mask)
+        else:
+            count = counts[k]
         fraction = count / total_voxels
 
         if fraction < min_presence_fraction:
             continue
 
         # If ROI mask provided, verify sentinel is primarily outside (>= 2:1)
-        if roi_arr is not None:
-            inside_count = np.count_nonzero(sentinel_mask & roi_arr)
+        if roi_mask is not None:
+            if inside_counts is None:
+                inside_count = np.count_nonzero(sentinel_mask & roi_arr)
+            else:
+                inside_count = inside_counts[k]
             outside_count = count - inside_count
             if outside_count <= inside_count * 2:
                 continue
@@ -530,9 +574,9 @@ def resample_image(
     """
     Resample image to new voxel spacing using IBSI-compliant 'Align grid centers' method.
 
-    The common cases (3D float64 image, 'nearest' boundary, nearest/linear
-    interpolation) run on parallel numba kernels; everything else uses
-    scipy.ndimage.affine_transform.
+    The common cases (3D float64 or uint8 image, 'nearest' boundary, nearest/linear
+    interpolation) run on parallel numba kernels that give scipy's output bit for bit;
+    everything else uses scipy.ndimage.affine_transform.
 
     Args:
         image: Input Image object.
@@ -678,23 +722,30 @@ def resample_image(
     # The parallel kernels cover the hot path (3D, 'nearest' boundary, common
     # dtypes); anything else falls back to scipy.ndimage. The kernels take the
     # shift form scipy's zoom_shift uses internally (coordinate is
-    # (idx + offset/scale) * scale), so their output matches the scipy path.
+    # (idx + offset/scale) * scale) and follow its steps, so their output is
+    # bit for bit the scipy output.
     kernel_ok = image.array.ndim == 3 and boundary_mode == "nearest"
     kernel_shift = offset / matrix
-
-    # The trilinear kernel matches scipy to ~1 ulp but not bit-for-bit; the
-    # discrete post-steps (mask_threshold binarization, round_intensities)
-    # are sensitive to that last ulp (flips observed exactly at .5 values),
-    # so those combinations keep the scipy path. Nearest (order 0) is pure
-    # voxel selection and bit-identical, so it stays on the kernel throughout.
-    kernel_exact_out = mask_threshold is None and not round_intensities
+    n_out = math.prod(out_shape)
 
     if effective_source is None:
-        if kernel_ok and kernel_exact_out and order == 1 and image.array.dtype == np.float64:
+        if (
+            kernel_ok
+            and order == 1
+            and image.array.dtype in (np.float64, np.uint8)
+            and n_out >= _LINEAR_KERNEL_MIN_SIZE
+        ):
             src = np.ascontiguousarray(image.array)
-            resampled_array = np.empty(out_shape, dtype=np.float64)
-            _resample_trilinear_numba(src, matrix, kernel_shift, resampled_array)
-        elif kernel_ok and order == 0 and image.array.dtype in (np.float64, np.uint8, np.bool_):
+            resampled_array = np.empty(out_shape, dtype=image.array.dtype)
+            _resample_trilinear_numba(
+                src, matrix, kernel_shift, image.array.dtype == np.uint8, resampled_array
+            )
+        elif (
+            kernel_ok
+            and order == 0
+            and image.array.dtype in (np.float64, np.uint8, np.bool_)
+            and n_out >= _NEAREST_KERNEL_MIN_SIZE
+        ):
             src = np.ascontiguousarray(image.array)
             resampled_array = np.empty(out_shape, dtype=image.array.dtype)
             _resample_nearest_numba(src, matrix, kernel_shift, resampled_array)
@@ -710,7 +761,12 @@ def resample_image(
         if source_all_valid:
             # Preserve the output contract: a resampled image keeps a source mask
             new_source_mask = np.ones(out_shape, dtype=bool)
-    elif kernel_ok and kernel_exact_out and order == 1 and image.array.dtype == np.float64:
+    elif (
+        kernel_ok
+        and order == 1
+        and image.array.dtype == np.float64
+        and n_out >= _MASKED_KERNEL_MIN_SIZE
+    ):
         # Masked resampling: one fused pass instead of two affine_transforms
         src = np.ascontiguousarray(image.array)
         valid = np.ascontiguousarray(effective_source)
@@ -822,8 +878,7 @@ def discretise_image(
     # Handle input type
     array = image.array if isinstance(image, Image) else image
 
-    # Determine ROI values for default min/max (small gather; NaNs excluded)
-    roi_values: Optional[npt.NDArray[Any]]
+    mask_arr: Optional[npt.NDArray[Any]] = None
     if roi_mask is not None:
         if isinstance(roi_mask, Image):
             if isinstance(image, Image):
@@ -835,14 +890,16 @@ def discretise_image(
         if mask_arr.shape != array.shape:
             raise ValueError(f"Shape mismatch: Image {array.shape} vs Mask {mask_arr.shape}")
 
-        # Extract ROI values (ignoring NaNs)
-        roi_values = array[mask_arr > 0]
-        roi_values = roi_values[~np.isnan(roi_values)]
-    else:
-        roi_values = None
+    roi_values: Optional[npt.NDArray[Any]] = None
 
     def _default_bound(roi_reduce: Any, global_reduce: Any) -> Any:
-        """Default bin bound: ROI reduction, falling back to the global one."""
+        """Default bin bound: ROI reduction, falling back to the global one. The ROI
+        values (NaNs excluded) are gathered at the first call, so given bounds skip
+        the gather."""
+        nonlocal roi_values
+        if roi_values is None and mask_arr is not None:
+            values = array[mask_arr > 0]
+            roi_values = values[~np.isnan(values)]
         if roi_values is not None and roi_values.size > 0:
             return roi_reduce(roi_values)
         # nanmin/nanmax of an all-NaN image is NaN (warning suppressed); it
@@ -1179,6 +1236,61 @@ def resegment_mask(
     )
 
 
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _roi_values_numba(
+    image_flat: npt.NDArray[np.float64], mask_flat: npt.NDArray[Any]
+) -> npt.NDArray[np.float64]:
+    """Image values where mask != 0, in array order (as image[mask != 0] gives them).
+
+    Each chunk counts its ROI voxels, a running sum gives each chunk its start, and
+    the chunks then copy their values in parallel.
+    """
+    n = image_flat.size
+    n_chunks = 64
+    step = (n + n_chunks - 1) // n_chunks
+    starts = np.zeros(n_chunks + 1, dtype=np.int64)
+    for c in prange(n_chunks):
+        count = 0
+        for i in range(c * step, min(n, (c + 1) * step)):
+            if mask_flat[i] != 0:
+                count += 1
+        starts[c + 1] = count
+    for c in range(n_chunks):
+        starts[c + 1] += starts[c]
+    values = np.empty(starts[n_chunks], dtype=np.float64)
+    for c in prange(n_chunks):
+        k = starts[c]
+        for i in range(c * step, min(n, (c + 1) * step)):
+            if mask_flat[i] != 0:
+                values[k] = image_flat[i]
+                k += 1
+    return values
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _filter_outliers_numba(
+    image_flat: npt.NDArray[np.float64],
+    mask_flat: npt.NDArray[Any],
+    lower: float,
+    upper: float,
+    out: npt.NDArray[Any],
+) -> None:
+    """Copy the mask, zeroing ROI voxels whose intensity lies outside [lower, upper].
+
+    NaN intensities compare False on both bounds and are zeroed, as in the numpy path.
+    """
+    for i in prange(image_flat.size):
+        m = mask_flat[i]
+        if m != 0:
+            v = image_flat[i]
+            if v >= lower and v <= upper:
+                out[i] = m
+            else:
+                out[i] = 0
+        else:
+            out[i] = m
+
+
 def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
     """
     Exclude outliers from the mask based on mean +/- sigma * std.
@@ -1208,10 +1320,21 @@ def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
     """
     _validate_geometry(mask, image, "mask", "image")
 
+    # Large images use two parallel passes (the ROI values, then the new mask); they
+    # give the same values in the same order, so the mean and the std stay the same.
+    large = (
+        image.array.dtype == np.float64
+        and image.array.size >= _KERNEL_MIN_SIZE
+        and mask.array.dtype in (np.float64, np.uint8, np.bool_)
+    )
+
     # Gather intensities within the mask once; all thresholding below runs on
     # this ROI-sized array instead of the full volume
-    roi = mask.array != 0
-    roi_values = image.array[roi]
+    if large:
+        roi_values = _roi_values_numba(image.array.ravel(), mask.array.ravel())
+    else:
+        roi = mask.array != 0
+        roi_values = image.array[roi]
 
     # Exclude NaNs (e.g. from extract_roi) which would otherwise poison the
     # mean/std and wipe the whole mask
@@ -1227,14 +1350,25 @@ def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
     lower_bound = mean_val - sigma * std_val
     upper_bound = mean_val + sigma * std_val
 
-    # Keep values within [lower, upper]; NaN compares False and is excluded
-    keep = (roi_values >= lower_bound) & (roi_values <= upper_bound)
+    if large:
+        flat_out = np.empty(mask.array.size, dtype=mask.array.dtype)
+        _filter_outliers_numba(
+            image.array.ravel(),
+            mask.array.ravel(),
+            float(lower_bound),
+            float(upper_bound),
+            flat_out,
+        )
+        new_mask_array = flat_out.reshape(mask.array.shape)
+    else:
+        # Keep values within [lower, upper]; NaN compares False and is excluded
+        keep = (roi_values >= lower_bound) & (roi_values <= upper_bound)
 
-    # Update original mask (zeroing outliers preserves dtype and label values)
-    new_mask_array = mask.array.copy()
-    roi_mask_values = new_mask_array[roi]
-    roi_mask_values[~keep] = 0
-    new_mask_array[roi] = roi_mask_values
+        # Update original mask (zeroing outliers preserves dtype and label values)
+        new_mask_array = mask.array.copy()
+        roi_mask_values = new_mask_array[roi]
+        roi_mask_values[~keep] = 0
+        new_mask_array[roi] = roi_mask_values
 
     return Image(
         array=new_mask_array,

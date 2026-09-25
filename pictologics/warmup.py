@@ -304,12 +304,21 @@ def _warmup_filters() -> None:
         m_flat = np.ones(flat.size, dtype=m_dtype)
         m_out = np.empty(flat.size, dtype=m_dtype)
         preprocessing._resegment_numba(flat, m_flat, 0.0, 5.0, m_out)
+        preprocessing._roi_values_numba(flat, m_flat)
+        preprocessing._filter_outliers_numba(flat, m_flat, 0.0, 5.0, m_out)
+        preprocessing._sentinel_counts_numba(flat, m_flat, np.array([0.0, -1000.0]))
+    preprocessing._sentinel_counts_numba(  # no ROI mask
+        flat, np.empty(0, dtype=np.uint8), np.array([0.0, -1000.0])
+    )
 
     src = np.ones((4, 4, 4), dtype=np.float64)
     scale = np.array([1.1, 1.1, 1.1])
     shift = np.zeros(3)
     out3 = np.empty((3, 3, 3), dtype=np.float64)
-    preprocessing._resample_trilinear_numba(src, scale, shift, out3)
+    preprocessing._resample_trilinear_numba(src, scale, shift, False, out3)
+    preprocessing._resample_trilinear_numba(  # uint8 masks
+        src.astype(np.uint8), scale, shift, True, np.empty((3, 3, 3), dtype=np.uint8)
+    )
     for s_dtype in (np.float64, np.uint8, np.bool_):
         src_d = src.astype(s_dtype)
         out_d = np.empty((3, 3, 3), dtype=s_dtype)
