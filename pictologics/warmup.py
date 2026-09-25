@@ -220,8 +220,11 @@ def _warmup_intensity() -> None:
     # Two offsets
     offsets = np.ascontiguousarray(np.array([[0, 0, 0], [0, 0, 1]], dtype=np.int32))
 
-    roi_means = intensity._calculate_local_mean_numba(data, mask_indices, offsets)
-    intensity._calculate_local_peaks_numba(data, mask_indices, roi_means)
+    # calculate_local_intensity_features passes a crop of the image: a strided view, or
+    # the C-contiguous array itself when the crop covers all of it. Compile both layouts.
+    for local_data in (data, data[1:, 1:, 1:]):
+        roi_means = intensity._calculate_local_mean_numba(local_data, mask_indices, offsets)
+        intensity._calculate_local_peaks_numba(local_data, mask_indices, roi_means)
 
 
 def _warmup_morphology() -> None:

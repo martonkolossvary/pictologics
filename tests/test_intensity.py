@@ -10,7 +10,7 @@ os.environ["NUMBA_DISABLE_JIT"] = "1"
 warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -60,6 +60,30 @@ class TestIntensityFeatures(unittest.TestCase):
         # Median stays the conventional sample median (mean of the two middle values).
         self.assertAlmostEqual(features["median_intensity_Y12H"], 5.5)
 
+    def test_order_statistics_match_numpy(self) -> None:
+        # One partition gives numpy's inverted_cdf percentiles and median, bit for bit.
+        from pictologics.features.intensity import _order_statistics
+
+        rng = np.random.default_rng(5)
+        for x in (
+            rng.normal(100.0, 50.0, 101),
+            rng.normal(100.0, 50.0, 100),
+            rng.integers(-5, 40, 64).astype(np.int32),
+            np.round(rng.normal(0.0, 3.0, 57)) * 0.1,
+            np.array([7.0]),
+        ):
+            expected = (
+                *np.percentile(x, [10, 25, 75, 90], method="inverted_cdf"),
+                np.median(x),
+            )
+            got = _order_statistics(x)
+            np.testing.assert_array_equal(np.array(got, dtype=float), np.array(expected, float))
+
+        # A NaN makes every order statistic NaN, as in numpy.
+        with_nan = np.array([1.0, np.nan, 3.0])
+        self.assertTrue(np.isnan(_order_statistics(with_nan)).all())
+        self.assertTrue(np.isnan(calculate_intensity_features(with_nan)["median_intensity_Y12H"]))
+
     def test_calculate_intensity_features_empty(self) -> None:
         features = calculate_intensity_features(np.array([]))
         self.assertEqual(features, {})
@@ -105,6 +129,26 @@ class TestIntensityFeatures(unittest.TestCase):
         self.assertAlmostEqual(features["10th_discretised_intensity_percentile_1PR"], 1.0)
         self.assertAlmostEqual(features["90th_discretised_intensity_percentile_GPMT"], 9.0)
         self.assertAlmostEqual(features["median_discretised_intensity_WIFQ"], 5.5)
+
+    def test_histogram_order_statistics_match_numpy(self) -> None:
+        # Integer values read the percentiles and the median from the histogram counts,
+        # float values from one partition; both give numpy's values.
+        rng = np.random.default_rng(8)
+        for disc_vals, n_bins in (
+            (rng.integers(1, 33, 301).astype(np.int32), 32),
+            (rng.integers(-4, 9, 300), None),
+            (rng.integers(1, 7, 99).astype(np.float64), 6),
+        ):
+            features = calculate_intensity_histogram_features(disc_vals, n_bins=n_bins)
+            p10, p25, p75, p90 = np.percentile(disc_vals, [10, 25, 75, 90], method="inverted_cdf")
+            self.assertEqual(features["10th_discretised_intensity_percentile_1PR"], float(p10))
+            self.assertEqual(features["90th_discretised_intensity_percentile_GPMT"], float(p90))
+            self.assertEqual(
+                features["discretised_intensity_interquartile_range_WR0O"], float(p75 - p25)
+            )
+            self.assertEqual(
+                features["median_discretised_intensity_WIFQ"], float(np.median(disc_vals))
+            )
 
     def test_calculate_intensity_histogram_features_multimodal(self) -> None:
         # IBSI AMMC: with multiple modes, select the one closest to the mean.
@@ -381,6 +425,45 @@ class TestIntensityFeatures(unittest.TestCase):
         features = calculate_spatial_intensity_features(mock_img, mock_mask)
         self.assertFalse(np.isnan(features["morans_i_index_N365"]))
 
+    @staticmethod
+    def _spatial_case() -> tuple[MagicMock, MagicMock]:
+        rng = np.random.default_rng(12)
+        image, roi = MagicMock(), MagicMock()
+        image.array = rng.normal(100.0, 25.0, (9, 8, 7))
+        image.spacing = (0.8, 0.8, 2.5)
+        roi.array = np.zeros((9, 8, 7))
+        roi.array[1:8, 2:8, 1:6] = rng.random((7, 6, 5)) < 0.7
+        return image, roi
+
+    def test_spatial_intensity_fft_matches_pair_loop(self) -> None:
+        # The FFT sums give the pair loop's Moran's I and Geary's C to about 1e-14.
+        image, roi = self._spatial_case()
+        module = "pictologics.features.intensity._FFT_MIN_PAIRS_PER_POINT"
+        with patch(module, 1 << 62):
+            pair = calculate_spatial_intensity_features(image, roi)
+        with patch(module, 0):
+            fft = calculate_spatial_intensity_features(image, roi)
+        for key, value in pair.items():
+            self.assertAlmostEqual(fft[key], value, delta=1e-12 * abs(value))
+
+    def test_spatial_intensity_fft_memory_cap(self) -> None:
+        # Above the memory cap, the pair loop runs and a warning gives the expected time.
+        from pictologics.features.intensity import _fft_memory_cap
+
+        self.assertLessEqual(_fft_memory_cap(), 16 << 30)
+        with patch("pictologics.features.intensity.os.sysconf", side_effect=ValueError):
+            self.assertEqual(_fft_memory_cap(), 4 << 30)  # 8 GB assumed
+
+        image, roi = self._spatial_case()
+        with patch("pictologics.features.intensity._FFT_MIN_PAIRS_PER_POINT", 1 << 62):
+            pair = calculate_spatial_intensity_features(image, roi)
+        with (
+            patch("pictologics.features.intensity._FFT_MIN_PAIRS_PER_POINT", 0),
+            patch("pictologics.features.intensity._fft_memory_cap", return_value=0),
+            self.assertWarnsRegex(UserWarning, "Expected run time"),
+        ):
+            self.assertEqual(calculate_spatial_intensity_features(image, roi), pair)
+
     def test_calculate_spatial_intensity_features_small_input(self) -> None:
         # < 2 voxels -> NaN
         mock_img = MagicMock()
@@ -390,6 +473,11 @@ class TestIntensityFeatures(unittest.TestCase):
         mock_mask.array = np.array([[[1]]])
         features = calculate_spatial_intensity_features(mock_img, mock_mask)
         self.assertTrue(np.isnan(features["morans_i_index_N365"]))
+
+        # An empty mask has an empty ROI box.
+        mock_mask.array = np.array([[[0]]])
+        features = calculate_spatial_intensity_features(mock_img, mock_mask)
+        self.assertTrue(np.isnan(features["gearys_c_measure_NPT7"]))
 
     def test_calculate_spatial_intensity_features_constant(self) -> None:
         # Constant intensity -> denom = 0
@@ -426,6 +514,42 @@ class TestIntensityFeatures(unittest.TestCase):
         features = calculate_local_intensity_features(mock_img, mock_mask)
         self.assertIn("global_intensity_peak_0F91", features)
         self.assertGreater(features["global_intensity_peak_0F91"], 0.0)
+
+    def test_local_intensity_crop_matches_full_image(self) -> None:
+        # The crop (ROI box plus sphere reach) gives the full-image result, bit for bit,
+        # for an ROI inside the image and for one at its edge.
+        from pictologics.features.intensity import (
+            _calculate_local_mean_numba,
+            _calculate_local_peaks_numba,
+            _sphere_offsets_for_radius,
+        )
+
+        rng = np.random.default_rng(4)
+        spacing = (1.5, 2.0, 3.0)
+        data = rng.normal(0.0, 50.0, (20, 18, 12))
+        offsets = _sphere_offsets_for_radius(spacing, 6.2035)
+        for box in ((slice(8, 11), slice(7, 10), slice(5, 7)), (slice(0, 4), slice(15, 18), 11)):
+            mask = np.zeros(data.shape)
+            mask[box] = 1.0
+            idx = np.ascontiguousarray(np.stack(np.where(mask > 0), axis=1).astype(np.int32))
+            means = _calculate_local_mean_numba(data, idx, offsets)
+            expected = _calculate_local_peaks_numba(data, idx, means)
+
+            image, roi = MagicMock(), MagicMock()
+            image.array, image.spacing, roi.array = data, spacing, mask
+            for min_size in (1, 1 << 15):  # with the crop, and without (a small image)
+                with patch("pictologics.features.intensity._LOCAL_CROP_MIN_SIZE", min_size):
+                    features = calculate_local_intensity_features(image, roi)
+                self.assertEqual(features["global_intensity_peak_0F91"], expected[0])
+                self.assertEqual(features["local_intensity_peak_VJGA"], expected[1])
+
+        # A mask without positive voxels has no ROI, also after the crop.
+        roi.array = -mask
+        with patch("pictologics.features.intensity._LOCAL_CROP_MIN_SIZE", 1):
+            self.assertEqual(calculate_local_intensity_features(image, roi), {})
+        roi.array = np.zeros(data.shape)
+        with patch("pictologics.features.intensity._LOCAL_CROP_MIN_SIZE", 1):
+            self.assertEqual(calculate_local_intensity_features(image, roi), {})
 
     def test_calculate_local_intensity_features_empty(self) -> None:
         mock_img = MagicMock()

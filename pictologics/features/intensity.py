@@ -22,12 +22,18 @@ spatial feature calculations.
 
 from __future__ import annotations
 
+import math
+import os
+import warnings
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
-from numba import jit, prange
+import scipy.fft
+from numba import get_num_threads, jit, prange
 from numpy import typing as npt
+
+from ._utils import compute_nonzero_bbox
 
 if TYPE_CHECKING:
     from ..loader import Image
@@ -307,6 +313,55 @@ def _sphere_offsets_for_radius(
     return np.ascontiguousarray(np.array(offsets, dtype=np.int32))
 
 
+def _percentile_ranks(n: int, dtype: np.dtype[Any]) -> npt.NDArray[np.intp]:
+    """0-based ranks of P10, P25, P75 and P90 among n sorted values of type `dtype`.
+
+    This is the index rule of `np.percentile(..., method="inverted_cdf")`, with the same
+    float steps, so the ranks are the same as numpy's.
+    """
+    q = np.true_divide([10, 25, 75, 90], dtype.type(100) if dtype.kind == "f" else 100)
+    index = n * q - 1
+    below = np.floor(index)
+    return np.where(index - below == 0, below, below + 1).astype(np.intp)
+
+
+def _order_statistics(values: npt.NDArray[Any]) -> tuple[Any, ...]:
+    """P10, P25, P75, P90 and the median of a non-empty array.
+
+    `np.percentile(..., method="inverted_cdf")` and `np.median` partition the array one
+    time each. One partition at all their ranks gives the same values: the median is
+    numpy's mean of the middle value or values. A NaN makes all of them NaN, as in numpy
+    (a partition puts NaNs last).
+    """
+    n = values.size
+    ranks = _percentile_ranks(n, values.dtype)
+    half = n // 2
+    low = half - 1 + n % 2  # lower middle rank (the middle rank when n is odd)
+    part = np.partition(values, np.unique(np.concatenate((ranks, [low, half, n - 1]))))
+    if part.dtype.kind == "f" and np.isnan(part[-1]):
+        return np.nan, np.nan, np.nan, np.nan, np.nan
+    p10, p25, p75, p90 = part[ranks]
+    return p10, p25, p75, p90, np.mean(part[low : half + 1])
+
+
+def _counts_order_statistics(
+    counts: npt.NDArray[Any], origin: int, dtype: np.dtype[Any]
+) -> tuple[Any, ...]:
+    """P10, P25, P75, P90 and the median of integer values of type `dtype`, from their
+    histogram (bin i counts the value origin + i).
+
+    The same values as `_order_statistics` gives, without a partition: the value at a rank
+    is the value of the first bin whose running count is above the rank. The median is
+    numpy's float64 mean of the middle value or values.
+    """
+    running = np.cumsum(counts)
+    n = int(running[-1])
+    half = n // 2
+    ranks = np.concatenate((_percentile_ranks(n, dtype), [half - 1 + n % 2, half]))
+    p10, p25, p75, p90, low, high = origin + np.searchsorted(running, ranks, side="right")
+    return p10, p25, p75, p90, (float(low) + float(high)) / 2.0
+
+
 def calculate_intensity_features(
     values: npt.NDArray[np.floating[Any]],
 ) -> dict[str, float]:
@@ -370,9 +425,8 @@ def calculate_intensity_features(
     # least p% of the data at or below it), i.e. numpy's 'inverted_cdf'. This
     # reproduces the IBSI benchmark (e.g. P90 = 4), whereas linear interpolation
     # would give an interpolated 4.2. The median (Y12H) is the conventional
-    # sample median, so it is computed separately.
-    p10, p25, p75, p90 = np.percentile(values, [10, 25, 75, 90], method="inverted_cdf")
-    median_val = np.median(values)
+    # sample median. One partition gives both.
+    p10, p25, p75, p90, median_val = _order_statistics(values)
 
     # 4.1.5 Median intensity (Y12H)
     features["median_intensity_Y12H"] = float(median_val)
@@ -524,9 +578,14 @@ def calculate_intensity_histogram_features(
             features["discretised_intensity_kurtosis_C3I7"] = np.nan
 
     # IBSI nearest-rank percentiles (see calculate_intensity_features); the
-    # discretised median (WIFQ) is the conventional sample median.
-    p10, p25, p75, p90 = np.percentile(disc, [10, 25, 75, 90], method="inverted_cdf")
-    median_val = np.median(disc)
+    # discretised median (WIFQ) is the conventional sample median. Integer values
+    # get them from the histogram counts.
+    if disc.dtype.kind in "iu":
+        p10, p25, p75, p90, median_val = _counts_order_statistics(
+            counts_full, hist_origin, disc.dtype
+        )
+    else:
+        p10, p25, p75, p90, median_val = _order_statistics(disc)
 
     features["median_discretised_intensity_WIFQ"] = float(median_val)
     features["minimum_discretised_intensity_1PR8"] = float(min_val_i)
@@ -649,6 +708,9 @@ def calculate_ivh_features(
 
     vals = np.asarray(discretised_values)
     sorted_vals = np.sort(vals)
+    # np.searchsorted converts an integer array to float64 on each call with a float
+    # threshold. Convert it one time; the comparisons stay the same.
+    sorted_f = sorted_vals.astype(np.float64, copy=False)
 
     # -------------------------------------------------------------------------
     # 1. Volume Fractions
@@ -664,7 +726,7 @@ def calculate_ivh_features(
 
         def get_volume_fraction_at_intensity_fraction_indices(frac: float) -> float:
             threshold_idx = t_min_idx + frac * val_range_idx
-            idx = int(np.searchsorted(sorted_vals, threshold_idx, side="left"))
+            idx = int(np.searchsorted(sorted_f, threshold_idx, side="left"))
             count = N - idx
             return float(count / N)
 
@@ -689,7 +751,7 @@ def calculate_ivh_features(
             else:
                 threshold_idx = threshold_val
 
-            idx = int(np.searchsorted(sorted_vals, threshold_idx, side="left"))
+            idx = int(np.searchsorted(sorted_f, threshold_idx, side="left"))
             count = N - idx
             return float(count / N)
 
@@ -753,9 +815,11 @@ def calculate_ivh_features(
                     idx = np.arange(num_steps + 1, dtype=np.float64)
                     candidates = g_min + idx * bin_width
             else:
-                candidates = sorted_vals.astype(np.float64)
+                candidates = sorted_f
         else:
             candidates = sorted_vals
+        # Float candidates search the float64 copy; the values themselves search as they are.
+        search_vals = sorted_vals if bin_width is None else sorted_f
 
         target_count = int(np.floor(vol_frac * N))
 
@@ -774,7 +838,7 @@ def calculate_ivh_features(
             else:
                 check_val = val
 
-            idx = np.searchsorted(sorted_vals, check_val, side="left")
+            idx = np.searchsorted(search_vals, check_val, side="left")
             count = N - idx
 
             if count <= target_count:
@@ -842,6 +906,70 @@ def calculate_ivh_features(
     return features
 
 
+# The FFT sums use about 27 bytes per point of their grid (measured peak); 32 leaves a
+# margin.
+_FFT_BYTES_PER_POINT = 32
+# Measured crossover: with fewer than 100 voxel pairs per FFT grid point, the pair loop
+# is faster.
+_FFT_MIN_PAIRS_PER_POINT = 100
+# Measured pair loop speed: about 2.5 ns per voxel pair on one thread.
+_PAIR_SECONDS_PER_THREAD = 2.5e-9
+
+
+def _fft_memory_cap() -> int:
+    """Memory limit of the FFT sums: 16 GB, but at most half of the physical memory.
+
+    When the system does not report its memory (for example on Windows), the limit
+    assumes 8 GB of memory.
+    """
+    try:
+        physical = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, OSError, ValueError):
+        physical = 8 << 30
+    return min(16 << 30, physical // 2)
+
+
+def _spatial_sums_fft(
+    roi: npt.NDArray[np.bool_],
+    diff: npt.NDArray[np.float64],
+    spacing: tuple[float, float, float],
+    fshape: tuple[int, ...],
+) -> tuple[float, float, float]:
+    """The three sums of `_calculate_spatial_features_numba`, from FFT convolutions.
+
+    A voxel pair has the weight 1 / distance. The convolution of the ROI with the kernel
+    1 / |r| (0 at r = 0) gives, for each voxel, the sum of its weights to all ROI voxels.
+    So the sum of weights is roi . (K * roi), the Moran numerator is diff . (K * diff), and
+    the Geary numerator is 2 diff^2 . (K * roi) - 2 times the Moran numerator. `diff` holds
+    the intensity minus the ROI mean (0 outside the ROI), and `fshape` is the FFT grid.
+    """
+    # Distance in mm along each axis, with the offsets wrapped around the grid.
+    axes = [
+        np.minimum(np.arange(n), n - np.arange(n)) * s for n, s in zip(fshape, spacing, strict=True)
+    ]
+    kernel = (axes[0] ** 2)[:, None, None] + (axes[1] ** 2)[None, :, None] + (axes[2] ** 2)
+    kernel[0, 0, 0] = 1.0  # a voxel has no weight to itself (set to 0 below)
+    np.sqrt(kernel, out=kernel)
+    np.divide(1.0, kernel, out=kernel)
+    kernel[0, 0, 0] = 0.0
+    kernel_f = scipy.fft.rfftn(kernel, workers=-1)
+    del kernel
+    box = tuple(slice(0, n) for n in roi.shape)
+
+    def convolve(a: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """K * a at the ROI voxels."""
+        spectrum = scipy.fft.rfftn(a, fshape, workers=-1)
+        spectrum *= kernel_f
+        full = scipy.fft.irfftn(spectrum, fshape, workers=-1, overwrite_x=True)
+        return np.asarray(full[box][roi])
+
+    weights = convolve(roi.astype(np.float64))
+    d = diff[roi]
+    numer_moran = float(np.sum(d * convolve(diff)))
+    numer_geary = 2.0 * float(np.sum(d * d * weights)) - 2.0 * numer_moran
+    return numer_moran, numer_geary, float(np.sum(weights))
+
+
 def calculate_spatial_intensity_features(
     image: Image,
     mask: Image,
@@ -852,7 +980,11 @@ def calculate_spatial_intensity_features(
     Calculate spatial intensity features: Moran's I and Geary's C (IBSI 4.4).
 
     These features measure spatial autocorrelation of intensity values within the ROI.
-    Computationally intensive (O(N²) where N = number of ROI voxels).
+    Small ROIs use a loop over all voxel pairs, whose time grows with N² (N = number of
+    ROI voxels). Large ROIs use FFT convolutions: the same values to about 1e-14
+    (relative) in much less time. The FFT needs about 32 bytes per point of a grid that
+    is twice the ROI box along each axis. Above 16 GB, or above half of the memory, the
+    pair loop runs instead, with a warning that gives the expected run time.
 
     Args:
         image: Image object containing intensity data.
@@ -894,31 +1026,51 @@ def calculate_spatial_intensity_features(
         float(image.spacing[2]),
     )
 
-    # Get ROI indices (X, Y, Z)
-    roi = mask_array > 0
-    x_idx, y_idx, z_idx = np.where(roi)
+    # The ROI (mask > 0) in its bounding box (an empty mask gives an empty box). Its
+    # voxels keep their full-image order, so `intensities` is the same as data[mask > 0].
+    bbox = compute_nonzero_bbox(mask_array) or (slice(0, 0),) * 3
+    roi = mask_array[bbox] > 0
+    intensities = np.ascontiguousarray(data[bbox][roi].astype(np.float64))
 
-    if len(x_idx) < 2:
+    N = len(intensities)
+    if N < 2:
         features["morans_i_index_N365"] = np.nan
         features["gearys_c_measure_NPT7"] = np.nan
         return features
 
-    xi = np.ascontiguousarray(x_idx.astype(np.int32))
-    yi = np.ascontiguousarray(y_idx.astype(np.int32))
-    zi = np.ascontiguousarray(z_idx.astype(np.int32))
-
-    intensities = np.ascontiguousarray(data[roi].astype(np.float64))
-
-    N = len(intensities)
     mean_int = np.mean(intensities)
+    denom = _sum_sq_centered(intensities, float(mean_int))
 
-    # Calculate terms using Parallelized Numba Function
-    numer_moran, numer_geary, sum_weights = _calculate_spatial_features_numba(
-        xi, yi, zi, intensities, float(mean_int), sx, sy, sz
-    )
+    # The FFT grid is at least 2 n - 1 along each axis of the box, so no pair wraps around.
+    fshape = tuple(scipy.fft.next_fast_len(2 * n - 1, real=True) for n in roi.shape)
+    grid = math.prod(fshape)
+    use_fft = N * N >= _FFT_MIN_PAIRS_PER_POINT * grid
+    if use_fft and _FFT_BYTES_PER_POINT * grid > (cap := _fft_memory_cap()):
+        use_fft = False
+        minutes = N * (N - 1) / 2 * _PAIR_SECONDS_PER_THREAD / get_num_threads() / 60
+        warnings.warn(
+            f"Moran's I and Geary's C: the FFT method needs about "
+            f"{_FFT_BYTES_PER_POINT * grid / 2**30:.1f} GB, more than its limit of "
+            f"{cap / 2**30:.1f} GB (16 GB, or half of the memory). The pair loop runs "
+            f"instead. Expected run time: about {minutes:.1f} min.",
+            stacklevel=2,
+        )
+
+    if use_fft:
+        diff = np.zeros(roi.shape)
+        diff[roi] = intensities - mean_int
+        numer_moran, numer_geary, sum_weights = _spatial_sums_fft(roi, diff, (sx, sy, sz), fshape)
+    else:
+        # Full-image voxel indices, as the pair loop used before the crop.
+        x_idx, y_idx, z_idx = (
+            np.ascontiguousarray((idx + box.start).astype(np.int32))
+            for idx, box in zip(np.nonzero(roi), bbox, strict=True)
+        )
+        numer_moran, numer_geary, sum_weights = _calculate_spatial_features_numba(
+            x_idx, y_idx, z_idx, intensities, float(mean_int), sx, sy, sz
+        )
 
     # Moran's I - N365
-    denom = _sum_sq_centered(intensities, float(mean_int))
 
     if denom != 0 and sum_weights != 0:
         moran_i = (N / sum_weights) * (numer_moran / denom)
@@ -934,6 +1086,11 @@ def calculate_spatial_intensity_features(
         features["gearys_c_measure_NPT7"] = np.nan
 
     return features
+
+
+# Measured crossover: below 2^15 voxels, the box search of the local intensity crop costs
+# more than the crop saves.
+_LOCAL_CROP_MIN_SIZE = 1 << 15
 
 
 def calculate_local_intensity_features(
@@ -989,6 +1146,22 @@ def calculate_local_intensity_features(
 
     # Radius for 1 cm^3 sphere
     radius_mm = 6.2035
+    offsets = _sphere_offsets_for_radius(spacing_tuple, radius_mm)
+
+    # Crop to the ROI box plus the reach of the sphere. Every sphere neighbour of an ROI
+    # voxel that is in the image is also in the crop, so the local means and the peaks
+    # stay the same, and the ROI search reads only the crop.
+    if mask_array.size >= _LOCAL_CROP_MIN_SIZE:
+        bbox = compute_nonzero_bbox(mask_array)
+        if bbox is None:
+            return features
+        reach = np.abs(offsets).max(axis=0)
+        crop = tuple(
+            slice(max(box.start - int(r), 0), min(box.stop + int(r), size))
+            for box, r, size in zip(bbox, reach, data.shape, strict=True)
+        )
+        data = data[crop]
+        mask_array = mask_array[crop]
 
     # Get ROI indices
     x_idx, y_idx, z_idx = np.where(mask_array > 0)
@@ -996,7 +1169,6 @@ def calculate_local_intensity_features(
         return features
 
     mask_indices = np.ascontiguousarray(np.stack([x_idx, y_idx, z_idx], axis=1).astype(np.int32))
-    offsets = _sphere_offsets_for_radius(spacing_tuple, radius_mm)
 
     # Calculate local means only for ROI voxels
     roi_means = _calculate_local_mean_numba(data, mask_indices, offsets)
