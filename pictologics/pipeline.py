@@ -986,7 +986,8 @@ class RadiomicsPipeline:
         """Raise a clear error if the ROI is empty.
 
         The pipeline treats any nonzero mask value as ROI membership unless a
-        step explicitly binarizes/selects labels first.
+        step explicitly binarizes/selects labels first. Each check reads the whole
+        mask, so a morph mask that is the intensity mask's array is not read again.
         """
         has_intensity_roi = bool(state.intensity_mask.array.any())
         if not has_intensity_roi:
@@ -995,6 +996,8 @@ class RadiomicsPipeline:
                 f"({context}). Ensure your mask contains at least one nonzero voxel, "
                 "or relax resegmentation/outlier filtering thresholds."
             )
+        if state.morph_mask.array is state.intensity_mask.array:
+            return
         has_morph_roi = bool(state.morph_mask.array.any())
         if not has_morph_roi:
             raise EmptyROIMaskError(
@@ -1145,25 +1148,36 @@ class RadiomicsPipeline:
                         raise ValueError(
                             "binarize_mask requires 'threshold' unless mask_values is provided"
                         )
-                    mask_arr = image.array >= float(threshold)
+                    # One pass straight into the uint8 mask (same memory order)
+                    mask_arr = np.greater_equal(
+                        image.array,
+                        float(threshold),
+                        out=np.empty_like(image.array, dtype=np.uint8),
+                    )
 
                 return Image(
-                    array=mask_arr.astype(np.uint8),
+                    array=mask_arr.astype(np.uint8, copy=False),
                     spacing=image.spacing,
                     origin=image.origin,
                     direction=image.direction,
                     modality=image.modality,
                 )
 
+            # When both masks are one array, binarize once and keep them in sync, so
+            # later steps (resample) also work on one mask.
+            masks_in_sync = state.morph_mask.array is state.intensity_mask.array
             if apply_to in ("morph", "both"):
                 state.morph_mask = _binarize(state.morph_mask)
-            if apply_to in ("intensity", "both"):
+            if apply_to == "both" and masks_in_sync:
+                state.intensity_mask = state.morph_mask
+            elif apply_to in ("intensity", "both"):
                 state.intensity_mask = _binarize(state.intensity_mask)
 
             self._ensure_nonempty_roi(state, context="binarize_mask")
 
         elif step_name == "discretise":
-            self._ensure_nonempty_roi(state, context="discretise")
+            # No ROI check here: only the steps that change a mask can empty it, and
+            # each of them checks the masks itself.
             method = params.get("method", "FBN")
 
             # Avoid passing 'method' twice
@@ -1654,13 +1668,26 @@ class RadiomicsPipeline:
             ivh_method = ivh_disc_params.pop("method", "FBS")
             ivh_disc_bin_width = ivh_disc_params.get("bin_width")
             ivh_disc_min_val = ivh_disc_params.get("min_val")
-            temp_ivh_disc = discretise_image(
-                state.raw_image,
-                method=ivh_method,
-                roi_mask=state.intensity_mask,
-                **ivh_disc_params,
+            # With the bin limits given, the bin rule works voxel by voxel: binning the
+            # ROI values alone gives the same bins, without a full-image discretisation.
+            limits_given = ivh_method == "FIXED_CUTOFFS" or (
+                ivh_disc_min_val is not None
+                and (ivh_method != "FBN" or ivh_disc_params.get("max_val") is not None)
             )
-            ivh_values = self._masked_values(temp_ivh_disc, state.intensity_mask, bbox_cache)
+            if limits_given:
+                raw_values = self._masked_values(state.raw_image, state.intensity_mask, bbox_cache)
+                ivh_values = cast(
+                    npt.NDArray[Any],
+                    discretise_image(raw_values, method=ivh_method, **ivh_disc_params),
+                )
+            else:
+                temp_ivh_disc = discretise_image(
+                    state.raw_image,
+                    method=ivh_method,
+                    roi_mask=state.intensity_mask,
+                    **ivh_disc_params,
+                )
+                ivh_values = self._masked_values(temp_ivh_disc, state.intensity_mask, bbox_cache)
         else:
             ivh_values = self._masked_values(state.image, state.intensity_mask, bbox_cache)
 

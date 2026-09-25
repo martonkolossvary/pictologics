@@ -4036,3 +4036,64 @@ def test_compute_texture_features_default_cache_empty_mask() -> None:
     pipeline = RadiomicsPipeline()
     state = _basic_state(disc, empty, is_discretised=True, n_bins=8)
     assert isinstance(pipeline._compute_texture_features(state, "glcm", {}), dict)
+
+
+def test_binarize_mask_keeps_one_mask_array_in_sync() -> None:
+    # Masks that are one array are binarized once and stay one array; separate masks,
+    # or apply_to="intensity", binarize the intensity mask on its own.
+    img = Image(np.random.rand(6, 6, 6), (1, 1, 1), (0, 0, 0))
+    mask_arr = np.zeros((6, 6, 6))
+    mask_arr[1:5, 1:5, 1:5] = 0.7
+    mask = Image(mask_arr, (1, 1, 1), (0, 0, 0))
+    pipeline = RadiomicsPipeline()
+    params = {"threshold": 0.5}
+
+    state = _basic_state(img, mask)
+    pipeline._execute_preprocessing_step(state, "binarize_mask", params)
+    assert state.intensity_mask is state.morph_mask
+    assert state.morph_mask.array.dtype == np.uint8
+    np.testing.assert_array_equal(state.morph_mask.array, (mask_arr >= 0.5).astype(np.uint8))
+
+    state = _basic_state(img, mask)
+    state.intensity_mask = Image(mask_arr.copy(), (1, 1, 1), (0, 0, 0))
+    pipeline._execute_preprocessing_step(state, "binarize_mask", params)
+    assert state.intensity_mask is not state.morph_mask
+    np.testing.assert_array_equal(state.intensity_mask.array, state.morph_mask.array)
+
+    state = _basic_state(img, mask)
+    pipeline._execute_preprocessing_step(
+        state, "binarize_mask", {**params, "apply_to": "intensity"}
+    )
+    assert state.morph_mask is mask
+    np.testing.assert_array_equal(state.intensity_mask.array, (mask_arr >= 0.5).astype(np.uint8))
+
+
+def test_ivh_discretisation_bins_only_the_roi_values() -> None:
+    # With the bin limits given, the IVH bins come from the ROI values alone and give
+    # the IVH features of a full-image discretisation; missing limits keep that path.
+    from pictologics.features.intensity import calculate_ivh_features
+    from pictologics.preprocessing import apply_mask, discretise_image
+
+    rng = np.random.default_rng(3)
+    raw = rng.normal(-200.0, 300.0, (8, 9, 7))
+    raw[2, 2, 2] = np.nan
+    mask_arr = np.zeros(raw.shape)
+    mask_arr[1:6, 2:8, 1:6] = 1.0
+    img, mask = Image(raw, (1, 1, 1), (0, 0, 0)), Image(mask_arr, (1, 1, 1), (0, 0, 0))
+    pipeline = RadiomicsPipeline()
+    state = _basic_state(img, mask)
+    for disc, kwargs in (
+        (
+            {"method": "FBS", "bin_width": 25.0, "min_val": -1000.0},
+            {"bin_width": 25.0, "min_val": -1000.0},
+        ),
+        ({"method": "FBN", "n_bins": 16, "min_val": -900.0, "max_val": 700.0}, {"min_val": -900.0}),
+        ({"method": "FIXED_CUTOFFS", "cutoffs": [-500.0, 0.0, 300.0]}, {}),
+        ({"method": "FBN", "n_bins": 16}, {}),  # a missing limit: the full-image path
+    ):
+        params = {"ivh_discretisation": dict(disc)}
+        disc_params = dict(disc)
+        method = disc_params.pop("method")
+        full = discretise_image(img, method=method, roi_mask=mask, **disc_params)
+        expected = calculate_ivh_features(apply_mask(full, mask), **kwargs)
+        assert pipeline._compute_ivh_features(state, params, {}) == expected
