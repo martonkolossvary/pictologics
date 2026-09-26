@@ -671,11 +671,15 @@ def _find_best_dicom_series_dir(root: Path) -> Path:
     return best_dir
 
 
+# Segmentation Storage and Label Map Segmentation Storage
+_SEG_SOP_CLASSES = ("1.2.840.10008.5.1.4.1.1.66.4", "1.2.840.10008.5.1.4.1.1.66.7")
+
+
 def _is_dicom_seg(path: str) -> bool:
     """Check if a DICOM file is a Segmentation object.
 
-    Checks if the SOPClassUID matches the DICOM Segmentation Storage class
-    (1.2.840.10008.5.1.4.1.1.66.4).
+    Checks if the SOPClassUID is Segmentation Storage (1.2.840.10008.5.1.4.1.1.66.4)
+    or Label Map Segmentation Storage (1.2.840.10008.5.1.4.1.1.66.7).
 
     Args:
         path: Path to the potential DICOM file.
@@ -685,8 +689,7 @@ def _is_dicom_seg(path: str) -> bool:
     """
     try:
         dcm = pydicom.dcmread(path, stop_before_pixels=True)
-        # DICOM Segmentation Storage SOP Class UID
-        return str(getattr(dcm, "SOPClassUID", "")) == "1.2.840.10008.5.1.4.1.1.66.4"
+        return str(getattr(dcm, "SOPClassUID", "")) in _SEG_SOP_CLASSES
     except Exception:
         return False
 

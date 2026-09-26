@@ -138,9 +138,10 @@ def load_seg(
     # Get available segment numbers
     available_segments = [s.SegmentNumber for s in seg.SegmentSequence]
 
-    # Determine which segments to extract
+    # Determine which segments to extract. A label map may describe its background as
+    # segment 0, which is not a segment to extract by default.
     if segment_numbers is None:
-        target_segments = available_segments
+        target_segments = [n for n in available_segments if n != 0 or not _is_labelmap(seg)]
     else:
         # Validate requested segments exist
         for seg_num in segment_numbers:
@@ -281,6 +282,11 @@ def _extract_seg_geometry(
     return spacing, origin, direction
 
 
+def _is_labelmap(seg: pydicom.Dataset) -> bool:
+    """A label-map SEG stores segment numbers as pixel values, one frame per position."""
+    return str(getattr(seg, "SegmentationType", "")) == "LABELMAP"
+
+
 class _FrameLayout(NamedTuple):
     """Where each frame of a SEG goes."""
 
@@ -319,7 +325,9 @@ def _frame_layout(seg: pydicom.Dataset, n_frames: int) -> _FrameLayout:
         if sid:
             segments[i] = int(sid[0].ReferencedSegmentNumber)
         fc = getattr(fg, "FrameContentSequence", None)
-        values = list(getattr(fc[0], "DimensionIndexValues", None) or []) if fc else []
+        values = getattr(fc[0], "DimensionIndexValues", None) if fc else None
+        if isinstance(values, int):  # one value, as in a label map (the position)
+            values = [values]
         if values:
             dim_slices[i] = int(values[0]) - 1
         pps = getattr(fg, "PlanePositionSequence", None)
@@ -330,7 +338,7 @@ def _frame_layout(seg: pydicom.Dataset, n_frames: int) -> _FrameLayout:
         if dim_slices:
             n_slices = max(dim_slices.values()) + 1
         else:
-            n_segments = len(seg.SegmentSequence)
+            n_segments = 1 if _is_labelmap(seg) else len(seg.SegmentSequence)
             n_slices = n_frames // n_segments if n_segments > 0 else n_frames
         slices = [dim_slices.get(i, i) for i in range(n_frames)]
         return _FrameLayout(segments, slices, n_slices, None, None)
@@ -383,15 +391,21 @@ def _extract_combined_segments(
         3D numpy array with segment numbers as voxel values.
     """
     layout = _frame_layout(seg, n_frames)
+    labelmap = _is_labelmap(seg)
     # Create output array: (Z, Y, X) = (slices, rows, cols)
     combined = np.zeros((layout.n_slices, seg.Rows, seg.Columns), dtype=np.uint8)
     for frame_idx in range(n_frames):
         seg_num = layout.segments[frame_idx]
-        if seg_num not in target_segments or layout.slices[frame_idx] >= layout.n_slices:
+        if layout.slices[frame_idx] >= layout.n_slices:
             continue
         frame_data = pixel_array[frame_idx] if pixel_array.ndim == 3 else pixel_array
-        # Add to combined array (higher segment numbers overwrite lower)
-        combined[layout.slices[frame_idx]][frame_data > 0] = seg_num
+        if labelmap:
+            # The pixel values are the segment numbers
+            keep = np.isin(frame_data, target_segments)
+            combined[layout.slices[frame_idx]][keep] = frame_data[keep]
+        elif seg_num in target_segments:
+            # Add to combined array (higher segment numbers overwrite lower)
+            combined[layout.slices[frame_idx]][frame_data > 0] = seg_num
     return combined
 
 
@@ -413,15 +427,17 @@ def _extract_single_segment(
         3D binary numpy array for the specified segment.
     """
     layout = _frame_layout(seg, n_frames)
+    labelmap = _is_labelmap(seg)
     result = np.zeros((layout.n_slices, seg.Rows, seg.Columns), dtype=np.uint8)
     for frame_idx in range(n_frames):
-        if (
-            layout.segments[frame_idx] != segment_number
-            or layout.slices[frame_idx] >= layout.n_slices
+        if layout.slices[frame_idx] >= layout.n_slices or not (
+            labelmap or layout.segments[frame_idx] == segment_number
         ):
             continue
         frame_data = pixel_array[frame_idx] if pixel_array.ndim == 3 else pixel_array
-        result[layout.slices[frame_idx]] = (frame_data > 0).astype(np.uint8)
+        # A label map holds the segment numbers themselves
+        in_segment = frame_data == segment_number if labelmap else frame_data > 0
+        result[layout.slices[frame_idx]] = in_segment.astype(np.uint8)
     return result
 
 

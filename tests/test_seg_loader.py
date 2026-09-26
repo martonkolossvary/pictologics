@@ -800,11 +800,15 @@ class TestEdgeCases:
 
 
 def _write_ct_and_seg(
-    folder: Path, labels: np.ndarray, spacing_between_slices: float | None = None
+    folder: Path,
+    labels: np.ndarray,
+    spacing_between_slices: float | None = None,
+    segmentation_type: str = "BINARY",
 ) -> tuple[Path, Path]:
     """A synthetic CT series and a highdicom SEG of `labels` ((Z, Y, X), one segment per
     label value). highdicom orders the frames by segment, then by position, and leaves
-    out empty frames."""
+    out empty frames. A LABELMAP SEG has one frame per position, with the labels as
+    pixel values."""
     import highdicom as hd
     import pydicom
     from pydicom.dataset import FileMetaDataset
@@ -856,7 +860,7 @@ def _write_ct_and_seg(
     seg = hd.seg.Segmentation(
         source_images=datasets,
         pixel_array=labels,
-        segmentation_type=hd.seg.SegmentationTypeValues.BINARY,
+        segmentation_type=hd.seg.SegmentationTypeValues[segmentation_type],
         segment_descriptions=descriptions,
         series_instance_uid=generate_uid(),
         series_number=2,
@@ -874,6 +878,30 @@ def _write_ct_and_seg(
 
 class TestHighdicomRoundTrip:
     """A SEG written by highdicom loads back into the labels it was made from."""
+
+    def test_label_maps_give_their_label_values(self, tmp_path: Path) -> None:
+        # A LABELMAP SEG (its own SOP class) reaches load_seg, and its pixel values are
+        # the segment numbers. The background, segment 0, is left out by default.
+        from pictologics.loader import load_image
+
+        labels = np.zeros((6, 12, 10), dtype=np.uint8)
+        labels[1:5, 2:8, 1:6] = 1
+        labels[2:6, 6:11, 4:9] = 2
+        ct_dir, seg_path = _write_ct_and_seg(tmp_path, labels, segmentation_type="LABELMAP")
+        expected = np.transpose(labels, (2, 1, 0))  # (X, Y, Z)
+        ct = load_image(str(ct_dir))
+
+        combined = load_image(str(seg_path), reference_image=ct)
+        np.testing.assert_array_equal(combined.array, expected)
+        separate = load_seg(str(seg_path), combine_segments=False, reference_image=ct)
+        assert isinstance(separate, dict) and sorted(separate) == [1, 2]
+        for n in (1, 2):
+            np.testing.assert_array_equal(separate[n].array, (expected == n).astype(np.uint8))
+        only_2 = load_seg(str(seg_path), segment_numbers=[2], reference_image=ct)
+        np.testing.assert_array_equal(only_2.array, np.where(expected == 2, 2, 0))
+        background = load_seg(str(seg_path), segment_numbers=[0], combine_segments=False)
+        assert isinstance(background, dict)
+        assert background[0].array.sum() > 0
 
     def test_segments_keep_their_slices(self, tmp_path: Path) -> None:
         from pictologics.loader import load_image
