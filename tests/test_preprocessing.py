@@ -687,7 +687,9 @@ def test_discretise_kernel_keeps_array_order() -> None:
 
 
 def test_discretise_roi_search_only_for_missing_bounds() -> None:
-    # Default bounds come from the ROI values; given bounds skip the ROI search.
+    # Default bounds come from the ROI values: one fused pass for a float64 or uint8
+    # row-order mask, a gather for other masks. An all-NaN or empty ROI falls back to the
+    # whole image. Given bounds skip the ROI search.
     rng = np.random.default_rng(9)
     arr = rng.normal(0.0, 50.0, (6, 7, 8))
     arr[2, 3, 4] = np.nan
@@ -696,17 +698,29 @@ def test_discretise_roi_search_only_for_missing_bounds() -> None:
     values = arr[mask > 0]
     values = values[~np.isnan(values)]
     expected = discretise_image(arr, "FBN", n_bins=8, min_val=values.min(), max_val=values.max())
-    assert_array_equal(discretise_image(arr, "FBN", roi_mask=mask, n_bins=8), expected)
+    for m in (mask, mask.astype(np.uint8), mask > 0, np.asfortranarray(mask)):
+        assert_array_equal(discretise_image(arr, "FBN", roi_mask=m, n_bins=8), expected)
+    all_nan = arr.copy()
+    all_nan[mask > 0] = np.nan
+    for data, m in ((all_nan, mask), (arr, np.zeros(arr.shape))):
+        lo, hi = np.nanmin(data), np.nanmax(data)
+        ref = discretise_image(data, "FBN", n_bins=8, min_val=lo, max_val=hi)
+        assert_array_equal(discretise_image(data, "FBN", roi_mask=m, n_bins=8), ref)
 
     class NoSearch(np.ndarray):
         def __gt__(self, other: object) -> np.ndarray:
             raise AssertionError("the ROI search ran")
 
-    no_search = mask.view(NoSearch)
-    discretise_image(arr, "FBS", roi_mask=no_search, bin_width=10.0, min_val=-100.0)
-    discretise_image(arr, "FBN", roi_mask=no_search, n_bins=8, min_val=-9.0, max_val=9.0)
-    with pytest.raises(AssertionError, match="the ROI search ran"):
-        discretise_image(arr, "FBN", roi_mask=no_search, n_bins=8)
+    no_gather = (mask > 0).view(NoSearch)  # a bool mask takes the gather
+    with patch(
+        "pictologics.preprocessing.roi_min_max",
+        side_effect=AssertionError("the ROI search ran"),
+    ):
+        discretise_image(arr, "FBS", roi_mask=no_gather, bin_width=10.0, min_val=-100.0)
+        discretise_image(arr, "FBN", roi_mask=mask, n_bins=8, min_val=-9.0, max_val=9.0)
+        for m in (mask, no_gather):
+            with pytest.raises(AssertionError, match="the ROI search ran"):
+                discretise_image(arr, "FBN", roi_mask=m, n_bins=8)
 
 
 def test_discretise_integer_input() -> None:

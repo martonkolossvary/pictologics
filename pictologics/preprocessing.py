@@ -25,7 +25,7 @@ from numba import jit, prange
 from numpy import typing as npt
 from scipy.ndimage import affine_transform, generate_binary_structure, label
 
-from .features._utils import compute_nonzero_bbox
+from .features._utils import compute_nonzero_bbox, roi_min_max
 from .loader import Image, _direction_matrix, _validate_geometry
 
 # Common sentinel values used in medical imaging to denote "no data" or "background"
@@ -959,18 +959,33 @@ def discretise_image(
         if mask_arr.shape != array.shape:
             raise ValueError(f"Shape mismatch: Image {array.shape} vs Mask {mask_arr.shape}")
 
-    roi_values: Optional[npt.NDArray[Any]] = None
+    roi_range: Optional[tuple[Any, ...]] = None  # (min, max) over the ROI, NaNs skipped
 
-    def _default_bound(roi_reduce: Any, global_reduce: Any) -> Any:
-        """Default bin bound: ROI reduction, falling back to the global one. The ROI
-        values (NaNs excluded) are gathered at the first call, so given bounds skip
-        the gather."""
-        nonlocal roi_values
-        if roi_values is None and mask_arr is not None:
-            values = array[mask_arr > 0]
-            roi_values = values[~np.isnan(values)]
-        if roi_values is not None and roi_values.size > 0:
-            return roi_reduce(roi_values)
+    def _default_bound(index: int, global_reduce: Any) -> Any:
+        """Default bin bound (index 0: min, 1: max) over the ROI, falling back to the
+        global one. The ROI range is found at the first call, so given bounds skip the
+        search. A float64 row-order image with a float64 or uint8 row-order mask takes
+        one fused pass (roi_min_max skips NaNs, as NaN compares false); other inputs
+        gather the ROI values."""
+        nonlocal roi_range
+        if roi_range is None and mask_arr is not None:
+            if (
+                array.ndim == 3
+                and array.dtype == np.float64
+                and mask_arr.dtype in (np.float64, np.uint8)
+                and array.flags.c_contiguous
+                and mask_arr.flags.c_contiguous
+            ):
+                found = roi_min_max(array, mask_arr)
+                roi_range = ()
+                if found is not None and found[0] <= found[1]:  # an all-NaN ROI: (inf, -inf)
+                    roi_range = (np.float64(found[0]), np.float64(found[1]))
+            else:
+                values = array[mask_arr > 0]
+                values = values[~np.isnan(values)]
+                roi_range = (values.min(), values.max()) if values.size else ()
+        if roi_range:
+            return roi_range[index]
         # nanmin/nanmax of an all-NaN image is NaN (warning suppressed); it
         # propagates through the bin math so every voxel ends up invalid (0).
         with warnings.catch_warnings():
@@ -1009,8 +1024,8 @@ def discretise_image(
             raise ValueError("n_bins must be positive")
 
         # Determine min/max
-        current_min = min_val if min_val is not None else _default_bound(np.min, np.nanmin)
-        current_max = max_val if max_val is not None else _default_bound(np.max, np.nanmax)
+        current_min = min_val if min_val is not None else _default_bound(0, np.nanmin)
+        current_max = max_val if max_val is not None else _default_bound(1, np.nanmax)
 
         if current_max <= current_min:
             # Edge case: flat region or invalid range
@@ -1049,7 +1064,7 @@ def discretise_image(
         if bin_width <= 0:
             raise ValueError("bin_width must be positive")
 
-        current_min = min_val if min_val is not None else _default_bound(np.min, np.nanmin)
+        current_min = min_val if min_val is not None else _default_bound(0, np.nanmin)
 
         if use_kernel:
             # Single-pass kernel; bit-identical to the numpy chain below
