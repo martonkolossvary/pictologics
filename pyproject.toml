@@ -105,6 +105,9 @@ filterwarnings = [
 
 [tool.coverage.run]
 source = ["pictologics"]
+# Python 3.12's sys.monitoring: the default tracer made `import highdicom` take 33 s
+# instead of 0.2 s, and the real highdicom SEG tests many minutes.
+core = "sysmon"
 omit = ["tests/*", "dev/*", "docs/*"]
 
 [tool.coverage.report]

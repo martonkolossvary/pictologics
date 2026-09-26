@@ -797,3 +797,138 @@ class TestEdgeCases:
         assert result.ndim == 3
         # Output array should have shape (3, 32, 32)
         assert result.shape[0] == 3
+
+
+def _write_ct_and_seg(
+    folder: Path, labels: np.ndarray, spacing_between_slices: float | None = None
+) -> tuple[Path, Path]:
+    """A synthetic CT series and a highdicom SEG of `labels` ((Z, Y, X), one segment per
+    label value). highdicom orders the frames by segment, then by position, and leaves
+    out empty frames."""
+    import highdicom as hd
+    import pydicom
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
+
+    nz, ny, nx = labels.shape
+    ct_dir = folder / "ct"
+    ct_dir.mkdir()
+    study, series, frame_ref = generate_uid(), generate_uid(), generate_uid()
+    datasets = []
+    for k in range(nz):
+        meta = FileMetaDataset()
+        meta.MediaStorageSOPClassUID = CTImageStorage
+        meta.MediaStorageSOPInstanceUID = generate_uid()
+        meta.TransferSyntaxUID = ExplicitVRLittleEndian
+        ds = pydicom.Dataset()
+        ds.file_meta = meta
+        ds.SOPClassUID, ds.SOPInstanceUID = CTImageStorage, meta.MediaStorageSOPInstanceUID
+        ds.StudyInstanceUID, ds.SeriesInstanceUID = study, series
+        ds.FrameOfReferenceUID = frame_ref
+        ds.PatientName, ds.PatientID, ds.PatientBirthDate, ds.PatientSex = "Syn^Test", "S1", "", "O"
+        ds.StudyDate, ds.StudyTime, ds.StudyID = "20260101", "120000", "1"
+        ds.AccessionNumber, ds.ReferringPhysicianName = "", ""
+        ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "CT", 1, k + 1
+        ds.Rows, ds.Columns = ny, nx
+        ds.PixelSpacing = [0.5, 0.75]
+        ds.SliceThickness = 2.0
+        if spacing_between_slices is not None:
+            ds.SpacingBetweenSlices = spacing_between_slices
+        ds.ImagePositionPatient = [-10.0, 5.0, 3.0 + 2.0 * k]
+        ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 1
+        ds.PixelData = np.zeros((ny, nx), dtype=np.int16).tobytes()
+        path = ct_dir / f"{k:02d}.dcm"
+        ds.save_as(path, enforce_file_format=True)
+        datasets.append(pydicom.dcmread(path))
+    code = hd.sr.CodedConcept
+    descriptions = [
+        hd.seg.SegmentDescription(
+            segment_number=int(n),
+            segment_label=f"label {n}",
+            segmented_property_category=code("91723000", "SCT", "Anatomical Structure"),
+            segmented_property_type=code("23451007", "SCT", "Adrenal gland"),
+            algorithm_type=hd.seg.SegmentAlgorithmTypeValues.MANUAL,
+        )
+        for n in np.unique(labels[labels > 0])
+    ]
+    seg = hd.seg.Segmentation(
+        source_images=datasets,
+        pixel_array=labels,
+        segmentation_type=hd.seg.SegmentationTypeValues.BINARY,
+        segment_descriptions=descriptions,
+        series_instance_uid=generate_uid(),
+        series_number=2,
+        sop_instance_uid=generate_uid(),
+        instance_number=1,
+        manufacturer="test",
+        manufacturer_model_name="test",
+        software_versions="1",
+        device_serial_number="1",
+    )
+    seg_path = folder / "seg.dcm"
+    seg.save_as(seg_path)
+    return ct_dir, seg_path
+
+
+class TestHighdicomRoundTrip:
+    """A SEG written by highdicom loads back into the labels it was made from."""
+
+    def test_segments_keep_their_slices(self, tmp_path: Path) -> None:
+        from pictologics.loader import load_image
+
+        labels = np.zeros((8, 20, 24), dtype=np.uint8)
+        labels[2:6, 5:12, 4:15] = 1
+        labels[1:4, 13:18, 16:22] = 2
+        ct_dir, seg_path = _write_ct_and_seg(tmp_path, labels)
+        expected = np.transpose(labels, (2, 1, 0))  # (X, Y, Z)
+        ct = load_image(str(ct_dir))
+
+        combined = load_seg(str(seg_path), reference_image=ct)
+        assert isinstance(combined, Image)
+        np.testing.assert_array_equal(combined.array, expected)
+        separate = load_seg(str(seg_path), combine_segments=False, reference_image=ct)
+        assert isinstance(separate, dict)
+        for n in (1, 2):
+            np.testing.assert_array_equal(separate[n].array, (expected == n).astype(np.uint8))
+
+        # Without a reference: the frames' extent, placed by the lowest slice.
+        alone = load_seg(str(seg_path))
+        assert isinstance(alone, Image)
+        np.testing.assert_array_equal(alone.array, expected[:, :, 1:6])
+        assert alone.origin == pytest.approx((-10.0, 5.0, 5.0))
+        assert alone.spacing == pytest.approx((0.75, 0.5, 2.0))
+
+    def test_slices_without_segments(self, tmp_path: Path) -> None:
+        # A segment on slices 1 and 4 only: the step stays the declared slice spacing.
+        labels = np.zeros((6, 10, 12), dtype=np.uint8)
+        labels[1, 2:5, 3:6] = 1
+        labels[4, 6:9, 7:10] = 1
+        _, seg_path = _write_ct_and_seg(tmp_path, labels, spacing_between_slices=2.0)
+        alone = load_seg(str(seg_path))
+        assert isinstance(alone, Image)
+        np.testing.assert_array_equal(alone.array, np.transpose(labels[1:5], (2, 1, 0)))
+        assert alone.spacing[2] == pytest.approx(2.0)
+
+    def test_frames_without_positions_use_the_dimension_index(self) -> None:
+        # A position item without ImagePositionPatient: the slice comes from the first
+        # dimension index value, as before.
+        from types import SimpleNamespace as NS
+
+        seg = NS(
+            Rows=4,
+            Columns=5,
+            SegmentSequence=[NS(SegmentNumber=1)],
+            PerFrameFunctionalGroupsSequence=[
+                NS(
+                    SegmentIdentificationSequence=[NS(ReferencedSegmentNumber=1)],
+                    FrameContentSequence=[NS(DimensionIndexValues=[k, 1])],
+                    PlanePositionSequence=[NS(ImagePositionPatient=None)],
+                )
+                for k in (3, 1)
+            ],
+        )
+        out = _extract_single_segment(seg, np.ones((2, 4, 5), dtype=np.uint8), 1, 2)
+        assert out.shape == (3, 4, 5)
+        assert out[0].all() and out[2].all() and not out[1].any()

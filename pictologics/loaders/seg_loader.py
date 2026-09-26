@@ -12,7 +12,7 @@ Uses highdicom for robust SEG parsing and extraction.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 import pydicom
@@ -271,36 +271,98 @@ def _extract_seg_geometry(
                 slice_cosines = np.cross(row_cosines, col_cosines)
                 direction = np.column_stack([row_cosines, col_cosines, slice_cosines])
 
-    # Try to get origin from first frame's PlanePositionSequence
-    if hasattr(seg, "PerFrameFunctionalGroupsSequence") and seg.PerFrameFunctionalGroupsSequence:
-        first_frame = seg.PerFrameFunctionalGroupsSequence[0]
-        if hasattr(first_frame, "PlanePositionSequence") and first_frame.PlanePositionSequence:
-            pp = first_frame.PlanePositionSequence[0]
-            if hasattr(pp, "ImagePositionPatient") and pp.ImagePositionPatient:
-                ipp = [float(x) for x in pp.ImagePositionPatient]
-                origin = (ipp[0], ipp[1], ipp[2])
-
-    # Calculate slice spacing from frame positions if available
-    if hasattr(seg, "PerFrameFunctionalGroupsSequence") and seg.PerFrameFunctionalGroupsSequence:
-        positions = []
-        for frame_fg in seg.PerFrameFunctionalGroupsSequence:
-            if hasattr(frame_fg, "PlanePositionSequence") and frame_fg.PlanePositionSequence:
-                pp = frame_fg.PlanePositionSequence[0]
-                if hasattr(pp, "ImagePositionPatient") and pp.ImagePositionPatient:
-                    positions.append([float(x) for x in pp.ImagePositionPatient])
-
-        if len(positions) >= 2:
-            # Calculate slice spacing from consecutive frame positions
-            pos_array = np.array(positions)
-            if len(pos_array) > 1:
-                diffs = np.diff(pos_array, axis=0)
-                slice_distances = np.linalg.norm(diffs, axis=1)
-                if len(slice_distances) > 0:
-                    median_spacing = float(np.median(slice_distances))
-                    if median_spacing > 0:
-                        spacing = (spacing[0], spacing[1], median_spacing)
+    # Origin and slice step from the frame positions (see _frame_layout)
+    layout = _frame_layout(seg, len(getattr(seg, "PerFrameFunctionalGroupsSequence", None) or []))
+    if layout.first_position is not None:
+        origin = layout.first_position
+    if layout.step is not None:
+        spacing = (spacing[0], spacing[1], layout.step)
 
     return spacing, origin, direction
+
+
+class _FrameLayout(NamedTuple):
+    """Where each frame of a SEG goes."""
+
+    segments: list[int]  # segment number of each frame
+    slices: list[int]  # slice index of each frame
+    n_slices: int
+    step: float | None  # slice step in mm, when the frames have positions
+    first_position: tuple[float, float, float] | None  # position of slice 0
+
+
+def _numbers(value: Any, count: int) -> list[float] | None:
+    """`value` as `count` floats, or None if it is not a sequence of `count` numbers."""
+    try:
+        numbers = [float(x) for x in value]
+    except TypeError:
+        return None
+    return numbers if len(numbers) == count else None
+
+
+def _frame_layout(seg: pydicom.Dataset, n_frames: int) -> _FrameLayout:
+    """Segment number and slice index of each frame.
+
+    The slice index comes from each frame's position along the slice normal: writers
+    order the dimension index values differently (highdicom puts the segment number
+    first), and they may leave out empty frames. The step is the smallest distance
+    between two slice positions, or the SEG's SpacingBetweenSlices when that distance
+    is a whole multiple of it (slices without any segment). Frames without a position
+    fall back to their first dimension index value, and then to their own order.
+    """
+    frames = list(getattr(seg, "PerFrameFunctionalGroupsSequence", None) or [])
+    segments = [1] * n_frames
+    dim_slices: dict[int, int] = {}
+    positions: list[list[float] | None] = [None] * n_frames
+    for i, fg in enumerate(frames[:n_frames]):
+        sid = getattr(fg, "SegmentIdentificationSequence", None)
+        if sid:
+            segments[i] = int(sid[0].ReferencedSegmentNumber)
+        fc = getattr(fg, "FrameContentSequence", None)
+        values = list(getattr(fc[0], "DimensionIndexValues", None) or []) if fc else []
+        if values:
+            dim_slices[i] = int(values[0]) - 1
+        pps = getattr(fg, "PlanePositionSequence", None)
+        if pps:
+            positions[i] = _numbers(getattr(pps[0], "ImagePositionPatient", None), 3)
+
+    if n_frames == 0 or any(pos is None for pos in positions):
+        if dim_slices:
+            n_slices = max(dim_slices.values()) + 1
+        else:
+            n_segments = len(seg.SegmentSequence)
+            n_slices = n_frames // n_segments if n_segments > 0 else n_frames
+        slices = [dim_slices.get(i, i) for i in range(n_frames)]
+        return _FrameLayout(segments, slices, n_slices, None, None)
+
+    normal = np.array([0.0, 0.0, 1.0])
+    shared = getattr(seg, "SharedFunctionalGroupsSequence", None)
+    po = getattr(shared[0], "PlaneOrientationSequence", None) if shared else None
+    iop = _numbers(getattr(po[0], "ImageOrientationPatient", None), 6) if po else None
+    if iop is not None:
+        normal = np.cross(iop[:3], iop[3:])
+    pos = np.array(positions)
+    proj = pos @ normal
+    levels = np.unique(np.round(proj, 3))  # one level per slice, to the micrometre
+    step: float | None = None
+    slices_arr = np.zeros(n_frames, dtype=np.int64)
+    if len(levels) > 1:
+        step = float(np.min(np.diff(levels)))
+        pm = getattr(shared[0], "PixelMeasuresSequence", None) if shared else None
+        declared = getattr(pm[0], "SpacingBetweenSlices", None) if pm else None
+        if isinstance(declared, (int, float)) and declared > 0:
+            ratio = step / float(declared)
+            if abs(ratio - round(ratio)) < 1e-3:
+                step = float(declared)
+        slices_arr = np.rint((proj - proj.min()) / step).astype(np.int64)
+    first = pos[int(np.argmin(proj))]
+    return _FrameLayout(
+        segments,
+        [int(k) for k in slices_arr],
+        int(slices_arr.max()) + 1,
+        step,
+        (float(first[0]), float(first[1]), float(first[2])),
+    )
 
 
 def _extract_combined_segments(
@@ -320,68 +382,16 @@ def _extract_combined_segments(
     Returns:
         3D numpy array with segment numbers as voxel values.
     """
-    # Determine array dimensions
-    rows = seg.Rows
-    cols = seg.Columns
-
-    # For multi-segment SEGs, we need to figure out the frame organization
-    # Each frame belongs to a specific segment and slice position
-
-    # Get segment info for each frame from PerFrameFunctionalGroupsSequence
-    frame_to_segment: dict[int, int] = {}
-    frame_to_slice: dict[int, int] = {}
-
-    if hasattr(seg, "PerFrameFunctionalGroupsSequence"):
-        for frame_idx, frame_fg in enumerate(seg.PerFrameFunctionalGroupsSequence):
-            # Get segment number for this frame
-            if (
-                hasattr(frame_fg, "SegmentIdentificationSequence")
-                and frame_fg.SegmentIdentificationSequence
-            ):
-                seg_id = frame_fg.SegmentIdentificationSequence[0]
-                frame_to_segment[frame_idx] = seg_id.ReferencedSegmentNumber
-
-            # Get dimension index for slice position
-            if hasattr(frame_fg, "FrameContentSequence") and frame_fg.FrameContentSequence:
-                fc = frame_fg.FrameContentSequence[0]
-                if hasattr(fc, "DimensionIndexValues") and fc.DimensionIndexValues:
-                    # Typically [slice_index, segment_number] or similar
-                    dim_values = list(fc.DimensionIndexValues)
-                    # Use first dimension as slice index (0-indexed)
-                    frame_to_slice[frame_idx] = dim_values[0] - 1 if dim_values else frame_idx
-
-    # Determine number of slices
-    if frame_to_slice:
-        n_slices = max(frame_to_slice.values()) + 1
-    else:
-        # Estimate from number of frames and segments
-        n_segments = len(seg.SegmentSequence)
-        n_slices = n_frames // n_segments if n_segments > 0 else n_frames
-
+    layout = _frame_layout(seg, n_frames)
     # Create output array: (Z, Y, X) = (slices, rows, cols)
-    combined = np.zeros((n_slices, rows, cols), dtype=np.uint8)
-
-    # Fill in segments
+    combined = np.zeros((layout.n_slices, seg.Rows, seg.Columns), dtype=np.uint8)
     for frame_idx in range(n_frames):
-        seg_num = frame_to_segment.get(frame_idx, 1)
-        slice_idx = frame_to_slice.get(frame_idx, frame_idx)
-
-        if seg_num not in target_segments:
+        seg_num = layout.segments[frame_idx]
+        if seg_num not in target_segments or layout.slices[frame_idx] >= layout.n_slices:
             continue
-
-        if slice_idx >= n_slices:
-            continue
-
-        # Get frame data
-        if pixel_array.ndim == 3:
-            frame_data = pixel_array[frame_idx]
-        else:
-            frame_data = pixel_array
-
+        frame_data = pixel_array[frame_idx] if pixel_array.ndim == 3 else pixel_array
         # Add to combined array (higher segment numbers overwrite lower)
-        mask = frame_data > 0
-        combined[slice_idx][mask] = seg_num
-
+        combined[layout.slices[frame_idx]][frame_data > 0] = seg_num
     return combined
 
 
@@ -402,56 +412,16 @@ def _extract_single_segment(
     Returns:
         3D binary numpy array for the specified segment.
     """
-    rows = seg.Rows
-    cols = seg.Columns
-
-    # Get frame organization
-    frame_to_segment: dict[int, int] = {}
-    frame_to_slice: dict[int, int] = {}
-
-    if hasattr(seg, "PerFrameFunctionalGroupsSequence"):
-        for frame_idx, frame_fg in enumerate(seg.PerFrameFunctionalGroupsSequence):
-            if (
-                hasattr(frame_fg, "SegmentIdentificationSequence")
-                and frame_fg.SegmentIdentificationSequence
-            ):
-                seg_id = frame_fg.SegmentIdentificationSequence[0]
-                frame_to_segment[frame_idx] = seg_id.ReferencedSegmentNumber
-
-            if hasattr(frame_fg, "FrameContentSequence") and frame_fg.FrameContentSequence:
-                fc = frame_fg.FrameContentSequence[0]
-                if hasattr(fc, "DimensionIndexValues") and fc.DimensionIndexValues:
-                    dim_values = list(fc.DimensionIndexValues)
-                    frame_to_slice[frame_idx] = dim_values[0] - 1 if dim_values else frame_idx
-
-    # Determine number of slices
-    if frame_to_slice:
-        n_slices = max(frame_to_slice.values()) + 1
-    else:
-        n_segments = len(seg.SegmentSequence)
-        n_slices = n_frames // n_segments if n_segments > 0 else n_frames
-
-    # Create output array
-    result = np.zeros((n_slices, rows, cols), dtype=np.uint8)
-
-    # Extract frames for this segment
+    layout = _frame_layout(seg, n_frames)
+    result = np.zeros((layout.n_slices, seg.Rows, seg.Columns), dtype=np.uint8)
     for frame_idx in range(n_frames):
-        seg_num = frame_to_segment.get(frame_idx, 1)
-        slice_idx = frame_to_slice.get(frame_idx, frame_idx)
-
-        if seg_num != segment_number:
+        if (
+            layout.segments[frame_idx] != segment_number
+            or layout.slices[frame_idx] >= layout.n_slices
+        ):
             continue
-
-        if slice_idx >= n_slices:
-            continue
-
-        if pixel_array.ndim == 3:
-            frame_data = pixel_array[frame_idx]
-        else:
-            frame_data = pixel_array
-
-        result[slice_idx] = (frame_data > 0).astype(np.uint8)
-
+        frame_data = pixel_array[frame_idx] if pixel_array.ndim == 3 else pixel_array
+        result[layout.slices[frame_idx]] = (frame_data > 0).astype(np.uint8)
     return result
 
 
