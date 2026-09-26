@@ -126,6 +126,9 @@ class TestFormatResults:
     def test_invalid_output_type(self, sample_results: dict[str, pd.Series]) -> None:
         with pytest.raises(ValueError, match="Unknown output_type"):
             format_results(sample_results, output_type="invalid")
+        for results in (sample_results, {}):
+            with pytest.raises(ValueError, match="Unknown output_type"):
+                format_results(results, fmt="long", output_type="invalid")
 
     def test_wide_rows_share_their_keys(self, sample_results: dict[str, pd.Series]) -> None:
         """Rows of many images keep one copy of each column name."""

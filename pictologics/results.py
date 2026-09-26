@@ -108,6 +108,9 @@ def format_results(
             raise ValueError(f"Unknown output_type: {output_type}")
 
     elif fmt == "long":
+        if output_type not in ("dict", "pandas", "json"):
+            raise ValueError(f"Unknown output_type: {output_type}")
+
         # Long format: Rows of [meta_cols..., config, feature_key, value]
         rows = []
         for config_name, series in results.items():
