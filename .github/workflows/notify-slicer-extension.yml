@@ -1,0 +1,33 @@
+name: Notify SlicerPictologics of release
+
+# When a stable Pictologics release is published, ask the SlicerPictologics extension
+# to open a compatibility-qualified version-bump pull request. This fires a
+# repository_dispatch that the extension's adopt-pictologics-release.yml workflow
+# consumes (event type "pictologics-release", client_payload.version). That workflow
+# validates the release and opens a review-only PR; it never auto-merges.
+#
+# Requires an org/repo secret SLICER_EXTENSION_DISPATCH_TOKEN: a personal access token
+# (classic "repo" scope, or a fine-grained token with "contents: write") on
+# martonkolossvary/SlicerPictologics. The default GITHUB_TOKEN cannot dispatch to
+# another repository. Until that secret is configured this workflow is inert.
+
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: Request extension version-bump adoption
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.release.prerelease }}
+    steps:
+      - name: Send repository_dispatch to SlicerPictologics
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.SLICER_EXTENSION_DISPATCH_TOKEN }}
+          repository: martonkolossvary/SlicerPictologics
+          event-type: pictologics-release
+          client-payload: '{"version": "${{ github.event.release.tag_name }}"}'
