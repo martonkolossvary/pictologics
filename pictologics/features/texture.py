@@ -613,8 +613,10 @@ def _process_voxel(
     if calc_ngtdm or calc_ngldm:
         s_val = 0.0
         dependence_count = 1
-        valid_neighbors = False
-        neighbor_sum = 0.0
+        # Integer sums: the 1-based grey levels of up to 26 neighbours add exactly in
+        # any order, so the float average below is the same as with a float sum. The
+        # mask (0/1) and the dependence test add as numbers, without branches.
+        neighbor_sum = 0
         neighbor_count = 0
 
         # Iterate over 26 neighbors
@@ -624,32 +626,15 @@ def _process_voxel(
             dx = offsets_26[i, 2]
             nz, ny, nx = z + dz, y + dy, x + dx
 
-            if is_safe:
-                # No boundary checks needed for 1-neighborhood
-                if mask[nz, ny, nx]:
-                    valid_neighbors = True
-                    n_val = data_int[nz, ny, nx]
-                    if calc_ngtdm:
-                        neighbor_sum += float(n_val) + 1.0
-                        neighbor_count += 1
-                    if calc_ngldm:
-                        if abs(int(n_val) - int(i_val)) <= ngldm_alpha:
-                            dependence_count += 1
-            else:
-                # Boundary checks needed
-                if 0 <= nz < depth and 0 <= ny < height and 0 <= nx < width:
-                    if mask[nz, ny, nx]:
-                        valid_neighbors = True
-                        n_val = data_int[nz, ny, nx]
-                        if calc_ngtdm:
-                            neighbor_sum += float(n_val) + 1.0
-                            neighbor_count += 1
-                        if calc_ngldm:
-                            if abs(int(n_val) - int(i_val)) <= ngldm_alpha:
-                                dependence_count += 1
+            if is_safe or (0 <= nz < depth and 0 <= ny < height and 0 <= nx < width):
+                m = int(mask[nz, ny, nx] != 0)
+                n_val = int(data_int[nz, ny, nx])
+                neighbor_sum += m * (n_val + 1)
+                neighbor_count += m
+                dependence_count += m * int(abs(n_val - int(i_val)) <= ngldm_alpha)
 
-        if calc_ngtdm and valid_neighbors and neighbor_count > 0:
-            avg = neighbor_sum / neighbor_count
+        if calc_ngtdm and neighbor_count > 0:
+            avg = float(neighbor_sum) / neighbor_count
             s_val = abs(float(i_val) + 1.0 - avg)
             ngtdm_n_local[tid, i_val] += 1
             ngtdm_s_local[tid, i_val] += s_val
