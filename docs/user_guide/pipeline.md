@@ -195,7 +195,7 @@ segments before feature extraction.
 | Parameter | Type | Default | Description |
 |:----------|:-----|:--------|:------------|
 | `threshold` | `float` | `0.5` | Threshold value for binarization |
-| `mask_values` | `int`, `list`, or `tuple` | `None` | Specific label(s) to select. Tuple `(min, max)` selects a range |
+| `mask_values` | `int`, `list`, or `tuple` | `None` | Specific label(s) to select. Tuple `(min, max)` selects an inclusive range; in a YAML or JSON file, write the range as `{range: [min, max]}`, because a plain list selects only the listed labels |
 | `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
 
 ### 7. `discretise`

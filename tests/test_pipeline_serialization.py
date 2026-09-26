@@ -21,9 +21,13 @@ from typing import Any
 os.environ["NUMBA_DISABLE_JIT"] = "1"
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
+import numpy as np
+import pandas as pd
 import pytest
 import yaml
 
+from pictologics.filters import BoundaryCondition
+from pictologics.loader import Image
 from pictologics.pipeline import CONFIG_SCHEMA_VERSION, RadiomicsPipeline
 from pictologics.templates import (
     get_all_templates,
@@ -991,3 +995,83 @@ class TestPipelineLoadingErrors:
             assert any(
                 "failed to load standard templates" in str(warning.message).lower() for warning in w
             )
+
+
+# --- Parameters Whose Meaning Must Survive Save and Load ---
+
+_MASK_RANGE = {"step": "binarize_mask", "params": {"mask_values": (1, 3)}}
+_MIRROR_FILTER = {
+    "step": "filter",
+    "params": {"type": "mean", "support": 3, "boundary": BoundaryCondition.MIRROR},
+}
+_EXTRACT_INTENSITY = {"step": "extract_features", "params": {"families": ["intensity"]}}
+
+
+def _three_label_inputs() -> tuple[Image, Image]:
+    rng = np.random.default_rng(3)
+    image = Image(
+        array=rng.normal(50.0, 20.0, (12, 12, 12)), spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0)
+    )
+    labels = np.zeros((12, 12, 12), dtype=np.uint8)
+    labels[2:5, 2:10, 2:10] = 1
+    labels[5:8, 2:10, 2:10] = 2
+    labels[8:11, 2:10, 2:10] = 3
+    return image, Image(array=labels, spacing=image.spacing, origin=image.origin)
+
+
+class TestSaveLoadKeepsMeaning:
+    """A configuration must give the same values after a save and a load."""
+
+    @pytest.mark.parametrize(
+        "step",
+        [pytest.param(_MASK_RANGE, id="mask-range"), pytest.param(_MIRROR_FILTER, id="boundary")],
+    )
+    def test_reloaded_configuration_gives_the_same_values(self, step: dict[str, Any]) -> None:
+        image, mask = _three_label_inputs()
+        original = RadiomicsPipeline(load_standard=False).add_config(
+            "cfg", [step, _EXTRACT_INTENSITY]
+        )
+        reloaded = RadiomicsPipeline.from_yaml(original.to_yaml())
+
+        before = original.run(image, mask, config_names=["cfg"])["cfg"]
+        after = reloaded.run(image, mask, config_names=["cfg"])["cfg"]
+
+        assert not before.isna().any()
+        pd.testing.assert_series_equal(after, before)
+
+    def test_files_write_a_range_apart_from_label_values(self) -> None:
+        pipeline = RadiomicsPipeline(load_standard=False)
+        pipeline.add_config("range", [_MASK_RANGE, _EXTRACT_INTENSITY])
+        pipeline.add_config(
+            "labels",
+            [{"step": "binarize_mask", "params": {"mask_values": [1, 3]}}, _EXTRACT_INTENSITY],
+        )
+
+        document = pipeline.to_dict()
+        reloaded = RadiomicsPipeline.from_dict(document)
+
+        saved = document["configs"]
+        assert saved["range"]["steps"][0]["params"]["mask_values"] == {"range": [1, 3]}
+        assert saved["labels"]["steps"][0]["params"]["mask_values"] == [1, 3]
+        assert reloaded.get_config("range")[0]["params"]["mask_values"] == (1, 3)
+        assert reloaded.get_config("labels")[0]["params"]["mask_values"] == [1, 3]
+
+    def test_boundary_is_written_by_the_name_that_loading_accepts(self) -> None:
+        pipeline = RadiomicsPipeline(load_standard=False).add_config(
+            "cfg", [_MIRROR_FILTER, _EXTRACT_INTENSITY]
+        )
+
+        saved = pipeline.to_dict()["configs"]["cfg"]["steps"][0]["params"]
+
+        assert saved["boundary"] == "mirror"
+
+    def test_feature_catalog_accepts_boundary_member_and_marks_ranges(self) -> None:
+        pipeline = RadiomicsPipeline(load_standard=False).add_config(
+            "cfg", [_MASK_RANGE, _MIRROR_FILTER, _EXTRACT_INTENSITY]
+        )
+
+        row = pipeline.describe_features().iloc[0]
+
+        binarize = json.loads(row["binarize_mask_params"])[0]["params"]
+        assert binarize["mask_values"] == {"range": [1, 3]}
+        assert json.loads(row["filter_params"])[0]["params"]["boundary"] == "mirror"

@@ -203,6 +203,17 @@ def _feature_name_families(family: str) -> list[str]:
     return [texture_family if texture_family is not None else family]
 
 
+def _mask_values_file_form(value: Any) -> Any:
+    """Keep a binarize_mask range apart from a list of label values in files.
+
+    The step reads a ``(lo, hi)`` tuple as an inclusive range but a list as label
+    values. Files have no tuples, so a range is written as ``{"range": [lo, hi]}``.
+    """
+    if isinstance(value, tuple) and len(value) == 2:
+        return {"range": list(value)}
+    return value
+
+
 def _get_apply_to(params: dict[str, Any], step_name: str) -> str:
     """Return a validated mask target for preprocessing steps that support it."""
     apply_to = params.get("apply_to", "both")
@@ -495,6 +506,10 @@ class RadiomicsPipeline:
                 # Convert new_spacing list to tuple
                 if "new_spacing" in params and isinstance(params["new_spacing"], list):
                     params["new_spacing"] = tuple(params["new_spacing"])
+                # {"range": [lo, hi]} is the file form of a binarize_mask (lo, hi) range
+                mask_values = params.get("mask_values")
+                if isinstance(mask_values, dict) and set(mask_values) == {"range"}:
+                    params["mask_values"] = tuple(mask_values["range"])
                 new_step["params"] = params
             converted.append(new_step)
         return converted
@@ -2238,7 +2253,9 @@ class RadiomicsPipeline:
             return [RadiomicsPipeline._catalog_serializable(item) for item in obj]
         if isinstance(obj, dict):
             return {
-                str(key): RadiomicsPipeline._catalog_serializable(value)
+                str(key): RadiomicsPipeline._catalog_serializable(
+                    _mask_values_file_form(value) if key == "mask_values" else value
+                )
                 for key, value in obj.items()
             }
         if isinstance(obj, list):
@@ -2247,6 +2264,8 @@ class RadiomicsPipeline:
             return obj.tolist()
         if isinstance(obj, (np.integer, np.floating, np.bool_)):
             return obj.item()
+        if isinstance(obj, BoundaryCondition):
+            return obj.name.lower()
         return obj
 
     @staticmethod
@@ -2508,7 +2527,10 @@ class RadiomicsPipeline:
         if isinstance(obj, tuple):
             return list(obj)
         elif isinstance(obj, dict):
-            return {k: self._make_serializable(v) for k, v in obj.items()}
+            return {
+                k: self._make_serializable(_mask_values_file_form(v) if k == "mask_values" else v)
+                for k, v in obj.items()
+            }
         elif isinstance(obj, list):
             return [self._make_serializable(item) for item in obj]
         elif isinstance(obj, np.ndarray):
@@ -2517,6 +2539,9 @@ class RadiomicsPipeline:
             return obj.item()
         elif isinstance(obj, Path):
             return str(obj)
+        elif isinstance(obj, BoundaryCondition):
+            # Loading accepts the member name ("mirror"), not scipy's mode ("reflect").
+            return obj.name.lower()
         elif isinstance(obj, Enum):
             return obj.value
         return obj
@@ -2524,15 +2549,12 @@ class RadiomicsPipeline:
     def _sanitize_filter_param_value(self, value: Any) -> Any:
         """Make a filter-step parameter value JSON-safe for provenance logging.
 
-        Two cases are handled before falling back to ``_make_serializable``: a raw
-        array (e.g. the pipeline-injected ``source_mask``) is never logged in full,
-        only as a compact shape/voxel-count descriptor; and ``BoundaryCondition`` is
-        recorded by its lowercase name (matching ``filter_boundary_effective``), not
-        scipy's numeric mode string (``BoundaryCondition.value``).
+        A raw array (e.g. the pipeline-injected ``source_mask``) is never logged in
+        full, only as a compact shape/voxel-count descriptor. Other values go through
+        ``_make_serializable``, which records a ``BoundaryCondition`` by its lowercase
+        name (matching ``filter_boundary_effective``).
         """
-        if isinstance(value, BoundaryCondition):
-            return value.name.lower()
-        elif isinstance(value, np.ndarray):
+        if isinstance(value, np.ndarray):
             return {
                 "shape": list(value.shape),
                 "voxel_count": int(value.size),
