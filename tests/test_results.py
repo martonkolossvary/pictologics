@@ -127,6 +127,30 @@ class TestFormatResults:
         with pytest.raises(ValueError, match="Unknown output_type"):
             format_results(sample_results, output_type="invalid")
 
+    def test_wide_rows_share_their_keys(self, sample_results: dict[str, pd.Series]) -> None:
+        """Rows of many images keep one copy of each column name."""
+        first = format_results(sample_results, meta={"subject_id": 1})
+        second = format_results(sample_results, meta={"subject_id": 2})
+        assert list(first) == list(second)
+        for a, b in zip(first, second, strict=True):
+            assert a is b
+
+    def test_wide_column_cache_stays_small_and_exact(self) -> None:
+        """The name cache holds at most _WIDE_CACHE_CONFIGS configurations and only str
+        names: equal numbers keep their own text, and a number as configuration works."""
+        from pictologics import results as results_module
+
+        series = pd.Series([1.0, 2.0], index=["a", "b"])
+        for k in range(results_module._WIDE_CACHE_CONFIGS + 5):
+            assert list(format_results({f"cfg_{k}": series})) == [f"cfg_{k}__a", f"cfg_{k}__b"]
+        assert len(results_module._WIDE_COLUMNS) <= results_module._WIDE_CACHE_CONFIGS
+        one = pd.Series([1.0], index=pd.Index([1], dtype=object))
+        one_float = pd.Series([2.0], index=pd.Index([1.0], dtype=object))
+        assert list(format_results({"c": one})) == ["c__1"]
+        assert list(format_results({"c": one_float})) == ["c__1.0"]
+        assert format_results({7: series}) == {"7__a": 1.0, "7__b": 2.0}
+        assert 7 not in results_module._WIDE_COLUMNS
+
 
 class TestSaveResults:
     """Tests for the save_results function."""

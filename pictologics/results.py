@@ -20,6 +20,13 @@ from typing import Any
 
 import pandas as pd
 
+# Wide-format column names of recent configurations, {config: {feature: column}}, so the
+# rows of many images share one copy of each name. Only str names are kept (equal numbers
+# can print differently), and the cache is emptied when it holds _WIDE_CACHE_CONFIGS
+# configurations, so names that change for every image stay bounded.
+_WIDE_COLUMNS: dict[str, dict[str, str]] = {}
+_WIDE_CACHE_CONFIGS = 64
+
 
 def format_results(
     results: dict[str, pd.Series],
@@ -78,8 +85,17 @@ def format_results(
         # Wide format: { "meta_key": val, "config__feature": val }
         formatted_data = meta.copy()
         for config_name, series in results.items():
+            columns = _WIDE_COLUMNS.get(config_name) if type(config_name) is str else {}
+            if columns is None:
+                if len(_WIDE_COLUMNS) >= _WIDE_CACHE_CONFIGS:
+                    _WIDE_COLUMNS.clear()
+                columns = _WIDE_COLUMNS[config_name] = {}
             for feature_name, value in series.items():
-                col_name = f"{config_name}__{feature_name}"
+                col_name = columns.get(feature_name)
+                if col_name is None:
+                    col_name = f"{config_name}__{feature_name}"
+                    if type(feature_name) is str:
+                        columns[feature_name] = col_name
                 formatted_data[col_name] = value
 
         if output_type == "dict":

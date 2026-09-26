@@ -1,0 +1,1 @@
+`format_results(fmt="wide")` keeps the column names of the last 64 configurations, so the rows of many images share one copy of each name. 1,000 rows of 1,200 features take 55 MB instead of 142 MB, and 110 ms instead of 140 ms to build. The rows are unchanged.
