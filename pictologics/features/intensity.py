@@ -899,9 +899,7 @@ def calculate_ivh_features(
         fractions = counts.astype(np.float64) / float(N)
 
         # Trapezoidal integration of fraction(I) over I.
-        features["area_under_the_ivh_curve_9CMM"] = float(
-            np.trapezoid(fractions, intensities_arr)
-        )
+        features["area_under_the_ivh_curve_9CMM"] = float(np.trapezoid(fractions, intensities_arr))
 
     return features
 

@@ -454,7 +454,11 @@ class TestLawsFilter:
         """Exercise the use_parallel=True branch across pooling and energy modes."""
         for pooling in ["max", "average", "min"]:
             result = laws_filter(
-                small_3d_image, "E3L3S3", rotation_invariant=True, pooling=pooling, use_parallel=True
+                small_3d_image,
+                "E3L3S3",
+                rotation_invariant=True,
+                pooling=pooling,
+                use_parallel=True,
             )
             assert result.shape == small_3d_image.shape
 
@@ -688,9 +692,7 @@ class TestGaborFilter:
         )
         assert not np.array_equal(old_wrong_response, new_correct_response)
 
-    def test_average_over_planes_anisotropic_spacing_is_now_handled_correctly(
-        self, small_3d_image
-    ):
+    def test_average_over_planes_anisotropic_spacing_is_now_handled_correctly(self, small_3d_image):
         """End-to-end: with average_over_planes=True and anisotropic z spacing,
         the overall result must differ from what pure isotropic (1, 1, 1) spacing
         would produce, since planes 0 and 1 (which contain the z axis) now

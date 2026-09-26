@@ -240,9 +240,7 @@ def _get_rotation_perms() -> List[Tuple[Tuple[int, int, int], Tuple[bool, bool, 
 
 
 @cache_by_bytes(_TRANSFER_CACHE_BYTES)
-def _simoncelli_transfer(
-    shape: Tuple[int, ...], level: int
-) -> npt.NDArray[np.floating[Any]]:
+def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.floating[Any]]:
     """Frequency-domain Simoncelli band-pass transfer function (IBSI 2 Eq. 27).
 
     Depends only on ``shape`` and ``level`` (never on image values or the source
