@@ -111,6 +111,18 @@ class TestTemplateLoading:
         assert metadata["schema_version"] == "1.0"
         assert "standard_fbn_32" in metadata["config_names"]
 
+    def test_yaml_loader_gives_the_safe_load_objects(self) -> None:
+        """libyaml's safe loader, when PyYAML has it, reads the templates and saved
+        configurations as yaml.safe_load does (the same types and values)."""
+        from pictologics import templates
+
+        assert templates._SafeLoader is getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+        folder = templates._get_templates_path()
+        texts = [folder.joinpath(name).read_text() for name in list_template_files()]
+        texts.append(RadiomicsPipeline().to_yaml())
+        for text in texts:
+            assert repr(templates._load_yaml(text)) == repr(yaml.safe_load(text))
+
 
 # --- Standard Config Tests ---
 

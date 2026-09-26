@@ -15,6 +15,14 @@ from typing import Any
 
 import yaml
 
+# libyaml's parser when PyYAML has it: the objects of yaml.safe_load, 5-10x faster.
+_SafeLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def _load_yaml(text: str) -> Any:
+    """Parse YAML text with the safe loader."""
+    return yaml.load(text, Loader=_SafeLoader)
+
 
 def _get_templates_path() -> resources.abc.Traversable:
     """Get the path to the templates directory using importlib.resources."""
@@ -53,7 +61,7 @@ def load_template_file(filename: str) -> dict[str, Any]:
         raise FileNotFoundError(f"Template file not found: {filename}")
 
     content = template_file.read_text(encoding="utf-8")
-    result: dict[str, Any] = yaml.safe_load(content)
+    result: dict[str, Any] = _load_yaml(content)
     return result
 
 

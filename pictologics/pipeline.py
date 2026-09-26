@@ -21,6 +21,7 @@ from __future__ import annotations
 import copy
 import datetime
 import functools
+import itertools
 import json
 import logging
 import math
@@ -91,7 +92,7 @@ from .preprocessing import (
     resegment_mask,
     round_intensities,
 )
-from .templates import get_standard_templates
+from .templates import _load_yaml, get_standard_templates
 
 # Schema version for config serialization - increment when format changes
 CONFIG_SCHEMA_VERSION = "1.0"
@@ -2077,7 +2078,11 @@ class RadiomicsPipeline:
         }
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=4, default=str), encoding="utf-8")
+        # Written as it is encoded, 4,096 pieces at a time: the whole text is never held.
+        encoder = json.JSONEncoder(indent=4, default=str)
+        with path.open("w", encoding="utf-8") as fh:
+            for pieces in itertools.batched(encoder.iterencode(payload), 4096):
+                fh.write("".join(pieces))
 
     # -------------------------------------------------------------------------
     # Configuration Serialization Methods
@@ -2820,7 +2825,7 @@ class RadiomicsPipeline:
         Returns:
             New RadiomicsPipeline instance.
         """
-        data = yaml.safe_load(yaml_string)
+        data = _load_yaml(yaml_string)
         return cls.from_dict(data, validate=validate, load_standard=load_standard)
 
     @classmethod

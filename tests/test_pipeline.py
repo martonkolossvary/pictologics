@@ -1061,6 +1061,12 @@ def test_save_log(pipeline: RadiomicsPipeline, tmp_path: Any) -> None:
     pipeline.save_log(p2)
     assert (tmp_path / "log_no_ext.json").exists()
 
+    # A log of many batches of 4,096 pieces: the text of json.dumps(indent=4).
+    pipeline._log.extend({"entry": i, "values": [i, i / 3]} for i in range(2000))
+    pipeline.save_log(p)
+    text = p.read_text()
+    assert text == json.dumps(json.loads(text), indent=4)
+
 
 def test_clear_log(pipeline: RadiomicsPipeline) -> None:
     pipeline._log.append({"a": 1})
