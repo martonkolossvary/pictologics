@@ -263,11 +263,13 @@ def _needs_full_grid(later_steps: list[dict[str, Any]]) -> bool:
 
 def _filter_reach(
     filter_type: str, params: dict[str, Any], spacing: tuple[float, float, float]
-) -> Optional[tuple[int, int, int]]:
+) -> Optional[tuple[Optional[int], Optional[int], Optional[int]]]:
     """Voxels that a filter output reads on each side, per axis, for the filters whose
     values do not depend on where the image ends: separable convolutions (LoG, wavelets,
-    the Laws response). None for the others: FFT filters, and the running sums of the
-    mean filter and the Laws energy, whose rounding depends on where a line starts."""
+    the Laws response), and along axis 2 the axial Gabor filter, which filters each
+    slice on its own (None: the filter reads the whole axis). None for the others: FFT
+    filters, and the running sums of the mean filter and the Laws energy, whose rounding
+    depends on where a line starts."""
     if filter_type == "log":
         spacing_mm = np.broadcast_to(np.asarray(params["spacing_mm"], dtype=float), (3,))
         truncate = params.get("truncate", 4.0)
@@ -281,6 +283,8 @@ def _filter_reach(
         kernels = params.get("kernel", "L5E5E5")
         half = max(int(kernels[i + 1]) for i in range(0, len(kernels), 2)) // 2 + 1
         return (half, half, half)
+    if filter_type == "gabor" and not params.get("average_over_planes", False):
+        return (None, None, 0)
     return None
 
 
@@ -1442,7 +1446,7 @@ class RadiomicsPipeline:
                     ]
                     region = (rs[0], rs[1], rs[2])
                     crop = tuple(
-                        slice(max(r.start - h, 0), min(r.stop + h, n))
+                        slice(0, n) if h is None else slice(max(r.start - h, 0), min(r.stop + h, n))
                         for r, h, n in zip(rs, reach, shape, strict=True)
                     )
                     img_arr = img_arr[crop]

@@ -4202,10 +4202,11 @@ def test_configurations_share_identical_preprocessing() -> None:
 
 def test_filters_of_the_roi_region_keep_every_feature() -> None:
     # A filter that no later step needs outside the ROI filters only the ROI region plus
-    # its reach (LoG, wavelets, the Laws response); every feature stays bit for bit. The
-    # mean filter and the Laws energy keep the full grid.
+    # its reach (LoG, wavelets, the Laws response, the slices of an axial Gabor filter);
+    # every feature stays bit for bit. The mean filter, the Laws energy and a Gabor filter
+    # averaged over three planes keep the full grid.
     from pictologics import pipeline as pipeline_module
-    from pictologics.filters import laplacian_of_gaussian
+    from pictologics.filters import gabor_filter, laplacian_of_gaussian
 
     rng = np.random.default_rng(81)
     img = Image(rng.normal(0.0, 50.0, (40, 36, 28)), (1.0, 1.0, 1.5), (0.0, 0.0, 0.0))
@@ -4223,7 +4224,15 @@ def test_filters_of_the_roi_region_keep_every_feature() -> None:
         },
         "laws": {"type": "laws", "kernel": "L5E5E5"},
         "laws_energy": {"type": "laws", "kernel": "L5E5E5", "compute_energy": True},
+        "laws_ri": {"type": "laws", "kernel": "E5W5E5", "rotation_invariant": True},
         "mean": {"type": "mean", "support": 5},
+        "gabor": {"type": "gabor", "sigma_mm": 2.0, "lambda_mm": 3.0, "theta": 0.5},
+        "gabor_planes": {
+            "type": "gabor",
+            "sigma_mm": 2.0,
+            "lambda_mm": 3.0,
+            "average_over_planes": True,
+        },
     }
     tail = [
         {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
@@ -4239,9 +4248,15 @@ def test_filters_of_the_roi_region_keep_every_feature() -> None:
             pipeline.add_config(name, [{"step": "filter", "params": dict(params)}, *tail])
         return pipeline.run(img, mask, config_names=list(filters))
 
-    with patch("pictologics.pipeline.laplacian_of_gaussian", wraps=laplacian_of_gaussian) as spy:
+    with (
+        patch("pictologics.pipeline.laplacian_of_gaussian", wraps=laplacian_of_gaussian) as spy,
+        patch("pictologics.pipeline.gabor_filter", wraps=gabor_filter) as gabor_spy,
+    ):
         limited = run()
     assert spy.call_args[0][0].size < img.array.size  # the LoG read only the region
+    axial, planes = (call.args[0].shape for call in gabor_spy.call_args_list)
+    assert axial[:2] == img.array.shape[:2] and axial[2] < img.array.shape[2]
+    assert planes == img.array.shape
     with patch.object(pipeline_module, "_needs_full_grid", return_value=True):
         full_grid = run()
     for name in filters:
