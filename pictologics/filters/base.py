@@ -5,7 +5,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Dict, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, Tuple, TypeVar, Union, cast
 
 import numpy as np
 from numpy import typing as npt
@@ -108,6 +108,32 @@ def cache_by_bytes(
         return cached
 
     return decorate
+
+
+def _slabs(
+    shape: Tuple[int, ...], elements: int = 1 << 21, minimum: int = 1 << 23
+) -> list[Tuple[int, int]]:
+    """(start, stop) ranges along the first axis with about `elements` values each, for
+    an array of more than `minimum` values; one range for a smaller array."""
+    if int(np.prod(shape)) <= minimum:
+        return [(0, shape[0])]
+    step = max(1, elements // max(1, int(np.prod(shape[1:]))))
+    return [(start, min(start + step, shape[0])) for start in range(0, shape[0], step)]
+
+
+def _times_transfer(
+    spectrum: npt.NDArray[np.complexfloating[Any, Any]], transfer: npt.NDArray[Any]
+) -> npt.NDArray[np.complexfloating[Any, Any]]:
+    """`spectrum * transfer`, written into `spectrum` when that keeps the product's type.
+
+    A float64 image has a complex128 spectrum, and the product fits in place. A float32
+    image has a complex64 spectrum, whose product with a float64 transfer is complex128,
+    so it gets a new array, as before.
+    """
+    if np.result_type(spectrum, transfer) == spectrum.dtype:
+        spectrum *= transfer
+        return spectrum
+    return cast(npt.NDArray[np.complexfloating[Any, Any]], spectrum * transfer)
 
 
 def ensure_float32(

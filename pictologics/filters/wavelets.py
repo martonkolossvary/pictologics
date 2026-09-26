@@ -17,14 +17,17 @@ from .base import (
     BoundaryCondition,
     _apply_with_boundary_padding,
     _prepare_masked_image,
+    _slabs,
+    _times_transfer,
     cache_by_bytes,
     ensure_float32,
     get_scipy_mode,
     resolve_boundary,
 )
 
-# Threshold for enabling parallel processing (voxels)
-_PARALLEL_THRESHOLD = 2_000_000  # ~128³
+# Threads for the 24 rotations from this size (voxels). Measured: they win from about
+# 14,000 voxels (db2) or 4,000 voxels (coif3), and run 4-8x faster from 30,000 voxels.
+_PARALLEL_THRESHOLD = 15_000
 
 
 def wavelet_transform(
@@ -58,7 +61,7 @@ def wavelet_transform(
         rotation_invariant: If True, average over 24 rotations
         pooling: Pooling method for rotation invariance
         use_parallel: If True, use parallel processing for rotation_invariant mode.
-            If None (default), auto-enables for images > ~128³ voxels.
+            If None (default), auto-enables for images > 15,000 voxels.
         source_mask: Optional boolean mask where True = valid voxel.
             When provided, zeros out invalid (sentinel) voxels before
             wavelet decomposition to prevent contamination.
@@ -189,10 +192,9 @@ def _apply_undecimated_wavelet_3d(
 
     For level j, filters are upsampled by inserting 2^(j-1) - 1 zeros.
     """
-    # No defensive copy needed: convolve1d never mutates its input, and `current`
-    # is only ever rebound to fresh convolution outputs.
-    current = image
-
+    # The first pass writes a new array; the later passes write into it. convolve1d
+    # copies each line before it writes that line, so the in-place result is the same.
+    result: npt.NDArray[np.floating[Any]] | None = None
     for j in range(1, level + 1):
         # À trous: insert zeros into filters for this level
         if j > 1:
@@ -202,23 +204,15 @@ def _apply_undecimated_wavelet_3d(
             lo_j = lo
             hi_j = hi
 
-        # Store the low-pass result for next iteration
-        # We only need to track LLL for multi-level decomposition
-        if j < level:
-            # Apply low-pass along all 3 axes
-            current = convolve1d(current, lo_j, axis=0, mode=mode)
-            current = convolve1d(current, lo_j, axis=1, mode=mode)
-            current = convolve1d(current, lo_j, axis=2, mode=mode)
-        else:
-            # Final level: compute requested decomposition. The first convolve1d
-            # rebinds `result` to a fresh array, so no copy of `current` is needed.
-            filters = {"L": lo_j, "H": hi_j}
-            result = current
-            for axis, char in enumerate(decomposition):
-                result = convolve1d(result, filters[char], axis=axis, mode=mode)
-            return result
-
-    raise RuntimeError("Unexpected end of wavelet decomposition loop")  # pragma: no cover
+        # The low-pass (LLL) result feeds the next level; the final level applies the
+        # requested decomposition.
+        filters = {"L": lo_j, "H": hi_j}
+        for axis, char in enumerate("LLL" if j < level else decomposition):
+            if result is None:
+                result = convolve1d(image, filters[char], axis=axis, mode=mode)
+            else:
+                convolve1d(result, filters[char], axis=axis, mode=mode, output=result)
+    return cast(npt.NDArray[np.floating[Any]], result)
 
 
 def _atrous_upsample(
@@ -274,22 +268,34 @@ def _simoncelli_transfer(
         # Shift to move DC to array start (index 0), matching fftn layout
         grid_shifted = np.fft.ifftshift(grid_norm)
         grids.append(grid_shifted)
-
-    # Use broadcasting for full 3D grid
     mesh_vectors = np.meshgrid(*grids, indexing="ij", sparse=True)
-    dist_sq = np.asarray(sum(g**2 for g in mesh_vectors), dtype=np.float64)
-    dist = np.sqrt(dist_sq)
 
-    # Calculate transfer function (Simoncelli band-pass, IBSI 2 Eq. 27)
-    val = 2.0 * dist / max_freq
-    log_arg = np.where(val > 0, val, 1.0)
+    # A large table is built slab by slab along the first axis, with the same element-wise
+    # operations (so the same values) and temporaries of one slab instead of six full
+    # volumes; the values outside the band stay 0.0, as np.where(mask, g, 0.0) gives.
+    slabs = _slabs(shape)
+    table = None if len(slabs) == 1 else np.zeros(shape, dtype=np.float64)
+    for start, stop in slabs:
+        dist_sq = np.asarray(
+            sum((g[start:stop] if i == 0 else g) ** 2 for i, g in enumerate(mesh_vectors)),
+            dtype=np.float64,
+        )
+        dist = np.sqrt(dist_sq)
 
-    with np.errstate(all="ignore"):
-        g_sim = np.cos(np.pi / 2.0 * np.log2(log_arg))
+        # Calculate transfer function (Simoncelli band-pass, IBSI 2 Eq. 27)
+        val = 2.0 * dist / max_freq
+        log_arg = np.where(val > 0, val, 1.0)
 
-    # Apply band-pass mask
-    mask = (dist >= max_freq / 4.0) & (dist <= max_freq)
-    g_sim = np.where(mask, g_sim, 0.0)
+        with np.errstate(all="ignore"):
+            g_sim = np.cos(np.pi / 2.0 * np.log2(log_arg))
+
+        # Apply band-pass mask
+        mask = (dist >= max_freq / 4.0) & (dist <= max_freq)
+        if table is None:
+            g_sim = np.where(mask, g_sim, 0.0)  # the whole table, as one slab
+        else:
+            np.copyto(table[start:stop], g_sim, where=mask)
+    g_sim = g_sim if table is None else table
     g_sim.flags.writeable = False  # cached array must not be mutated by callers
     return cast(npt.NDArray[np.floating[Any]], g_sim)
 
@@ -379,8 +385,8 @@ def simoncelli_wavelet(
         # the centered grid is non-symmetric for even N). scipy.fft with workers=-1
         # is multithreaded and matches np.fft to float32 precision.
         axes = tuple(range(ndim))
-        F = scipy.fft.fftn(arr, workers=-1)
-        response = scipy.fft.ifftn(F * g_sim, s=shape, axes=axes, workers=-1)
+        spectrum = _times_transfer(scipy.fft.fftn(arr, workers=-1), g_sim)
+        response = scipy.fft.ifftn(spectrum, s=shape, axes=axes, workers=-1, overwrite_x=True)
 
         return cast(npt.NDArray[np.floating[Any]], np.real(response).astype(np.float32))
 

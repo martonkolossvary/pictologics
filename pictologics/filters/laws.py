@@ -38,8 +38,10 @@ LAWS_KERNELS = _LAWS_KERNELS
 """Dictionary of normalized Laws kernels (IBSI 2 Table 6)."""
 
 
-# Threshold for enabling parallel processing (voxels)
-_PARALLEL_THRESHOLD = 2_000_000  # ~128³
+# Threads for the rotations from this size (voxels). Measured: with 5-tap kernels the
+# threads win from about 15,000-20,000 voxels (2x at 0.26-2M voxels); below, their start-up
+# costs more than they save.
+_PARALLEL_THRESHOLD = 20_000
 
 
 def _separable_convolve_3d(
@@ -168,7 +170,7 @@ def laws_filter(
         compute_energy: If True, compute texture energy image (PQSD)
         energy_distance: Chebyshev distance δ for energy computation (I176)
         use_parallel: If True, use parallel processing for rotation_invariant mode.
-            If None (default), auto-enables for images > ~128³ voxels.
+            If None (default), auto-enables for images > 20,000 voxels.
             Only affects rotation_invariant mode.
         source_mask: Optional boolean mask where True = valid voxel.
             In non-rotation-invariant mode, uses normalized separable convolution

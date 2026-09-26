@@ -1163,3 +1163,128 @@ def test_cache_by_bytes_keeps_the_newest_results() -> None:
     make(300)  # alone above the limit: it stays, the rest goes
     make(300)
     assert calls == [100, 120, 60, 120, 300]
+
+
+def test_wavelet_passes_in_place_give_the_new_array_result() -> None:
+    """Every pass after the first writes into one array; the result equals passes that
+    each make a new array, bit for bit, and the input stays unchanged."""
+    import pywt
+    from scipy.ndimage import convolve1d
+
+    from pictologics.filters.wavelets import _apply_undecimated_wavelet_3d, _atrous_upsample
+
+    image = np.random.default_rng(3).normal(size=(9, 8, 7))
+    before = image.copy()
+    for wavelet, level, decomposition in (
+        ("db2", 1, "LHL"),
+        ("coif1", 2, "HHH"),
+        ("haar", 3, "LLH"),
+    ):
+        w = pywt.Wavelet(wavelet)
+        lo, hi = np.array(w.dec_lo, dtype=np.float32), np.array(w.dec_hi, dtype=np.float32)
+        expected = image
+        for j in range(1, level + 1):
+            lo_j = _atrous_upsample(lo, j) if j > 1 else lo
+            hi_j = _atrous_upsample(hi, j) if j > 1 else hi
+            chars = "LLL" if j < level else decomposition
+            for axis, char in enumerate(chars):
+                expected = convolve1d(
+                    expected, {"L": lo_j, "H": hi_j}[char], axis=axis, mode="reflect"
+                )
+        result = _apply_undecimated_wavelet_3d(image, lo, hi, level, decomposition, "reflect")
+        assert_array_equal(result, expected)
+    assert_array_equal(image, before)
+
+
+def test_fft_filters_multiply_in_place_only_when_the_type_holds() -> None:
+    """A complex128 spectrum takes the product in place; a complex64 one gets a new
+    complex128 array, as the product with a float64 transfer always was."""
+    from pictologics.filters.base import _times_transfer
+
+    transfer = np.array([0.5, 2.0])
+    spectrum = np.array([1 + 1j, 2 - 1j])
+    assert _times_transfer(spectrum, transfer) is spectrum
+    assert_array_equal(spectrum, [0.5 + 0.5j, 4 - 2j])
+    single = np.array([1 + 1j, 2 - 1j], dtype=np.complex64)
+    product = _times_transfer(single, transfer)
+    assert product.dtype == np.complex128 and product is not single
+    assert_array_equal(product, single.astype(np.complex128) * transfer)
+
+
+def test_fft_filters_match_the_out_of_place_product() -> None:
+    """Simoncelli and Riesz give the values of the out-of-place product, bit for bit,
+    for float64 and float32 images."""
+    import scipy.fft
+
+    from pictologics.filters.riesz import _riesz_transfer
+    from pictologics.filters.wavelets import _simoncelli_transfer
+
+    rng = np.random.default_rng(4)
+    for dtype in (np.float64, np.float32):
+        image = rng.normal(size=(12, 11, 10)).astype(dtype)
+        g = _simoncelli_transfer(image.shape, 2)
+        spectrum = scipy.fft.fftn(image, workers=-1) * g
+        expected = np.real(scipy.fft.ifftn(spectrum, s=image.shape, workers=-1)).astype(np.float32)
+        assert_array_equal(simoncelli_wavelet(image, level=2), expected)
+        t = _riesz_transfer(image.shape, (1, 1, 0))
+        spectrum = scipy.fft.rfftn(image, workers=-1) * t
+        expected = scipy.fft.irfftn(spectrum, s=image.shape, workers=-1).astype(np.float32)
+        assert_array_equal(riesz_transform(image, order=(1, 1, 0)), expected)
+
+
+def test_transfer_functions_built_in_slabs_match_one_volume() -> None:
+    """The slab-by-slab transfer functions equal the whole-volume formulas, bit for bit."""
+    from math import factorial, sqrt
+    from unittest.mock import patch
+
+    from pictologics.filters import base, riesz, wavelets
+
+    def simoncelli_whole(shape: tuple[int, ...], level: int) -> np.ndarray:
+        max_freq = 1.0 / (2 ** (level - 1))
+        center = (np.array(shape) - 1.0) / 2.0
+        grids = [
+            np.fft.ifftshift((np.arange(s) - center[i]) / center[i]) for i, s in enumerate(shape)
+        ]
+        dist = np.sqrt(
+            np.asarray(sum(g**2 for g in np.meshgrid(*grids, indexing="ij", sparse=True)))
+        )
+        val = 2.0 * dist / max_freq
+        with np.errstate(all="ignore"):
+            g_sim = np.cos(np.pi / 2.0 * np.log2(np.where(val > 0, val, 1.0)))
+        return np.where((dist >= max_freq / 4.0) & (dist <= max_freq), g_sim, 0.0)
+
+    def riesz_whole(shape: tuple[int, ...], order: tuple[int, ...]) -> np.ndarray:
+        freqs = [np.fft.fftfreq(s) * 2 * np.pi for s in shape[:-1]] + [
+            np.fft.rfftfreq(shape[-1]) * 2 * np.pi
+        ]
+        nu = np.meshgrid(*freqs, indexing="ij", sparse=True)
+        nu_norm = np.sqrt(np.asarray(sum(n**2 for n in nu), dtype=np.float64))
+        numerator = np.ones(nu_norm.shape)
+        for i, o in enumerate(order):
+            if o > 0:
+                numerator *= nu[i] ** o
+        L = sum(order)
+        norm = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
+        t = (
+            np.exp(-1j * np.pi * L / 2)
+            * norm
+            * numerator
+            / (np.where(nu_norm > 0, nu_norm, 1.0) ** L)
+        )
+        return np.where(nu_norm > 0, t, 0)
+
+    def small_slabs(shape: tuple[int, ...]) -> list[tuple[int, int]]:
+        return base._slabs(shape, elements=40, minimum=0)
+
+    assert base._slabs((5, 3, 2), elements=6, minimum=0) == [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)]
+    assert base._slabs((5, 3, 2)) == [(0, 5)]  # a small table is one slab
+    with patch.object(wavelets, "_slabs", small_slabs), patch.object(riesz, "_slabs", small_slabs):
+        for shape in ((9, 8, 7), (6, 10, 5)):
+            for level in (1, 2):
+                built = wavelets._simoncelli_transfer.__wrapped__(shape, level)
+                assert_array_equal(built, simoncelli_whole(shape, level))
+                assert not built.flags.writeable
+            for order in ((1, 0, 0), (0, 1, 1), (0, 0, 2)):
+                built = riesz._riesz_transfer.__wrapped__(shape, order)
+                assert_array_equal(built, riesz_whole(shape, order))
+                assert not built.flags.writeable

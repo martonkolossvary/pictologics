@@ -13,6 +13,8 @@ from .base import (
     BoundaryCondition,
     _apply_with_boundary_padding,
     _prepare_masked_image,
+    _slabs,
+    _times_transfer,
     cache_by_bytes,
     ensure_float32,
     resolve_boundary,
@@ -54,20 +56,32 @@ def _riesz_transfer(
 
     # Broadcast (sparse) grid to avoid a full meshgrid the size of the input.
     nu_vectors = np.meshgrid(*freqs, indexing="ij", sparse=True)
-    nu_sq_norm = np.asarray(sum(n**2 for n in nu_vectors), dtype=np.float64)
-    nu_norm = np.sqrt(nu_sq_norm)
-    nu_norm_safe = np.where(nu_norm > 0, nu_norm, 1.0)  # avoid /0 at DC
-
     norm_factor = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
-
-    numerator = np.ones(nu_norm.shape, dtype=np.float64)
-    for i, ord_val in enumerate(order):
-        if ord_val > 0:
-            numerator *= nu_vectors[i] ** ord_val
-
     phase = np.exp(-1j * np.pi * L / 2)
-    transfer = phase * norm_factor * numerator / (nu_norm_safe**L)
-    transfer = np.where(nu_norm > 0, transfer, 0)  # DC = 0
+
+    # A large table is built slab by slab along the first axis, with the same element-wise
+    # operations (so the same values) and temporaries of one slab instead of four full
+    # volumes; the DC value stays 0, as np.where(nu_norm > 0, transfer, 0) gives.
+    out_shape = np.broadcast_shapes(*(n.shape for n in nu_vectors))
+    slabs = _slabs(out_shape)
+    table = None if len(slabs) == 1 else np.zeros(out_shape, dtype=np.complex128)
+    for start, stop in slabs:
+        nu = [n[start:stop] if i == 0 else n for i, n in enumerate(nu_vectors)]
+        nu_sq_norm = np.asarray(sum(n**2 for n in nu), dtype=np.float64)
+        nu_norm = np.sqrt(nu_sq_norm)
+        nu_norm_safe = np.where(nu_norm > 0, nu_norm, 1.0)  # avoid /0 at DC
+
+        numerator = np.ones(nu_norm.shape, dtype=np.float64)
+        for i, ord_val in enumerate(order):
+            if ord_val > 0:
+                numerator *= nu[i] ** ord_val
+
+        transfer = phase * norm_factor * numerator / (nu_norm_safe**L)
+        if table is None:
+            transfer = np.where(nu_norm > 0, transfer, 0)  # DC = 0; the whole table
+        else:
+            np.copyto(table[start:stop], transfer, where=nu_norm > 0)
+    transfer = transfer if table is None else table
     transfer.flags.writeable = False  # cached array must not be mutated by callers
     return cast(npt.NDArray[np.complexfloating[Any, Any]], transfer)
 
@@ -155,10 +169,9 @@ def riesz_transform(
         # workers=-1) is several times faster than the single-threaded np.fft and
         # matches it to float32 precision.
         axes = tuple(range(ndim))
-        F = scipy.fft.rfftn(arr, workers=-1)
-
-        # F has shape (N1, N2, N3//2 + 1); transfer is broadcastable to it.
-        response = scipy.fft.irfftn(F * transfer, s=shape, axes=axes, workers=-1)
+        # The spectrum has shape (N1, N2, N3//2 + 1), the shape of the transfer.
+        spectrum = _times_transfer(scipy.fft.rfftn(arr, workers=-1), transfer)
+        response = scipy.fft.irfftn(spectrum, s=shape, axes=axes, workers=-1, overwrite_x=True)
 
         return cast(npt.NDArray[np.floating[Any]], response.astype(np.float32))
 
