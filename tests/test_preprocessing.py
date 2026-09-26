@@ -929,3 +929,34 @@ def test_resegment_kernel_keeps_array_order() -> None:
             assert np.array_equal(bits, np.ascontiguousarray(ref).view(np.uint8))
             both_f = img_arr.flags.f_contiguous and m_arr.flags.f_contiguous
             assert out.flags.f_contiguous == both_f
+
+
+def test_resample_mask_threshold_every_type() -> None:
+    # A mask threshold applies to the interpolated value, on the kernel path and on
+    # scipy's path (linear and cubic). A float64 mask compares the value itself; a uint8
+    # or bool mask rounds it at the threshold, which at 0.5 is the rounding a uint8 mask
+    # always had. Before, a uint8 mask ignored the threshold and a bool mask kept only
+    # voxels with every neighbour inside.
+    rng = np.random.default_rng(21)
+    labels = rng.random((12, 11, 10)) < 0.5
+    spacing = (1.7, 1.6, 1.5)
+
+    def resample(arr: np.ndarray, how: str, thr: float | None) -> np.ndarray:
+        img = Image(arr, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+        return resample_image(img, spacing, how, mask_threshold=thr).array
+
+    for how in ("linear", "cubic"):
+        for limit in (1, 1 << 30):  # the kernel path (linear only), then scipy's path
+            with patch("pictologics.preprocessing._LINEAR_KERNEL_MIN_SIZE", limit):
+                values = resample(labels.astype(np.float64), how, None)
+                for thr in (0.3, 0.5, 0.7):
+                    ref = resample(labels.astype(np.float64), how, thr)
+                    assert_array_equal(ref, (values >= thr).astype(np.uint8))
+                    rounded = (values + (1.0 - thr) >= 1.0).astype(np.uint8)
+                    for arr in (labels.astype(np.uint8), labels):
+                        out = resample(arr, how, thr)
+                        assert out.dtype == np.uint8
+                        assert_array_equal(out, rounded)
+                    if how == "linear" and thr == 0.5:  # the old uint8 result
+                        old = resample(labels.astype(np.uint8), how, None)
+                        assert_array_equal(rounded, (old >= 0.5).astype(np.uint8))

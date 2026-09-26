@@ -217,15 +217,17 @@ def _resample_trilinear_numba(
     scale: npt.NDArray[np.float64],
     shift: npt.NDArray[np.float64],
     unsigned_out: bool,
+    threshold: float,
     out: npt.NDArray[Any],
 ) -> None:
     """Trilinear resampling for a diagonal transform, 'nearest' boundary.
 
     Replicates scipy's zoom_shift path bit for bit: the per-axis indices and weights
     of `_linear_axis_numba`, and the 8 support terms added in scipy's point order,
-    each with left-to-right weight products. With `unsigned_out`, the value is
-    stored as scipy stores it in an unsigned integer output: t + 0.5 for t > 0,
-    else 0, truncated.
+    each with left-to-right weight products. A `threshold` (not NaN) stores 1 where
+    the value reaches it, else 0 (see `_mask_threshold`). Else, with `unsigned_out`,
+    the value is stored as scipy stores it in an unsigned integer output: t + 0.5 for
+    t > 0, else 0, truncated.
     """
     nz, ny, nx = src.shape
     oz, oy, ox = out.shape
@@ -252,7 +254,12 @@ def _resample_trilinear_numba(
                 acc += src[z1, y0, x1] * wz1 * wy0 * wx1
                 acc += src[z1, y1, x0] * wz1 * wy1 * wx0
                 acc += src[z1, y1, x1] * wz1 * wy1 * wx1
-                if unsigned_out:
+                if threshold == threshold:
+                    if unsigned_out:
+                        out[k, j, i] = 1 if acc + (1.0 - threshold) >= 1.0 else 0
+                    else:
+                        out[k, j, i] = 1 if acc >= threshold else 0
+                elif unsigned_out:
                     out[k, j, i] = acc + 0.5 if acc > 0 else 0.0
                 else:
                     out[k, j, i] = acc
@@ -585,6 +592,18 @@ def _resample_with_source_mask(
     return result, output_source_mask
 
 
+def _mask_threshold(values: npt.NDArray[Any], threshold: float, rounded: bool) -> npt.NDArray[Any]:
+    """1 where an interpolated mask value reaches `threshold`, else 0.
+
+    A float64 mask compares the value itself. A uint8 or bool mask (`rounded`) rounds
+    it at the threshold, value + (1 - threshold) >= 1: at 0.5 this is the rounding that
+    uint8 masks always had, which keeps a value that is one half up to rounding error.
+    """
+    if rounded:
+        return (values + (1.0 - threshold) >= 1.0).astype(np.uint8)
+    return (values >= threshold).astype(np.uint8)
+
+
 def resample_image(
     image: Image,
     new_spacing: tuple[float, float, float],
@@ -616,7 +635,10 @@ def resample_image(
             'wrap': Wraps around.
         round_intensities: If True, round resulting intensities to nearest integer.
         mask_threshold: If provided, treat output as a binary mask.
-                        Values >= threshold become 1, others 0.
+                        Interpolated values >= threshold become 1, others 0.
+                        A float64 mask compares the value itself; another mask
+                        type rounds it at the threshold (value + 1 - threshold
+                        >= 1), as a uint8 mask always did at 0.5.
                         Commonly 0.5 for partial volume correction.
         source_mask: Optional source validity mask. If provided (or if image.source_mask
                      is set), only valid voxels are used for interpolation. This prevents
@@ -751,6 +773,9 @@ def resample_image(
     kernel_ok = image.array.ndim == 3 and boundary_mode == "nearest"
     kernel_shift = offset / matrix
     n_out = math.prod(out_shape)
+    # A mask threshold applies to the interpolated value: a uint8 or bool mask would
+    # otherwise round or truncate the value first and lose the threshold.
+    thresholded = False
 
     if effective_source is None:
         if (
@@ -760,9 +785,17 @@ def resample_image(
             and n_out >= _LINEAR_KERNEL_MIN_SIZE
         ):
             src = np.ascontiguousarray(image.array)
-            resampled_array = np.empty(out_shape, dtype=image.array.dtype)
+            thresholded = mask_threshold is not None
+            resampled_array = np.empty(
+                out_shape, dtype=np.uint8 if thresholded else image.array.dtype
+            )
             _resample_trilinear_numba(
-                src, matrix, kernel_shift, image.array.dtype == np.uint8, resampled_array
+                src,
+                matrix,
+                kernel_shift,
+                image.array.dtype == np.uint8,
+                math.nan if mask_threshold is None else float(mask_threshold),
+                resampled_array,
             )
         elif (
             kernel_ok
@@ -774,8 +807,18 @@ def resample_image(
             resampled_array = np.empty(out_shape, dtype=image.array.dtype)
             _resample_nearest_numba(src, matrix, kernel_shift, resampled_array)
         else:
+            # A mask threshold needs the interpolated value, so a non-float64 mask is
+            # interpolated in float64. A uint8 mask at the threshold 0.5 keeps scipy's
+            # uint8 output, whose rounding gives that same result.
+            source = image.array
+            if (
+                mask_threshold is not None
+                and order > 0
+                and not (source.dtype == np.uint8 and mask_threshold == 0.5)
+            ):
+                source = source.astype(np.float64, copy=False)
             resampled_array = affine_transform(
-                image.array,
+                source,
                 matrix=matrix,
                 offset=offset,
                 output_shape=out_shape,
@@ -819,9 +862,11 @@ def resample_image(
         )
 
     # Post-processing
-    if mask_threshold is not None:
+    if mask_threshold is not None and not thresholded:
         # Binarize mask
-        resampled_array = (resampled_array >= mask_threshold).astype(np.uint8)
+        resampled_array = _mask_threshold(
+            resampled_array, mask_threshold, image.array.dtype != np.float64 and order > 0
+        )
     elif round_intensities:
         # Round intensities
         resampled_array = np.round(resampled_array)

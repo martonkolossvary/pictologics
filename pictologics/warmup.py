@@ -12,6 +12,7 @@ Behavior can be controlled via the environment variable:
 
 from __future__ import annotations
 
+import math
 import os
 import warnings
 from typing import Any
@@ -321,9 +322,11 @@ def _warmup_filters() -> None:
     scale = np.array([1.1, 1.1, 1.1])
     shift = np.zeros(3)
     out3 = np.empty((3, 3, 3), dtype=np.float64)
-    preprocessing._resample_trilinear_numba(src, scale, shift, False, out3)
-    preprocessing._resample_trilinear_numba(  # uint8 masks
-        src.astype(np.uint8), scale, shift, True, np.empty((3, 3, 3), dtype=np.uint8)
+    out_u8 = np.empty((3, 3, 3), dtype=np.uint8)
+    preprocessing._resample_trilinear_numba(src, scale, shift, False, math.nan, out3)
+    preprocessing._resample_trilinear_numba(src, scale, shift, False, 0.5, out_u8)  # masks
+    preprocessing._resample_trilinear_numba(  # uint8 images and masks
+        src.astype(np.uint8), scale, shift, True, math.nan, out_u8
     )
     for s_dtype in (np.float64, np.uint8, np.bool_):
         src_d = src.astype(s_dtype)
