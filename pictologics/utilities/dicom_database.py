@@ -320,7 +320,10 @@ class DicomDatabase:
             show_progress: Whether to display progress bars.
             extract_private_tags: Whether to extract vendor-specific private tags.
             num_workers: Number of parallel workers. None=auto (cpu_count-1),
-                        1=sequential (no multiprocessing).
+                        1=sequential (no multiprocessing). At most one worker
+                        runs per FILES_PER_WORKER DICOM files: each worker process
+                        imports the package first, so smaller scans run faster
+                        in this process.
             split_multiseries: Whether to split multi-phase series (e.g. cardiac)
                               into separate series based on tags or spatial duplicates.
 
@@ -344,16 +347,14 @@ class DicomDatabase:
         # Convert paths to Path objects
         path_objs = [Path(p) for p in paths]
 
-        # Determine number of workers
-        workers = _get_num_workers(num_workers)
-
-        # Step 1: Discover all DICOM files
-        dicom_files = _scan_dicom_files(path_objs, recursive, show_progress, workers)
+        # Step 1: Discover all DICOM files (a 132-byte check per file, in this process)
+        dicom_files = _scan_dicom_files(path_objs, recursive, show_progress)
 
         if not dicom_files:
             return cls(patients=[], spacing_tolerance=spacing_tolerance)
 
         # Step 2: Extract metadata from each file (parallel if workers > 1)
+        workers = _get_num_workers(num_workers, len(dicom_files))
         file_metadata = _extract_all_metadata(
             dicom_files, show_progress, extract_private_tags, workers
         )
@@ -822,47 +823,41 @@ def _split_series_instances(
 # ============================================================================
 
 
-def _get_num_workers(num_workers: Optional[int]) -> int:
-    """Determine the number of workers to use.
+# DICOM files per worker process of a scan. Each worker imports the package first (about
+# 0.6 s), and a header read takes about 0.25 ms: a 200-file series took 3.06 s with the
+# default 13 workers and 0.06 s in this process. Measured break-even: 4 workers win from
+# about 4,000 files, 8 workers from about 6,000.
+FILES_PER_WORKER = 1_000
+
+
+def _get_num_workers(num_workers: Optional[int], n_files: int) -> int:
+    """Determine the number of workers to use for `n_files` DICOM files.
 
     Args:
-        num_workers: User-specified workers. None=auto, 1=sequential.
+        num_workers: User-specified workers. None=auto (cpu_count - 1), 1=sequential.
+        n_files: Number of files to read.
 
     Returns:
-        Number of workers to use (minimum 1).
+        Number of workers to use: at most one per FILES_PER_WORKER files (minimum 1).
     """
-    if num_workers is not None:
-        return max(1, num_workers)
-    cpu_count = os.cpu_count() or 1
-    return max(1, cpu_count - 1)
-
-
-def _is_dicom_file(file_path: Path) -> Optional[Path]:
-    """Check if a file is a DICOM file (for parallel processing).
-
-    Returns the path if DICOM, None otherwise.
-    """
-    try:
-        if pydicom.misc.is_dicom(file_path):
-            return file_path
-    except Exception as e:
-        logger.debug("Could not check DICOM status for %s: %s", file_path, e)
-    return None
+    requested = num_workers if num_workers is not None else (os.cpu_count() or 1) - 1
+    return max(1, min(requested, n_files // FILES_PER_WORKER))
 
 
 def _scan_dicom_files(
     paths: list[Path],
     recursive: bool,
     show_progress: bool,
-    num_workers: int = 1,
 ) -> list[Path]:
-    """Scan folders for DICOM files with optional parallel processing.
+    """Scan folders for DICOM files.
+
+    The check reads 132 bytes of each file, so it runs in this process: worker processes
+    would cost more to start than they save.
 
     Args:
         paths: List of folder paths to scan.
         recursive: Whether to scan subdirectories.
         show_progress: Whether to display progress bar.
-        num_workers: Number of parallel workers (1=sequential).
 
     Returns:
         List of paths to DICOM files.
@@ -887,26 +882,6 @@ def _scan_dicom_files(
     if not file_candidates:
         return []
 
-    # Use parallel processing if num_workers > 1
-    if num_workers > 1:
-        chunksize = max(1, len(file_candidates) // (num_workers * 4))
-        dicom_files: list[Path] = []
-
-        with header_worker_pool(num_workers) as executor:
-            # Submit all tasks and collect results with progress bar
-            results = list(
-                tqdm(
-                    executor.map(_is_dicom_file, file_candidates, chunksize=chunksize),
-                    total=len(file_candidates),
-                    desc="Scanning for DICOM files",
-                    disable=not show_progress,
-                )
-            )
-        # Filter out None results
-        dicom_files = [p for p in results if p is not None]
-        return dicom_files
-
-    # Sequential processing
     dicom_files = []
     iterator = tqdm(
         file_candidates,

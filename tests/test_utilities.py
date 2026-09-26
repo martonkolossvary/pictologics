@@ -39,7 +39,6 @@ from pictologics.utilities.dicom_database import (
     _extract_single_file_metadata,
     _get_num_workers,
     _get_tag_value,
-    _is_dicom_file,
     _scan_dicom_files,
     _sort_hierarchy,
     _values_equal,
@@ -1381,32 +1380,12 @@ class TestSyntheticDicom:
 
     def test_scan_files_synthetic(self, synthetic_dicom_dir: Path) -> None:
         """Test file scanning with synthetic files."""
-        files = _scan_dicom_files(
-            [synthetic_dicom_dir],
-            recursive=True,
-            show_progress=False,
-            num_workers=1,
-        )
-        assert len(files) == 5
-
-    def test_parallel_scan_synthetic(self, synthetic_dicom_dir: Path) -> None:
-        """Test parallel file scanning with synthetic files."""
-        files = _scan_dicom_files(
-            [synthetic_dicom_dir],
-            recursive=True,
-            show_progress=False,
-            num_workers=2,
-        )
+        files = _scan_dicom_files([synthetic_dicom_dir], recursive=True, show_progress=False)
         assert len(files) == 5
 
     def test_extract_metadata_synthetic(self, synthetic_dicom_dir: Path) -> None:
         """Test metadata extraction with synthetic files."""
-        files = _scan_dicom_files(
-            [synthetic_dicom_dir],
-            recursive=True,
-            show_progress=False,
-            num_workers=1,
-        )
+        files = _scan_dicom_files([synthetic_dicom_dir], recursive=True, show_progress=False)
         metadata = _extract_all_metadata(
             files,
             show_progress=False,
@@ -1418,12 +1397,7 @@ class TestSyntheticDicom:
 
     def test_parallel_metadata_synthetic(self, synthetic_dicom_dir: Path) -> None:
         """Test parallel metadata extraction with synthetic files."""
-        files = _scan_dicom_files(
-            [synthetic_dicom_dir],
-            recursive=True,
-            show_progress=False,
-            num_workers=1,
-        )
+        files = _scan_dicom_files([synthetic_dicom_dir], recursive=True, show_progress=False)
         metadata = _extract_all_metadata(
             files,
             show_progress=False,
@@ -1431,13 +1405,6 @@ class TestSyntheticDicom:
             num_workers=2,
         )
         assert len(metadata) == 5
-
-    def test_is_dicom_file_synthetic(self, synthetic_dicom_dir: Path) -> None:
-        """Test _is_dicom_file with synthetic file."""
-        files = list(synthetic_dicom_dir.glob("*.dcm"))
-        assert len(files) > 0
-        result = _is_dicom_file(files[0])
-        assert result == files[0]
 
     def test_single_file_metadata_synthetic(self, synthetic_dicom_dir: Path) -> None:
         """Test single file metadata extraction with synthetic file."""
@@ -1450,17 +1417,18 @@ class TestSyntheticDicom:
         assert result["ImagePositionPatient"] is not None
 
     def test_parallel_from_folders_synthetic(self, synthetic_dicom_dir: Path) -> None:
-        """Test from_folders with explicit worker count."""
+        """Test from_folders with explicit worker count (one file per worker allowed)."""
         db1 = DicomDatabase.from_folders(
             [str(synthetic_dicom_dir)],
             show_progress=False,
             num_workers=1,
         )
-        db2 = DicomDatabase.from_folders(
-            [str(synthetic_dicom_dir)],
-            show_progress=False,
-            num_workers=2,
-        )
+        with patch("pictologics.utilities.dicom_database.FILES_PER_WORKER", 1):
+            db2 = DicomDatabase.from_folders(
+                [str(synthetic_dicom_dir)],
+                show_progress=False,
+                num_workers=2,
+            )
 
         # Results should be identical
         assert len(db1.patients) == len(db2.patients)
@@ -1800,26 +1768,24 @@ class TestParallelProcessing:
     """Tests for parallel processing functionality."""
 
     def test_get_num_workers_auto(self) -> None:
-        """Test automatic worker count detection."""
-        workers = _get_num_workers(None)
+        """Automatic worker count: cpu_count - 1 for a large scan, one below 2 x
+        FILES_PER_WORKER files."""
+        from pictologics.utilities.dicom_database import FILES_PER_WORKER
+
         cpu_count = os.cpu_count() or 1
-        expected = max(1, cpu_count - 1)
-        assert workers == expected
+        assert _get_num_workers(None, 10**9) == max(1, cpu_count - 1)
+        assert _get_num_workers(None, 2 * FILES_PER_WORKER - 1) == 1
 
     def test_get_num_workers_explicit(self) -> None:
-        """Test explicit worker count."""
-        assert _get_num_workers(4) == 4
-        assert _get_num_workers(1) == 1
-        assert _get_num_workers(0) == 1  # Minimum 1
-        assert _get_num_workers(-1) == 1  # Minimum 1
+        """Explicit worker count, at most one per FILES_PER_WORKER files."""
+        from pictologics.utilities.dicom_database import FILES_PER_WORKER
 
-    def test_is_dicom_file_invalid(self) -> None:
-        """Test _is_dicom_file with invalid file."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            invalid_file = Path(tmpdir) / "invalid.txt"
-            invalid_file.write_text("Not a DICOM file")
-            result = _is_dicom_file(invalid_file)
-            assert result is None
+        many = 10 * FILES_PER_WORKER
+        assert _get_num_workers(4, many) == 4
+        assert _get_num_workers(1, many) == 1
+        assert _get_num_workers(0, many) == 1  # Minimum 1
+        assert _get_num_workers(-1, many) == 1  # Minimum 1
+        assert _get_num_workers(4, 200) == 1  # a small scan runs in this process
 
     def test_sort_hierarchy(self) -> None:
         """Test _sort_hierarchy sorts all levels correctly."""
@@ -1887,13 +1853,6 @@ class TestParallelProcessing:
             [], show_progress=False, extract_private_tags=False, num_workers=2
         )
         assert result == []
-
-    def test_is_dicom_file_exception(self) -> None:
-        """Test _is_dicom_file handles exceptions (lines 734-735)."""
-        with patch("pictologics.utilities.dicom_database.pydicom.misc.is_dicom") as mock:
-            mock.side_effect = Exception("Read error")
-            result = _is_dicom_file(Path("/fake/file.dcm"))
-            assert result is None
 
     def test_extract_metadata_wrapper(self) -> None:
         """Test _extract_metadata_wrapper directly (lines 815-816)."""

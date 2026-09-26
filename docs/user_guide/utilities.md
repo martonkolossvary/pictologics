@@ -31,6 +31,8 @@ df_instances = db.get_instances_df()
 
 For large DICOM datasets, parsing can take significant time. `DicomDatabase.from_folders()` supports **parallel processing** to speed up the scan and displays a **progress bar** showing progress and estimated time remaining.
 
+Each worker process imports Pictologics before it reads a file, so workers pay off only for large scans. `from_folders()` starts at most one worker per 1,000 DICOM files (`FILES_PER_WORKER`); a folder of a few series is read in the calling process, which is faster.
+
 ```python
 # Parallel processing with all available cores
 db = DicomDatabase.from_folders(
