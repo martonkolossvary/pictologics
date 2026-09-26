@@ -17,6 +17,12 @@ from typing import Any, Optional
 
 import pandas as pd
 
+# SRDocument.from_folders parses fewer than SR_POOL_BYTES bytes of SR files in the calling
+# process: each worker process imports the package before its first file (about 1 s),
+# which costs more than the workers save on smaller batches. Parse time grows with the
+# file size (3 ms for 10 KB, 50 ms for 120 KB).
+SR_POOL_BYTES = 2_500_000
+
 # ============================================================================
 # Dataclass Definitions (mirroring dicom_database.py pattern)
 # ============================================================================
@@ -386,7 +392,10 @@ class SRDocument:
             recursive: Whether to scan subdirectories (default: True).
             show_progress: Whether to display progress bars (default: True).
             num_workers: Number of parallel workers. None=auto (cpu_count-1),
-                        1=sequential (no multiprocessing).
+                        1=sequential (no multiprocessing). SR files of fewer than
+                        SR_POOL_BYTES bytes in total are parsed in this process: each
+                        worker process imports the package first, so smaller batches
+                        run faster without workers.
             output_dir: If specified, exports each SR to this directory.
             export_csv: Export individual CSV files (default: True).
             export_json: Export individual JSON files (default: True).
@@ -425,11 +434,6 @@ class SRDocument:
         # Convert paths to Path objects
         path_objs = [Path(p) for p in paths]
 
-        # Determine number of workers
-        if num_workers is None:
-            cpu_count = os.cpu_count()
-            num_workers = max(1, (cpu_count - 1) if cpu_count else 1)
-
         # Step 1: Discover all SR files
         sr_files: list[Path] = []
         for path_obj in path_objs:
@@ -447,6 +451,13 @@ class SRDocument:
 
         if not sr_files:
             return SRBatch(documents=[], processing_log=[], output_dir=None)
+
+        # Determine number of workers
+        if sum(f.stat().st_size for f in sr_files) < SR_POOL_BYTES:
+            num_workers = 1
+        elif num_workers is None:
+            cpu_count = os.cpu_count()
+            num_workers = max(1, (cpu_count - 1) if cpu_count else 1)
 
         # Create output directory if specified
         out_path = Path(output_dir) if output_dir else None
@@ -801,6 +812,8 @@ def _get_code_value(item: Any) -> Optional[str]:
 def is_dicom_sr(path: str | Path) -> bool:
     """Check if a DICOM file is a Structured Report.
 
+    The file is read only up to its SOP Class UID (0008,0016).
+
     Args:
         path: Path to the potential DICOM file.
 
@@ -815,10 +828,11 @@ def is_dicom_sr(path: str | Path) -> bool:
             print("This is a DICOM SR document")
         ```
     """
-    import pydicom
+    from pydicom.filereader import read_partial
 
     try:
-        dcm = pydicom.dcmread(str(path), stop_before_pixels=True)
+        with open(path, "rb") as fp:
+            dcm = read_partial(fp, stop_when=lambda tag, vr, length: tag > 0x00080016)
         sop_class = str(getattr(dcm, "SOPClassUID", ""))
 
         sr_sop_classes = [

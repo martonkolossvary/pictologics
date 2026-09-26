@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 # Disable JIT warmup for tests
@@ -108,46 +109,65 @@ def create_mock_sr_dataset(
 # ============================================================================
 
 
+def _write_dicom(path: Path, sop_class: str, size: int = 0) -> None:
+    """Write a small DICOM file of a SOP class; `size` bytes of text make it larger."""
+    from pydicom.dataset import Dataset, FileMetaDataset
+    from pydicom.uid import ExplicitVRLittleEndian
+
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = sop_class
+    meta.MediaStorageSOPInstanceUID = "1.2.3.4"
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = Dataset()
+    ds.file_meta = meta
+    ds.SOPClassUID = sop_class
+    ds.SOPInstanceUID = "1.2.3.4"
+    ds.PatientID = "PATIENT"
+    ds.TextValue = "x" * size
+    ds.save_as(path, enforce_file_format=True)
+
+
 class TestIsDicomSR:
     """Tests for is_dicom_sr helper function."""
 
-    def test_is_dicom_sr_comprehensive(self) -> None:
-        """Test detection of Comprehensive SR."""
-        with patch("pydicom.dcmread") as mock_read:
-            mock_dcm = MagicMock()
-            mock_dcm.SOPClassUID = "1.2.840.10008.5.1.4.1.1.88.33"
-            mock_read.return_value = mock_dcm
+    @pytest.mark.parametrize(
+        ("sop_class", "expected"),
+        [
+            ("1.2.840.10008.5.1.4.1.1.88.33", True),  # Comprehensive SR
+            ("1.2.840.10008.5.1.4.1.1.88.11", True),  # Basic Text SR
+            ("1.2.840.10008.5.1.4.1.1.2", False),  # CT Image
+            ("1.2.840.10008.5.1.4.1.1.88.59", False),  # Key Object Selection
+        ],
+    )
+    def test_is_dicom_sr(self, tmp_path: Path, sop_class: str, expected: bool) -> None:
+        """The SOP Class UID of a real file decides."""
+        path = tmp_path / "file.dcm"
+        _write_dicom(path, sop_class)
+        assert is_dicom_sr(path) is expected
 
-            result = is_dicom_sr("/path/to/file.dcm")
-            assert result is True
+    def test_is_dicom_sr_reads_up_to_the_sop_class(self, tmp_path: Path) -> None:
+        """The elements after SOPClassUID (0008,0016) are not read."""
+        from pydicom.filereader import read_partial
 
-    def test_is_dicom_sr_basic_text(self) -> None:
-        """Test detection of Basic Text SR."""
-        with patch("pydicom.dcmread") as mock_read:
-            mock_dcm = MagicMock()
-            mock_dcm.SOPClassUID = "1.2.840.10008.5.1.4.1.1.88.11"
-            mock_read.return_value = mock_dcm
+        path = tmp_path / "file.dcm"
+        _write_dicom(path, "1.2.840.10008.5.1.4.1.1.88.33")
+        read = []
 
-            result = is_dicom_sr("/path/to/file.dcm")
-            assert result is True
+        def spy(fp: Any, stop_when: Any) -> Any:
+            ds = read_partial(fp, stop_when=stop_when)
+            read.extend(ds.keys())
+            return ds
 
-    def test_is_dicom_sr_false_for_ct(self) -> None:
-        """Test non-SR DICOM returns False."""
-        with patch("pydicom.dcmread") as mock_read:
-            mock_dcm = MagicMock()
-            mock_dcm.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"  # CT Image
-            mock_read.return_value = mock_dcm
+        with patch("pydicom.filereader.read_partial", side_effect=spy):
+            assert is_dicom_sr(path) is True
+        assert read and max(read) == 0x00080016
 
-            result = is_dicom_sr("/path/to/file.dcm")
-            assert result is False
-
-    def test_is_dicom_sr_exception(self) -> None:
-        """Test exception handling returns False."""
-        with patch("pydicom.dcmread") as mock_read:
-            mock_read.side_effect = Exception("Read error")
-
-            result = is_dicom_sr("/path/to/file.dcm")
-            assert result is False
+    def test_is_dicom_sr_exception(self, tmp_path: Path) -> None:
+        """A file that is no DICOM file, or no file, is no SR."""
+        path = tmp_path / "notes.txt"
+        path.write_text("not a DICOM file")
+        assert is_dicom_sr(path) is False
+        assert is_dicom_sr(tmp_path / "missing.dcm") is False
 
 
 # ============================================================================
@@ -1002,13 +1022,40 @@ class TestSRDocumentFromFolders:
 
             mock_is_sr.return_value = True
 
-            # Run with num_workers=2 to trigger parallel branch
-            batch = SRDocument.from_folders([tmpdir], show_progress=False, num_workers=2)
+            # Run with num_workers=2 and no size limit to trigger parallel branch
+            with patch("pictologics.utilities.sr_parser.SR_POOL_BYTES", 0):
+                batch = SRDocument.from_folders([tmpdir], show_progress=False, num_workers=2)
 
             # Verify parallel processing was attempted (files were found and processed)
             assert len(batch.processing_log) == 3
             # All should fail because these are empty files, but the parallel branch ran
             assert all(log["status"] == "error" for log in batch.processing_log)
+
+    @pytest.mark.parametrize("num_workers", [None, 4])
+    def test_from_folders_small_batches_use_no_workers(
+        self, tmp_path: Path, num_workers: int | None
+    ) -> None:
+        """SR files of fewer than SR_POOL_BYTES bytes are parsed in this process; from
+        that size the requested workers (cpu_count - 1 by default) run."""
+        import pictologics.utilities.dicom_utils as dicom_utils
+
+        for i in range(3):
+            _write_dicom(tmp_path / f"sr_{i}.dcm", "1.2.840.10008.5.1.4.1.1.88.33", size=100)
+        total = sum(f.stat().st_size for f in tmp_path.iterdir())
+        with patch.object(dicom_utils, "header_worker_pool") as pool:
+            with patch("pictologics.utilities.sr_parser.SR_POOL_BYTES", total + 1):
+                batch = SRDocument.from_folders(
+                    [tmp_path], show_progress=False, num_workers=num_workers
+                )
+            assert len(batch.processing_log) == 3
+            pool.assert_not_called()
+            pool.return_value.__enter__.return_value.map.return_value = []
+            with (
+                patch("pictologics.utilities.sr_parser.SR_POOL_BYTES", total),
+                patch("os.cpu_count", return_value=6),
+            ):
+                SRDocument.from_folders([tmp_path], show_progress=False, num_workers=num_workers)
+            pool.assert_called_once_with(5 if num_workers is None else num_workers)
 
 
 class TestProcessSRFileWorker:

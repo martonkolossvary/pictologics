@@ -311,6 +311,8 @@ batch.export_log("sr_exports/processing_log.csv")
 
 For large collections of SR files, `SRDocument.from_folders()` supports **parallel processing** for faster parsing and displays a **progress bar** showing progress and estimated time remaining.
 
+Each worker process imports Pictologics before it parses a file (about 1 s), so workers pay off only for large batches. `from_folders()` parses SR files of less than 2.5 MB in total (`SR_POOL_BYTES`) in the calling process, whatever `num_workers` asks for; a few hundred small reports parse faster that way. To find the SR files, it reads each file only up to its SOP Class UID.
+
 ```python
 # Parallel processing with 8 workers
 batch = SRDocument.from_folders(
