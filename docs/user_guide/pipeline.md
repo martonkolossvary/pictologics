@@ -450,21 +450,28 @@ When running multiple configurations that share preprocessing steps, the pipelin
 
 ### How It Works
 
-The system analyzes your configurations and identifies reusable features:
+A feature family is reused only when everything that can change its values is the same in both configurations:
 
-| Feature Family | Depends On | Independent Of |
-| :--- | :--- | :--- |
-| **Morphology** | Mask geometry (resample, resegment, filter_outliers, binarize_mask, keep_largest_component) | Response-map filters, discretization |
-| **Intensity** | Intensity preprocessing (resample, resegment, filter_outliers, filter) | Discretization |
-| **Texture / Histogram** | All of the above **plus** discretization | — |
-| **IVH** | Same as texture/histogram unless `ivh_use_continuous=True` | Discretization in continuous mode |
+- the `source_mode` and `sentinel_value`;
+- every preprocessing step before `extract_features`, with the same parameters and in the same order;
+- the `extract_features` options other than `families` (for example `ivh_params`, `texture_matrix_params`, and `include_spatial_intensity`).
 
-When configs share preprocessing but differ only in discretization:
+The only exception is a `discretise` step at the end of the preprocessing:
+
+| Feature Family | Ignores a final `discretise` step |
+| :--- | :--- |
+| **Morphology** | Yes |
+| **Intensity** (including spatial and local intensity) | Yes |
+| **IVH** | Only with `ivh_use_continuous=True` |
+| **Texture / Histogram** | No |
+
+When configs share preprocessing but differ only in a final discretization step:
 
 - **Morphology** and **intensity** are computed **once** and reused
 - **Texture**, **histogram**, and discretized **IVH** are computed per configuration
 - Cache reuse is scoped by feature family as well as preprocessing signature; texture, histogram, and IVH do not reuse each other's cached values.
 - Preprocessing order is part of the signature. The same steps in a different order are computed independently because they can produce different ROIs and intensities.
+- A configuration with more than one `extract_features` step is always computed on its own.
 
 ### Checking Statistics
 

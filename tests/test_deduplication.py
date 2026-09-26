@@ -2,10 +2,12 @@
 Tests for the deduplication module.
 """
 
+import copy
 import json
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from pictologics.deduplication import (
@@ -21,6 +23,7 @@ from pictologics.deduplication import (
     get_default_rules,
     get_ivh_dependencies,
 )
+from pictologics.filters import BoundaryCondition
 from pictologics.loader import Image
 from pictologics.pipeline import RadiomicsPipeline
 
@@ -890,8 +893,8 @@ class TestPreprocessingSignatureEdgeCases:
 class TestIVHDependencies:
     """Tests for IVH dependency handling."""
 
-    def test_ivh_continuous_mode_removes_discretise_dependency(self):
-        """When ivh_use_continuous=True, discretise should not be a dependency."""
+    def test_nested_ivh_continuous_flag_keeps_discretise_dependency(self):
+        """Extraction ignores a nested flag and bins the discretised image, so keep it."""
         rules = get_default_rules()
         config_steps = [
             {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}},
@@ -903,7 +906,7 @@ class TestIVHDependencies:
         ]
 
         deps = get_ivh_dependencies(config_steps, rules)
-        assert "discretise" not in deps
+        assert "discretise" in deps
 
     def test_ivh_top_level_continuous_mode_removes_discretise_dependency(self):
         """The runtime top-level ivh_use_continuous parameter controls dedup."""
@@ -1028,3 +1031,235 @@ class TestConfigurationAnalyzerEdgeCases:
         assert ("alias", "glcm") in plan.signatures
         assert ("alias", "texture_glcm") not in plan.signatures
         assert plan.sources[("alias", "glcm")] == "raw"
+
+    def test_voxel_validity_settings_are_part_of_every_signature(self):
+        """A different source mode or sentinel value must stop reuse for every family."""
+        steps = [
+            {"step": "resample", "params": {"new_spacing": [0.5, 0.5, 0.5]}},
+            {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
+        ]
+        configs = {"full": steps, "roi": steps, "auto": steps}
+        metadata = {
+            "roi": {"source_mode": "roi_only", "sentinel_value": None},
+            "auto": {"source_mode": "auto", "sentinel_value": -1000.0},
+        }
+
+        plan = ConfigurationAnalyzer(configs, config_metadata=metadata).analyze()
+
+        for config in configs:
+            for family in ("intensity", "morphology"):
+                assert plan.sources[(config, family)] is None
+
+        # Without metadata every configuration uses the default mode and shares results.
+        plan = ConfigurationAnalyzer(configs).analyze()
+        assert plan.sources[("roi", "intensity")] == "full"
+
+    def test_configuration_with_two_extraction_steps_gets_no_signature(self):
+        """Each extraction step sees different preprocessing, so the config never shares."""
+        configs = {
+            "twice": [
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+                {"step": "resegment", "params": {"range_min": 0, "range_max": 10}},
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+            ],
+            "once": [{"step": "extract_features", "params": {"families": ["intensity"]}}],
+        }
+
+        plan = ConfigurationAnalyzer(configs).analyze()
+
+        assert ("twice", "intensity") not in plan.signatures
+        assert plan.should_compute("twice", "intensity")
+        assert plan.sources[("once", "intensity")] is None
+
+    def test_relevant_steps_stop_at_extraction_and_keep_inner_discretise(self):
+        """Only a discretise step at the end of the preprocessing can be left out."""
+        steps = [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+            {"step": "resegment", "params": {"range_min": 2, "range_max": 5}},
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 4}},
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+            {"step": "resample", "params": {"new_spacing": [1.0, 1.0, 1.0]}},
+        ]
+
+        relevant = extract_relevant_steps(steps, "intensity", get_default_rules())
+
+        assert [step_name for step_name, _ in relevant] == ["discretise", "resegment"]
+
+
+_RESAMPLE = {
+    "step": "resample",
+    "params": {"new_spacing": (0.5, 0.5, 0.5), "interpolation": "linear"},
+}
+_FBN_8 = {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}}
+_FBN_16 = {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}}
+_RESEGMENT_BINS = {"step": "resegment", "params": {"range_min": 2, "range_max": 5}}
+_LABEL_RANGE = {"step": "binarize_mask", "params": {"mask_values": (1, 3)}}  # labels 1 to 3
+_LABEL_LIST = {"step": "binarize_mask", "params": {"mask_values": [1, 3]}}  # labels 1 and 3
+
+
+def _extract(*families: str, **options: Any) -> dict[str, Any]:
+    return {"step": "extract_features", "params": {"families": list(families), **options}}
+
+
+def _config(
+    steps: list[dict[str, Any]], source_mode: str = "full_image", sentinel_value: Any = None
+) -> dict[str, Any]:
+    return {"steps": steps, "source_mode": source_mode, "sentinel_value": sentinel_value}
+
+
+# Each pair differs in one setting that changes the values of a family that the old
+# signatures shared between the two configurations.
+_CONFIGURATION_PAIRS = [
+    pytest.param(
+        _config([_RESAMPLE, _extract("intensity")]),
+        _config([_RESAMPLE, _extract("intensity")], "roi_only"),
+        id="source-mode",
+    ),
+    pytest.param(
+        _config([_RESAMPLE, _extract("intensity")], "auto", -1000.0),
+        _config([_RESAMPLE, _extract("intensity")], "auto", 0.0),
+        id="sentinel-value",
+    ),
+    pytest.param(
+        _config([_extract("intensity", "morphology")]),
+        _config(
+            [{"step": "keep_largest_component", "params": {}}, _extract("intensity", "morphology")]
+        ),
+        id="keep-largest-component",
+    ),
+    pytest.param(
+        _config([_extract("intensity")]),
+        _config([{"step": "binarize_mask", "params": {"mask_values": 1}}, _extract("intensity")]),
+        id="binarize-mask",
+    ),
+    pytest.param(
+        _config([_extract("intensity")]),
+        _config([{"step": "round_intensities", "params": {}}, _extract("intensity")]),
+        id="round-intensities",
+    ),
+    pytest.param(
+        _config([_extract("morphology")]),
+        _config(
+            [{"step": "filter", "params": {"type": "mean", "support": 3}}, _extract("morphology")]
+        ),
+        id="filter-before-morphology",
+    ),
+    pytest.param(
+        _config([_extract("intensity")]),
+        _config([_extract("intensity", include_spatial_intensity=True)]),
+        id="spatial-intensity-option",
+    ),
+    pytest.param(
+        _config([_FBN_8, _extract("ivh")]),
+        _config(
+            [_FBN_8, _extract("ivh", ivh_params={"target_range_min": 2, "target_range_max": 5})]
+        ),
+        id="ivh-options",
+    ),
+    pytest.param(
+        _config([_FBN_8, _extract("ngldm")]),
+        _config([_FBN_8, _extract("ngldm", texture_matrix_params={"ngldm_alpha": 1})]),
+        id="texture-matrix-options",
+    ),
+    pytest.param(
+        _config(
+            [
+                _extract("intensity"),
+                {"step": "resegment", "params": {"range_min": 40, "range_max": 60}},
+                _extract("intensity"),
+            ]
+        ),
+        _config([_extract("intensity")]),
+        id="second-extraction-step",
+    ),
+    pytest.param(
+        _config([_FBN_8, _RESEGMENT_BINS, _extract("intensity")]),
+        _config([_FBN_16, _RESEGMENT_BINS, _extract("intensity")]),
+        id="step-after-discretise",
+    ),
+    pytest.param(
+        _config([_FBN_8, _extract("ivh", ivh_params={"ivh_use_continuous": True})]),
+        _config([_FBN_16, _extract("ivh", ivh_params={"ivh_use_continuous": True})]),
+        id="nested-ivh-continuous-flag",
+    ),
+    pytest.param(
+        _config([_LABEL_RANGE, _extract("intensity")]),
+        _config([_LABEL_LIST, _extract("intensity")]),
+        id="mask-range-versus-labels",
+    ),
+    pytest.param(
+        _config(
+            [
+                {
+                    "step": "filter",
+                    "params": {"type": "mean", "support": 3, "boundary": BoundaryCondition.MIRROR},
+                },
+                _extract("intensity"),
+            ]
+        ),
+        _config(
+            [
+                {"step": "filter", "params": {"type": "mean", "support": 5, "boundary": "mirror"}},
+                _extract("intensity"),
+            ]
+        ),
+        id="boundary-member",
+    ),
+]
+
+
+class TestDeduplicationKeepsResults:
+    """Reusing a family must give the same values as computing each config alone."""
+
+    @staticmethod
+    def _inputs() -> tuple[Image, Image]:
+        rng = np.random.default_rng(7)
+        array = rng.normal(50.0, 20.0, size=(12, 12, 12))
+        # A fill value next to the ROI, so the source mode changes the resampled values.
+        array[:, :, 1] = -1000.0
+        labels = np.zeros(array.shape, dtype=np.uint8)
+        labels[2:7, 2:7, 2:7] = 1
+        labels[8:10, 8:10, 8:10] = 2  # A second, smaller component with its own label
+        return (
+            Image(array=array, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0)),
+            Image(array=labels, spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0)),
+        )
+
+    @pytest.mark.parametrize(("first", "second"), _CONFIGURATION_PAIRS)
+    def test_reused_values_match_separate_computation(
+        self, first: dict[str, Any], second: dict[str, Any]
+    ):
+        image, mask = self._inputs()
+        results = {}
+        for deduplicate in (True, False):
+            pipeline = RadiomicsPipeline(deduplicate=deduplicate, load_standard=False)
+            for name, config in (("first", first), ("second", second)):
+                pipeline.add_config(
+                    name,
+                    copy.deepcopy(config["steps"]),
+                    source_mode=config["source_mode"],
+                    sentinel_value=config["sentinel_value"],
+                )
+            results[deduplicate] = pipeline.run(image, mask, config_names=["first", "second"])
+
+        separate = results[False]
+        # The pair only tests reuse if the setting really changes the values.
+        assert not separate["first"].equals(separate["second"])
+        for name in ("first", "second"):
+            pd.testing.assert_series_equal(
+                results[True][name], separate[name], check_exact=False, rtol=1e-9
+            )
+
+    def test_discretisation_only_difference_still_reuses_intensity_and_morphology(self):
+        image, mask = self._inputs()
+        pipeline = RadiomicsPipeline(load_standard=False)
+        for name, discretise in (("fbn_8", _FBN_8), ("fbn_16", _FBN_16)):
+            pipeline.add_config(
+                name, [_RESAMPLE, discretise, _extract("intensity", "morphology", "histogram")]
+            )
+
+        pipeline.run(image, mask, config_names=["fbn_8", "fbn_16"])
+
+        # fbn_16 reuses intensity and morphology; the histogram depends on the bins.
+        assert pipeline.deduplication_stats["reused_families"] == 2
+        assert pipeline.deduplication_stats["computed_families"] == 4

@@ -799,7 +799,13 @@ class RadiomicsPipeline:
         if self._deduplication_enabled and len(target_configs) > 1:
             # Get configs for analysis
             configs_to_analyze = {name: self._configs[name] for name in target_configs}
-            analyzer = ConfigurationAnalyzer(configs_to_analyze, self._deduplication_rules)
+            analyzer = ConfigurationAnalyzer(
+                configs_to_analyze,
+                self._deduplication_rules,
+                config_metadata={
+                    name: self._config_metadata.get(name, {}) for name in target_configs
+                },
+            )
             dedup_plan = analyzer.analyze()
             self._last_deduplication_plan = dedup_plan
             self._configs_modified_since_plan = False

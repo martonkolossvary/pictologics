@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 _TEXTURE_FAMILIES = {"glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm"}
@@ -50,7 +51,10 @@ class DeduplicationRules:
     Attributes:
         version: Semantic version string for this rules definition.
         family_dependencies: Mapping of feature family names to the set of
-            preprocessing step names that affect their output.
+            preprocessing step names that affect their output. Signatures always
+            include every preprocessing step before extraction; a family whose set
+            does not list ``discretise`` leaves out only a ``discretise`` step at the
+            end of the preprocessing.
         ivh_discretization_dependent_unless: Condition under which IVH becomes
             independent of discretization (e.g., "ivh_use_continuous=True").
         comparison_mode: How to compare preprocessing parameters ("exact_params").
@@ -374,9 +378,15 @@ def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
 
     Converts numpy arrays, tuples, and other non-JSON types to lists/primitives.
     """
-    result = {}
+    result: dict[str, Any] = {}
     for key, value in sorted(params.items()):
-        if hasattr(value, "tolist"):  # numpy array
+        if key == "mask_values" and isinstance(value, tuple) and len(value) == 2:
+            # binarize_mask reads a (lo, hi) tuple as a range but a list as label
+            # values, so the two must not share a signature.
+            result[key] = {"range": list(value)}
+        elif isinstance(value, Enum):  # for example a BoundaryCondition
+            result[key] = value.name.lower()
+        elif hasattr(value, "tolist"):  # numpy array
             result[key] = value.tolist()
         elif isinstance(value, tuple):
             result[key] = list(value)
@@ -402,7 +412,8 @@ def get_ivh_dependencies(
     Determine IVH feature dependencies based on config parameters.
 
     If ivh_use_continuous=True is set in extract_features params,
-    IVH becomes independent of discretization.
+    IVH becomes independent of discretization. The flag counts only at the top
+    level of the params, because feature extraction reads it only there.
 
     Args:
         config_steps: List of step dictionaries from the config.
@@ -428,19 +439,13 @@ def get_ivh_dependencies(
         # False
         ```
     """
-    # Find extract_features step and check IVH continuous mode.  Runtime treats
-    # ivh_use_continuous as a top-level extract_features parameter; keep the
-    # historical nested ivh_params form as a compatibility alias for old configs.
+    # Find extract_features step and check IVH continuous mode. Feature extraction
+    # ignores an ivh_use_continuous key nested in ivh_params and then bins the
+    # discretised image, so only the top-level flag removes the dependency.
     for step in config_steps:
         if step.get("step") == "extract_features":
             params = step.get("params", {})
-            ivh_params = params.get("ivh_params", {})
-            nested_continuous = (
-                ivh_params.get("ivh_use_continuous", False)
-                if isinstance(ivh_params, dict)
-                else False
-            )
-            if params.get("ivh_use_continuous", False) is True or nested_continuous is True:
+            if params.get("ivh_use_continuous", False) is True:
                 # Remove discretise from dependencies
                 deps = rules.family_dependencies.get("ivh", frozenset())
                 return deps - {"discretise"}
@@ -456,6 +461,12 @@ def extract_relevant_steps(
 ) -> list[tuple[str, dict[str, Any]]]:
     """
     Extract preprocessing steps relevant to a feature family.
+
+    Every step before the first ``extract_features`` step can change the image or
+    the masks that a family reads, so each one is relevant. The only exception is a
+    ``discretise`` step at the end of the preprocessing, for a family whose rules do
+    not list ``discretise``: such a family reads the image from before
+    discretisation, and no later step reads the binned image.
 
     Args:
         config_steps: Full list of step dictionaries from config.
@@ -485,13 +496,16 @@ def extract_relevant_steps(
     else:
         dependencies = rules.family_dependencies.get(family, frozenset())
 
-    # Extract matching steps with their params
     relevant = []
     for step in config_steps:
         step_name = step.get("step", "")
-        if step_name in dependencies:
-            params = step.get("params", {})
-            relevant.append((step_name, params))
+        if step_name == "extract_features":
+            break
+        relevant.append((step_name, step.get("params", {})))
+
+    if "discretise" not in dependencies:
+        while relevant and relevant[-1][0] == "discretise":
+            relevant.pop()
 
     return relevant
 
@@ -645,6 +659,9 @@ class ConfigurationAnalyzer:
     Args:
         configs: Dict mapping config names to lists of step dicts.
         rules: The DeduplicationRules to use (defaults to current version).
+        config_metadata: Optional dict mapping config names to their
+            ``source_mode`` and ``sentinel_value``. A config without an entry
+            uses ``"full_image"`` and no sentinel value.
 
     Example:
         ```python
@@ -676,9 +693,11 @@ class ConfigurationAnalyzer:
         self,
         configs: dict[str, list[dict[str, Any]]],
         rules: DeduplicationRules | None = None,
+        config_metadata: dict[str, dict[str, Any]] | None = None,
     ):
         self.configs = configs
         self.rules = rules or get_default_rules()
+        self.config_metadata = config_metadata or {}
 
     def analyze(self) -> DeduplicationPlan:
         """
@@ -703,6 +722,29 @@ class ConfigurationAnalyzer:
 
         # Process each config
         for config_name, steps in self.configs.items():
+            extraction_steps = [step for step in steps if step.get("step") == "extract_features"]
+            # A later extraction step sees more preprocessing than an earlier one, but the
+            # plan holds one signature per config and family. Such a config is always
+            # computed on its own and never shares results.
+            if len(extraction_steps) != 1:
+                continue
+
+            # The source mode and sentinel value change resampling and filtering, so
+            # they are part of every family's signature.
+            metadata = self.config_metadata.get(config_name, {})
+            source = {
+                "source_mode": metadata.get("source_mode", "full_image"),
+                "sentinel_value": metadata.get("sentinel_value"),
+            }
+            # Extraction options (for example ivh_params, texture_matrix_params, and
+            # include_spatial_intensity) change values too. Only the family list is left
+            # out, because each family is computed on its own.
+            extraction_options = {
+                key: value
+                for key, value in extraction_steps[0].get("params", {}).items()
+                if key != "families"
+            }
+
             # Determine which families this config extracts
             families_in_config = self._get_families_in_config(steps)
 
@@ -711,8 +753,11 @@ class ConfigurationAnalyzer:
                     # Unknown family, skip
                     continue
 
-                # Extract relevant preprocessing steps
-                relevant_steps = extract_relevant_steps(steps, family, self.rules)
+                relevant_steps = [
+                    ("source_mode", source),
+                    *extract_relevant_steps(steps, family, self.rules),
+                    ("extract_features", extraction_options),
+                ]
 
                 # Create signature
                 signature = PreprocessingSignature.from_steps(relevant_steps)

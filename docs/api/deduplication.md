@@ -152,28 +152,23 @@ The `RULES_REGISTRY` provides versioned deduplication rules for reproducibility:
 
 ## Feature Family Dependencies
 
-The deduplication system understands which preprocessing steps affect which feature families:
+A signature holds the `source_mode` and `sentinel_value`, every preprocessing step before `extract_features` (with its parameters, in order), and the `extract_features` options other than `families`. The rules decide only which families can ignore a `discretise` step at the end of the preprocessing: a family whose rules do not list `discretise` leaves that step out.
 
-| Feature Family | Relevant Preprocessing Steps |
+| Feature Family | Rules list `discretise` |
 | :--- | :--- |
-| `morphology` | `resample`, `resegment`, `filter_outliers`, `binarize_mask`, `keep_largest_component` |
-| `intensity` | `resample`, `resegment`, `filter_outliers`, `filter` |
-| `spatial_intensity` | Same as `intensity` |
-| `local_intensity` | Same as `intensity` |
-| `histogram` | `resample`, `resegment`, `filter_outliers`, `filter`, `binarize_mask`, `keep_largest_component`, `discretise` |
-| `ivh` | Same as `histogram` (unless `ivh_use_continuous=True`, which removes `discretise` dependency) |
-| `texture` (all subfamilies) | Same as `histogram` |
+| `morphology` | No |
+| `intensity`, `spatial_intensity`, `local_intensity` | No |
+| `histogram` | Yes |
+| `ivh` | Yes, unless `ivh_use_continuous=True` is set at the top level of the `extract_features` params |
+| `texture` (all subfamilies) | Yes |
 
-!!! warning "Filters Affect Intensity Features"
-    When using image filters (LoG, Gabor, Wavelets, Laws, etc.), intensity features are computed 
-    from the **filtered response map**, not the original image. Therefore, different filter 
-    configurations will produce different intensity features and cannot be deduplicated.
-    
-    **Morphology features are not affected by response-map filters** since they are computed from
-    mask geometry, not filtered intensities. Morphology is affected by mask-narrowing preprocessing
-    such as `resegment` and `filter_outliers` when those steps target the morphology mask.
+!!! warning "Filters Affect Intensity and Morphology Features"
+    When using image filters (LoG, Gabor, Wavelets, Laws, etc.), intensity features are computed
+    from the **filtered response map**, not the original image. The intensity-weighted morphology
+    features (`integrated_intensity_99N0` and `center_of_mass_shift_KLMA`) use the response map
+    too. Configurations with different filters therefore never share these families.
 
-When two configurations share identical values for the relevant preprocessing steps of a feature family in the same order, that family is computed once and the result is reused. Cache reuse is scoped by both feature family and preprocessing signature, so families such as `texture`, `histogram`, and `ivh` never reuse each other's cached values even when their relevant preprocessing steps are identical.
+When two configurations have the same signature for a feature family, that family is computed once and the result is reused. Cache reuse is scoped by both feature family and signature, so families such as `texture`, `histogram`, and `ivh` never reuse each other's cached values even when their signatures are identical. A configuration with more than one `extract_features` step is always computed on its own.
 
 ---
 

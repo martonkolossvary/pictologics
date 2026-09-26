@@ -1112,14 +1112,14 @@ You want to:
 
 ### Key concepts
 
-The deduplication system understands which feature families depend on which preprocessing steps:
+The deduplication system reuses a feature family only when the source mode, every preprocessing step before extraction, and the extraction options are the same. Only a final discretization step may differ:
 
-| Feature Family | Depends On |
+| Feature Family | Ignores a final discretization step |
 | :--- | :--- |
-| **Morphology** | Resampling, mask operations (resegment, keep_largest_component, filter_outliers) |
-| **Intensity** | Resampling, intensity preprocessing (resegment, filter_outliers, round_intensities) |
-| **Texture / Histogram** | All of the above **plus** discretization |
-| **IVH** | Depends on IVH-specific settings (`ivh_use_continuous`, `ivh_discretisation`) |
+| **Morphology** | Yes |
+| **Intensity** | Yes |
+| **Texture / Histogram** | No |
+| **IVH** | Only with `ivh_use_continuous=True` |
 
 When configs share preprocessing but differ only in discretization:
 
