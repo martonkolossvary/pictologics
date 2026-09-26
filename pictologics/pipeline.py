@@ -2898,6 +2898,7 @@ class RadiomicsPipeline:
                 self._config_metadata[name] = copy.deepcopy(other._config_metadata[name])
             else:
                 self._config_metadata.pop(name, None)
+            self._configs_modified_since_plan = True
         return self
 
     # -------------------------------------------------------------------------

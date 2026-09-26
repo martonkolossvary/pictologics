@@ -4388,3 +4388,17 @@ def test_run_reuses_the_plan_while_the_configs_and_rules_stay() -> None:
         for _ in range(2):
             pipeline.run(image, mask)
         assert analyzer.call_count == 6
+
+
+def test_merge_configs_marks_the_plan_out_of_date(pipeline: RadiomicsPipeline) -> None:
+    from pictologics.deduplication import ConfigurationAnalyzer
+
+    steps = [{"step": "extract_features", "params": {"families": ["intensity"]}}]
+    pipeline.add_config("cfg1", steps)
+    pipeline._last_deduplication_plan = ConfigurationAnalyzer(pipeline._configs).analyze()
+    pipeline._configs_modified_since_plan = False
+    other = RadiomicsPipeline(load_standard=False)
+    other.add_config("cfg2", copy.deepcopy(steps))
+    pipeline.merge_configs(other)
+    data = pipeline.to_dict(config_names=["cfg1", "cfg2"], include_deduplication=True)
+    assert "last_plan" not in data["deduplication"]
