@@ -6,6 +6,7 @@ import warnings
 # Suppress "NumPy module was reloaded" warning
 warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
+import copy
 import json
 import os
 
@@ -3778,9 +3779,15 @@ def test_get_apply_to_invalid():
 def test_get_package_version_not_found():
     from pictologics.pipeline import _get_package_version
 
-    with patch("pictologics.pipeline.version") as mock_version:
-        mock_version.side_effect = PackageNotFoundError()
-        assert _get_package_version() is None
+    _get_package_version.cache_clear()
+    try:
+        with patch("pictologics.pipeline.version") as mock_version:
+            mock_version.side_effect = PackageNotFoundError()
+            assert _get_package_version() is None
+            assert _get_package_version() is None
+            assert mock_version.call_count == 1  # read once per process
+    finally:
+        _get_package_version.cache_clear()
 
 
 # ===========================================================================
@@ -4239,3 +4246,124 @@ def test_filters_of_the_roi_region_keep_every_feature() -> None:
         full_grid = run()
     for name in filters:
         assert limited[name].equals(full_grid[name])
+
+
+def test_run_does_the_start_up_once_per_run(sm_mask: Image) -> None:
+    # The first ROI check, the sentinel search and the source mask of each source setup
+    # (source mode, sentinel value) are made once per run; each configuration keeps its
+    # own warning, log values and features.
+    from pictologics import pipeline as pipeline_module
+
+    image = _sentinel_image()
+    steps = [{"step": "extract_features", "params": {"families": ["intensity"]}}]
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("auto_a", steps, source_mode="auto")
+    pipeline.add_config("auto_b", copy.deepcopy(steps), source_mode="auto")
+    pipeline.add_config("explicit", copy.deepcopy(steps), source_mode="auto", sentinel_value=-1000)
+    pipeline.add_config("roi_a", copy.deepcopy(steps), source_mode="roi_only")
+    pipeline.add_config("roi_b", copy.deepcopy(steps), source_mode="roi_only")
+    names = ["auto_a", "auto_b", "explicit", "roi_a", "roi_b"]
+    check = RadiomicsPipeline._ensure_nonempty_roi
+    with (
+        patch.object(
+            pipeline_module, "detect_sentinel_value", wraps=pipeline_module.detect_sentinel_value
+        ) as detect,
+        patch.object(
+            pipeline_module,
+            "create_source_mask_from_sentinel",
+            wraps=pipeline_module.create_source_mask_from_sentinel,
+        ) as sentinel_mask,
+        patch.object(
+            RadiomicsPipeline, "_ensure_nonempty_roi", autospec=True, side_effect=check
+        ) as roi_check,
+        pytest.warns(UserWarning, match="Auto-detected sentinel value") as record,
+    ):
+        together = pipeline.run(image, sm_mask, config_names=names)
+    assert detect.call_count == 1
+    assert sentinel_mask.call_count == 2  # the detected value and the explicit value
+    contexts = [call.kwargs["context"] for call in roi_check.call_args_list]
+    assert contexts.count("initialization") == 1
+    messages = [str(w.message) for w in record if "Auto-detected" in str(w.message)]
+    assert len(messages) == 2 and "'auto_a'" in messages[0] and "'auto_b'" in messages[1]
+    logs = {entry["config_name"]: entry for entry in pipeline._log}
+    for name in names:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            alone = pipeline.run(image, sm_mask, config_names=[name])
+        assert together[name].equals(alone[name])
+        for key in ("sentinel_detected", "sentinel_value", "sentinel_proportion"):
+            assert logs[name][key] == pipeline._log[-1][key]
+
+
+def test_run_frees_each_source_mask_after_its_last_configuration(sm_mask: Image) -> None:
+    # The configurations of one source setup share its source mask, and the mask is freed
+    # once the last of them has run: auto, auto, ROI-only, ROI-only keep one at a time.
+    import weakref
+
+    steps = [{"step": "extract_features", "params": {"families": ["intensity"]}}]
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    for name, mode in (("a1", "auto"), ("a2", "auto"), ("r1", "roi_only"), ("r2", "roi_only")):
+        pipeline.add_config(name, copy.deepcopy(steps), source_mode=mode)
+    refs: list[Any] = []
+    shared: list[bool] = []
+    alive: list[list[bool]] = []
+    extract = RadiomicsPipeline._extract_features
+
+    def spy(self: RadiomicsPipeline, state: PipelineState, params: dict[str, Any]) -> Any:
+        refs.append(weakref.ref(state.source_mask))
+        shared.append(len(refs) > 1 and refs[-1]() is refs[-2]())
+        alive.append([ref() is not None for ref in refs])
+        return extract(self, state, params)
+
+    with patch.object(RadiomicsPipeline, "_extract_features", spy), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pipeline.run(_sentinel_image(), sm_mask)
+    assert shared == [False, True, False, True]
+    assert alive[2] == [False, False, True]  # r1 runs: the auto mask is gone
+
+
+def test_run_reuses_the_plan_while_the_configs_and_rules_stay() -> None:
+    # A run builds the deduplication plan again only when the rules object or the pickled
+    # configs (names in order, steps and metadata) changed.
+    from pictologics import pipeline as pipeline_module
+    from pictologics.deduplication import DeduplicationRules
+
+    rng = np.random.default_rng(3)
+    image = Image(rng.normal(size=(12, 12, 12)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    labels = np.zeros(image.array.shape)
+    labels[3:9, 3:9, 3:9] = 1.0
+    mask = Image(labels, image.spacing, image.origin)
+
+    def config(n_bins: int) -> list[dict[str, Any]]:
+        return [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
+            {"step": "extract_features", "params": {"families": ["intensity", "glcm"]}},
+        ]
+
+    steps_b = config(16)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("a", config(8))
+    pipeline.add_config("b", steps_b)
+    analyzer_class = pipeline_module.ConfigurationAnalyzer
+    with patch.object(pipeline_module, "ConfigurationAnalyzer", wraps=analyzer_class) as analyzer:
+        first = pipeline.run(image, mask)
+        plan = pipeline.last_deduplication_plan
+        second = pipeline.run(image, mask)
+        assert analyzer.call_count == 1 and pipeline.last_deduplication_plan is plan
+        for name in first:
+            assert first[name].equals(second[name])
+        steps_b[0]["params"]["n_bins"] = 8.0  # the stored config is the caller's list
+        pipeline.run(image, mask)
+        assert analyzer.call_count == 2
+        pipeline.run(image, mask, config_names=["b", "a"])
+        assert analyzer.call_count == 3
+        pipeline.deduplication_rules = DeduplicationRules.from_dict(
+            pipeline.deduplication_rules.to_dict()
+        )
+        pipeline.run(image, mask, config_names=["b", "a"])
+        assert analyzer.call_count == 4
+        # A parameter that pickle cannot write: the plan is built for every run.
+        steps_b.append({"step": "note", "params": {"made_by": lambda: None}})
+        for _ in range(2):
+            pipeline.run(image, mask)
+        assert analyzer.call_count == 6

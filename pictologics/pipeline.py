@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import copy
 import datetime
+import functools
 import json
 import logging
 import math
+import pickle
 import re
 import warnings
 from collections import Counter
@@ -98,8 +100,9 @@ CONFIG_SCHEMA_VERSION = "1.0"
 _VALID_SCHEMA_VERSIONS = {"1.0", "1.1"}
 
 
+@functools.cache
 def _get_package_version() -> str | None:
-    """Return the installed package version when available."""
+    """Return the installed package version when available (read once per process)."""
     try:
         return version("pictologics")
     except PackageNotFoundError:
@@ -466,6 +469,8 @@ class RadiomicsPipeline:
 
         self._last_deduplication_plan: DeduplicationPlan | None = None
         self._configs_modified_since_plan: bool = False
+        # (rules, pickled configs, plan) of the last plan that run() built
+        self._plan_cache: tuple[DeduplicationRules, bytes, DeduplicationPlan] | None = None
 
         # Deduplication statistics (reset on each run)
         self._dedup_reused_count: int = 0
@@ -814,14 +819,30 @@ class RadiomicsPipeline:
         if self._deduplication_enabled and len(target_configs) > 1:
             # Get configs for analysis
             configs_to_analyze = {name: self._configs[name] for name in target_configs}
-            analyzer = ConfigurationAnalyzer(
-                configs_to_analyze,
-                self._deduplication_rules,
-                config_metadata={
-                    name: self._config_metadata.get(name, {}) for name in target_configs
-                },
-            )
-            dedup_plan = analyzer.analyze()
+            config_metadata = {name: self._config_metadata.get(name, {}) for name in target_configs}
+            # The plan of an earlier run holds while the rules and the pickled configs
+            # (names in order, steps and metadata) are the same.
+            try:
+                plan_key: bytes | None = pickle.dumps((configs_to_analyze, config_metadata))
+            except Exception:  # a parameter that pickle cannot write: plan anew
+                plan_key = None
+            cached = self._plan_cache
+            if (
+                plan_key is not None
+                and cached is not None
+                and cached[0] is self._deduplication_rules
+                and cached[1] == plan_key
+            ):
+                dedup_plan = cached[2]
+            else:
+                analyzer = ConfigurationAnalyzer(
+                    configs_to_analyze,
+                    self._deduplication_rules,
+                    config_metadata=config_metadata,
+                )
+                dedup_plan = analyzer.analyze()
+                if plan_key is not None:
+                    self._plan_cache = (self._deduplication_rules, plan_key, dedup_plan)
             self._last_deduplication_plan = dedup_plan
             self._configs_modified_since_plan = False
 
@@ -834,6 +855,18 @@ class RadiomicsPipeline:
         users = Counter(key for name in target_configs for key in prefix_keys[name])
         shared: dict[str, tuple[PipelineState, list[dict[str, Any]]]] = {}
 
+        # Every configuration starts from the same image and mask, so the first ROI check,
+        # the sentinel search (value, count) and the source mask of each source setup
+        # (source mode, sentinel value) are done once per run. A source mask is kept
+        # until the last configuration that uses it.
+        roi_checked = False
+        detection: Optional[tuple[Optional[float], int]] = None
+        source_masks: dict[tuple[Any, Any], Image] = {}
+        source_users = Counter(
+            (metadata.get("source_mode", "full_image"), metadata.get("sentinel_value"))
+            for metadata in (self._config_metadata.get(name, {}) for name in target_configs)
+        )
+
         # Run each configuration
         for config_name in target_configs:
             steps = self._configs[config_name]
@@ -844,6 +877,8 @@ class RadiomicsPipeline:
             source_mode_str = metadata.get("source_mode", "full_image")
             source_mode = SourceMode(source_mode_str)
             explicit_sentinel = metadata.get("sentinel_value")
+            source_key = (source_mode_str, explicit_sentinel)
+            source_users[source_key] -= 1
 
             # Determine source mask based on source_mode
             source_mask: Optional[Image] = None
@@ -858,13 +893,15 @@ class RadiomicsPipeline:
 
             elif source_mode == SourceMode.ROI_ONLY:
                 # Use ROI mask as source mask
-                source_mask = Image(
-                    array=(orig_mask.array > 0).astype(np.uint8),
-                    spacing=orig_mask.spacing,
-                    origin=orig_mask.origin,
-                    direction=orig_mask.direction,
-                    modality="SOURCE_MASK",
-                )
+                if source_key not in source_masks:
+                    source_masks[source_key] = Image(
+                        array=(orig_mask.array > 0).astype(np.uint8),
+                        spacing=orig_mask.spacing,
+                        origin=orig_mask.origin,
+                        direction=orig_mask.direction,
+                        modality="SOURCE_MASK",
+                    )
+                source_mask = source_masks[source_key]
 
             elif source_mode == SourceMode.AUTO:
                 # Auto-detect sentinel values
@@ -874,16 +911,21 @@ class RadiomicsPipeline:
                     detected_sentinel_value = explicit_sentinel
                     sentinel_detected = True
                 else:
-                    # If mask was auto-generated (full mask), do not use it for
-                    # "outside-ness" check in detection, as everything is "inside".
-                    mask_for_detection = orig_mask if not mask_was_generated else None
-                    detected = detect_sentinel_value(orig_img, roi_mask=mask_for_detection)
+                    if detection is None:
+                        # If mask was auto-generated (full mask), do not use it for
+                        # "outside-ness" check in detection, as everything is "inside".
+                        mask_for_detection = orig_mask if not mask_was_generated else None
+                        found = detect_sentinel_value(orig_img, roi_mask=mask_for_detection)
+                        count = (
+                            0 if found is None else int(np.count_nonzero(orig_img.array == found))
+                        )
+                        detection = (found, count)
+                    detected, n_sentinel = detection
                     if detected is not None:
                         detected_sentinel_value = detected
                         sentinel_detected = True
                         sentinel_auto_detected = True
                         n_total = int(orig_img.array.size)
-                        n_sentinel = int(np.count_nonzero(orig_img.array == detected))
                         sentinel_proportion = n_sentinel / n_total
 
                         # Only ever print "100.0%" when literally every voxel is the
@@ -926,9 +968,13 @@ class RadiomicsPipeline:
                         warnings.warn(msg, stacklevel=2)
 
                 if sentinel_detected and detected_sentinel_value is not None:
-                    source_mask = create_source_mask_from_sentinel(
-                        orig_img, detected_sentinel_value
-                    )
+                    if source_key not in source_masks:
+                        source_masks[source_key] = create_source_mask_from_sentinel(
+                            orig_img, detected_sentinel_value
+                        )
+                    source_mask = source_masks[source_key]
+            if source_users[source_key] == 0:
+                source_masks.pop(source_key, None)
 
             # Initialize State with source tracking
             # We start with fresh copies for each config
@@ -998,7 +1044,9 @@ class RadiomicsPipeline:
             current_step: dict[str, Any] | None = None
 
             try:
-                self._ensure_nonempty_roi(state, context="initialization")
+                if not roi_checked:
+                    self._ensure_nonempty_roi(state, context="initialization")
+                    roi_checked = True
 
                 # Continue from the longest prefix that an earlier configuration ran.
                 start = 0
