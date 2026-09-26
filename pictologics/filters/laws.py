@@ -3,7 +3,7 @@
 
 import math
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, Tuple, Union, cast, overload
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union, cast, overload
 
 import numpy as np
 from numpy import typing as npt
@@ -66,11 +66,54 @@ def _separable_convolve_3d(
     Returns:
         Convolved 3D array
     """
-    # Apply 1D convolutions sequentially along each axis
+    # Apply 1D convolutions sequentially along each axis. The first pass makes the
+    # output array; the others write into it (convolve1d copies each line before it
+    # writes that line, so the values are those of passes that make new arrays).
     result = convolve1d(image, g1, axis=0, mode=mode)
-    result = convolve1d(result, g2, axis=1, mode=mode)
-    result = convolve1d(result, g3, axis=2, mode=mode)
+    convolve1d(result, g2, axis=1, mode=mode, output=result)
+    convolve1d(result, g3, axis=2, mode=mode, output=result)
     return cast(npt.NDArray[np.floating[Any]], result.astype(image.dtype, copy=False))
+
+
+def _pool_rotations(
+    bases: Iterator[npt.NDArray[np.floating[Any]]],
+    steps: List[Tuple[Tuple[str, str, str], int]],
+    pooling: str,
+) -> Optional[npt.NDArray[np.floating[Any]]]:
+    """
+    Pool the signed base responses in step order, each base as soon as it is ready.
+
+    `bases` yields one response per key, in the order of the key's first step. For max
+    and min pooling, a base changes its sign in place when a step needs the other sign
+    (negation is exact); average pooling subtracts it instead. A base is freed after
+    the last step of its key.
+    """
+    last = {key: i for i, (key, _sign) in enumerate(steps)}
+    held: Dict[Tuple[str, str, str], Tuple[npt.NDArray[np.floating[Any]], int]] = {}
+    result: Optional[npt.NDArray[np.floating[Any]]] = None
+    for i, (key, sign) in enumerate(steps):
+        base, base_sign = held.pop(key) if key in held else (next(bases), 1)
+        if pooling == "average":
+            if result is None:  # the first step, the identity rotation, has sign 1
+                result = base.astype(np.float64)
+            elif sign > 0:
+                result += base
+            else:
+                result -= base
+        else:
+            if base_sign != sign:
+                np.negative(base, out=base)
+                base_sign = sign
+            if result is None:
+                result = base if last[key] == i else base.copy()
+            elif pooling == "max":
+                np.maximum(result, base, out=result)
+            else:  # "min"
+                np.minimum(result, base, out=result)
+        if last[key] > i:
+            held[key] = (base, base_sign)
+        del base
+    return result
 
 
 def _get_rotation_permutations_3d() -> List[Tuple[Tuple[int, int, int], Tuple[bool, bool, bool]]]:
@@ -275,13 +318,20 @@ def laws_filter(
         kernel_arrays = [g1, g2, g3]
         antisym = [bool(np.allclose(k, -k[::-1])) for k in kernel_arrays]
 
-        base_keys: List[Tuple[Tuple[str, str, str], Tuple[int, int, int]]] = []
-        seen: set[Tuple[str, str, str]] = set()
-        for perm, _flips in rotations:
+        # One step per rotation: the permuted kernels (the key) and the sign.
+        steps: List[Tuple[Tuple[str, str, str], int]] = []
+        base_perms: Dict[Tuple[str, str, str], Tuple[int, int, int]] = {}
+        for perm, flips in rotations:
             key = (kernel_names[perm[0]], kernel_names[perm[1]], kernel_names[perm[2]])
-            if key not in seen:
-                seen.add(key)
-                base_keys.append((key, perm))
+            sign = 1
+            for i, do_flip in enumerate(flips):
+                if do_flip and antisym[perm[i]]:
+                    sign = -sign
+            steps.append((key, sign))
+            base_perms.setdefault(key, perm)
+        if pooling != "average":
+            # A (key, sign) step that comes again leaves a max or a min unchanged.
+            steps = list(dict.fromkeys(steps))
 
         def _base(perm: Tuple[int, int, int]) -> npt.NDArray[np.floating[Any]]:
             return _separable_convolve_3d(
@@ -290,27 +340,9 @@ def laws_filter(
 
         if use_parallel:
             with ThreadPoolExecutor() as executor:
-                computed = list(executor.map(lambda kp: _base(kp[1]), base_keys))
+                result = _pool_rotations(executor.map(_base, base_perms.values()), steps, pooling)
         else:
-            computed = [_base(perm) for _key, perm in base_keys]
-        base_cache = {key: resp for (key, _perm), resp in zip(base_keys, computed, strict=True)}
-
-        for perm, flips in rotations:
-            key = (kernel_names[perm[0]], kernel_names[perm[1]], kernel_names[perm[2]])
-            sign = 1
-            for i, do_flip in enumerate(flips):
-                if do_flip and antisym[perm[i]]:
-                    sign = -sign
-            base = base_cache[key]
-            signed = base if sign > 0 else -base
-            if result is None:
-                result = signed.astype(np.float64) if pooling == "average" else signed.copy()
-            elif pooling == "max":
-                np.maximum(result, signed, out=result)
-            elif pooling == "average":
-                result += signed
-            else:  # "min"
-                np.minimum(result, signed, out=result)
+            result = _pool_rotations(map(_base, base_perms.values()), steps, pooling)
 
         # Finalize average pooling
         if pooling == "average" and result is not None:
@@ -332,10 +364,13 @@ def laws_filter(
 
         # Energy = mean of absolute values over δ neighborhood, i.e. uniform_filter
         # on |result|. Accumulate in float64: scipy's running moving-sum otherwise
-        # drifts in float32 over long axes. Cast the result back to float32.
-        abs_result = np.abs(result).astype(np.float64, copy=False)
+        # drifts in float32 over long axes. Cast the result back to float32. result is
+        # always a new array of this function, so the steps write into it.
+        np.abs(result, out=result)
+        result = result.astype(np.float64, copy=False)
         energy_support = 2 * energy_distance + 1
-        result = uniform_filter(abs_result, size=energy_support, mode=mode).astype(np.float32)
+        uniform_filter(result, size=energy_support, mode=mode, output=result)
+        result = result.astype(np.float32)
 
     if result is None:  # pragma: no cover
         raise RuntimeError("Result should not be None")

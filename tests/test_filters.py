@@ -1288,3 +1288,64 @@ def test_transfer_functions_built_in_slabs_match_one_volume() -> None:
                 built = riesz._riesz_transfer.__wrapped__(shape, order)
                 assert_array_equal(built, riesz_whole(shape, order))
                 assert not built.flags.writeable
+
+
+def test_laws_rotations_pool_as_the_rotation_loop() -> None:
+    """The rotation-invariant Laws filter pools each base response as soon as it is ready,
+    with in-place signs, passes and energy: the values of the loop over all 24 rotations
+    with signed copies, bit for bit (signed zeros too), for every pooling mode."""
+    from scipy.ndimage import convolve1d, uniform_filter
+
+    from pictologics.filters.laws import _get_rotation_permutations_3d, _parse_kernel_string
+
+    def rotation_loop(image: np.ndarray, kernels: str, pooling: str, energy: bool) -> np.ndarray:
+        g = [LAWS_KERNELS[name].astype(np.float32) for name in _parse_kernel_string(kernels)]
+        antisym = [bool(np.allclose(k, -k[::-1])) for k in g]
+        rotations = _get_rotation_permutations_3d()
+        result = None
+        for perm, flips in rotations:
+            base = image
+            for axis in range(3):
+                base = convolve1d(base, g[perm[axis]], axis=axis, mode="constant")
+            sign = 1
+            for i, do_flip in enumerate(flips):
+                if do_flip and antisym[perm[i]]:
+                    sign = -sign
+            signed = base if sign > 0 else -base
+            if result is None:
+                result = signed.astype(np.float64) if pooling == "average" else signed.copy()
+            elif pooling == "max":
+                np.maximum(result, signed, out=result)
+            elif pooling == "average":
+                result += signed
+            else:
+                np.minimum(result, signed, out=result)
+        if pooling == "average":
+            result /= len(rotations)
+        if energy:
+            abs_result = np.abs(result).astype(np.float64)
+            result = uniform_filter(abs_result, size=5, mode="constant").astype(np.float32)
+        return result
+
+    image = np.random.default_rng(5).normal(size=(11, 10, 9)).astype(np.float32)
+    image[:4] = -0.0
+    image[4:6] = 0.0
+    # Distinct kernels, a repeated kernel, three antisymmetric kernels (a key comes back
+    # after other keys) and three symmetric ones (one key, one sign).
+    for kernels in ("E5L5S5", "L5E5E5", "E5W5E5", "L3L3L3"):
+        for pooling in ("max", "min", "average"):
+            for energy in (False, True):
+                expected = rotation_loop(image, kernels, pooling, energy)
+                for use_parallel in (False, True):
+                    result = laws_filter(
+                        image,
+                        kernels,
+                        rotation_invariant=True,
+                        pooling=pooling,
+                        compute_energy=energy,
+                        energy_distance=2,
+                        use_parallel=use_parallel,
+                    )
+                    assert result.dtype == expected.dtype
+                    bits = np.uint32 if result.dtype == np.float32 else np.uint64
+                    assert_array_equal(result.view(bits), expected.view(bits))
