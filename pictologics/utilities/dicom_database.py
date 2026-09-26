@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 import pydicom
+from pydicom.uid import MediaStorageDirectoryStorage
 from tqdm import tqdm
 
 from .dicom_utils import header_worker_pool
@@ -1016,6 +1017,9 @@ def _extract_single_file_metadata(
         dcm = pydicom.dcmread(file_path, stop_before_pixels=True)
     except Exception as e:
         logger.debug("Cannot read DICOM file %s: %s", file_path, e)
+        return None
+    # A DICOMDIR only indexes the other files: it is no image of any patient
+    if getattr(dcm.file_meta, "MediaStorageSOPClassUID", None) == MediaStorageDirectoryStorage:
         return None
 
     metadata: dict[str, Any] = {

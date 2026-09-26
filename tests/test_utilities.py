@@ -1787,6 +1787,20 @@ class TestParallelProcessing:
         assert _get_num_workers(-1, many) == 1  # Minimum 1
         assert _get_num_workers(4, 200) == 1  # a small scan runs in this process
 
+    def test_dicomdir_is_not_a_patient(self, tmp_path: Path) -> None:
+        """A DICOMDIR only indexes the files: it adds no patient "UNKNOWN"."""
+        import pydicom
+        from pydicom.fileset import FileSet
+
+        create_synthetic_dicom(tmp_path / "ct.dcm", StudyID="1")
+        fs = FileSet()
+        fs.add(pydicom.dcmread(tmp_path / "ct.dcm"))
+        out = tmp_path / "media"
+        fs.write(out)
+        assert _extract_single_file_metadata(out / "DICOMDIR", extract_private_tags=False) is None
+        db = DicomDatabase.from_folders([str(out)], show_progress=False, num_workers=1)
+        assert [p.patient_id for p in db.patients] == ["SYNTH_PATIENT_001"]
+
     def test_echo_numbers_are_read(self, tmp_path: Path) -> None:
         """The echo number comes from the EchoNumbers tag (0018,0086)."""
         path = create_synthetic_dicom(tmp_path / "mr.dcm", EchoNumbers=2)
