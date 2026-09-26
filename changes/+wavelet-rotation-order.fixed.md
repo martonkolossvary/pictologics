@@ -1,0 +1,1 @@
+Rotation-invariant wavelet filters on large images (above 2 million voxels) now give the same result on every run. Their parallel path added the 24 rotations in the order the threads finished, so average pooling could change in the last bits from run to run and differ from the sequential path. The rotations are now pooled in their fixed order.

@@ -1,8 +1,9 @@
 # pictologics/filters/wavelets.py
 """Wavelet transform implementations (separable and non-separable)."""
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import lru_cache
+import os
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, List, Optional, Tuple, Union, cast
 
 import numpy as np
@@ -12,9 +13,11 @@ from numpy import typing as npt
 from scipy.ndimage import convolve1d
 
 from .base import (
+    _TRANSFER_CACHE_BYTES,
     BoundaryCondition,
     _apply_with_boundary_padding,
     _prepare_masked_image,
+    cache_by_bytes,
     ensure_float32,
     get_scipy_mode,
     resolve_boundary,
@@ -148,13 +151,18 @@ def wavelet_transform(
                 np.minimum(result, response, out=result)
 
         if use_parallel:
-            with ThreadPoolExecutor() as executor:
-                future_to_rot = {
-                    executor.submit(apply_rotated_wavelet, rot): rot for rot in rotations
-                }
-                # Pool responses as they complete to avoid holding all 24 at once.
-                for future in as_completed(future_to_rot):
-                    _pool(future.result())
+            # Pool the responses in rotation order, as the sequential path does, so the
+            # result does not depend on thread timing. At most `workers` rotations are
+            # in flight, and each response is dropped once pooled.
+            workers = min(len(rotations), os.cpu_count() or 1)
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                pending: deque[Future[npt.NDArray[np.floating[Any]]]] = deque()
+                for rotation in rotations:
+                    pending.append(executor.submit(apply_rotated_wavelet, rotation))
+                    if len(pending) == workers:
+                        _pool(pending.popleft().result())
+                while pending:
+                    _pool(pending.popleft().result())
         else:
             # Sequential processing for small images
             for rotation in rotations:
@@ -237,7 +245,7 @@ def _get_rotation_perms() -> List[Tuple[Tuple[int, int, int], Tuple[bool, bool, 
     return _get_rotation_permutations_3d()
 
 
-@lru_cache(maxsize=32)
+@cache_by_bytes(_TRANSFER_CACHE_BYTES)
 def _simoncelli_transfer(
     shape: Tuple[int, ...], level: int
 ) -> npt.NDArray[np.floating[Any]]:

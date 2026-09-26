@@ -784,18 +784,20 @@ class TestWaveletTransform:
         assert result.shape == small_3d_image.shape
 
     def test_parallel_execution(self, small_3d_image):
-        """Exercise the use_parallel=True branch across pooling modes."""
+        """The use_parallel=True branch pools in rotation order: the sequential result,
+        bit for bit, for every pooling mode."""
         for pooling in ["max", "average", "min"]:
-            result = wavelet_transform(
-                small_3d_image,
+            kwargs = dict(
                 wavelet="db2",
                 level=1,
                 decomposition="LHL",
                 rotation_invariant=True,
                 pooling=pooling,
-                use_parallel=True,
             )
+            result = wavelet_transform(small_3d_image, use_parallel=True, **kwargs)
             assert result.shape == small_3d_image.shape
+            sequential = wavelet_transform(small_3d_image, use_parallel=False, **kwargs)
+            assert_array_equal(result, sequential)
 
 
 class TestSimoncelliWavelet:
@@ -1136,3 +1138,28 @@ class TestModuleImports:
         assert hasattr(filters, "BoundaryCondition")
         assert hasattr(filters, "FilterResult")
         assert hasattr(filters, "LAWS_KERNELS")
+
+
+def test_cache_by_bytes_keeps_the_newest_results() -> None:
+    """The cache drops the least recently used results above its byte limit, and it
+    always keeps the newest one."""
+    from pictologics.filters.base import cache_by_bytes
+
+    calls: list[int] = []
+
+    @cache_by_bytes(250)
+    def make(n: int) -> np.ndarray:
+        calls.append(n)
+        return np.zeros(n, dtype=np.uint8)
+
+    make(100)
+    make(100)  # a hit
+    make(120)
+    make(100)  # a hit: now the most recently used
+    make(60)  # 280 bytes: drops 120
+    make(100)
+    make(120)
+    assert calls == [100, 120, 60, 120]
+    make(300)  # alone above the limit: it stays, the rest goes
+    make(300)
+    assert calls == [100, 120, 60, 120, 300]

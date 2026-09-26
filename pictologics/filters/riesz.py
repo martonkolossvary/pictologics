@@ -1,7 +1,6 @@
 # pictologics/filters/riesz.py
 """Riesz transform implementation (IBSI code: AYRS)."""
 
-from functools import lru_cache
 from math import factorial, sqrt
 from typing import Any, Optional, Tuple, Union, cast
 
@@ -10,9 +9,11 @@ import scipy.fft
 from numpy import typing as npt
 
 from .base import (
+    _TRANSFER_CACHE_BYTES,
     BoundaryCondition,
     _apply_with_boundary_padding,
     _prepare_masked_image,
+    cache_by_bytes,
     ensure_float32,
     resolve_boundary,
 )
@@ -29,7 +30,7 @@ from .base import (
 _RIESZ_BASE_PAD = 16
 
 
-@lru_cache(maxsize=64)
+@cache_by_bytes(_TRANSFER_CACHE_BYTES)
 def _riesz_transfer(
     shape: Tuple[int, ...], order: Tuple[int, ...]
 ) -> npt.NDArray[np.complexfloating[Any, Any]]:

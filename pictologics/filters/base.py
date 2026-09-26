@@ -1,9 +1,11 @@
 # pictologics/filters/base.py
 """Base classes and utilities for IBSI 2 filter implementations."""
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, Tuple, Union
+from functools import wraps
+from typing import Any, Callable, Dict, Tuple, TypeVar, Union
 
 import numpy as np
 from numpy import typing as npt
@@ -67,6 +69,45 @@ class FilterResult:
     def dtype(self) -> np.dtype[Any]:
         """Data type of the response map."""
         return self.response_map.dtype  # type: ignore[no-any-return]
+
+
+_Array = TypeVar("_Array", bound=npt.NDArray[Any])
+
+# Byte limit of each transfer-function cache: large enough for the few shapes of one
+# image (rotations, orders, levels), small enough that a cohort of images with
+# different shapes does not keep a full volume for each of them.
+_TRANSFER_CACHE_BYTES = 2 << 30
+
+
+def cache_by_bytes(
+    max_bytes: int,
+) -> Callable[[Callable[..., _Array]], Callable[..., _Array]]:
+    """Least-recently-used cache of array results, bounded by their total bytes.
+
+    The newest result always stays cached, even when it alone is larger than
+    `max_bytes`. Arguments must be hashable.
+    """
+
+    def decorate(func: Callable[..., _Array]) -> Callable[..., _Array]:
+        cache: OrderedDict[Any, _Array] = OrderedDict()
+        total = 0
+
+        @wraps(func)
+        def cached(*args: Any) -> _Array:
+            nonlocal total
+            if args in cache:
+                cache.move_to_end(args)
+                return cache[args]
+            value = func(*args)
+            cache[args] = value
+            total += value.nbytes
+            while total > max_bytes and len(cache) > 1:
+                total -= cache.popitem(last=False)[1].nbytes
+            return value
+
+        return cached
+
+    return decorate
 
 
 def ensure_float32(
