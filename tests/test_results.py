@@ -154,6 +154,20 @@ class TestFormatResults:
         assert format_results({7: series}) == {"7__a": 1.0, "7__b": 2.0}
         assert 7 not in results_module._WIDE_COLUMNS
 
+    def test_long_frames_of_many_cases_save_as_one_table(
+        self, sample_results: dict[str, pd.Series], tmp_path: Path
+    ) -> None:
+        """The cookbook's long-format batch: one DataFrame per case, saved together."""
+        rows = [
+            format_results(sample_results, fmt="long", meta={"subject_id": i}, output_type="pandas")
+            for i in range(3)
+        ]
+        path = tmp_path / "long.csv"
+        save_results(rows, path)
+        table = pd.read_csv(path)
+        assert list(table.columns) == ["subject_id", "config", "feature_key", "value"]
+        assert len(table) == 12
+
 
 class TestSaveResults:
     """Tests for the save_results function."""

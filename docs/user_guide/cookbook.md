@@ -363,15 +363,16 @@ You want to:
                     "image_root": str(image_root),
                     "seg_root": str(seg_root),
                 },
+                output_type="pandas",  # One DataFrame per case
             )
             rows.append(row)
 
             # Save per-case logs
             pipeline.save_log(str(log_dir / f"{subject_id}.json"))
 
-        # Final export
+        # Final export (save_results joins the list of DataFrames)
         save_results(rows, output_csv)
-        print(f"Wrote {len(rows)} rows to {output_csv}")
+        print(f"Wrote {len(rows)} cases to {output_csv}")
 
     if __name__ == "__main__":
         main()
@@ -518,6 +519,7 @@ You want to:
                     "image": str(img_path),
                     "masks": ";".join(str(p) for p in mask_paths),
                 },
+                output_type="pandas",  # One DataFrame per case
             )
             rows.append(row)
 
