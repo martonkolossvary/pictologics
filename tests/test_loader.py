@@ -436,6 +436,54 @@ class TestLoader(unittest.TestCase):
             self.assertEqual(img.array.dtype, np.int16)
             self.assertTrue(getattr(img.array.flags, order))
 
+    def test_slice_spacing_prefers_positions_over_a_wrong_tag(self) -> None:
+        # The tag wins when it agrees with the slice positions within 1%; else the
+        # positions win, with a warning. Without positions, the tag or 1.0.
+        from pictologics.loader import _slice_spacing
+
+        z = np.array([0.0, 0.0, 1.0])
+        positions = [np.array([0.0, 0.0, 0.625 * k]) for k in (3, 0, 2, 1)]  # any order
+        self.assertEqual(_slice_spacing(None, positions, z), 0.625)
+        self.assertEqual(_slice_spacing(0.63, positions, z), 0.63)  # within 1%
+        with self.assertWarns(UserWarning):
+            self.assertEqual(_slice_spacing(1.25, positions, z), 0.625)
+        same = [np.zeros(3), np.zeros(3)]  # one position twice: no step to measure
+        self.assertEqual(_slice_spacing(2.0, same, z), 2.0)
+        self.assertEqual(_slice_spacing(None, positions[:1], z), 1.0)
+        self.assertEqual(_slice_spacing(3.0, None, z), 3.0)
+
+    @patch("pictologics.loader.Path")
+    @patch("pictologics.loader.pydicom.dcmread")
+    @patch("pictologics.utilities.dicom_utils.split_dicom_phases")
+    def test_load_dicom_series_overlapping_slices(
+        self,
+        mock_split_phases: MagicMock,
+        mock_dcmread: MagicMock,
+        mock_Path_cls: MagicMock,
+    ) -> None:
+        # 1.25 mm slices every 0.625 mm: the spacing is the distance between the slices.
+        files = [MagicMock() for _ in range(4)]
+        for f in files:
+            f.is_file.return_value = True
+        mock_Path_cls.return_value.iterdir.return_value = files
+        mock_split_phases.return_value = [[{"file_path": f} for f in files]]
+        slices = []
+        for z in range(4):
+            s = MagicMock()
+            s.pixel_array = np.zeros((2, 3), dtype=np.int16)
+            s.ImagePositionPatient = [0.0, 0.0, 0.625 * z]
+            s.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+            s.PixelSpacing = [0.5, 0.5]
+            s.SliceThickness = 1.25
+            s.RescaleSlope = 1.0
+            s.RescaleIntercept = 0.0
+            del s.SpacingBetweenSlices
+            slices.append(s)
+        mock_dcmread.side_effect = slices + slices
+        with self.assertWarns(UserWarning):
+            img = _load_dicom_series("dicom_dir")
+        self.assertEqual(img.spacing, (0.5, 0.5, 0.625))
+
     @patch("pictologics.loader.pydicom.dcmread")
     def test_load_dicom_file_large_volume_row_order(self, mock_dcmread: MagicMock) -> None:
         # A large multiframe (Z, Y, X) volume comes back as (X, Y, Z) in row order.

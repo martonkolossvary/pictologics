@@ -193,6 +193,35 @@ def _per_frame_positions(ds: Any, n_frames: int) -> list[npt.NDArray[np.float64]
     return positions
 
 
+def _slice_spacing(
+    tag_spacing: float | None, positions: list[Any] | None, normal: npt.NDArray[Any]
+) -> float:
+    """Slice spacing from the slice positions, or from the tag when they agree.
+
+    `tag_spacing` is SpacingBetweenSlices, else SliceThickness. SliceThickness is the width
+    of a slice, not the step between slices, and the two differ for overlapping or gapped
+    reconstructions. So the median step between the positions along the slice normal
+    wins, with a warning, when the tag differs from it by more than 1%. Without two
+    distinct positions, the tag (or 1.0) is used.
+    """
+    if positions is not None and len(positions) > 1:
+        steps = np.diff(
+            np.sort([float(np.dot(np.asarray(p, dtype=float), normal)) for p in positions])
+        )
+        measured = float(np.median(steps))
+        if measured > 0:
+            if tag_spacing is None or abs(tag_spacing - measured) <= 0.01 * measured:
+                return measured if tag_spacing is None else tag_spacing
+            warnings.warn(
+                f"The slice spacing tag ({tag_spacing:g} mm) differs from the distance "
+                f"between the slice positions ({measured:g} mm); using {measured:g} mm.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return measured
+    return tag_spacing if tag_spacing is not None else 1.0
+
+
 def _rescale_params_from_functional_group(group: Any) -> tuple[float, float] | None:
     """Return RescaleSlope/Intercept from a DICOM functional group item if present."""
     item = _functional_group_item(group, "PixelValueTransformationSequence")
@@ -1495,19 +1524,16 @@ def _load_dicom_series(
         spacing_x = float(pixel_spacing[1])  # Column spacing (X)
         spacing_y = float(pixel_spacing[0])  # Row spacing (Y)
 
-        # Slice thickness / spacing
+        # Slice spacing: the tag, checked against the slice positions
+        tag_spacing = None
         if hasattr(ref, "SpacingBetweenSlices"):
-            spacing_z = float(ref.SpacingBetweenSlices)
+            tag_spacing = float(ref.SpacingBetweenSlices)
         elif hasattr(ref, "SliceThickness"):
-            spacing_z = float(ref.SliceThickness)
-        else:
-            # Estimate from position difference if multiple slices
-            if len(slices) > 1:
-                p1 = np.array(slices[0].ImagePositionPatient)
-                p2 = np.array(slices[1].ImagePositionPatient)
-                spacing_z = float(np.linalg.norm(p2 - p1))
-            else:
-                spacing_z = 1.0
+            tag_spacing = float(ref.SliceThickness)
+        positions = [getattr(s, "ImagePositionPatient", None) for s in slices]
+        spacing_z = _slice_spacing(
+            tag_spacing, None if any(p is None for p in positions) else positions, slice_normal
+        )
 
         spacing = (spacing_x, spacing_y, spacing_z)
     except (AttributeError, IndexError):
@@ -1639,23 +1665,19 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
         if ps is None:
             raise AttributeError("PixelSpacing")
 
-        # Prefer SpacingBetweenSlices over SliceThickness (consistent with _load_dicom_series)
-        spacing_z = None
+        # Slice spacing: SpacingBetweenSlices over SliceThickness (as in
+        # _load_dicom_series), checked against the frame positions
+        tag_spacing = None
         for tag_source in (dcm, measures):
             if tag_source is None:
                 continue
             if hasattr(tag_source, "SpacingBetweenSlices"):
-                spacing_z = float(tag_source.SpacingBetweenSlices)
+                tag_spacing = float(tag_source.SpacingBetweenSlices)
                 break
             if hasattr(tag_source, "SliceThickness"):
-                spacing_z = float(tag_source.SliceThickness)
+                tag_spacing = float(tag_source.SliceThickness)
                 break
-        if spacing_z is None:
-            # Estimate from consecutive (sorted) frame positions if available
-            if frame_positions is not None and len(frame_positions) > 1:
-                spacing_z = float(np.linalg.norm(frame_positions[1] - frame_positions[0]))
-            else:
-                spacing_z = 1.0
+        spacing_z = _slice_spacing(tag_spacing, frame_positions, slice_cosine)
 
         spacing = (
             float(ps[1]),  # Column spacing (X)
