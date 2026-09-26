@@ -768,5 +768,20 @@ class TestMultiPhaseTags(unittest.TestCase):
         self.assertEqual(len(MULTI_PHASE_TAGS), 5)
 
 
+class TestHeaderWorkerPool(unittest.TestCase):
+    def test_workers_skip_the_warmup(self) -> None:
+        # The workers see PICTOLOGICS_DISABLE_WARMUP=1; the previous value comes back.
+        from pictologics.utilities.dicom_utils import header_worker_pool
+
+        key = "PICTOLOGICS_DISABLE_WARMUP"
+        for previous in (None, "0"):
+            with patch.dict(os.environ, {} if previous is None else {key: previous}):
+                if previous is None:
+                    os.environ.pop(key, None)
+                with header_worker_pool(1) as pool:
+                    self.assertEqual(pool.submit(os.getenv, key).result(), "1")
+                self.assertEqual(os.environ.get(key), previous)
+
+
 if __name__ == "__main__":
     unittest.main()

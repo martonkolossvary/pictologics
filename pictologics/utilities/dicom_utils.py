@@ -8,6 +8,10 @@ the DicomDatabase and the image loader.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -311,3 +315,23 @@ def get_dicom_phases(
         )
 
     return result
+
+
+@contextmanager
+def header_worker_pool(num_workers: int) -> Iterator[ProcessPoolExecutor]:
+    """A process pool whose workers skip the JIT warm-up.
+
+    Each spawned worker imports pictologics again, which would compile or load every
+    numba kernel, although the workers only read DICOM headers. The pool starts its
+    workers lazily, so the setting stays in place until the pool closes.
+    """
+    previous = os.environ.get("PICTOLOGICS_DISABLE_WARMUP")
+    os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
+    try:
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            yield executor
+    finally:
+        if previous is None:
+            del os.environ["PICTOLOGICS_DISABLE_WARMUP"]
+        else:
+            os.environ["PICTOLOGICS_DISABLE_WARMUP"] = previous

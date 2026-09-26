@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -23,6 +22,8 @@ import numpy as np
 import pandas as pd
 import pydicom
 from tqdm import tqdm
+
+from .dicom_utils import header_worker_pool
 
 logger = logging.getLogger(__name__)
 
@@ -891,7 +892,7 @@ def _scan_dicom_files(
         chunksize = max(1, len(file_candidates) // (num_workers * 4))
         dicom_files: list[Path] = []
 
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        with header_worker_pool(num_workers) as executor:
             # Submit all tasks and collect results with progress bar
             results = list(
                 tqdm(
@@ -956,7 +957,7 @@ def _extract_all_metadata(
         # Create argument tuples for parallel execution
         args_list = [(fp, extract_private_tags) for fp in dicom_files]
 
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        with header_worker_pool(num_workers) as executor:
             results = list(
                 tqdm(
                     executor.map(_extract_metadata_wrapper, args_list, chunksize=chunksize),

@@ -290,7 +290,6 @@ def _warmup_filters() -> None:
     """Warmup filter, preprocessing and loader operations."""
     # Import here to avoid circular dependencies
     from scipy.ndimage import affine_transform
-    from scipy.signal import fftconvolve
 
     from . import loader, preprocessing
 
@@ -342,13 +341,3 @@ def _warmup_filters() -> None:
     matrix = np.array([1.1, 1.1, 1.1])  # Slight scaling
     offset = np.array([0.0, 0.0, 0.0])
     _ = affine_transform(dummy_img, matrix=matrix, offset=offset, output_shape=(6, 6, 6), order=1)
-
-    # 3. Warmup FFT convolution (used in Gabor, Laws, etc.)
-    dummy_2d = np.ones((8, 8), dtype=np.float32)
-    kernel_2d = np.ones((3, 3), dtype=np.complex64)
-    _ = fftconvolve(dummy_2d, kernel_2d, mode="same")
-
-    # 4. Warmup 3D convolution
-    dummy_3d = np.ones((8, 8, 8), dtype=np.float32)
-    kernel_3d = np.ones((3, 3, 3), dtype=np.float32)
-    _ = fftconvolve(dummy_3d, kernel_3d, mode="same")

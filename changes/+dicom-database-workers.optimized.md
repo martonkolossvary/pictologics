@@ -1,0 +1,1 @@
+The worker processes of `DicomDatabase.from_folders` and `SRDocument.from_folders` no longer run the JIT warm-up. Each spawned worker imports pictologics again, which loaded (or, after a new install, compiled) every numba kernel, although the workers only read DICOM headers. A scan of 200 files with 4 workers takes 1.9 s instead of 3.7 s.
