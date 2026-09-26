@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import pydicom
+from pydicom.multival import MultiValue
 
 
 @dataclass
@@ -47,7 +48,7 @@ MULTI_PHASE_TAGS = [
     "TemporalPositionIdentifier",
     "TriggerTime",
     "AcquisitionNumber",
-    "EchoNumber",
+    "EchoNumbers",
 ]
 
 
@@ -100,6 +101,8 @@ def split_dicom_phases(
         values: dict[Any, list[dict[str, Any]]] = {}
         for meta in file_metadata:
             val = meta.get(tag)
+            if isinstance(val, (list, MultiValue)):  # a multi-valued tag, e.g. EchoNumbers 1\2
+                val = tuple(val)
             if val is not None:
                 values.setdefault(val, []).append(meta)
 
@@ -292,7 +295,7 @@ def get_dicom_phases(
             label = f"Phase {split_value}%" if split_value is not None else f"Phase {i}"
         elif split_tag == "TemporalPositionIdentifier":
             label = f"Temporal {split_value}" if split_value is not None else f"Time {i}"
-        elif split_tag == "EchoNumber":
+        elif split_tag == "EchoNumbers":
             label = f"Echo {split_value}" if split_value is not None else f"Echo {i}"
         elif split_tag == "AcquisitionNumber":
             label = f"Acquisition {split_value}" if split_value is not None else f"Acq {i}"

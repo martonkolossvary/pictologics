@@ -255,7 +255,7 @@ Pictologics automatically detects phases using these DICOM tags (in order of pri
 2. **TemporalPositionIdentifier** - Temporal position index
 3. **TriggerTime** - ECG trigger time
 4. **AcquisitionNumber** - Acquisition sequence number
-5. **EchoNumber** - Multi-echo MRI
+5. **EchoNumbers** - Multi-echo MRI
 
 ## 4D NIfTI Files
 

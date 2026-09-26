@@ -1787,6 +1787,12 @@ class TestParallelProcessing:
         assert _get_num_workers(-1, many) == 1  # Minimum 1
         assert _get_num_workers(4, 200) == 1  # a small scan runs in this process
 
+    def test_echo_numbers_are_read(self, tmp_path: Path) -> None:
+        """The echo number comes from the EchoNumbers tag (0018,0086)."""
+        path = create_synthetic_dicom(tmp_path / "mr.dcm", EchoNumbers=2)
+        meta = _extract_single_file_metadata(path, extract_private_tags=False)
+        assert meta is not None and meta["EchoNumbers"] == 2
+
     def test_sort_hierarchy(self) -> None:
         """Test _sort_hierarchy sorts all levels correctly."""
         # Create unsorted data

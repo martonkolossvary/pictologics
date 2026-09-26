@@ -1047,7 +1047,7 @@ def _extract_single_file_metadata(
         "TemporalPositionIdentifier": _get_tag_value(dcm, "TemporalPositionIdentifier"),
         "TriggerTime": _get_tag_value(dcm, "TriggerTime"),
         "AcquisitionNumber": _get_tag_value(dcm, "AcquisitionNumber"),
-        "EchoNumber": _get_tag_value(dcm, "EchoNumber"),
+        "EchoNumbers": _get_tag_value(dcm, "EchoNumbers"),
     }
 
     # Extract spatial geometry for completeness validation
@@ -1266,7 +1266,7 @@ def _build_hierarchy(
                                 "TemporalPositionIdentifier",
                                 "TriggerTime",
                                 "AcquisitionNumber",
-                                "EchoNumber",
+                                "EchoNumbers",
                             }
                             if inst_meta.get(k) is not None
                         },

@@ -57,13 +57,20 @@ class TestSplitDicomPhases(unittest.TestCase):
         self.assertEqual(len(result), 2)
 
     def test_split_by_echo_number(self) -> None:
-        """Split by EchoNumber tag."""
+        """Split by the EchoNumbers tag, also a multi-valued one (VM 1-n)."""
         meta = [
-            {"file_path": Path("1.dcm"), "EchoNumber": 1},
-            {"file_path": Path("2.dcm"), "EchoNumber": 2},
+            {"file_path": Path("1.dcm"), "EchoNumbers": 1},
+            {"file_path": Path("2.dcm"), "EchoNumbers": 2},
         ]
         result = split_dicom_phases(meta)
         self.assertEqual(len(result), 2)
+        from pydicom.multival import MultiValue
+
+        meta = [
+            {"file_path": Path("1.dcm"), "EchoNumbers": MultiValue(int, [1, 2])},
+            {"file_path": Path("2.dcm"), "EchoNumbers": [3]},
+        ]
+        self.assertEqual([len(p) for p in split_dicom_phases(meta)], [1, 1])
 
     def test_split_by_acquisition_number(self) -> None:
         """Split by AcquisitionNumber tag."""
@@ -418,19 +425,19 @@ class TestGetDicomPhases(unittest.TestCase):
 
         dcm1 = MagicMock()
         dcm1.InstanceNumber = 1
-        dcm1.EchoNumber = 1
+        dcm1.EchoNumbers = 1
         del dcm1.ImagePositionPatient
 
         dcm2 = MagicMock()
         dcm2.InstanceNumber = 2
-        dcm2.EchoNumber = 2
+        dcm2.EchoNumbers = 2
         del dcm2.ImagePositionPatient
 
         mock_dcmread.side_effect = [dcm1, dcm2]
 
         mock_split.return_value = [
-            [{"file_path": file1, "EchoNumber": 1}],
-            [{"file_path": file2, "EchoNumber": 2}],
+            [{"file_path": file1, "EchoNumbers": 1}],
+            [{"file_path": file2, "EchoNumbers": 2}],
         ]
 
         result = get_dicom_phases("test_dir")
@@ -438,7 +445,7 @@ class TestGetDicomPhases(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0].label, "Echo 1")
         self.assertEqual(result[1].label, "Echo 2")
-        self.assertEqual(result[0].split_tag, "EchoNumber")
+        self.assertEqual(result[0].split_tag, "EchoNumbers")
 
     @patch("pictologics.utilities.dicom_utils.Path")
     @patch("pictologics.utilities.dicom_utils.pydicom.misc.is_dicom")
@@ -764,7 +771,7 @@ class TestMultiPhaseTags(unittest.TestCase):
         self.assertIn("TemporalPositionIdentifier", MULTI_PHASE_TAGS)
         self.assertIn("TriggerTime", MULTI_PHASE_TAGS)
         self.assertIn("AcquisitionNumber", MULTI_PHASE_TAGS)
-        self.assertIn("EchoNumber", MULTI_PHASE_TAGS)
+        self.assertIn("EchoNumbers", MULTI_PHASE_TAGS)
         self.assertEqual(len(MULTI_PHASE_TAGS), 5)
 
 
@@ -781,6 +788,29 @@ class TestHeaderWorkerPool(unittest.TestCase):
                 with header_worker_pool(1) as pool:
                     self.assertEqual(pool.submit(os.getenv, key).result(), "1")
                 self.assertEqual(os.environ.get(key), previous)
+
+
+def test_echo_numbers_split_real_files(tmp_path: Path) -> None:
+    """Two echoes of real files split by their EchoNumbers tag, even at distinct slice
+    positions, where the duplicate-position fallback finds nothing."""
+    import pydicom
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.uid import MRImageStorage, generate_uid
+
+    for k, echo in enumerate((1, 2, 1, 2)):
+        meta = FileMetaDataset()
+        meta.MediaStorageSOPClassUID = MRImageStorage
+        meta.MediaStorageSOPInstanceUID = generate_uid()
+        meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+        ds = pydicom.Dataset()
+        ds.file_meta = meta
+        ds.SOPClassUID, ds.SOPInstanceUID = MRImageStorage, meta.MediaStorageSOPInstanceUID
+        ds.InstanceNumber, ds.EchoNumbers = k + 1, echo
+        ds.ImagePositionPatient = [0.0, 0.0, float(k)]
+        ds.save_as(tmp_path / f"{k}.dcm", enforce_file_format=True)
+    phases = get_dicom_phases(str(tmp_path))
+    assert [p.label for p in phases] == ["Echo 1", "Echo 2"]
+    assert [p.num_slices for p in phases] == [2, 2]
 
 
 if __name__ == "__main__":
