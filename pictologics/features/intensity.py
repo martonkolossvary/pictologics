@@ -1088,6 +1088,9 @@ def calculate_spatial_intensity_features(
     return features
 
 
+# Radius of the 1 cm3 sphere of the local intensity peaks (IBSI 4.5).
+_LOCAL_PEAK_RADIUS_MM = 6.2035
+
 # Measured crossover: below 2^15 voxels, the box search of the local intensity crop costs
 # more than the crop saves.
 _LOCAL_CROP_MIN_SIZE = 1 << 15
@@ -1145,8 +1148,7 @@ def calculate_local_intensity_features(
     )
 
     # Radius for 1 cm^3 sphere
-    radius_mm = 6.2035
-    offsets = _sphere_offsets_for_radius(spacing_tuple, radius_mm)
+    offsets = _sphere_offsets_for_radius(spacing_tuple, _LOCAL_PEAK_RADIUS_MM)
 
     # Crop to the ROI box plus the reach of the sphere. Every sphere neighbour of an ROI
     # voxel that is in the image is also in the crop, so the local means and the peaks

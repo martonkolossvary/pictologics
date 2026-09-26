@@ -892,9 +892,9 @@ def _get_intensity_morphology_features(
 
     # Crop to the intensity mask's nonzero bbox before scanning: this avoids a
     # full read of the (large, float64) image. Reuse the morph bbox when the
-    # masks are the same object; otherwise scan the mask for its own bbox.
+    # masks share one array; otherwise scan the mask for its own bbox.
     i_bbox: Optional[tuple[slice, slice, slice]]
-    if intensity_mask is mask and mask_bbox is not None:
+    if intensity_mask.array is mask.array and mask_bbox is not None:
         i_bbox = mask_bbox
     else:
         i_bbox = compute_nonzero_bbox(intensity_mask.array)

@@ -353,13 +353,14 @@ def test_step_resegment(
     )
     mock_reseg.return_value = mock_mask
 
+    # The two masks start as one array, so one call updates both.
     pipeline.run(mock_image, mock_mask, config_names=["reseg"])
-    assert mock_reseg.call_count == 2
+    assert mock_reseg.call_count == 1
 
     # Test generated mask case: default resegmentation updates both masks too.
     mock_reseg.reset_mock()
     pipeline.run(mock_image, mask=None, config_names=["reseg"])
-    assert mock_reseg.call_count == 2
+    assert mock_reseg.call_count == 1
 
 
 @pytest.mark.parametrize("deduplicate", [False, True])
@@ -414,9 +415,9 @@ def test_step_filter_outliers(
     pipeline.add_config("filt", [{"step": "filter_outliers", "params": {"sigma": 2.0}}])
     mock_filt.return_value = mock_mask
 
-    # 1. Normal case
+    # 1. Normal case: one call, as the two masks start as one array
     pipeline.run(mock_image, mock_mask, config_names=["filt"])
-    assert mock_filt.call_count == 2
+    assert mock_filt.call_count == 1
     mock_filt.assert_called_with(ANY, ANY, 2.0)
 
     # 2. Generated mask case -> covers 'if state.mask_was_generated'
@@ -424,8 +425,8 @@ def test_step_filter_outliers(
     # Need load_image to return something if no mask provided?
     # Or just use mock_image directly if we pass it.
     pipeline.run(mock_image, mask=None, config_names=["filt"])
-    # Should be called twice: once for intensity, once for morph
-    assert mock_filt.call_count == 2
+    # One call: the generated masks are one array too
+    assert mock_filt.call_count == 1
 
 
 def test_filter_outliers_updates_morphology_mask_by_default() -> None:
@@ -526,8 +527,8 @@ def test_step_keep_largest(
 
     pipeline.run(mock_image, mock_mask, config_names=["klc"])
 
-    # Called for morph_mask and intensity_mask
-    assert mock_klc.call_count == 2
+    # One call for morph_mask and intensity_mask, which start as one array
+    assert mock_klc.call_count == 1
 
 
 def test_step_binarize_mask(
@@ -4097,3 +4098,144 @@ def test_ivh_discretisation_bins_only_the_roi_values() -> None:
         full = discretise_image(img, method=method, roi_mask=mask, **disc_params)
         expected = calculate_ivh_features(apply_mask(full, mask), **kwargs)
         assert pipeline._compute_ivh_features(state, params, {}) == expected
+
+
+@pytest.mark.parametrize(
+    ("step", "params"),
+    [
+        ("resegment", {"range_min": 0.2, "range_max": 0.8}),
+        ("filter_outliers", {"sigma": 1.0}),
+        ("keep_largest_component", {}),
+    ],
+)
+def test_mask_steps_keep_one_mask_array_in_sync(step: str, params: dict[str, Any]) -> None:
+    # Masks that are one array are processed once and stay one array; separate masks get
+    # their own, equal results.
+    rng = np.random.default_rng(41)
+    img = Image(rng.random((8, 8, 8)), (1, 1, 1), (0, 0, 0))
+    mask_arr = (rng.random((8, 8, 8)) < 0.8).astype(np.uint8)
+    mask = Image(mask_arr, (1, 1, 1), (0, 0, 0))
+    pipeline = RadiomicsPipeline()
+
+    state = _basic_state(img, mask)
+    pipeline._execute_preprocessing_step(state, step, params)
+    assert state.intensity_mask is state.morph_mask
+
+    separate = _basic_state(img, mask)
+    separate.intensity_mask = Image(mask_arr.copy(), (1, 1, 1), (0, 0, 0))
+    pipeline._execute_preprocessing_step(separate, step, params)
+    assert separate.intensity_mask is not separate.morph_mask
+    np.testing.assert_array_equal(separate.morph_mask.array, state.morph_mask.array)
+    np.testing.assert_array_equal(separate.intensity_mask.array, state.morph_mask.array)
+
+
+def test_configurations_share_identical_preprocessing() -> None:
+    # Two configurations with the same resample step run it once and give the results
+    # (and step logs) that each gives alone. A binarize range and a label list with the
+    # same numbers, or another source mode, share nothing.
+    import copy
+
+    from pictologics.pipeline import _prefix_keys
+    from pictologics.preprocessing import resample_image
+
+    rng = np.random.default_rng(51)
+    img = Image(rng.normal(0.0, 50.0, (12, 11, 10)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    labels = np.zeros((12, 11, 10))
+    labels[2:10, 2:9, 2:8] = 1.0
+    labels[4:7, 4:7, 4:7] = 2.0
+    mask = Image(labels, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    resample = {"step": "resample", "params": {"new_spacing": (1.5, 1.5, 1.5)}}
+    extract = {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}}
+    configs = {
+        "fbn8": [
+            resample,
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+            extract,
+        ],
+        "fbn16": [
+            resample,
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
+            extract,
+        ],
+        "range": [{"step": "binarize_mask", "params": {"mask_values": (1, 3)}}, extract],
+        "labels": [{"step": "binarize_mask", "params": {"mask_values": [1, 3]}}, extract],
+    }
+
+    def run(names: list[str], source_mode: str = "full_image") -> tuple[dict[str, Any], int]:
+        # No deduplication: only the shared preprocessing can make two results equal.
+        pipeline = RadiomicsPipeline(deduplicate=False)
+        for name in names:
+            pipeline.add_config(name, copy.deepcopy(configs[name]), source_mode=source_mode)
+        with patch("pictologics.pipeline.resample_image", wraps=resample_image) as spy:
+            out = pipeline.run(img, mask, config_names=names)
+        logs = {entry["config_name"]: entry["steps_executed"] for entry in pipeline._log}
+        return {name: (out[name], logs[name]) for name in names}, spy.call_count
+
+    together, calls = run(["fbn8", "fbn16"])
+    assert calls == 2  # image and mask, once for both configurations
+    for name in ("fbn8", "fbn16"):
+        alone, _ = run([name])
+        assert together[name][0].equals(alone[name][0])
+        assert together[name][1] == alone[name][1]
+    _, calls = run(["fbn8", "fbn16"], source_mode="roi_only")
+    assert calls == 2
+    both, _ = run(["range", "labels"])
+    assert not both["range"][0].equals(both["labels"][0])  # label 2 only in the range
+
+    # An array parameter counts in full: numpy's repr hides the middle of a large array.
+    values = np.zeros(2000)
+    changed = values.copy()
+    changed[1000] = 1.0
+    keys = [
+        _prefix_keys([{"step": "binarize_mask", "params": {"mask_values": v}}], {})
+        for v in (values, changed)
+    ]
+    assert keys[0] != keys[1]
+
+
+def test_filters_of_the_roi_region_keep_every_feature() -> None:
+    # A filter that no later step needs outside the ROI filters only the ROI region plus
+    # its reach (LoG, wavelets, the Laws response); every feature stays bit for bit. The
+    # mean filter and the Laws energy keep the full grid.
+    from pictologics import pipeline as pipeline_module
+    from pictologics.filters import laplacian_of_gaussian
+
+    rng = np.random.default_rng(81)
+    img = Image(rng.normal(0.0, 50.0, (40, 36, 28)), (1.0, 1.0, 1.5), (0.0, 0.0, 0.0))
+    labels = np.zeros(img.array.shape)
+    labels[16:24, 14:22, 10:16] = 1.0
+    mask = Image(labels, img.spacing, img.origin)
+    filters = {
+        "log": {"type": "log", "sigma_mm": 1.5},
+        "wavelet": {"type": "wavelet", "wavelet": "db2", "level": 2, "decomposition": "LHL"},
+        "wavelet_ri": {
+            "type": "wavelet",
+            "wavelet": "haar",
+            "decomposition": "HHH",
+            "rotation_invariant": True,
+        },
+        "laws": {"type": "laws", "kernel": "L5E5E5"},
+        "laws_energy": {"type": "laws", "kernel": "L5E5E5", "compute_energy": True},
+        "mean": {"type": "mean", "support": 5},
+    }
+    tail = [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {
+            "step": "extract_features",
+            "params": {"families": ["intensity", "local_intensity", "glcm"]},
+        },
+    ]
+
+    def run() -> dict[str, Any]:
+        pipeline = RadiomicsPipeline()
+        for name, params in filters.items():
+            pipeline.add_config(name, [{"step": "filter", "params": dict(params)}, *tail])
+        return pipeline.run(img, mask, config_names=list(filters))
+
+    with patch("pictologics.pipeline.laplacian_of_gaussian", wraps=laplacian_of_gaussian) as spy:
+        limited = run()
+    assert spy.call_args[0][0].size < img.array.size  # the LoG read only the region
+    with patch.object(pipeline_module, "_needs_full_grid", return_value=True):
+        full_grid = run()
+    for name in filters:
+        assert limited[name].equals(full_grid[name])

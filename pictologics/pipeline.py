@@ -22,9 +22,11 @@ import copy
 import datetime
 import json
 import logging
+import math
 import re
 import warnings
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -32,6 +34,7 @@ from typing import Any, Optional, cast
 
 import numpy as np
 import pandas as pd
+import pywt
 import yaml
 from numpy import typing as npt
 
@@ -44,6 +47,7 @@ from .deduplication import (
 from .features import FEATURE_NAMES
 from .features._utils import compute_nonzero_bbox, merge_bboxes
 from .features.intensity import (
+    _LOCAL_PEAK_RADIUS_MM,
     calculate_intensity_features,
     calculate_intensity_histogram_features,
     calculate_ivh_features,
@@ -208,6 +212,64 @@ def _get_apply_to(params: dict[str, Any], step_name: str) -> str:
     return cast(str, apply_to)
 
 
+def _canonical(value: Any) -> Any:
+    """A hashable form of step parameters that keeps tuples (a binarize range) and
+    lists (labels) apart."""
+    if isinstance(value, dict):
+        return tuple(sorted((key, _canonical(item)) for key, item in value.items()))
+    if isinstance(value, np.ndarray):
+        return ("ndarray", _canonical(value.tolist()))
+    if isinstance(value, (list, tuple)):
+        return (type(value).__name__, tuple(_canonical(item) for item in value))
+    return value
+
+
+def _prefix_keys(steps: list[dict[str, Any]], metadata: dict[str, Any]) -> list[str]:
+    """One key per prefix of the leading preprocessing steps (those before the first
+    extract_features step). Equal keys give equal states after the prefix: the start
+    state depends only on the source mode and the sentinel value."""
+    parts = [repr((metadata.get("source_mode", "full_image"), metadata.get("sentinel_value")))]
+    keys = []
+    for index, step in enumerate(steps):
+        if step["step"] == "extract_features":
+            break
+        part: tuple[Any, ...] = (step["step"], _canonical(step.get("params", {})))
+        if step["step"] == "filter":  # whether it may filter the ROI region only
+            part += (_needs_full_grid(steps[index + 1 :]),)
+        parts.append(repr(part))
+        keys.append("|".join(parts))
+    return keys
+
+
+def _needs_full_grid(later_steps: list[dict[str, Any]]) -> bool:
+    """Whether a later step reads a filtered image outside the ROI region (another
+    filter or a resample); otherwise a filter computes only the region around the ROI."""
+    return any(step["step"] in ("filter", "resample") for step in later_steps)
+
+
+def _filter_reach(
+    filter_type: str, params: dict[str, Any], spacing: tuple[float, float, float]
+) -> Optional[tuple[int, int, int]]:
+    """Voxels that a filter output reads on each side, per axis, for the filters whose
+    values do not depend on where the image ends: separable convolutions (LoG, wavelets,
+    the Laws response). None for the others: FFT filters, and the running sums of the
+    mean filter and the Laws energy, whose rounding depends on where a line starts."""
+    if filter_type == "log":
+        spacing_mm = np.broadcast_to(np.asarray(params["spacing_mm"], dtype=float), (3,))
+        truncate = params.get("truncate", 4.0)
+        r = [int(truncate * params["sigma_mm"] / s + 0.5) + 1 for s in spacing_mm]
+        return (r[0], r[1], r[2])
+    if filter_type == "wavelet":
+        n = pywt.Wavelet(params.get("wavelet", "db2")).dec_len
+        reach = sum((n - 1) * 2 ** (j - 1) + 1 for j in range(1, params.get("level", 1) + 1))
+        return (reach, reach, reach)
+    if filter_type == "laws" and not params.get("compute_energy", False):
+        kernels = params.get("kernel", "L5E5E5")
+        half = max(int(kernels[i + 1]) for i in range(0, len(kernels), 2)) // 2 + 1
+        return (half, half, half)
+    return None
+
+
 def _intersect_mask(mask: Image, valid_mask: npt.NDArray[np.bool_]) -> Image:
     """Return mask intersected with a boolean validity mask."""
     return Image(
@@ -324,6 +386,9 @@ class PipelineState:
     source_mask: Optional[Image] = None
     sentinel_detected: bool = False
     sentinel_value: Optional[float] = None
+    # No later step reads the image outside the ROI region, so a filter may compute
+    # only that region (the rest is 0).
+    limit_to_roi: bool = False
 
 
 class EmptyROIMaskError(ValueError):
@@ -739,10 +804,20 @@ class RadiomicsPipeline:
             self._last_deduplication_plan = dedup_plan
             self._configs_modified_since_plan = False
 
+        # Configurations share identical preprocessing: the state after a step prefix
+        # that a later configuration repeats is kept until its last user.
+        prefix_keys = {
+            name: _prefix_keys(self._configs[name], self._config_metadata.get(name, {}))
+            for name in target_configs
+        }
+        users = Counter(key for name in target_configs for key in prefix_keys[name])
+        shared: dict[str, tuple[PipelineState, list[dict[str, Any]]]] = {}
+
         # Run each configuration
         for config_name in target_configs:
             steps = self._configs[config_name]
             metadata = self._config_metadata.get(config_name, {})
+            keys = prefix_keys[config_name]
 
             # Determine source mode for this config
             source_mode_str = metadata.get("source_mode", "full_image")
@@ -904,10 +979,22 @@ class RadiomicsPipeline:
             try:
                 self._ensure_nonempty_roi(state, context="initialization")
 
-                for step_def in steps:
+                # Continue from the longest prefix that an earlier configuration ran.
+                start = 0
+                for k in range(len(keys), 0, -1):
+                    if keys[k - 1] in shared:
+                        shared_state, shared_log = shared[keys[k - 1]]
+                        state = replace(shared_state)
+                        config_log["steps_executed"].extend(copy.deepcopy(shared_log))
+                        start = k
+                        break
+
+                for index, step_def in enumerate(steps[start:], start):
                     current_step = step_def
                     step_name = step_def["step"]
                     params = step_def.get("params", {})
+                    if step_name == "filter":
+                        state.limit_to_roi = not _needs_full_grid(steps[index + 1 :])
 
                     # Execute Step
                     if step_name == "extract_features":
@@ -934,6 +1021,8 @@ class RadiomicsPipeline:
                         step_log_entry["params_requested"] = state.filter_params_requested
                         step_log_entry["params_effective"] = state.filter_params_effective
                     config_log["steps_executed"].append(step_log_entry)
+                    if index < len(keys) and users[keys[index]] > 1 and keys[index] not in shared:
+                        shared[keys[index]] = (replace(state), list(config_log["steps_executed"]))
                 config_log["status"] = "completed"
                 config_log["result_feature_count"] = len(config_features)
 
@@ -969,6 +1058,11 @@ class RadiomicsPipeline:
                 for name in nan_names:
                     config_features.setdefault(name, float("nan"))
                 config_log["result_feature_count"] = len(config_features)
+            finally:
+                for key in keys:
+                    users[key] -= 1
+                    if users[key] == 0:
+                        shared.pop(key, None)
 
             self._log.append(config_log)
 
@@ -1091,12 +1185,15 @@ class RadiomicsPipeline:
             range_max = params.get("range_max")
             apply_to = _get_apply_to(params, "resegment")
 
+            # Masks that are one array are resegmented once and stay one array.
+            masks_in_sync = state.morph_mask.array is state.intensity_mask.array
             if apply_to in ("intensity", "both"):
                 state.intensity_mask = resegment_mask(
                     state.image, state.intensity_mask, range_min, range_max
                 )
-
-            if apply_to in ("morph", "both"):
+            if apply_to == "both" and masks_in_sync:
+                state.morph_mask = state.intensity_mask
+            elif apply_to in ("morph", "both"):
                 state.morph_mask = resegment_mask(
                     state.image, state.morph_mask, range_min, range_max
                 )
@@ -1107,9 +1204,13 @@ class RadiomicsPipeline:
             sigma = params.get("sigma", 3.0)
             apply_to = _get_apply_to(params, "filter_outliers")
 
+            # Masks that are one array are filtered once and stay one array.
+            masks_in_sync = state.morph_mask.array is state.intensity_mask.array
             if apply_to in ("intensity", "both"):
                 state.intensity_mask = filter_outliers(state.image, state.intensity_mask, sigma)
-            if apply_to in ("morph", "both"):
+            if apply_to == "both" and masks_in_sync:
+                state.morph_mask = state.intensity_mask
+            elif apply_to in ("morph", "both"):
                 state.morph_mask = filter_outliers(state.image, state.morph_mask, sigma)
 
             self._ensure_nonempty_roi(state, context="filter_outliers")
@@ -1121,9 +1222,13 @@ class RadiomicsPipeline:
         elif step_name == "keep_largest_component":
             # apply_to: "morph", "intensity", or "both" (default)
             apply_to = _get_apply_to(params, "keep_largest_component")
+            # Masks that are one array are labelled once and stay one array.
+            masks_in_sync = state.morph_mask.array is state.intensity_mask.array
             if apply_to in ("morph", "both"):
                 state.morph_mask = keep_largest_component(state.morph_mask)
-            if apply_to in ("intensity", "both"):
+            if apply_to == "both" and masks_in_sync:
+                state.intensity_mask = state.morph_mask
+            elif apply_to in ("intensity", "both"):
                 state.intensity_mask = keep_largest_component(state.intensity_mask)
 
             self._ensure_nonempty_roi(state, context="keep_largest_component")
@@ -1246,6 +1351,32 @@ class RadiomicsPipeline:
                 filter_params["source_mask"] = state.source_mask.array > 0
 
             img_arr = state.image.array
+            if filter_type == "log":
+                filter_params.setdefault("spacing_mm", state.image.spacing)
+
+            # When no later step reads the image outside the ROI, a filter whose values
+            # do not depend on where the image ends filters only the ROI region (grown by
+            # the local intensity sphere) plus its reach; the rest of the image is 0.
+            region = None
+            reach = _filter_reach(filter_type, {**params, **filter_params}, state.image.spacing)
+            if state.limit_to_roi and reach is not None and "source_mask" not in filter_params:
+                bbox = merge_bboxes(
+                    compute_nonzero_bbox(state.morph_mask.array),
+                    compute_nonzero_bbox(state.intensity_mask.array),
+                )
+                if bbox is not None:
+                    shape = img_arr.shape
+                    grow = [math.ceil(_LOCAL_PEAK_RADIUS_MM / s) + 1 for s in state.image.spacing]
+                    rs = [
+                        slice(max(b.start - g, 0), min(b.stop + g, n))
+                        for b, g, n in zip(bbox, grow, shape, strict=True)
+                    ]
+                    region = (rs[0], rs[1], rs[2])
+                    crop = tuple(
+                        slice(max(r.start - h, 0), min(r.stop + h, n))
+                        for r, h, n in zip(rs, reach, shape, strict=True)
+                    )
+                    img_arr = img_arr[crop]
 
             # Each branch calls its filter; mean/log/laws return (result, valid_mask)
             # when a source mask is supplied, the others return a bare array. The
@@ -1258,7 +1389,6 @@ class RadiomicsPipeline:
                 result = mean_filter(img_arr, **filter_params)
             elif filter_type == "log":
                 filter_params["boundary"] = boundary
-                filter_params.setdefault("spacing_mm", state.image.spacing)
                 result = laplacian_of_gaussian(img_arr, **filter_params)
             elif filter_type == "laws":
                 filter_params["boundary"] = boundary
@@ -1305,6 +1435,15 @@ class RadiomicsPipeline:
             filtered_array: npt.NDArray[np.floating[Any]] = (
                 result[0] if isinstance(result, tuple) else result
             )
+            if region is not None:
+                embedded: npt.NDArray[Any] = np.zeros(state.image.array.shape, filtered_array.dtype)
+                embedded[region] = filtered_array[
+                    tuple(
+                        slice(r.start - c.start, r.stop - c.start)
+                        for r, c in zip(region, crop, strict=True)
+                    )
+                ]
+                filtered_array = embedded
 
             # Snapshot of the parameters actually honoured by this step, for IBSI 2
             # provenance (params_requested / params_effective in the run log).
