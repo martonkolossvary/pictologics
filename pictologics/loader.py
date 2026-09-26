@@ -55,6 +55,7 @@ such mixing is detected.
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -64,6 +65,7 @@ from typing import Any, Optional, cast
 import nibabel as nib
 import numpy as np
 import pydicom
+from nibabel.arrayproxy import ArrayProxy
 from numba import jit, prange
 from numpy import typing as npt
 from numpy.typing import DTypeLike
@@ -1289,6 +1291,38 @@ def _to_row_order_numba(src: npt.NDArray[Any], out: npt.NDArray[Any]) -> None:
                         out[i, j, k] = src[i, j, k]
 
 
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _to_float_row_order_numba(
+    src: npt.NDArray[Any],
+    slope: npt.NDArray[np.float64],
+    intercept: npt.NDArray[np.float64],
+    scale: npt.NDArray[np.bool_],
+    shift: npt.NDArray[np.bool_],
+    out: npt.NDArray[np.float64],
+) -> None:
+    """float64 row-order copy of a column-order 3D array, rescaled plane by plane (k).
+
+    Each value becomes float64, then `* slope[k]` where `scale[k]`, then `+ intercept[k]`
+    where `shift[k]`: the numpy operations of the loaders, in their order, so the values
+    are the same. The tiles are those of `_to_row_order_numba`.
+    """
+    nx, ny, nz = src.shape
+    tile = 32
+    for j in prange(ny):
+        for i0 in range(0, nx, tile):
+            i1 = min(i0 + tile, nx)
+            for k0 in range(0, nz, tile):
+                k1 = min(k0 + tile, nz)
+                for i in range(i0, i1):
+                    for k in range(k0, k1):
+                        value = np.float64(src[i, j, k])
+                        if scale[k]:
+                            value = value * slope[k]
+                        if shift[k]:
+                            value = value + intercept[k]
+                        out[i, j, k] = value
+
+
 # Below this size the copy costs more than row order saves (small NIfTI images got 7.5%
 # slower without this limit), and the preprocessing kernels read column order without a copy.
 _ROW_ORDER_MIN_SIZE = 1 << 20
@@ -1296,6 +1330,19 @@ _ROW_ORDER_MIN_SIZE = 1 << 20
 # Types that take the tiled copy (warmed in warmup._warmup_filters): NIfTI data (float64),
 # rescaled DICOM (float64), stored DICOM pixels (int16, uint16) and SEG masks (uint8).
 _ROW_ORDER_DTYPES = (np.float64, np.int16, np.uint16, np.uint8)
+
+
+def _float_row_order(
+    src: npt.NDArray[Any],
+    slope: npt.NDArray[np.float64],
+    intercept: npt.NDArray[np.float64],
+    scale: npt.NDArray[np.bool_],
+    shift: npt.NDArray[np.bool_],
+) -> npt.NDArray[np.float64]:
+    """The float64 row-order output of `_to_float_row_order_numba` for a column-order `src`."""
+    out = np.empty(src.shape, dtype=np.float64)
+    _to_float_row_order_numba(src, slope, intercept, scale, shift, out)
+    return out
 
 
 def _row_order(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
@@ -1310,6 +1357,46 @@ def _row_order(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
         _to_row_order_numba(array, out)
         return out
     return np.ascontiguousarray(array)
+
+
+# Stored NIfTI types that the fused load takes: nibabel scales them in float64 when
+# get_fdata asks for float64 (int_scinter_ftype keeps float64 for them).
+_NIFTI_FUSED_DTYPES = tuple(
+    np.dtype(t)
+    for t in (np.int8, np.uint8, np.int16, np.uint16, np.int32, np.uint32, np.float32, np.float64)
+)
+
+
+def _nifti_float64(nii_img: Any, dataset_index: int) -> npt.NDArray[Any]:
+    """The values of nibabel's `get_fdata()`, in row order for large images.
+
+    nibabel returns column-order (Fortran) arrays. The kernels read in row order, and the
+    discretise, resegment and resample steps copy other layouts on every call. A large 3D
+    image in a native stored type goes through one pass: the stored values, scaled as
+    `get_fdata` scales them (float64(x), times the slope unless it is 1, plus the
+    intercept unless it is 0), written in row order. The float64 column-order array and
+    its copy are not made.
+    """
+    proxy = nii_img.dataobj
+    if (
+        isinstance(proxy, ArrayProxy)
+        and len(proxy.shape) == 3
+        and math.prod(proxy.shape) >= _ROW_ORDER_MIN_SIZE
+        and np.dtype(proxy.dtype).isnative
+        and np.dtype(proxy.dtype) in _NIFTI_FUSED_DTYPES
+    ):
+        slope, inter = np.asanyarray(proxy.slope), np.asanyarray(proxy.inter)
+        if np.can_cast(slope, np.float64) and np.can_cast(inter, np.float64):
+            s, b = float(slope), float(inter)
+            nz = proxy.shape[2]
+            return _float_row_order(
+                proxy.get_unscaled(),  # type: ignore[no-untyped-call]
+                np.full(nz, s),
+                np.full(nz, b),
+                np.full(nz, s != 1.0),
+                np.full(nz, b != 0.0),
+            )
+    return _row_order(_ensure_3d(nii_img.get_fdata(), dataset_index))
 
 
 def _load_nifti(path: str, dataset_index: int = 0) -> Image:
@@ -1335,10 +1422,7 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
         raise ValueError(f"Could not load NIfTI file '{path}': {e}") from e
 
     # Load image data as float64 to preserve precision
-    array = nii_img.get_fdata()  # type: ignore
-    # nibabel returns column-order (Fortran) arrays. The kernels read in row order, and the
-    # discretise, resegment and resample steps copy other layouts on every call. Convert once.
-    array = _row_order(_ensure_3d(array, dataset_index))
+    array = _nifti_float64(nii_img, dataset_index)
 
     # Extract metadata
     header = nii_img.header  # type: ignore
@@ -1418,11 +1502,14 @@ def _load_dicom_series(
     if not files:
         raise ValueError(f"No DICOM files found in directory: {path}")
 
-    # Extract metadata for phase detection
+    # Extract metadata for phase detection. Each file is parsed once: the pixel data (and
+    # other large values) are read from the file only when used, for the selected phase.
     file_metadata: list[dict[str, Any]] = []
+    datasets: dict[Any, Any] = {}
     for f in files:
         try:
-            dcm = pydicom.dcmread(f, stop_before_pixels=True)
+            dcm = pydicom.dcmread(f, defer_size=_DEFER_SIZE)
+            datasets[f] = dcm
             meta: dict[str, Any] = {
                 "file_path": f,
                 "InstanceNumber": getattr(dcm, "InstanceNumber", None),
@@ -1462,14 +1549,10 @@ def _load_dicom_series(
             f"Use pictologics.utilities.get_dicom_phases() to discover available phases."
         )
 
-    # Get files for the requested phase
-    selected_files = [m["file_path"] for m in phases[dataset_index]]
-
-    # Read all slices for the selected phase
-    try:
-        slices = [pydicom.dcmread(f) for f in selected_files]
-    except Exception as e:
-        raise ValueError(f"Error reading DICOM files in '{path}': {e}") from e
+    # The slices of the requested phase, from the read above; the list is their only
+    # reference now, so _stack_slices frees each slice once its pixels are copied
+    slices = [datasets[m["file_path"]] for m in phases[dataset_index]]
+    datasets.clear()
 
     # Determine sorting direction
     # Calculate the normal vector of the slice plane
@@ -1492,31 +1575,11 @@ def _load_dicom_series(
         # Fallback to InstanceNumber if ImagePositionPatient is missing
         slices.sort(key=lambda s: int(getattr(s, "InstanceNumber", 0)))
 
-    # Stack pixel data
-    # pydicom pixel_array is (Rows, Columns) -> (Y, X)
-    # We want (X, Y, Z)
-    try:
-        pixel_data = []
-        for s in slices:
-            pixels = s.pixel_array
-            if apply_rescale:
-                slope = float(getattr(s, "RescaleSlope", 1.0))
-                intercept = float(getattr(s, "RescaleIntercept", 0.0))
-                if slope != 1.0 or intercept != 0.0:
-                    pixels = pixels.astype(np.float64) * slope + intercept
-            pixel_data.append(pixels)
-    except Exception as e:
-        raise ValueError("Failed to extract pixel arrays from DICOM slices.") from e
-
-    # Stacking on a new first axis copies each slice in one piece. The (X, Y, Z) view of
-    # the result is in column order, and a large volume goes to row order, like NIfTI data.
-    volume = np.moveaxis(np.stack(pixel_data), 0, -1)  # Result: (Y, X, Z)
-    pixel_data.clear()  # the stack holds the slices now; free them before the copy
-    volume = np.swapaxes(volume, 0, 1)  # Result: (X, Y, Z)
-    volume = _row_order(_ensure_3d(volume))
-
-    # Extract metadata from the first slice (reference)
+    # Extract metadata from the first slice (reference), and the positions, before the
+    # slices are freed while their pixels are stacked
     ref = slices[0]
+    positions = [getattr(s, "ImagePositionPatient", None) for s in slices]
+    volume = _stack_slices(slices, apply_rescale)
 
     # Spacing
     try:
@@ -1530,7 +1593,6 @@ def _load_dicom_series(
             tag_spacing = float(ref.SpacingBetweenSlices)
         elif hasattr(ref, "SliceThickness"):
             tag_spacing = float(ref.SliceThickness)
-        positions = [getattr(s, "ImagePositionPatient", None) for s in slices]
         spacing_z = _slice_spacing(
             tag_spacing, None if any(p is None for p in positions) else positions, slice_normal
         )
@@ -1566,6 +1628,78 @@ def _load_dicom_series(
         direction=direction,
         modality=getattr(ref, "Modality", "DICOM"),
     )
+
+
+# Series headers are parsed once; values above this size (the pixel data) are read from
+# the file when used, for the selected phase only.
+_DEFER_SIZE = "4 KB"
+
+# Slices with equal values of these tags decode to 2D arrays of one shape and type (when
+# SamplesPerPixel and NumberOfFrames are 1 or absent).
+_SLICE_LAYOUT_TAGS = (
+    "Rows",
+    "Columns",
+    "BitsAllocated",
+    "PixelRepresentation",
+    "SamplesPerPixel",
+    "NumberOfFrames",
+)
+
+
+def _stack_slices(slices: list[Any], apply_rescale: bool) -> npt.NDArray[Any]:
+    """(X, Y, Z) volume of the sorted slices; empties `slices` as it goes.
+
+    A slice with a RescaleSlope other than 1 or a RescaleIntercept other than 0 becomes
+    `pixels.astype(np.float64) * slope + intercept`; the others keep their stored values.
+    A large rescaled series of 2D slices with one shape and pixel type takes one tiled
+    kernel from the stored-type stack into the row-order float64 output, and each slice
+    (its file bytes and decoded pixels) is freed once copied. Other series stack the
+    slices, then turn a large volume to row order, like NIfTI data.
+    """
+    # pydicom pixel_array is (Rows, Columns) -> (Y, X); the stack is (Z, Y, X) and its
+    # (X, Y, Z) view is in column order
+    try:
+        slopes = np.ones(len(slices))
+        intercepts = np.zeros(len(slices))
+        if apply_rescale:
+            for k, s in enumerate(slices):
+                slopes[k] = float(getattr(s, "RescaleSlope", 1.0))
+                intercepts[k] = float(getattr(s, "RescaleIntercept", 0.0))
+        rescaled = (slopes != 1.0) | (intercepts != 0.0)
+        layout = [tuple(getattr(s, key, None) for key in _SLICE_LAYOUT_TAGS) for s in slices]
+        rows, columns, _, _, samples, frames = layout[0]
+        fused = (
+            bool(rescaled.any())
+            and all(item == layout[0] for item in layout)
+            and samples in (None, 1)
+            and frames in (None, 1)
+            and isinstance(rows, int)
+            and isinstance(columns, int)
+            and rows * columns * len(slices) >= _ROW_ORDER_MIN_SIZE
+        )
+        if fused:
+            first = slices[0].pixel_array
+            stack = np.empty((len(slices),) + first.shape, dtype=first.dtype)
+            for k in range(len(slices)):
+                stack[k] = first if k == 0 else slices[k].pixel_array
+                slices[k] = None
+            return _float_row_order(
+                stack.transpose(2, 1, 0), slopes, intercepts, rescaled, rescaled
+            )
+        pixel_data = []
+        for k in range(len(slices)):
+            pixels = slices[k].pixel_array
+            if rescaled[k]:
+                pixels = pixels.astype(np.float64) * slopes[k] + intercepts[k]
+            pixel_data.append(pixels)
+            slices[k] = None
+    except Exception as e:
+        raise ValueError("Failed to extract pixel arrays from DICOM slices.") from e
+
+    volume = np.moveaxis(np.stack(pixel_data), 0, -1)  # Result: (Y, X, Z)
+    pixel_data.clear()  # the stack holds the slices now; free them before the copy
+    volume = np.swapaxes(volume, 0, 1)  # Result: (X, Y, Z)
+    return _row_order(_ensure_3d(volume))
 
 
 def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:

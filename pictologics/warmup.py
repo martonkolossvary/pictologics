@@ -293,10 +293,15 @@ def _warmup_filters() -> None:
 
     from . import loader, preprocessing
 
-    # 0. Loader: the column-order to row-order copy for NIfTI, DICOM and SEG data.
+    # 0. Loader: the column-order to row-order copy for NIfTI, DICOM and SEG data, and
+    # the float64 copy with rescale of stored DICOM pixels and NIfTI data.
     for dtype in loader._ROW_ORDER_DTYPES:
         col = np.asfortranarray(np.ones((4, 4, 4), dtype=dtype))
         loader._to_row_order_numba(col, np.empty((4, 4, 4), dtype=dtype))
+    ones, flags = np.ones(4), np.ones(4, dtype=np.bool_)
+    for stored in (*loader._ROW_ORDER_DTYPES, np.float32):  # float32: NIfTI PET and MR data
+        col = np.asfortranarray(np.ones((4, 4, 4), dtype=stored))
+        loader._to_float_row_order_numba(col, ones, ones, flags, flags, np.empty((4, 4, 4)))
 
     # 1. Preprocessing kernels (discretise / resegment / resample). The
     # dispatch code always feeds C-contiguous arrays (via ravel /

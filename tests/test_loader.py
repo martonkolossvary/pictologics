@@ -1030,35 +1030,6 @@ class TestLoader(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dataset_index 5 is out of range"):
             _load_dicom_series("dicom_dir", dataset_index=5)
 
-    @patch("pictologics.loader.Path")
-    @patch("pictologics.loader.pydicom.misc.is_dicom")
-    @patch("pictologics.loader.pydicom.dcmread")
-    @patch("pictologics.utilities.dicom_utils.split_dicom_phases")
-    def test_load_dicom_series_full_read_error(
-        self,
-        mock_split_phases: MagicMock,
-        mock_dcmread: MagicMock,
-        mock_is_dicom: MagicMock,
-        mock_Path_cls: MagicMock,
-    ) -> None:
-        """Test error when full read (with pixels) fails."""
-        file1 = MagicMock()
-        file1.is_file.return_value = True
-        mock_Path_cls.return_value.iterdir.return_value = [file1]
-        mock_is_dicom.return_value = True
-
-        dcm_header = MagicMock()
-        dcm_header.InstanceNumber = 1
-        dcm_header.ImagePositionPatient = [0, 0, 0]
-
-        mock_split_phases.return_value = [[{"file_path": file1}]]
-
-        # First call (header read) succeeds, second call (full read) fails
-        mock_dcmread.side_effect = [dcm_header, Exception("Read error")]
-
-        with self.assertRaisesRegex(ValueError, "Error reading DICOM files"):
-            _load_dicom_series("dicom_dir")
-
     @patch("pictologics.loader._is_dicom_seg")
     @patch("pictologics.loader.Path")
     def test_load_image_seg_dict_return(
@@ -2368,6 +2339,109 @@ class TestRepositioning(unittest.TestCase):
                 reference_image=reference,
                 reposition_to_reference=True,
             )
+
+
+def _write_series(folder: "os.PathLike[str]", rescale: list[tuple[float, float]]) -> np.ndarray:
+    """A small CT series, one slice per (slope, intercept), written in shuffled order.
+    Returns the expected (X, Y, Z) volume: each slice as float64 * slope + intercept when
+    it has a rescale, else its stored values."""
+    from pathlib import Path
+
+    import pydicom
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
+
+    rng = np.random.default_rng(12)
+    series = generate_uid()
+    planes = []
+    order = rng.permutation(len(rescale))
+    for k, (slope, intercept) in enumerate(rescale):
+        pixels = rng.integers(-2000, 2000, (6, 5), dtype=np.int16)
+        meta = FileMetaDataset()
+        meta.MediaStorageSOPClassUID = CTImageStorage
+        meta.MediaStorageSOPInstanceUID = generate_uid()
+        meta.TransferSyntaxUID = ExplicitVRLittleEndian
+        ds = pydicom.Dataset()
+        ds.file_meta = meta
+        ds.SOPClassUID, ds.SOPInstanceUID = CTImageStorage, meta.MediaStorageSOPInstanceUID
+        ds.SeriesInstanceUID, ds.Modality, ds.InstanceNumber = series, "CT", k + 1
+        ds.Rows, ds.Columns = pixels.shape
+        ds.PixelSpacing, ds.SliceThickness = [0.5, 0.75], 2.0
+        ds.ImagePositionPatient = [0.0, 0.0, 2.0 * k]
+        ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        ds.RescaleSlope, ds.RescaleIntercept = slope, intercept
+        ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 1
+        ds.PixelData = pixels.tobytes()
+        ds.save_as(Path(folder) / f"{order[k]:02d}.dcm", enforce_file_format=True)
+        rescaled = slope != 1.0 or intercept != 0.0
+        planes.append(pixels.astype(np.float64) * slope + intercept if rescaled else pixels)
+    return np.stack([p.T for p in planes], axis=-1)
+
+
+def test_dicom_series_reads_each_file_once_and_rescales_in_one_pass(
+    tmp_path: "os.PathLike[str]",
+) -> None:
+    # Each file is read once. A large rescaled series goes through one kernel into the
+    # row-order float64 output; it equals the per-slice float64 rescale, bit for bit, also
+    # with slices that keep their stored values. A small one keeps the stacked path.
+    import pydicom
+
+    expected = _write_series(tmp_path, [(1.0, 0.0), (2.5, -1024.0), (1.0, -1024.0), (0.5, 0.0)])
+    with patch("pictologics.loader.pydicom.dcmread", side_effect=pydicom.dcmread) as reads:
+        small = _load_dicom_series(tmp_path)
+    assert reads.call_count == 4
+    with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
+        large = _load_dicom_series(tmp_path)
+    for image in (small, large):
+        assert image.array.dtype == np.float64
+        np.testing.assert_array_equal(image.array.view(np.uint64), expected.view(np.uint64))
+    assert large.array.flags.c_contiguous and small.array.flags.f_contiguous
+    assert large.spacing == small.spacing == (0.75, 0.5, 2.0)
+
+    # No rescale: the stored values, stored type
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    expected = _write_series(plain, [(1.0, 0.0)] * 3)
+    with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
+        image = _load_dicom_series(plain)
+    assert image.array.dtype == np.int16
+    np.testing.assert_array_equal(image.array, expected)
+
+
+def test_nifti_loads_the_values_of_get_fdata_in_one_pass(tmp_path: "os.PathLike[str]") -> None:
+    # A large 3D NIfTI image goes from its stored values to the row-order float64 output in
+    # one pass, scaled as nibabel scales for get_fdata; the values are the same, bit for bit.
+    from pathlib import Path
+
+    import nibabel as nib
+
+    rng = np.random.default_rng(13)
+    affine = np.diag([0.5, 0.75, 2.0, 1.0])
+    cases = {
+        "int16.nii": rng.integers(-1000, 3000, (7, 6, 5)).astype(np.int16),
+        "uint8.nii.gz": rng.integers(0, 2, (7, 6, 5)).astype(np.uint8),
+        "float32.nii": rng.normal(size=(7, 6, 5)).astype(np.float32),
+    }
+    scaled = nib.Nifti1Image(rng.normal(0.0, 500.0, (7, 6, 5)), affine)
+    scaled.set_data_dtype(np.int16)  # nibabel picks a slope and an intercept on save
+    for name, data in cases.items():
+        nib.save(nib.Nifti1Image(data, affine), Path(tmp_path) / name)
+    nib.save(scaled, Path(tmp_path) / "scaled.nii")
+    # scl_slope 1 and scl_inter 5 (header bytes 112-119): only the intercept applies
+    nib.save(nib.Nifti1Image(cases["int16.nii"], affine), Path(tmp_path) / "offset.nii")
+    with open(Path(tmp_path) / "offset.nii", "r+b") as fh:
+        fh.seek(112)
+        fh.write(np.array([1.0, 5.0], dtype="<f4").tobytes())
+    for name in (*cases, "scaled.nii", "offset.nii"):
+        path = str(Path(tmp_path) / name)
+        expected = nib.load(path).get_fdata()
+        with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
+            array = _load_nifti(path).array
+        assert array.flags.c_contiguous and array.dtype == np.float64
+        np.testing.assert_array_equal(array.view(np.uint64), expected.view(np.uint64))
+    assert nib.load(str(Path(tmp_path) / "scaled.nii")).dataobj.slope != 1.0
+    assert nib.load(str(Path(tmp_path) / "offset.nii")).dataobj.inter == 5.0
 
 
 if __name__ == "__main__":
