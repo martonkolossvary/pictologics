@@ -174,6 +174,8 @@ save_slices("output/", image=img, mask=mask, slice_selection="every_10")
 save_slices("output/", image=img, slice_selection=[0, 50, 100])
 ```
 
+A single slice index outside the image raises a `ValueError`, as does an `initial_slice` outside the image in `visualize_slices`; in a list of indices, the indices outside the image are skipped.
+
 ### Window/Level Normalization
 
 For CT and MR images, use window/level controls for proper contrast:

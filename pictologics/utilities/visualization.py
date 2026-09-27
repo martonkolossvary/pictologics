@@ -359,9 +359,17 @@ def _parse_slice_selection(
 
     Returns:
         List of slice indices.
+
+    Raises:
+        ValueError: If a single index is outside 0 to num_slices - 1.
     """
-    if isinstance(selection, int):
-        return [selection]
+    if isinstance(selection, (int, np.integer)):
+        if not 0 <= selection < num_slices:
+            raise ValueError(
+                f"Slice {selection} is out of range: the axis has {num_slices} slices "
+                f"(0 to {num_slices - 1})."
+            )
+        return [int(selection)]
 
     if isinstance(selection, list):
         return [i for i in selection if 0 <= i < num_slices]
@@ -461,8 +469,8 @@ def save_slices(
         slice_selection: Slice selection specification:
             - "every_N" or "N": Every Nth slice
             - "N%": Slices at each N% interval (e.g., "10%" = ~10 images)
-            - int: Single slice index
-            - list[int]: Specific slice indices
+            - int: Single slice index (0 to the number of slices - 1)
+            - list[int]: Specific slice indices (indices out of range are skipped)
         format: Output format ("png", "jpeg", "tiff").
         dpi: Output resolution in dots per inch.
         alpha: Transparency of mask overlay (0-1). Only used in overlay mode.
@@ -485,8 +493,8 @@ def save_slices(
         List of paths to saved files.
 
     Raises:
-        ValueError: If neither image nor mask is provided, or if shapes don't match
-            when both are provided.
+        ValueError: If neither image nor mask is provided, if shapes don't match
+            when both are provided, or if a single slice index is out of range.
 
     Example:
         Save image slices with and without mask overlay:
@@ -647,8 +655,8 @@ def visualize_slices(
             If False, display as grayscale.
 
     Raises:
-        ValueError: If neither image nor mask is provided, or if shapes don't match
-            when both are provided.
+        ValueError: If neither image nor mask is provided, if shapes don't match
+            when both are provided, or if initial_slice is out of range.
 
     Example:
         Visualise slices interactively:
@@ -691,6 +699,11 @@ def visualize_slices(
     # Set initial slice
     if initial_slice is None:
         initial_slice = num_slices // 2
+    elif not 0 <= initial_slice < num_slices:
+        raise ValueError(
+            f"initial_slice {initial_slice} is out of range: the axis has {num_slices} "
+            f"slices (0 to {num_slices - 1})."
+        )
     value_range = _gray_range(image, mask, window_center, window_width, mask_as_colormap)
 
     # Create figure and axes

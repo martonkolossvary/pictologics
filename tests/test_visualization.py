@@ -232,6 +232,12 @@ class TestParseSliceSelection:
         """Test single integer selection."""
         result = _parse_slice_selection(50, 100)
         assert result == [50]
+        assert _parse_slice_selection(np.int64(99), 100) == [99]  # numpy ints too
+
+    @pytest.mark.parametrize("index", [100, -1])
+    def test_single_int_out_of_range_raises(self, index: int) -> None:
+        with pytest.raises(ValueError, match="out of range"):
+            _parse_slice_selection(index, 100)
 
     def test_list_of_ints(self) -> None:
         """Test list of integers."""
@@ -412,6 +418,12 @@ class TestSaveSlices:
         assert _gray_range(None, mask, None, None, True) is None  # colors, no gray scale
         assert _gray_range(None, mask, None, None, False) == (0.0, 2.0)
 
+    def test_save_single_slice_out_of_range_raises(
+        self, synthetic_image: Image, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ValueError, match="out of range"):
+            save_slices(str(tmp_path), image=synthetic_image, slice_selection=20)
+
     def test_save_with_dpi_72(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test saving with 72 DPI (scale_factor=1.0)."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -503,6 +515,13 @@ class TestVisualizeSlices:
             visualize_slices(mask=synthetic_mask)
 
             mock_show.assert_called_once()
+
+    @pytest.mark.parametrize("initial_slice", [20, -1])
+    def test_visualize_initial_slice_out_of_range_raises(
+        self, synthetic_image: Image, initial_slice: int
+    ) -> None:
+        with pytest.raises(ValueError, match="out of range"):
+            visualize_slices(image=synthetic_image, initial_slice=initial_slice)
 
     def test_visualize_neither_raises(self) -> None:
         """Test that providing neither raises ValueError."""
