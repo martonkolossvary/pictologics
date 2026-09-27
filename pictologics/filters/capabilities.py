@@ -104,10 +104,10 @@ class FilterCapability:
     anisotropic_spacing: str
 
 
-# All four `BoundaryCondition` members, honored by `boundary=...` on mean/log/laws/
-# gabor/wavelet today. Declared here once since it's shared verbatim by every entry
-# below, including the FFT filters that forward-declare it (see module docstring
-# and the "riesz*" comments further down).
+# All four `BoundaryCondition` members. Every filter below accepts them through its
+# `boundary` parameter: the spatial filters apply the boundary directly, and the FFT
+# filters (Simoncelli and the three Riesz variants) by pad-filter-crop (see each
+# entry's effective_boundary). Declared here once since every entry shares it.
 _ALL_BOUNDARIES: tuple[str, ...] = ("ZERO", "NEAREST", "PERIODIC", "MIRROR")
 
 FILTER_CAPABILITIES: dict[str, FilterCapability] = {
@@ -249,12 +249,14 @@ FILTER_CAPABILITIES: dict[str, FilterCapability] = {
         structure_tensor_steering=False,
         anisotropic_spacing="not_applicable",
     ),
-    # riesz.py: riesz_log(image, sigma_mm, spacing_mm, order, truncate, source_mask)
-    # -- variant="log": applies laplacian_of_gaussian() then riesz_transform() to
-    # its output. spacing_mm is forwarded verbatim to laplacian_of_gaussian, which
-    # converts it per-axis (see "log" above), so anisotropic spacing is genuinely
-    # supported here despite the Riesz stage itself having no spacing concept. No
-    # `boundary` parameter (same forward-declaration caveat as "riesz" above).
+    # riesz.py: riesz_log(image, sigma_mm, spacing_mm, order, truncate, boundary,
+    # source_mask) -- variant="log": applies laplacian_of_gaussian() then
+    # riesz_transform() to its output. spacing_mm is forwarded verbatim to
+    # laplacian_of_gaussian, which converts it per-axis (see "log" above), so
+    # anisotropic spacing is genuinely supported here despite the Riesz stage itself
+    # having no spacing concept. `boundary` (default PERIODIC) applies to the whole
+    # LoG-then-Riesz chain: a non-periodic boundary pads the image once with the
+    # pad-filter-crop helper, as for "riesz".
     "riesz_log": FilterCapability(
         input_dimensionality=(3,),
         kernel_dimensionality=3,
@@ -270,11 +272,11 @@ FILTER_CAPABILITIES: dict[str, FilterCapability] = {
         structure_tensor_steering=False,
         anisotropic_spacing="supported",
     ),
-    # riesz.py: riesz_simoncelli(image, level, order, source_mask) -- variant=
-    # "simoncelli": applies simoncelli_wavelet() then riesz_transform(). No
+    # riesz.py: riesz_simoncelli(image, level, order, boundary, source_mask) --
+    # variant="simoncelli": applies simoncelli_wavelet() then riesz_transform(). No
     # spacing_mm anywhere in this call chain (Simoncelli assumes an isotropic
-    # frequency grid regardless). No `boundary` parameter (same
-    # forward-declaration caveat as "riesz" above).
+    # frequency grid regardless). `boundary` (default PERIODIC) applies to the whole
+    # Simoncelli-then-Riesz chain through the pad-filter-crop helper, as for "riesz".
     "riesz_simoncelli": FilterCapability(
         input_dimensionality=(3,),
         kernel_dimensionality=3,
