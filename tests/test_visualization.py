@@ -418,6 +418,71 @@ class TestSaveSlices:
         assert _gray_range(None, mask, None, None, True) is None  # colors, no gray scale
         assert _gray_range(None, mask, None, None, False) == (0.0, 2.0)
 
+    @pytest.mark.parametrize("fmt", ["png", "jpeg", "tiff"])
+    def test_save_writes_the_display_pixels_as_rgb(
+        self, synthetic_image: Image, synthetic_mask: Image, tmp_path: Path, fmt: str
+    ) -> None:
+        """Slices are saved in threads as RGB: at 72 dpi the pixels of the RGBA display, at
+        another dpi those of the RGBA display resized with LANCZOS (as the RGBA files were);
+        the paths come back in slice order."""
+        from PIL import Image as PILImage
+
+        from pictologics.utilities import visualization
+
+        value_range = visualization._gray_range(synthetic_image, synthetic_mask, None, None, True)
+        for dpi in (72, 144):
+            out = tmp_path / f"dpi{dpi}"
+            files = save_slices(
+                str(out),
+                image=synthetic_image,
+                mask=synthetic_mask,
+                slice_selection=[9, 3, 6],
+                format=fmt,
+                dpi=dpi,
+            )
+            assert [Path(f).name[:10] for f in files] == ["slice_0009", "slice_0003", "slice_0006"]
+            for f, idx in zip(files, (9, 3, 6), strict=True):
+                rgba = _create_display_rgba(
+                    synthetic_image.array[:, :, idx],
+                    synthetic_mask.array[:, :, idx],
+                    value_range=value_range,
+                )
+                expected = PILImage.fromarray(rgba)
+                if dpi != 72:
+                    expected = expected.resize((128, 128), PILImage.Resampling.LANCZOS)
+                saved = PILImage.open(f)
+                if fmt == "jpeg":  # lossy: the JPEG of the same RGB pixels
+                    expected.convert("RGB").save(tmp_path / "expected.jpg", dpi=(dpi, dpi))
+                    assert Path(f).read_bytes() == (tmp_path / "expected.jpg").read_bytes()
+                else:
+                    assert saved.mode == "RGB"
+                    np.testing.assert_array_equal(
+                        np.asarray(saved), np.asarray(expected.convert("RGB"))
+                    )
+
+    def test_save_uses_threads_and_png_level_3(
+        self, synthetic_image: Image, tmp_path: Path
+    ) -> None:
+        """At most 8 threads (and not more than the slices), and PNG compression level 3."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from PIL import Image as PILImage
+
+        from pictologics.utilities import visualization
+
+        save = PILImage.Image.save
+        with (
+            patch.object(visualization, "ThreadPoolExecutor", wraps=ThreadPoolExecutor) as pool,
+            patch.object(PILImage.Image, "save", autospec=True, side_effect=save) as saved,
+            patch("os.cpu_count", return_value=16),
+        ):
+            save_slices(str(tmp_path), image=synthetic_image, slice_selection="every_1")
+            save_slices(str(tmp_path), image=synthetic_image, slice_selection=[1, 2], format="tiff")
+        assert [c.kwargs["max_workers"] for c in pool.call_args_list] == [8, 2]
+        options = [c.kwargs for c in saved.call_args_list]
+        assert all(o.get("compress_level") == 3 for o in options[:20])
+        assert all("compress_level" not in o for o in options[20:])
+
     def test_save_single_slice_out_of_range_raises(
         self, synthetic_image: Image, tmp_path: Path
     ) -> None:

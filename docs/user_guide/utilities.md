@@ -176,6 +176,8 @@ save_slices("output/", image=img, slice_selection=[0, 50, 100])
 
 A single slice index outside the image raises a `ValueError`, as does an `initial_slice` outside the image in `visualize_slices`; in a list of indices, the indices outside the image are skipped.
 
+`save_slices` writes up to 8 slices at a time, in threads. The files are RGB: the mask overlay is mixed into the colors, so they need no transparency layer. PNG files use compression level 3, which is 2.5x faster than the default level 6.
+
 ### Window/Level Normalization
 
 For CT and MR images, use window/level controls for proper contrast:
