@@ -161,6 +161,7 @@ def _apply_window_level(
     arr = arr.astype(np.float64)
     min_val = center - width / 2
     max_val = center + width / 2
+    np.nan_to_num(arr, copy=False, nan=min_val)  # NaN shows as the window minimum
     arr = np.clip(arr, min_val, max_val)
     arr = (arr - min_val) / (max_val - min_val) * 255
     return arr.astype(np.uint8)
@@ -170,17 +171,21 @@ def _normalize_image(
     image_array: npt.NDArray[np.floating[Any]],
     window_center: Optional[float] = None,
     window_width: Optional[float] = None,
+    value_range: Optional[tuple[float, float]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Normalize image array to 0-255 uint8.
 
     If window/level parameters are provided, uses window/level normalization.
-    Otherwise, uses min-max normalization.
+    Otherwise, uses min-max normalization over `value_range`, or over the array
+    itself when no range is given.
 
     Args:
         image_array: Input image array.
         window_center: Optional window center (level).
         window_width: Optional window width.
+        value_range: Optional (minimum, maximum) for min-max normalization, for
+            example those of the whole volume, so that all slices share one scale.
 
     Returns:
         Normalized array as uint8.
@@ -190,8 +195,12 @@ def _normalize_image(
 
     # Default: min-max normalization
     arr = image_array.astype(np.float64)
-    arr_min = np.min(arr)
-    arr_max = np.max(arr)
+    if value_range is not None:
+        arr_min, arr_max = value_range
+        np.nan_to_num(arr, copy=False, nan=arr_min)  # NaN shows as the minimum
+    else:
+        arr_min = np.min(arr)
+        arr_max = np.max(arr)
     if arr_max > arr_min:
         arr = (arr - arr_min) / (arr_max - arr_min) * 255
     else:
@@ -215,6 +224,7 @@ def _create_display_rgba(
     window_center: Optional[float] = None,
     window_width: Optional[float] = None,
     mask_as_colormap: bool = True,
+    value_range: Optional[tuple[float, float]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Create an RGBA image for display.
@@ -232,6 +242,8 @@ def _create_display_rgba(
         window_center: Optional window center for image normalization.
         window_width: Optional window width for image normalization.
         mask_as_colormap: If True and mask-only, display with colormap. If False, grayscale.
+        value_range: Optional (minimum, maximum) for the min-max normalization of the
+            slice shown in gray (the image, or a grayscale mask), used without a window.
 
     Returns:
         RGBA array (H, W, 4) as uint8, ready for matplotlib imshow.
@@ -258,7 +270,7 @@ def _create_display_rgba(
     # --- Mode 1: Image only ---
     if mask_slice is None:
         assert image_slice is not None  # For mypy
-        gray = _normalize_image(image_slice, window_center, window_width)
+        gray = _normalize_image(image_slice, window_center, window_width, value_range)
         rgba = np.zeros((*shape, 4), dtype=np.uint8)
         rgba[..., 0] = gray
         rgba[..., 1] = gray
@@ -289,7 +301,7 @@ def _create_display_rgba(
             return rgba  # type: ignore[return-value]
         else:
             # Grayscale mask
-            gray = _normalize_image(mask_slice, window_center, window_width)
+            gray = _normalize_image(mask_slice, window_center, window_width, value_range)
             rgba = np.zeros((*shape, 4), dtype=np.uint8)
             rgba[..., 0] = gray
             rgba[..., 1] = gray
@@ -298,7 +310,7 @@ def _create_display_rgba(
             return rgba  # type: ignore[return-value]
 
     # --- Mode 3: Overlay (image + mask) ---
-    gray = _normalize_image(image_slice, window_center, window_width)
+    gray = _normalize_image(image_slice, window_center, window_width, value_range)
 
     # Create RGB base from grayscale
     rgba = np.zeros((*shape, 4), dtype=np.uint8)
@@ -383,6 +395,24 @@ def _parse_slice_selection(
     return [0]
 
 
+def _gray_range(
+    image: Optional[Image],
+    mask: Optional[Image],
+    window_center: Optional[float],
+    window_width: Optional[float],
+    mask_as_colormap: bool,
+) -> Optional[tuple[float, float]]:
+    """(minimum, maximum) of the whole volume shown in gray (the image, or a mask shown
+    in grayscale) when no window is set, so that all slices share one gray scale. NaN
+    values are left out."""
+    if window_center is not None and window_width is not None:
+        return None
+    gray = image if image is not None else (None if mask_as_colormap else mask)
+    if gray is None:
+        return None
+    return float(np.nanmin(gray.array)), float(np.nanmax(gray.array))
+
+
 def _get_reference_array(
     image: Optional[Image],
     mask: Optional[Image],
@@ -444,8 +474,10 @@ def save_slices(
             - "Paired": 12 paired colors
         axis: Axis along which to slice (0=sagittal, 1=coronal, 2=axial).
         filename_prefix: Prefix for output filenames.
-        window_center: Window center (level) for normalization. Default: None (min-max).
-        window_width: Window width for normalization. Default: None (min-max).
+        window_center: Window center (level) for normalization. Default: None (the
+            minimum and maximum of the whole volume, the same for all slices).
+        window_width: Window width for normalization. Default: None (the minimum and
+            maximum of the whole volume, the same for all slices).
         mask_as_colormap: If True and mask-only mode, display with colormap.
             If False, display as grayscale.
 
@@ -497,6 +529,7 @@ def save_slices(
 
     # Parse slice selection
     slice_indices = _parse_slice_selection(slice_selection, num_slices)
+    value_range = _gray_range(image, mask, window_center, window_width, mask_as_colormap)
 
     # Validate format
     format = format.lower()
@@ -540,6 +573,7 @@ def save_slices(
             window_center,
             window_width,
             mask_as_colormap,
+            value_range,
         )
 
         # Scale if needed for DPI
@@ -605,8 +639,10 @@ def visualize_slices(
         axis: Axis along which to slice (0=sagittal, 1=coronal, 2=axial).
         initial_slice: Initial slice to display (default: middle).
         window_title: Title for the viewer window.
-        window_center: Window center (level) for normalization. Default: None (min-max).
-        window_width: Window width for normalization. Default: None (min-max).
+        window_center: Window center (level) for normalization. Default: None (the
+            minimum and maximum of the whole volume, the same for all slices).
+        window_width: Window width for normalization. Default: None (the minimum and
+            maximum of the whole volume, the same for all slices).
         mask_as_colormap: If True and mask-only mode, display with colormap.
             If False, display as grayscale.
 
@@ -655,6 +691,7 @@ def visualize_slices(
     # Set initial slice
     if initial_slice is None:
         initial_slice = num_slices // 2
+    value_range = _gray_range(image, mask, window_center, window_width, mask_as_colormap)
 
     # Create figure and axes
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
@@ -694,6 +731,7 @@ def visualize_slices(
         window_center,
         window_width,
         mask_as_colormap,
+        value_range,
     )
 
     # Display
@@ -723,6 +761,7 @@ def visualize_slices(
             window_center,
             window_width,
             mask_as_colormap,
+            value_range,
         )
         im.set_data(rgba)
         ax.set_title(f"Slice {idx}/{num_slices - 1}")

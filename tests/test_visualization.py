@@ -28,6 +28,7 @@ from pictologics.utilities.visualization import (
     _create_display_rgba,
     _get_colormap_colors,
     _get_reference_array,
+    _gray_range,
     _normalize_image,
     _parse_slice_selection,
     save_slices,
@@ -88,6 +89,25 @@ class TestNormalizeImage:
         assert result.dtype == np.uint8
         assert np.min(result) == 0
         assert np.max(result) == 255
+
+    def test_normalize_over_a_given_range(self) -> None:
+        """A value range (the whole volume) replaces the array's own minimum and maximum."""
+        arr = np.array([[100.0, 200.0]])
+        result = _normalize_image(arr, value_range=(0.0, 400.0))
+        np.testing.assert_array_equal(result, [[63, 127]])
+        assert _normalize_image(arr, value_range=(5.0, 5.0)).max() == 0
+
+    def test_nan_shows_as_the_minimum(self) -> None:
+        """NaN pixels become black, without the undefined NaN-to-uint8 cast."""
+        import warnings
+
+        arr = np.array([[0.0, np.nan, 400.0]])
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            np.testing.assert_array_equal(
+                _normalize_image(arr, value_range=(0.0, 400.0)), [[0, 0, 255]]
+            )
+            np.testing.assert_array_equal(_normalize_image(arr, 200.0, 400.0), [[0, 0, 255]])
 
     def test_normalize_with_window_level(self) -> None:
         """Test normalization with window/level parameters."""
@@ -372,6 +392,25 @@ class TestSaveSlices:
         with tempfile.TemporaryDirectory() as tmpdir:
             with pytest.raises(ValueError, match="At least one"):
                 save_slices(output_dir=tmpdir)
+
+    def test_save_slices_share_one_gray_scale(self, tmp_path: Path) -> None:
+        """Without a window, a value gets the same gray level in every slice (the range of
+        the whole volume, NaN left out); a grayscale mask uses its own volume range."""
+        from PIL import Image as PILImage
+
+        arr = np.zeros((8, 8, 3))
+        arr[0, 0, :] = 100.0  # the same value in every slice
+        arr[1, 1, 0] = 400.0  # the brightest value, in slice 0 only
+        arr[2, 2, 2] = np.nan
+        image = Image(arr, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+        files = save_slices(str(tmp_path), image=image, slice_selection=[0, 1], dpi=72)
+        levels = [np.asarray(PILImage.open(f))[0, 0, 0] for f in files]
+        assert levels == [63, 63]  # 100 / 400 * 255, floored
+        assert _gray_range(image, None, None, None, True) == (0.0, 400.0)
+        assert _gray_range(image, None, 40.0, 400.0, True) is None  # a window is set
+        mask = Image(np.arange(8 * 8 * 3).reshape(8, 8, 3) % 3, image.spacing, image.origin)
+        assert _gray_range(None, mask, None, None, True) is None  # colors, no gray scale
+        assert _gray_range(None, mask, None, None, False) == (0.0, 2.0)
 
     def test_save_with_dpi_72(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test saving with 72 DPI (scale_factor=1.0)."""

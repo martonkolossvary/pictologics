@@ -178,9 +178,10 @@ save_slices("output/", image=img, slice_selection=[0, 50, 100])
 
 For CT and MR images, use window/level controls for proper contrast:
 
+Without `window_center` and `window_width`, all slices share one gray scale: the minimum and maximum of the whole volume (NaN values left out), so a tissue keeps its gray level from slice to slice.
+
 ```python
-# Soft tissue window preset (omitting window_center/window_width instead
-# defaults to min-max normalization)
+# Soft tissue window preset
 visualize_slices(image=img, window_center=40, window_width=400)
 
 # Bone window
