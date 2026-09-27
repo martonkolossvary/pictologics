@@ -108,33 +108,33 @@ assert max_diff <= tolerance  # IBSI 2 Phase 1 pass criterion
 | 2.a | LoG | impulse_response | 0.00% | 10ms | 3.0MB | ✅ PASS |
 | 2.b | LoG | checkerboard | 0.03% | 12ms | 3.0MB | ✅ PASS |
 | 2.c | LoG (2D) | checkerboard | - | - | - | ⏭ SKIP |
-| 3.a.1 | Laws | impulse_response | 0.00% | 2ms | 2.0MB | ✅ PASS |
-| 3.a.2 | Laws | impulse_response | 0.00% | 15ms | 9.0MB | ✅ PASS |
-| 3.a.3 | Laws | impulse_response | 0.00% | 17ms | 13.0MB | ✅ PASS |
-| 3.b.1 | Laws | checkerboard | 0.00% | 2ms | 2.0MB | ✅ PASS |
-| 3.b.2 | Laws | checkerboard | 0.00% | 14ms | 9.0MB | ✅ PASS |
-| 3.b.3 | Laws | checkerboard | 0.00% | 17ms | 12.0MB | ✅ PASS |
+| 3.a.1 | Laws | impulse_response | 0.00% | 2ms | 1.0MB | ✅ PASS |
+| 3.a.2 | Laws | impulse_response | 0.00% | 5ms | 7.0MB | ✅ PASS |
+| 3.a.3 | Laws | impulse_response | 0.00% | 6ms | 7.0MB | ✅ PASS |
+| 3.b.1 | Laws | checkerboard | 0.00% | 2ms | 1.0MB | ✅ PASS |
+| 3.b.2 | Laws | checkerboard | 0.00% | 4ms | 7.0MB | ✅ PASS |
+| 3.b.3 | Laws | checkerboard | 0.00% | 6ms | 7.0MB | ✅ PASS |
 | 3.c.1 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
 | 3.c.2 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
 | 3.c.3 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
-| 4.a.1 | Gabor | impulse_response | 0.27% | 18ms | 11.6MB | ✅ PASS |
-| 4.a.2 | Gabor | impulse_response | 0.14% | 103ms | 18.6MB | ✅ PASS |
-| 4.b.1 | Gabor | sphere | 0.01% | 22ms | 30.0MB | ✅ PASS |
-| 4.b.2 | Gabor | sphere | 0.09% | 207ms | 47.3MB | ✅ PASS |
-| 5.a.1 | Daubechies 2 | impulse_response | 0.00% | 3ms | 2.0MB | ✅ PASS |
-| 5.a.2 | Daubechies 2 | impulse_response | 0.00% | 63ms | 4.0MB | ✅ PASS |
-| 6.a.1 | Coiflet 1 | sphere | 0.00% | 3ms | 2.0MB | ✅ PASS |
-| 6.a.2 | Coiflet 1 | sphere | 0.00% | 69ms | 4.0MB | ✅ PASS |
-| 7.a.1 | Haar | checkerboard | 0.00% | 109ms | 5.0MB | ✅ PASS |
-| 7.a.2 | Haar | checkerboard | 0.00% | 108ms | 5.0MB | ✅ PASS |
-| 8.a.1 | Simoncelli | checkerboard | 0.38% | 6ms | 12.3MB | ✅ PASS |
+| 4.a.1 | Gabor | impulse_response | 0.27% | 19ms | 12.8MB | ✅ PASS |
+| 4.a.2 | Gabor | impulse_response | 0.14% | 110ms | 18.7MB | ✅ PASS |
+| 4.b.1 | Gabor | sphere | 0.01% | 26ms | 27.1MB | ✅ PASS |
+| 4.b.2 | Gabor | sphere | 0.09% | 238ms | 47.3MB | ✅ PASS |
+| 5.a.1 | Daubechies 2 | impulse_response | 0.00% | 3ms | 1.0MB | ✅ PASS |
+| 5.a.2 | Daubechies 2 | impulse_response | 0.00% | 11ms | 16.1MB | ✅ PASS |
+| 6.a.1 | Coiflet 1 | sphere | 0.00% | 3ms | 1.0MB | ✅ PASS |
+| 6.a.2 | Coiflet 1 | sphere | 0.00% | 12ms | 16.1MB | ✅ PASS |
+| 7.a.1 | Haar | checkerboard | 0.00% | 17ms | 16.1MB | ✅ PASS |
+| 7.a.2 | Haar | checkerboard | 0.00% | 18ms | 16.2MB | ✅ PASS |
+| 8.a.1 | Simoncelli | checkerboard | 0.38% | 5ms | 12.3MB | ✅ PASS |
 | 8.a.2 | Simoncelli | checkerboard | 0.00% | 5ms | 12.3MB | ✅ PASS |
 | 8.a.3 | Simoncelli | checkerboard | 0.00% | 5ms | 12.3MB | ✅ PASS |
-| 9.a | Riesz-LoG | impulse_response | 0.05% | 40ms | 49.4MB | ✅ PASS |
-| 9.b.1 | Riesz-LoG | sphere | 0.32% | 38ms | 49.4MB | ✅ PASS |
+| 9.a | Riesz-LoG | impulse_response | 0.05% | 41ms | 49.4MB | ✅ PASS |
+| 9.b.1 | Riesz-LoG | sphere | 0.32% | 40ms | 49.4MB | ✅ PASS |
 | 9.b.2 | Riesz-LoG (aligned) | sphere | - | - | - | ❗ REF. |
 | 10.a | Riesz-Simoncelli | impulse_response | - | - | - | ❗ REF. |
-| 10.b.1 | Riesz-Simoncelli | pattern_1 | 0.21% | 36ms | 71.1MB | ✅ PASS |
+| 10.b.1 | Riesz-Simoncelli | pattern_1 | 0.21% | 21ms | 55.1MB | ✅ PASS |
 | 10.b.2 | Riesz-Simoncelli (aligned) | pattern_1 | - | - | - | ❗ REF. |
 
 ### Tolerance Criteria
@@ -147,10 +147,10 @@ max_difference ≤ 0.01 × (reference_max - reference_min)
 ### Provenance
 
 !!! info "Reproducibility Provenance"
-    - **Pictologics version**: `0.5.1`
+    - **Pictologics version**: `0.6.0`
     - **IBSI 2 reference manual**: version 9 (the revision bundled under `dev/IBSI2/documentation/`)
     - **Reference dataset source**: `reference_response_maps` subfolder of the [IBSI 2 reference data repository](https://github.com/theibsi/ibsi_2_reference_data)
-    - **Local reference directory**: `/Users/mjk2/Library/CloudStorage/OneDrive-Personal/Python/Pictologics/Pictologics/dev/IBSI2/references/response_maps`
+    - **Local reference directory**: `dev/IBSI2/references/response_maps`
     - Per-test reference filenames and short (12-character) SHA-256 content hashes are recorded for all 28 compared tests (passed or failed) in the JSON results this script writes (`--output <file>.json`), keyed by test ID under `ref_file` / `ref_sha256` (e.g. Test `8.a.1` was validated against `8_a_1-ValidCRM.nii`, sha256 short-hash `f26254a1dac5`).
 
 ## Known Deviations

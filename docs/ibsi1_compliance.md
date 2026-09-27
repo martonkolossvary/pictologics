@@ -26,40 +26,77 @@ pipeline = RadiomicsPipeline()
 
 # A. Digital Phantom Config (FBS 1.0, no resampling)
 config_digital_phantom = [
-    {"step": "discretise", "params": {"method": "FBS", "bin_width": 1.0}},
-    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"], "include_spatial_intensity": True, "include_local_intensity": True}}
+    {'step': 'discretise', 'params': {'method': 'FBS', 'bin_width': 1.0}},
+    {'step': 'extract_features',
+     'params': {'families': ['intensity', 'morphology', 'texture', 'histogram', 'ivh'],
+                'include_spatial_intensity': True,
+                'include_local_intensity': True}},
 ]
 
 # B. Config C (2mm isotropic, resegment [-1000, 400], FBS 25 HU)
 config_c = [
-    {"step": "binarize_mask", "params": {"threshold": 0.5}},
-    {"step": "resample", "params": {"new_spacing": (2.0, 2.0, 2.0), "interpolation": "linear", "round_intensities": True}},
-    {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    {"step": "discretise", "params": {"method": "FBS", "bin_width": 25.0, "min_val": -1000}},
-    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"], "include_spatial_intensity": True, "include_local_intensity": True, "ivh_discretisation": {"method": "FBS", "bin_width": 2.5, "min_val": -1000}, "ivh_params": {"target_range_max": 400}}}
+    {'step': 'binarize_mask', 'params': {'threshold': 0.5}},
+    {'step': 'resample',
+     'params': {'new_spacing': (2.0, 2.0, 2.0),
+                'interpolation': 'linear',
+                'round_intensities': True,
+                'mask_interpolation': 'linear',
+                'mask_threshold': 0.5}},
+    {'step': 'keep_largest_component', 'params': {'apply_to': 'morph'}},
+    {'step': 'resegment',
+     'params': {'range_min': -1000, 'range_max': 400, 'apply_to': 'intensity'}},
+    {'step': 'discretise',
+     'params': {'method': 'FBS', 'bin_width': 25.0, 'min_val': -1000}},
+    {'step': 'extract_features',
+     'params': {'families': ['intensity', 'morphology', 'texture', 'histogram', 'ivh'],
+                'include_spatial_intensity': True,
+                'include_local_intensity': True,
+                'ivh_discretisation': {'method': 'FBS',
+                                       'bin_width': 2.5,
+                                       'min_val': -1000},
+                'ivh_params': {'target_range_max': 400}}},
 ]
 
 # C. Config D (2mm isotropic, 3-sigma outlier, FBN 32, Continuous IVH)
 config_d = [
-    {"step": "binarize_mask", "params": {"threshold": 0.5}},
-    {"step": "resample", "params": {"new_spacing": (2.0, 2.0, 2.0), "interpolation": "linear", "round_intensities": True}},
-    {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-    {"step": "filter_outliers", "params": {"sigma": 3.0}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"], "include_spatial_intensity": True, "include_local_intensity": True, "ivh_use_continuous": True}}
+    {'step': 'binarize_mask', 'params': {'threshold': 0.5}},
+    {'step': 'resample',
+     'params': {'new_spacing': (2.0, 2.0, 2.0),
+                'interpolation': 'linear',
+                'round_intensities': True,
+                'mask_interpolation': 'linear',
+                'mask_threshold': 0.5}},
+    {'step': 'keep_largest_component', 'params': {'apply_to': 'morph'}},
+    {'step': 'filter_outliers', 'params': {'sigma': 3.0, 'apply_to': 'intensity'}},
+    {'step': 'discretise', 'params': {'method': 'FBN', 'n_bins': 32}},
+    {'step': 'extract_features',
+     'params': {'families': ['intensity', 'morphology', 'texture', 'histogram', 'ivh'],
+                'include_spatial_intensity': True,
+                'include_local_intensity': True,
+                'ivh_use_continuous': True}},
 ]
 
 # D. Config E (Cubic resamp, 3-sigma, round last, FBN 32 for tex, FBN 1000 for IVH)
 config_e = [
-    {"step": "binarize_mask", "params": {"threshold": 0.5}},
-    {"step": "resample", "params": {"new_spacing": (2.0, 2.0, 2.0), "interpolation": "cubic", "round_intensities": False}},
-    {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    {"step": "filter_outliers", "params": {"sigma": 3.0}},
-    {"step": "round_intensities", "params": {}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"], "include_spatial_intensity": True, "include_local_intensity": True, "ivh_discretisation": {"method": "FBN", "n_bins": 1000}, "ivh_params": {"bin_width": 1.0, "min_val": 0.5, "max_val": 1000.5}}}
+    {'step': 'binarize_mask', 'params': {'threshold': 0.5}},
+    {'step': 'resample',
+     'params': {'new_spacing': (2.0, 2.0, 2.0),
+                'interpolation': 'cubic',
+                'round_intensities': False,
+                'mask_interpolation': 'linear',
+                'mask_threshold': 0.5}},
+    {'step': 'keep_largest_component', 'params': {'apply_to': 'morph'}},
+    {'step': 'resegment',
+     'params': {'range_min': -1000, 'range_max': 400, 'apply_to': 'intensity'}},
+    {'step': 'filter_outliers', 'params': {'sigma': 3.0, 'apply_to': 'intensity'}},
+    {'step': 'round_intensities', 'params': {}},
+    {'step': 'discretise', 'params': {'method': 'FBN', 'n_bins': 32}},
+    {'step': 'extract_features',
+     'params': {'families': ['intensity', 'morphology', 'texture', 'histogram', 'ivh'],
+                'include_spatial_intensity': True,
+                'include_local_intensity': True,
+                'ivh_discretisation': {'method': 'FBN', 'n_bins': 1000},
+                'ivh_params': {'bin_width': 1.0, 'min_val': 0.5, 'max_val': 1000.5}}},
 ]
 
 # --- RUN PIPELINE ---
@@ -72,7 +109,7 @@ image = load_image("path/to/CT_image.nii.gz")
 mask = load_image("path/to/CT_mask.nii.gz")
 
 # 4. Run extraction
-results = pipeline.run(image, "ibsi_config_c", mask=mask)
+results = pipeline.run(image, mask, config_names=["ibsi_config_c"])
 
 # 5. Access results
 print(results["ibsi_config_c"])
