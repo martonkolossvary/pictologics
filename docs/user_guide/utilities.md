@@ -134,6 +134,8 @@ Pictologics provides flexible utilities for visualizing medical images and segme
 | **Image Only** | ✓ | ✗ | Grayscale image (with optional window/level) |
 | **Mask Only** | ✗ | ✓ | Colormap or grayscale mask display |
 
+In overlay mode, `alpha` sets how much of each mask color is mixed into the gray image: 0 shows the image only, 1 the mask color only, and 0.25 (the default) keeps the image visible through the mask. The mixed colors are stored in the red, green and blue channels, so the saved files are fully opaque.
+
 ### Interactive Viewer
 
 Scroll through slices interactively:

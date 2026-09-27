@@ -171,6 +171,28 @@ class TestCreateDisplayRgba:
         with pytest.raises(ValueError, match="At least one"):
             _create_display_rgba(None, None)
 
+    def test_overlay_mixes_mask_colors_by_alpha(self) -> None:
+        """Each label's color is mixed into the gray image by alpha (0: image only, 1: color
+        only); background pixels keep the gray value; labels past the colormap wrap; the
+        alpha channel stays 255 (the transparency is in the colors)."""
+        rng = np.random.default_rng(1)
+        img = rng.normal(40, 100, (64, 48))
+        mask = np.zeros((64, 48))
+        mask[10:20, 5:15] = 1
+        mask[30:40, 20:30] = 2
+        mask[45:55, 30:40] = 21  # tab20 has 20 colors: label 21 gets color 1
+        gray = _normalize_image(img.T).astype(np.float64)
+        for alpha in (0.0, 0.25, 0.6, 1.0):
+            rgba = _create_display_rgba(img, mask, alpha=alpha)
+            expected = np.repeat(gray[..., None], 3, axis=2)
+            for label in (1, 2, 21):
+                inside = mask.T == label
+                color = np.array(COLORMAPS["tab20"][(label - 1) % 20], dtype=np.float64)
+                expected[inside] = (1 - alpha) * expected[inside] + alpha * color
+            np.testing.assert_array_equal(rgba[..., :3], expected.astype(np.uint8))
+            assert np.all(rgba[..., 3] == 255)
+        assert tuple(_create_display_rgba(img, mask, alpha=1.0)[12, 12, :3]) == (31, 119, 180)
+
     def test_multi_label_mask(self) -> None:
         """Test multi-label mask overlay."""
         img = np.ones((64, 64)) * 100
