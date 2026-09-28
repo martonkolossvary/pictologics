@@ -374,6 +374,7 @@ def calculate_intensity_features(
 
     Args:
         values: 1D array of intensity values from the ROI (after mask application).
+            The sums run in float64, also for float32 values.
 
     Returns:
         Dictionary mapping feature names (with IBSI codes) to computed values.
@@ -396,6 +397,9 @@ def calculate_intensity_features(
     """
     if len(values) == 0:
         return {}
+    # float32 values (for example filter responses) would sum in float32: with its rounding
+    # errors, and in an order that depends on the numpy version.
+    values = np.asarray(values, dtype=np.float64)
 
     features: dict[str, float] = {}
 

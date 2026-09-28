@@ -126,7 +126,7 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 
 | Patient | Feature | Configuration | Pictologics Value | Team Value | Error | Range |
 |:--------|:--------|:-------------|----------:|-----------:|------:|------:|
-| STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7689 | 332.3 |
+| STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7690 | 332.3 |
 | STS_049_MRI | stat_qcod | LoG | 1749 | 13.98 | 1735 | 105.6 |
 | STS_021_MRI | stat_cov | LoG | -1097 | 79.72 | 1176 | 122.7 |
 | STS_045_MRI | stat_cov | LoG | -642.1 | -43.01 | 599.1 | 122.7 |
@@ -135,7 +135,7 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 | STS_020_PET | stat_cov | LoG | -1492 | -302.7 | 1190 | 308.1 |
 | STS_050_MRI | stat_cov | LoG | -181.1 | 30.95 | 212.1 | 122.7 |
 | STS_003_CT | stat_median | Coif3 LHH L1 | -0.02632 | 0.001908 | 0.02823 | 0.01912 |
-| STS_012_CT | stat_cov | Coif3 LHH L1 | -3.282e+05 | 6075 | 3.343e+05 | 2.325e+05 |
+| STS_012_CT | stat_cov | Coif3 LHH L1 | -3.283e+05 | 6075 | 3.343e+05 | 2.325e+05 |
 
 ### Cardiff University
 
@@ -144,9 +144,9 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 | Patient | Feature | Configuration | Pictologics Value | Team Value | Error | Range |
 |:--------|:--------|:-------------|----------:|-----------:|------:|------:|
 | STS_049_MRI | stat_qcod | LoG | 1749 | 13.98 | 1735 | 98.73 |
-| STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7689 | 544.8 |
+| STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7690 | 544.8 |
 | STS_021_MRI | stat_cov | LoG | -1097 | 27.56 | 1124 | 109.7 |
-| STS_045_MRI | stat_cov | LoG | -642.1 | 82.86 | 725 | 109.7 |
+| STS_045_MRI | stat_cov | LoG | -642.1 | 82.86 | 724.9 | 109.7 |
 | STS_014_CT | stat_qcod | LoG | -1188 | 46.59 | 1234 | 293.1 |
 | STS_050_CT | stat_qcod | Coif3 LHH L1 | -1.276e+05 | -1.726e+04 | 1.104e+05 | 2.741e+04 |
 | STS_021_CT | stat_qcod | Simon. L1 | 1.344e+05 | -5.431e+04 | 1.887e+05 | 5.585e+04 |
@@ -161,7 +161,7 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 | Patient | Feature | Configuration | Pictologics Value | Team Value | Error | Range |
 |:--------|:--------|:-------------|----------:|-----------:|------:|------:|
 | STS_049_MRI | stat_qcod | LoG | 1749 | 13.98 | 1735 | 108.8 |
-| STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7689 | 568.5 |
+| STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7690 | 568.5 |
 | STS_021_MRI | stat_cov | LoG | -1097 | 27.56 | 1124 | 102.5 |
 | STS_050_CT | stat_qcod | Coif3 LHH L1 | -1.276e+05 | -469.6 | 1.272e+05 | 1.482e+04 |
 | STS_021_CT | stat_qcod | Simon. L1 | 1.344e+05 | -1.688e+04 | 1.513e+05 | 1.982e+04 |
@@ -266,7 +266,7 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 | STS_001_CT | stat_qcod | Simon. L2 | 2018 | -15.17 | 2033 | 73.8 |
 | STS_046_CT | stat_qcod | Simon. L2 | -1328 | 4.325 | 1332 | 73.8 |
 | STS_049_MRI | stat_qcod | LoG | 1749 | 13.98 | 1735 | 110 |
-| STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7689 | 573.5 |
+| STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7690 | 573.5 |
 | STS_021_MRI | stat_cov | LoG | -1097 | 27.56 | 1124 | 102.5 |
 | STS_007_CT | stat_qcod | Simon. L2 | -799.8 | -8.832 | 791 | 73.8 |
 | STS_009_CT | stat_qcod | Simon. L2 | 689.8 | 23.41 | 666.4 | 73.8 |

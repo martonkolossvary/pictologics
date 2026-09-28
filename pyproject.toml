@@ -45,10 +45,6 @@ PyWavelets = "^1.4"
 pyyaml = ">=6.0"
 
 [tool.poetry.group.dev.dependencies]
-# The IBSI baselines come from numpy 2.2: numpy 2.3 and newer sum float32 values in another
-# order, so first-order statistics of filtered images move by up to 5e-7 (relative). Only
-# the lock (CI and development) keeps numpy 2.2 on Python 3.12 and 3.13.
-numpy = { version = "<2.3", python = "<3.14" }
 pytest = ">=7.0.0"
 mypy = ">=1.0.0"
 ruff = ">=0.8.0"
