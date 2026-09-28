@@ -11,21 +11,21 @@ jobs:
     environment: testpypi
     permissions:
       id-token: write  # Required for Trusted Publisher (OIDC)
-      contents: write  # Required for GitHub Pages deployment
+      contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
-          version: latest
+          version: 2.2.1
           virtualenvs-create: true
           virtualenvs-in-project: true
 
@@ -39,7 +39,19 @@ jobs:
 
       - name: Run tests
         run: |
-          poetry run pytest -q --cov=pictologics --cov-report=xml
+          poetry run pytest -q -n auto --cov=pictologics --cov-report=xml
+
+      - name: Check the version
+        run: |
+          # The release tag without "v" and a pre-release suffix (v0.6.0-rc -> 0.6.0) must
+          # equal the version in pyproject.toml and in pictologics/__init__.py.
+          TAG="${GITHUB_REF#refs/tags/}"
+          BASE="${TAG#v}"
+          BASE="${BASE%%-*}"
+          PROJECT="$(poetry version -s)"
+          CODE="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' pictologics/__init__.py)"
+          echo "tag $TAG, pyproject $PROJECT, __version__ $CODE"
+          test "$BASE" = "$PROJECT" && test "$BASE" = "$CODE"
 
       - name: Build package
         run: |

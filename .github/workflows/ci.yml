@@ -11,14 +11,14 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
-        # Note: Python 3.14 not yet available in GitHub Actions
+        # Python 3.14 needs numba 0.63 or newer; pyproject.toml pins numba 0.62.
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Install Poetry
-        run: pipx install poetry
+        run: pipx install poetry==2.2.1
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -45,7 +45,7 @@ jobs:
 
       - name: Pytest
         run: |
-          poetry run pytest -q --cov=pictologics --cov-report=xml --cov-report=term-missing
+          poetry run pytest -q -n auto --cov=pictologics --cov-report=xml --cov-report=term-missing
 
       - name: JIT smoke
         env:
@@ -101,6 +101,13 @@ jobs:
         run: |
           poetry run mkdocs build --strict
 
+      # The docs job deploys this site, so the docs are built once per push.
+      - name: Upload Pages artifact
+        if: matrix.python-version == '3.12' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./site
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
         with:
@@ -121,31 +128,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Poetry
-        run: pipx install poetry
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: 'poetry'
-
-      - name: Install dependencies
-        run: |
-          poetry install --no-interaction
-
-      - name: Build documentation
-        run: |
-          poetry run mkdocs build --strict
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: ./site
-
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5

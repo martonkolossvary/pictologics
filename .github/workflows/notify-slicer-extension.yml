@@ -9,7 +9,7 @@ name: Notify SlicerPictologics of release
 # Requires an org/repo secret SLICER_EXTENSION_DISPATCH_TOKEN: a personal access token
 # (classic "repo" scope, or a fine-grained token with "contents: write") on
 # martonkolossvary/SlicerPictologics. The default GITHUB_TOKEN cannot dispatch to
-# another repository. Until that secret is configured this workflow is inert.
+# another repository. Until that secret is configured, the job only prints a notice.
 
 on:
   release:
@@ -23,11 +23,18 @@ jobs:
     name: Request extension version-bump adoption
     runs-on: ubuntu-latest
     if: ${{ !github.event.release.prerelease }}
+    env:
+      DISPATCH_TOKEN: ${{ secrets.SLICER_EXTENSION_DISPATCH_TOKEN }}
     steps:
+      - name: Skip without the dispatch token
+        if: env.DISPATCH_TOKEN == ''
+        run: echo "::notice::SLICER_EXTENSION_DISPATCH_TOKEN is not set, so no dispatch was sent."
+
       - name: Send repository_dispatch to SlicerPictologics
+        if: env.DISPATCH_TOKEN != ''
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.SLICER_EXTENSION_DISPATCH_TOKEN }}
+          token: ${{ env.DISPATCH_TOKEN }}
           repository: martonkolossvary/SlicerPictologics
           event-type: pictologics-release
           client-payload: '{"version": "${{ github.event.release.tag_name }}"}'
