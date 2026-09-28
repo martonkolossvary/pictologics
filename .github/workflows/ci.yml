@@ -10,8 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
-        # Python 3.14 needs numba 0.63 or newer; pyproject.toml pins numba 0.62.
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout

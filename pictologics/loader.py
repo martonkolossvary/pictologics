@@ -149,7 +149,8 @@ def _normalize_direction_columns(
     safe_norms = np.where(norms > 0.0, norms, 1.0)
     direction = direction / safe_norms
     direction[:, norms == 0.0] = np.eye(3)[:, norms == 0.0]
-    return cast(npt.NDArray[np.float64], direction)
+    # numpy 2.3+ type hints know the type; numpy 2.2 hints return Any
+    return cast(npt.NDArray[np.float64], direction)  # type: ignore[redundant-cast]
 
 
 def _functional_group_item(group: Any, sequence_name: str) -> Any:

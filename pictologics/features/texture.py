@@ -338,11 +338,11 @@ def _calculate_local_features_numba(
     n_threads: int,
     merge_directions: bool = False,
 ) -> tuple[
-    npt.NDArray[np.floating[Any]],
-    npt.NDArray[np.floating[Any]],
-    npt.NDArray[np.floating[Any]],
-    npt.NDArray[np.floating[Any]],
-    npt.NDArray[np.floating[Any]],
+    npt.NDArray[Any],
+    npt.NDArray[Any],
+    npt.NDArray[Any],
+    npt.NDArray[Any],
+    npt.NDArray[Any],
 ]:
     """
     Calculate GLCM, GLRLM, NGTDM, and NGLDM in a single pass.
@@ -546,15 +546,20 @@ def _calculate_local_features_numba(
                         dir_step,
                     )
 
-    # Aggregate results from all threads.
+    # Aggregate results from all threads into uint64 tables. (np.sum of uint32 gives uint64
+    # in NumPy and numba 0.62, but int64 in numba 0.67.)
     # Keep stable output shapes even when a matrix is not requested.
     if calc_glcm:
-        glcm = np.sum(glcm_local, axis=0)
+        glcm = np.zeros(glcm_local.shape[1:], dtype=np.uint64)
+        for t in range(glcm_local.shape[0]):
+            glcm += glcm_local[t]
     else:
         glcm = np.zeros((n_dirs, n_bins, n_bins), dtype=np.uint64)
 
     if calc_glrlm:
-        glrlm = np.sum(glrlm_local, axis=0)
+        glrlm = np.zeros(glrlm_local.shape[1:], dtype=np.uint64)
+        for t in range(glrlm_local.shape[0]):
+            glrlm += glrlm_local[t]
     else:
         glrlm = np.zeros((n_dirs, n_bins, 1), dtype=np.uint64)
 
@@ -566,7 +571,9 @@ def _calculate_local_features_numba(
         ngtdm_n = np.zeros((n_bins,), dtype=np.float64)
 
     if calc_ngldm:
-        ngldm = np.sum(ngldm_local, axis=0)
+        ngldm = np.zeros(ngldm_local.shape[1:], dtype=np.uint64)
+        for t in range(ngldm_local.shape[0]):
+            ngldm += ngldm_local[t]
     else:
         ngldm = np.zeros((n_bins, 27), dtype=np.uint64)
 
@@ -2062,7 +2069,7 @@ def _glszm_features(
     J2 = J * J
     P = c / N_zones
 
-    features = {}
+    features: dict[str, float] = {}
 
     # Small Zone Emphasis (SZE) - P001
     features["small_zone_emphasis_P001"] = np.sum(P / J2)

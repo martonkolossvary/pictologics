@@ -28,12 +28,15 @@ exclude = ["tests", "docs", "scripts", "site", "coverage.xml", "junit.xml"]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.15"
-numpy = ">=2.0"
+numpy = [
+    { version = ">=2.0", python = "<3.14" },
+    { version = ">=2.3.2", python = ">=3.14" },  # the first numpy with a Python 3.14 build
+]
 scipy = "^1.16.3"
 nibabel = ">=3.2.0"
 pydicom = ">=2.2.0"
 highdicom = ">=0.22.0"
-numba = "^0.62.1"
+numba = "^0.67.0"
 pandas = ">=2.0.0"
 tqdm = "^4.66.0"
 matplotlib = "^3.10.0"
@@ -42,6 +45,10 @@ PyWavelets = "^1.4"
 pyyaml = ">=6.0"
 
 [tool.poetry.group.dev.dependencies]
+# The IBSI baselines come from numpy 2.2: numpy 2.3 and newer sum float32 values in another
+# order, so first-order statistics of filtered images move by up to 5e-7 (relative). Only
+# the lock (CI and development) keeps numpy 2.2 on Python 3.12 and 3.13.
+numpy = { version = "<2.3", python = "<3.14" }
 pytest = ">=7.0.0"
 mypy = ">=1.0.0"
 ruff = ">=0.8.0"
@@ -82,6 +89,12 @@ exclude_gitignore = true
 [[tool.mypy.overrides]]
 module = ["tests.*", "dev.*"]
 ignore_errors = true
+
+# numba 0.67 ships incomplete type hints (prange, jitted calls, numba.config); read numba as
+# untyped, as mypy did before numba had type hints.
+[[tool.mypy.overrides]]
+module = ["numba", "numba.*"]
+follow_imports = "skip"
 
 [tool.ruff]
 line-length = 100
