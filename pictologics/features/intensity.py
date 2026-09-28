@@ -950,15 +950,16 @@ def _spatial_sums_fft(
     np.sqrt(kernel, out=kernel)
     np.divide(1.0, kernel, out=kernel)
     kernel[0, 0, 0] = 0.0
-    kernel_f = scipy.fft.rfftn(kernel, workers=-1)
+    workers = get_num_threads()
+    kernel_f = scipy.fft.rfftn(kernel, workers=workers)
     del kernel
     box = tuple(slice(0, n) for n in roi.shape)
 
     def convolve(a: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """K * a at the ROI voxels."""
-        spectrum = scipy.fft.rfftn(a, fshape, workers=-1)
+        spectrum = scipy.fft.rfftn(a, fshape, workers=workers)
         spectrum *= kernel_f
-        full = scipy.fft.irfftn(spectrum, fshape, workers=-1, overwrite_x=True)
+        full = scipy.fft.irfftn(spectrum, fshape, workers=workers, overwrite_x=True)
         return np.asarray(full[box][roi])
 
     weights = convolve(roi.astype(np.float64))

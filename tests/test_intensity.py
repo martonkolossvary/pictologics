@@ -446,6 +446,23 @@ class TestIntensityFeatures(unittest.TestCase):
         for key, value in pair.items():
             self.assertAlmostEqual(fft[key], value, delta=1e-12 * abs(value))
 
+    def test_spatial_intensity_fft_threads_follow_numba(self) -> None:
+        # The FFT sums use numba's thread count, with the same values.
+        import scipy.fft
+
+        image, roi = self._spatial_case()
+        with patch("pictologics.features.intensity._FFT_MIN_PAIRS_PER_POINT", 0):
+            expected = calculate_spatial_intensity_features(image, roi)
+            with (
+                patch("pictologics.features.intensity.get_num_threads", return_value=2),
+                patch.object(scipy.fft, "rfftn", wraps=scipy.fft.rfftn) as rfftn,
+                patch.object(scipy.fft, "irfftn", wraps=scipy.fft.irfftn) as irfftn,
+            ):
+                self.assertEqual(calculate_spatial_intensity_features(image, roi), expected)
+        calls = rfftn.call_args_list + irfftn.call_args_list
+        self.assertTrue(calls)
+        self.assertTrue(all(c.kwargs["workers"] == 2 for c in calls))
+
     def test_spatial_intensity_fft_memory_cap(self) -> None:
         # Above the memory cap, the pair loop runs and a warning gives the expected time.
         from pictologics.features.intensity import _fft_memory_cap

@@ -1,7 +1,6 @@
 # pictologics/filters/wavelets.py
 """Wavelet transform implementations (separable and non-separable)."""
 
-import os
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, List, Optional, Tuple, Union, cast
@@ -9,6 +8,7 @@ from typing import Any, List, Optional, Tuple, Union, cast
 import numpy as np
 import pywt
 import scipy.fft
+from numba import get_num_threads
 from numpy import typing as npt
 from scipy.ndimage import convolve1d
 
@@ -157,7 +157,7 @@ def wavelet_transform(
             # Pool the responses in rotation order, as the sequential path does, so the
             # result does not depend on thread timing. At most `workers` rotations are
             # in flight, and each response is dropped once pooled.
-            workers = min(len(rotations), os.cpu_count() or 1)
+            workers = min(len(rotations), get_num_threads())
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 pending: deque[Future[npt.NDArray[np.floating[Any]]]] = deque()
                 for rotation in rotations:
@@ -380,11 +380,12 @@ def simoncelli_wavelet(
         g_sim = _simoncelli_transfer(shape, level)
 
         # Apply filter in frequency domain using full FFT (full FFT required because
-        # the centered grid is non-symmetric for even N). scipy.fft with workers=-1
-        # is multithreaded and matches np.fft to float32 precision.
+        # the centered grid is non-symmetric for even N). scipy.fft with numba's thread
+        # count is multithreaded and matches np.fft to float32 precision.
         axes = tuple(range(ndim))
-        spectrum = _times_transfer(scipy.fft.fftn(arr, workers=-1), g_sim)
-        response = scipy.fft.ifftn(spectrum, s=shape, axes=axes, workers=-1, overwrite_x=True)
+        workers = get_num_threads()
+        spectrum = _times_transfer(scipy.fft.fftn(arr, workers=workers), g_sim)
+        response = scipy.fft.ifftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
 
         return cast(npt.NDArray[np.floating[Any]], np.real(response).astype(np.float32))
 

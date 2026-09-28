@@ -6,6 +6,7 @@ from typing import Any, Optional, Tuple, Union, cast
 
 import numpy as np
 import scipy.fft
+from numba import get_num_threads
 from numpy import typing as npt
 
 from .base import (
@@ -165,13 +166,14 @@ def riesz_transform(
         # or the source mask — so it is built once and cached (see _riesz_transfer).
         transfer = _riesz_transfer(shape, order)
 
-        # Apply in frequency domain using Real FFT. scipy.fft (multithreaded via
-        # workers=-1) is several times faster than the single-threaded np.fft and
-        # matches it to float32 precision.
+        # Apply in frequency domain using Real FFT. scipy.fft (multithreaded, with
+        # numba's thread count) is several times faster than the single-threaded np.fft
+        # and matches it to float32 precision.
         axes = tuple(range(ndim))
+        workers = get_num_threads()
         # The spectrum has shape (N1, N2, N3//2 + 1), the shape of the transfer.
-        spectrum = _times_transfer(scipy.fft.rfftn(arr, workers=-1), transfer)
-        response = scipy.fft.irfftn(spectrum, s=shape, axes=axes, workers=-1, overwrite_x=True)
+        spectrum = _times_transfer(scipy.fft.rfftn(arr, workers=workers), transfer)
+        response = scipy.fft.irfftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
 
         return cast(npt.NDArray[np.floating[Any]], response.astype(np.float32))
 

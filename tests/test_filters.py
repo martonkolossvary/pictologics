@@ -1351,3 +1351,53 @@ def test_laws_rotations_pool_as_the_rotation_loop() -> None:
                     assert result.dtype == expected.dtype
                     bits = np.uint32 if result.dtype == np.float32 else np.uint64
                     assert_array_equal(result.view(bits), expected.view(bits))
+
+
+def test_filter_threads_follow_the_numba_thread_count() -> None:
+    """The FFT filters, the rotation threads of the wavelet and Laws filters and the slice
+    threads of the Gabor filter use numba's thread count, with the same values."""
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import ExitStack
+    from unittest.mock import patch
+
+    import scipy.fft
+
+    from pictologics.filters import gabor, laws, riesz, wavelets
+
+    image = np.random.default_rng(7).normal(size=(12, 11, 10)).astype(np.float32)
+    fft_runs = {
+        "simoncelli": lambda: simoncelli_wavelet(image, level=2),
+        "riesz": lambda: riesz_transform(image, order=(1, 0, 0)),
+    }
+    pool_runs = {
+        "wavelet": lambda: wavelet_transform(
+            image, wavelet="haar", rotation_invariant=True, use_parallel=True
+        ),
+        "laws": lambda: laws_filter(image, "L3E3S3", rotation_invariant=True, use_parallel=True),
+        "gabor": lambda: gabor_filter(image, sigma_mm=2.0, lambda_mm=3.0, use_parallel=True),
+    }
+    expected = {name: run() for name, run in {**fft_runs, **pool_runs}.items()}
+    with ExitStack() as stack:
+        for module in (gabor, laws, riesz, wavelets):
+            stack.enter_context(patch.object(module, "get_num_threads", return_value=2))
+        ffts = [
+            stack.enter_context(patch.object(scipy.fft, name, wraps=getattr(scipy.fft, name)))
+            for name in ("fftn", "ifftn", "rfftn", "irfftn")
+        ]
+        for name, run in fft_runs.items():
+            assert_array_equal(run(), expected[name])
+        assert all(fft.called for fft in ffts)
+        assert all(c.kwargs["workers"] == 2 for fft in ffts for c in fft.call_args_list)
+        pools = [
+            stack.enter_context(
+                patch.object(module, "ThreadPoolExecutor", wraps=ThreadPoolExecutor)
+            )
+            for module in (wavelets, laws, gabor)
+        ]
+        for name, run in pool_runs.items():
+            assert_array_equal(run(), expected[name])
+    assert [[c.kwargs["max_workers"] for c in pool.call_args_list] for pool in pools] == [
+        [2],
+        [2],
+        [2],
+    ]

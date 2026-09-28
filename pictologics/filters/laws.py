@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union, cast, overload
 
 import numpy as np
+from numba import get_num_threads
 from numpy import typing as npt
 from scipy.ndimage import convolve1d, uniform_filter
 
@@ -339,7 +340,7 @@ def laws_filter(
             )
 
         if use_parallel:
-            with ThreadPoolExecutor() as executor:
+            with ThreadPoolExecutor(max_workers=get_num_threads()) as executor:
                 result = _pool_rotations(executor.map(_base, base_perms.values()), steps, pooling)
         else:
             result = _pool_rotations(map(_base, base_perms.values()), steps, pooling)

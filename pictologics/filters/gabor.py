@@ -6,6 +6,7 @@ from typing import Any, Optional, Tuple, Union, cast
 
 import numpy as np
 import scipy.fft
+from numba import get_num_threads
 from numpy import typing as npt
 
 from .base import (
@@ -309,7 +310,7 @@ def _apply_gabor_to_plane(
 
     if use_parallel:
         # Parallel processing for large images
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=get_num_threads()) as executor:
             # image_reordered[i] is a view, no copy needed
             processed = list(
                 executor.map(process_slice, [image_reordered[i] for i in range(n_slices)])

@@ -51,12 +51,12 @@ Common presets:
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import numpy as np
+from numba import get_num_threads
 from numpy import typing as npt
 from PIL import Image as PILImage
 
@@ -607,7 +607,7 @@ def save_slices(
 
     # Slices in threads: PIL releases the GIL while it resizes and encodes. At most 8
     # threads, as each holds one resized slice (about 20 MB at 300 dpi for 512 x 512).
-    workers = min(8, os.cpu_count() or 1, max(1, len(slice_indices)))
+    workers = min(8, get_num_threads(), max(1, len(slice_indices)))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         return list(executor.map(save_slice, slice_indices))
 

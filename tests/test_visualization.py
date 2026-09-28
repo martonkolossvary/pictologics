@@ -463,7 +463,8 @@ class TestSaveSlices:
     def test_save_uses_threads_and_png_level_3(
         self, synthetic_image: Image, tmp_path: Path
     ) -> None:
-        """At most 8 threads (and not more than the slices), and PNG compression level 3."""
+        """At most 8 threads (and not more than numba's threads or the slices), and PNG
+        compression level 3."""
         from concurrent.futures import ThreadPoolExecutor
 
         from PIL import Image as PILImage
@@ -474,11 +475,14 @@ class TestSaveSlices:
         with (
             patch.object(visualization, "ThreadPoolExecutor", wraps=ThreadPoolExecutor) as pool,
             patch.object(PILImage.Image, "save", autospec=True, side_effect=save) as saved,
-            patch("os.cpu_count", return_value=16),
+            patch.object(visualization, "get_num_threads", side_effect=[16, 16, 3]),
         ):
             save_slices(str(tmp_path), image=synthetic_image, slice_selection="every_1")
             save_slices(str(tmp_path), image=synthetic_image, slice_selection=[1, 2], format="tiff")
-        assert [c.kwargs["max_workers"] for c in pool.call_args_list] == [8, 2]
+            save_slices(
+                tmp_path, image=synthetic_image, slice_selection=[1, 2, 3, 4], format="tiff"
+            )
+        assert [c.kwargs["max_workers"] for c in pool.call_args_list] == [8, 2, 3]
         options = [c.kwargs for c in saved.call_args_list]
         assert all(o.get("compress_level") == 3 for o in options[:20])
         assert all("compress_level" not in o for o in options[20:])
