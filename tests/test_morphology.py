@@ -253,24 +253,22 @@ class TestMorphologyFeatures(unittest.TestCase):
         self.assertEqual(features, {})
 
     def test_marching_cubes_matches_pymcubes(self):
-        # The kernel gives the PyMCubes mesh: the same vertices and faces, in the same order.
-        import mcubes
-        from scipy.ndimage import gaussian_filter
-
+        # The kernel gives the PyMCubes 0.1.6 mesh: the same vertices and faces, in the same
+        # order. The file holds 32 masks and their PyMCubes meshes, made once with PyMCubes.
         from pictologics.features._mc_tables import EDGE_TABLE, TRIANGLE_COUNT, TRIANGLE_TABLE
         from pictologics.features.morphology import _marching_cubes_numba
 
-        rng = np.random.default_rng(3)
-        masks = [np.ones((1, 1, 1)), np.ones((3, 1, 2))]
-        for n in range(30):
-            field = rng.random(tuple(int(s) for s in rng.integers(1, 12, 3)))
-            masks.append(field < 0.5 if n % 2 else gaussian_filter(field, 1.0) > 0.5)
-        for m in masks:
-            padded = np.pad(m.astype(np.uint8), 1)
-            ref_verts, ref_faces = mcubes.marching_cubes(padded.astype(np.float32), 0.5)
-            verts, faces = _marching_cubes_numba(padded, EDGE_TABLE, TRIANGLE_TABLE, TRIANGLE_COUNT)
-            np.testing.assert_array_equal(verts, ref_verts)
-            np.testing.assert_array_equal(faces, ref_faces.astype(np.int64))
+        path = os.path.join(os.path.dirname(__file__), "data", "marching_cubes_pymcubes.npz")
+        with np.load(path) as ref:
+            count = sum(key.startswith("mask_") for key in ref.files)
+            self.assertEqual(count, 32)
+            for i in range(count):
+                padded = np.pad(ref[f"mask_{i}"], 1)
+                verts, faces = _marching_cubes_numba(
+                    padded, EDGE_TABLE, TRIANGLE_TABLE, TRIANGLE_COUNT
+                )
+                np.testing.assert_array_equal(verts, ref[f"verts_{i}"])
+                np.testing.assert_array_equal(faces, ref[f"faces_{i}"])
 
     def test_mesh_features_empty_bbox(self):
         # A given bbox with no ROI voxel gives no mesh features.

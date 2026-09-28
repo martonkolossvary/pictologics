@@ -1655,7 +1655,7 @@ version = "2.2.6"
 description = "Fundamental package for array computing in Python"
 optional = false
 python-versions = ">=3.10"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "numpy-2.2.6-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:b412caa66f72040e6d268491a59f2c43bf03eb6c96dd8f0307829feb7fa2b6fb"},
     {file = "numpy-2.2.6-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:8e41fd67c52b86603a91c1a505ebaef50b3314de0213461c7a6e99c9a3beff90"},
@@ -2095,37 +2095,6 @@ files = [
 numpy = ">=2.0"
 
 [[package]]
-name = "pymcubes"
-version = "0.1.6"
-description = "Marching cubes for Python"
-optional = false
-python-versions = "*"
-groups = ["dev"]
-files = [
-    {file = "PyMCubes-0.1.6-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:8b66c714abb554dbb0cc3fa75fc1fd24e27dc2cc618a2685832b825156848792"},
-    {file = "PyMCubes-0.1.6-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:e37a81ffff099e8d275c4c973f34978934720120a02d06198c410f48c9f6b7d0"},
-    {file = "PyMCubes-0.1.6-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:16ed358f20f514def6b4669d4714f86429c609421f167a2fd28731b71adf381a"},
-    {file = "PyMCubes-0.1.6-cp310-cp310-win_amd64.whl", hash = "sha256:8433ecf1ef8dca963056d0b5e8ce9d6a1d5160764a199fd1a375a4ab58e89a3c"},
-    {file = "PyMCubes-0.1.6-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:e859a7aaa97bfc909079ce1ecbc12f0bc61b49b8b01ee0d59eaabf9a7f266a9f"},
-    {file = "PyMCubes-0.1.6-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:8f1246d4ef9dee648a111060aac95f0b99f9b36c937436e75af4cae57b5f50f7"},
-    {file = "PyMCubes-0.1.6-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:323b1d6454e3092ce2ba42c0ce69a753cb646fbda33d5274f03514a68f4441c8"},
-    {file = "PyMCubes-0.1.6-cp311-cp311-win_amd64.whl", hash = "sha256:4e326cba1471047567e016c39fa2b4934dd451e9f1feec63a35e23bbcab1d34c"},
-    {file = "PyMCubes-0.1.6-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:6dea0bfb68778d7f9becd87c86a396c9ffbb8f322c184967fa2a48d430974513"},
-    {file = "PyMCubes-0.1.6-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:138eaa87d2b8daf7488102070191e8e99254d48b6f08577a618db6e95fd53f90"},
-    {file = "PyMCubes-0.1.6-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ea366a2064af0846093e0ad3f9035e375f4b14b62bb565c95dcc8dcaf78308a5"},
-    {file = "PyMCubes-0.1.6-cp312-cp312-win_amd64.whl", hash = "sha256:8926475690ce1e0be2460c941a51cdda6eed6f10986073d23fc67535bc70aa78"},
-    {file = "PyMCubes-0.1.6-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:8a688c49fdaee472703075c2ac86ca42663407d24ac97a02b6004ac39cdca1ff"},
-    {file = "PyMCubes-0.1.6-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:31cc86d26baa5db3248700f662bdfe6de383c5c179e68c123c1f54ed81708b4f"},
-    {file = "PyMCubes-0.1.6-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0dd6e2e3b7d1682251071c628266b669388e5e338199f8855923af8ee192c94e"},
-    {file = "PyMCubes-0.1.6-cp39-cp39-win_amd64.whl", hash = "sha256:cf65b37f6047508e6c5e640a5cb7b8910a4e420ad9605352bbcd73c9394360d0"},
-    {file = "pymcubes-0.1.6.tar.gz", hash = "sha256:1a72476a22a4c98907acec0c5ef8d46f4451fa987c7efeaf970990775826ed8b"},
-]
-
-[package.dependencies]
-numpy = ">=1.21"
-scipy = ">=1.0.0"
-
-[[package]]
 name = "pymdown-extensions"
 version = "10.17.2"
 description = "Extension pack for Python Markdown."
@@ -2548,7 +2517,7 @@ version = "1.17.0"
 description = "Fundamental algorithms for scientific computing in Python"
 optional = false
 python-versions = ">=3.11"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "scipy-1.17.0-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:2abd71643797bd8a106dff97894ff7869eeeb0af0f7a5ce02e4227c6a2e9d6fd"},
     {file = "scipy-1.17.0-cp311-cp311-macosx_12_0_arm64.whl", hash = "sha256:ef28d815f4d2686503e5f4f00edc387ae58dfd7a2f42e348bb53359538f01558"},
@@ -2858,4 +2827,4 @@ watchmedo = ["PyYAML (>=3.10)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "58acea6264dd2f22d0e3aeae730208ad6714bb5aa2a15826951761820822653a"
+content-hash = "70e76b60e7e586ecf8809f157f026689914bf6d39f49a7e906896e6975b00a5c"

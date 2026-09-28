@@ -54,7 +54,6 @@ twine = "^6.2.0"
 pytest-xdist = "^3.8.0"
 types-pyyaml = "^6.0.12.20250915"
 towncrier = ">=24.8.0"
-pymcubes = "^0.1.6"  # reference mesh for the marching cubes test
 
 [tool.poetry.group.benchmark]
 optional = true
