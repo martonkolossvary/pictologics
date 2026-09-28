@@ -2999,6 +2999,8 @@ class RadiomicsPipeline:
             "families",
             "include_spatial_intensity",
             "include_local_intensity",
+            "spatial_intensity_params",
+            "local_intensity_params",
             "texture_matrix_params",
             "ivh_params",
             "ivh_use_continuous",

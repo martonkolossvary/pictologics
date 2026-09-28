@@ -641,6 +641,8 @@ class TestValidation:
                     "families": ["ivh"],
                     "ivh_use_continuous": True,
                     "ivh_discretisation": {"method": "FBS", "bin_width": 5},
+                    "spatial_intensity_params": {},
+                    "local_intensity_params": {},
                 },
             },
         ]
