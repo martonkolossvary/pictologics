@@ -1,1 +1,1 @@
-PyMCubes is no longer a dependency. Pictologics builds its marching cubes mesh with its own kernel, and the tests check that kernel against 32 PyMCubes meshes stored once in `tests/data/marching_cubes_pymcubes.npz` (PyMCubes has no Python 3.14 build).
+PyMCubes is no longer a dependency. Pictologics builds its marching cubes mesh with its own kernel. The tests check that kernel against 32 PyMCubes meshes stored in `tests/data/marching_cubes_pymcubes.npz`.

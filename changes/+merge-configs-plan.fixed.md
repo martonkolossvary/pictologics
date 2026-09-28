@@ -1,1 +1,1 @@
-`merge_configs` now marks the deduplication plan out of date, as `add_config` and `remove_config` do. `to_dict()`, `to_json()`, `to_yaml()` and `save_configs()` exported the plan of the configurations before the merge.
+`merge_configs` now marks the deduplication plan out of date, as `add_config` and `remove_config` do. Before, `to_dict()`, `to_json()`, `to_yaml()` and `save_configs()` exported the plan of the configurations before the merge.
