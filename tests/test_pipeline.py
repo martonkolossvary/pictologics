@@ -106,6 +106,14 @@ def test_run_loading_variations(
     assert mask_call.args == ("mask.nii",)
     assert mask_call.kwargs["reference_image"] is mock_image
 
+    # 1b. pathlib.Path image and mask load as their strings
+    mock_load.reset_mock()
+    mock_load.side_effect = [mock_image, mock_mask]
+    pipeline.run(Path("img.nii"), Path("mask.nii"), config_names=["t1"])
+    assert [c.args for c in mock_load.call_args_list] == [("img.nii",), ("mask.nii",)]
+    assert pipeline._log[-1]["image_source"] == "img.nii"
+    assert pipeline._log[-1]["mask_source"] == "mask.nii"
+
     # 2. Image obj, Mask obj
     mock_load.reset_mock()
     pipeline.run(mock_image, mock_mask, config_names=["t1"])

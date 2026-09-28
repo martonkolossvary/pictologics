@@ -1115,6 +1115,7 @@ class TestDicomDatabase:
             result = db.export_json(str(json_path))
 
             assert Path(result).exists()
+            assert db.export_json(json_path) == result  # a Path gives the same string
 
             with open(result) as f:
                 data = json.load(f)

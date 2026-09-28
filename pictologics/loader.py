@@ -695,7 +695,7 @@ def _is_dicom_seg(path: str) -> bool:
 
 
 def load_image(
-    path: str,
+    path: str | Path,
     dataset_index: int = 0,
     recursive: bool = False,
     reference_image: Optional[Image] = None,
@@ -729,7 +729,7 @@ def load_image(
         ("World Coordinate Frames").
 
     Args:
-        path (str): The absolute or relative path to the image file (e.g., .nii.gz,
+        path (str | Path): The absolute or relative path to the image file (e.g., .nii.gz,
             .dcm or file with no extension) or the directory containing DICOM files.
         dataset_index (int, optional): For multi-volume datasets, specifies which
             volume to extract (0-indexed). This works for:
@@ -842,6 +842,7 @@ def load_image(
         img = load_image("cardiac_ct/", dataset_index=4)
         ```
     """
+    path = str(path)
     path_obj = Path(path)
     if not path_obj.exists():
         raise ValueError(f"The specified path does not exist: {path}")
@@ -916,7 +917,7 @@ def load_image(
 
 
 def load_and_merge_images(
-    image_paths: list[str],
+    image_paths: Sequence[str | Path],
     reference_image: Optional[Image] = None,
     conflict_resolution: str = "max",
     dataset_index: int = 0,
@@ -951,7 +952,7 @@ def load_and_merge_images(
     - **Nested directories** (if paths point to folders containing DICOMs).
 
     Args:
-        image_paths (list[str]): List of absolute or relative paths to the images.
+        image_paths (Sequence[str | Path]): List of absolute or relative paths to the images.
             These can be file paths or directory paths.
         reference_image (Optional[Image]): An optional reference image (e.g., the scan
             corresponding to the masks). If provided, the merged image is validated

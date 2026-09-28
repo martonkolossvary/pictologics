@@ -158,7 +158,7 @@ def split_dicom_phases(
 
 
 def get_dicom_phases(
-    path: str,
+    path: str | Path,
     recursive: bool = False,
 ) -> list[DicomPhaseInfo]:
     """Discover phases in a DICOM series directory.

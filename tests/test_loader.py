@@ -2444,5 +2444,23 @@ def test_nifti_loads_the_values_of_get_fdata_in_one_pass(tmp_path: "os.PathLike[
     assert nib.load(str(Path(tmp_path) / "offset.nii")).dataobj.inter == 5.0
 
 
+def test_load_image_accepts_path_objects(tmp_path: "os.PathLike[str]") -> None:
+    # A pathlib.Path loads the same image as its string, also in load_and_merge_images.
+    from pathlib import Path
+
+    import nibabel as nib
+
+    data = np.arange(60, dtype=np.int16).reshape(5, 4, 3)
+    image = Path(tmp_path) / "image.nii.gz"
+    mask = Path(tmp_path) / "mask.nii.gz"
+    nib.save(nib.Nifti1Image(data, np.eye(4)), image)
+    nib.save(nib.Nifti1Image((data > 30).astype(np.uint8), np.eye(4)), mask)
+    np.testing.assert_array_equal(load_image(image).array, load_image(str(image)).array)
+    np.testing.assert_array_equal(
+        load_and_merge_images([mask, mask]).array,
+        load_and_merge_images([str(mask), str(mask)]).array,
+    )
+
+
 if __name__ == "__main__":
     unittest.main()

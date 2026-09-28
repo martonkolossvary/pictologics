@@ -436,7 +436,7 @@ def _get_reference_array(
 
 
 def save_slices(
-    output_dir: str,
+    output_dir: str | Path,
     image: Optional[Image] = None,
     mask: Optional[Image] = None,
     slice_selection: Union[str, int, list[int]] = "10%",

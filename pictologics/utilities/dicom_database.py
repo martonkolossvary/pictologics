@@ -626,7 +626,7 @@ class DicomDatabase:
 
     def export_csv(
         self,
-        base_path: str,
+        base_path: str | Path,
         levels: Optional[list[str]] = None,
         include_instance_lists: bool = False,
     ) -> dict[str, str]:
@@ -682,7 +682,7 @@ class DicomDatabase:
 
     def export_json(
         self,
-        json_path: str,
+        json_path: str | Path,
         include_instance_lists: bool = True,
     ) -> str:
         """Export full hierarchy to JSON.
@@ -762,7 +762,7 @@ class DicomDatabase:
         with open(json_path, "w") as f:
             json.dump(data, f, indent=2, default=str)
 
-        return json_path
+        return str(json_path)
 
 
 # ============================================================================

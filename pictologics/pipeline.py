@@ -698,8 +698,8 @@ class RadiomicsPipeline:
 
     def run(
         self,
-        image: str | Image,
-        mask: str | Image | None = None,
+        image: str | Path | Image,
+        mask: str | Path | Image | None = None,
         subject_id: Optional[str] = None,
         config_names: Optional[list[str]] = None,
         mask_subvoxel_tolerance: float = 0.5,
@@ -710,8 +710,8 @@ class RadiomicsPipeline:
         Run configurations on the provided image and mask.
 
         Args:
-            image: Path to image or Image object.
-            mask: Optional path to mask or Image object.
+            image: Path to image (str or Path) or Image object.
+            mask: Optional path to mask (str or Path) or Image object.
                 If omitted (or passed as `None` / empty string), the pipeline will
                 treat the **entire image** as the ROI by generating a full (all-ones)
                 mask matching the input image geometry.
@@ -771,6 +771,10 @@ class RadiomicsPipeline:
             ```
         """
         # 1. Load Data
+        if isinstance(image, Path):
+            image = str(image)
+        if isinstance(mask, Path):
+            mask = str(mask)
         if isinstance(image, str):
             orig_img = load_image(image)
             img_source = image
