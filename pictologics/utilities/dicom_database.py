@@ -24,7 +24,7 @@ import pydicom
 from pydicom.uid import MediaStorageDirectoryStorage
 from tqdm import tqdm
 
-from .dicom_utils import header_worker_pool
+from .dicom_utils import worker_pool
 
 logger = logging.getLogger(__name__)
 
@@ -933,7 +933,7 @@ def _extract_all_metadata(
         # Create argument tuples for parallel execution
         args_list = [(fp, extract_private_tags) for fp in dicom_files]
 
-        with header_worker_pool(num_workers) as executor:
+        with worker_pool(num_workers) as executor:
             results = list(
                 tqdm(
                     executor.map(_extract_metadata_wrapper, args_list, chunksize=chunksize),

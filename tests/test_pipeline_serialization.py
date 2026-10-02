@@ -105,6 +105,42 @@ class TestTemplateLoading:
         # Should include standard configs
         assert "standard_fbn_32" in templates
 
+    def test_from_template(self) -> None:
+        """Each template of the package gives its configurations with their source mode
+        and sentinel value, and each configuration passes the checks of add_config."""
+        counts = {"standard": 6, "lv": 30, "coronary": 30}
+        for name, count in counts.items():
+            pipeline = RadiomicsPipeline.from_template(name)
+            assert len(pipeline.list_configs()) == count
+            check = RadiomicsPipeline(load_standard=False)
+            for config in pipeline.list_configs():
+                metadata = pipeline._config_metadata.get(config, {})
+                check.add_config(
+                    config,
+                    pipeline.get_config(config),
+                    source_mode=metadata.get("source_mode", "full_image"),
+                    sentinel_value=metadata.get("sentinel_value"),
+                )
+        lv = RadiomicsPipeline.from_template("lv")
+        assert lv._config_metadata["lv_myo_fbs_16"] == {
+            "source_mode": "auto",
+            "sentinel_value": -3024.0,
+        }
+        assert lv.get_config("lv_myo_fbs_16")[1] == {
+            "step": "resegment",
+            "params": {"range_min": -29.0, "range_max": 350.0},
+        }
+        coronary = RadiomicsPipeline.from_template("coronary", load_standard=True)
+        assert {"standard_fbn_32", "coronary_cp_orig", "coronary_lap_fbs_64"} <= set(
+            coronary.list_configs()
+        )
+        assert coronary._config_metadata["coronary_lap_fbs_64"] == {
+            "source_mode": "auto",
+            "sentinel_value": None,
+        }
+        with pytest.raises(ValueError, match="did you mean 'coronary'"):
+            RadiomicsPipeline.from_template("coronar")
+
     def test_get_template_metadata(self) -> None:
         """Test getting metadata from a template file."""
         metadata = get_template_metadata("standard_configs.yaml")

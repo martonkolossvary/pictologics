@@ -885,14 +885,14 @@ class TestMultiPhaseTags(unittest.TestCase):
 class TestHeaderWorkerPool(unittest.TestCase):
     def test_workers_skip_the_warmup(self) -> None:
         # The workers see PICTOLOGICS_DISABLE_WARMUP=1; the previous value comes back.
-        from pictologics.utilities.dicom_utils import header_worker_pool
+        from pictologics.utilities.dicom_utils import worker_pool
 
         key = "PICTOLOGICS_DISABLE_WARMUP"
         for previous in (None, "0"):
             with patch.dict(os.environ, {} if previous is None else {key: previous}):
                 if previous is None:
                     os.environ.pop(key, None)
-                with header_worker_pool(1) as pool:
+                with worker_pool(1) as pool:
                     self.assertEqual(pool.submit(os.getenv, key).result(), "1")
                 self.assertEqual(os.environ.get(key), previous)
 
@@ -903,12 +903,17 @@ class TestHeaderWorkerPool(unittest.TestCase):
 
         from pictologics.utilities import dicom_utils
 
-        for method, expected in (("forkserver", "spawn"), ("spawn", "spawn"), ("fork", "fork")):
+        for method, spawn, expected in (
+            ("forkserver", False, "spawn"),
+            ("spawn", False, "spawn"),
+            ("fork", False, "fork"),
+            ("fork", True, "spawn"),
+        ):
             with (
                 patch.object(multiprocessing, "get_start_method", return_value=method),
                 patch.object(dicom_utils, "ProcessPoolExecutor") as pool,
             ):
-                with dicom_utils.header_worker_pool(2):
+                with dicom_utils.worker_pool(2, spawn=spawn):
                     pass
             self.assertEqual(pool.call_args.kwargs["mp_context"].get_start_method(), expected)
 

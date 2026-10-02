@@ -149,6 +149,8 @@ Resamples the image and mask to a new voxel spacing.
 | `mask_threshold` | `float` | `0.5` | Threshold for non-nearest mask interpolation |
 | `round_intensities` | `bool` | `False` | Round intensities to nearest integer after resampling |
 
+Before it resamples, the pipeline checks that the new grid fits in the memory of the computer. A configuration needs at least 24 bytes for each voxel of the new grid. When only steps near the ROI follow, the pipeline resamples only the region around the ROI, and the check uses that region. A filter after the resample needs the whole grid. When the grid does not fit, the configuration stops with a `MemoryError` in its log entry, and its features are `NaN`.
+
 ### 2. `resegment`
 
 Refines ROI masks based on intensity thresholds, excluding voxels outside the specified range from feature extraction. By default, resegmentation applies to both the morphology mask and the intensity mask, so morphology volumes and shape features describe the selected compartment, not the original geometric ROI. Set `apply_to="intensity"` only when morphology should remain anchored to the original ROI extent.
@@ -207,6 +209,10 @@ Discretises image intensities into bins. **Required** before texture feature ext
 | `method` | `str` | *(required)* | `"FBN"` (Fixed Bin Number) or `"FBS"` (Fixed Bin Size) |
 | `n_bins` | `int` | `None` | Number of bins (for FBN) |
 | `bin_width` | `float` | `None` | Width of each bin (for FBS) |
+| `min_val` | `float` | `None` | The start of the first bin. FBS default: the lower bound of an earlier `resegment` step (IBSI). FBN default: the ROI minimum |
+| `max_val` | `float` | `None` | The end of the last bin (for FBN). Default: the ROI maximum |
+
+FBS bins start at the same value in every image, so that a grey level has the same intensity range in every image (IBSI). An FBS step without `min_val` starts at the largest lower bound of the `resegment` steps that change the intensity mask (`apply_to` `"both"` or `"intensity"`). A `filter` step after them cancels this start, because the filter response has other units. Without `min_val` and without such a `resegment` step, `add_config` raises an error. The log entry of the step records the start that it used (`min_val_effective`). An FBS `ivh_discretisation` follows the same rule.
 
 ### 8. `filter`
 
@@ -304,6 +310,49 @@ for file in image_files:
 save_results(all_rows, "full_study_results.csv")
 ```
 
+### Batch Runs with `run_batch`
+
+`run_batch()` runs the configurations on many cases, in several processes when you ask for them. It writes the result of each case to its own file as soon as the case ends, so a stopped batch can go on later.
+
+```python
+from pictologics import RadiomicsPipeline, save_results
+
+if __name__ == "__main__":  # the worker processes import this script again
+    pipeline = RadiomicsPipeline.from_template("coronary")
+    cases = [
+        {"subject_id": "p001", "image": "p001/ccta.nii.gz", "mask": "p001/plaque.nii.gz"},
+        {"subject_id": "p002", "image": "p002/ccta.nii.gz", "mask": "p002/plaque.nii.gz"},
+    ]
+    table = pipeline.run_batch(cases, "results", workers=4)
+    print(table.loc[table["status"] != "completed", ["subject_id", "status", "error"]])
+    save_results(table, "results/features.csv")
+```
+
+- **Cases**: each case is a dict, or a row of a DataFrame, with the `run()` arguments of one image: `subject_id` and `image` (both required), `mask`, and the mask settings such as `mask_subvoxel_tolerance`.
+- **Result files**: the result of a case goes to `results/cases/<subject_id>.json`. The file holds the status, the error, the warnings, the run time, the features and the processing log of the case.
+- **Resume**: a second call with the same folder skips each case whose file has the same image, mask and configurations (by their `config_hash`). A failed case runs again. To run a case again, delete its file.
+- **Workers**: with `workers=4`, four processes run the cases, and each process uses a quarter of the numba threads. Each process holds one case at a time, so the memory need grows with the number of workers. On 28 CT cases (512 × 512 × 200) with a 1 mm configuration, 1 process with 14 threads did 3.1 cases per second, and 4 processes with 3 threads each did 6.6.
+- **Script guard**: the workers start with spawn on every platform, and spawn imports your script again. Keep the call inside `if __name__ == "__main__":`.
+- **Status**: the returned DataFrame has one row for each case, in the order of the cases: `subject_id`, `status`, `error`, `warnings`, `seconds` and the features in the wide format of `format_results()`. The status is `"completed"`; `"incomplete"` when a configuration ended with an empty ROI or an error; or `"failed"` when the case did not run, for example because its image did not load.
+- **Errors and warnings**: an error of one case does not stop the batch. The warnings of a case go to its `warnings` column, not to the screen.
+
+### Many ROIs with `run_rois`
+
+`run_rois()` runs the configurations on each ROI of a label map. In a label map, each voxel holds the label of its ROI, and 0 for the background (for example an organ segmentation, or a DICOM SEG loaded with `combine_segments=True`).
+
+```python
+results = pipeline.run_rois(
+    "ct.nii.gz",
+    "organs.nii.gz",
+    labels={"liver": 5, "spleen": 1},  # default: every label in the map
+    config_names=["study"],
+)
+rows = [format_results(series, meta={"subject_id": "p001", "roi": roi}) for roi, series in results.items()]
+save_results(rows, "p001_rois.csv")
+```
+
+Each ROI gets the results of `run()` with a mask of its label alone, bit for bit. `run_rois` loads the image once, checks it for NaN values once, and makes each mask only inside the box of its label. On a CT of 512 × 512 × 200 voxels with 100 labels, one `run()` for each label took 1.81 s with a 1 mm texture configuration and 1.21 s with intensity features alone; `run_rois` took 0.92 s and 0.29 s. The log entries of an ROI hold its name in `roi`. A label map cannot hold overlapping ROIs: for segments that overlap, load each segment as its own mask (`load_seg(..., combine_segments=False)`) and call `run()` for each.
+
 ### Result Guarantees
 
 Every configuration in a `run()` call **always** returns a `pandas.Series` with a
@@ -381,10 +430,15 @@ row = format_results(results, fmt="wide", meta={"subject_id": "case1"})
     failed or produced partial results:
 
     ```python
-    for entry in pipeline._log:
-        if "error" in entry:
-            print(f"{entry['config_name']}: {entry['error']}")
+    for entry in pipeline.get_log():
+        if entry["status"] != "completed":
+            print(f"{entry['config_name']}: {entry['status']}: {entry['error']}")
     ```
+
+    `get_log()` returns a copy of the log: one entry for each configuration run, with its
+    status (`"completed"`, `"empty_roi"` or `"error"`), error, failed step and run time
+    (`elapsed_seconds`). The log grows with each run, so call `pipeline.clear_log()` in a
+    long loop over cases.
 
 ## Feature Catalog
 
@@ -520,6 +574,9 @@ semantics used for the run, and an `entries` array. Each entry records:
 - Mask repositioning settings used when loading mask paths
 - List of executed steps with serialized parameters
 - Final configuration status, error text, failed step, and feature count when applicable
+- The configuration hash (`config_hash`), the versions and thread count of the run (`environment`), and the run time of the configuration (`elapsed_seconds`)
+
+`pipeline.get_log()` returns a copy of the entries. The log grows with each run until `clear_log()`.
 
 ## Examples
 
@@ -690,7 +747,9 @@ print(f"Extracted {len(all_features)} features")
 removes every voxel from the ROI. You won't see this exception directly: `run()` catches it and
 returns a `pandas.Series` of `NaN` for that configuration so batch runs keep going (see
 [Result Guarantees](#result-guarantees)). To resolve it, relax the offending step's thresholds or
-check `pipeline._log` for the failed step and its error message.
+check `pipeline.get_log()` for the failed step and its error message.
+
+**`MemoryError` at the resample step** (`"Resampling to ... mm makes a grid of ... voxels. It needs at least ... GB, more than the ... GB of memory of this computer."`) — the new grid does not fit in memory. This happens, for example, with a PET image at 0.5 mm without a mask: its grid has about 4 billion voxels. Use a larger spacing, pass a mask, or crop the image.
 
 **Spacing-mismatch `ValueError`** (`"...Resampling would be required but is not yet supported."`) —
 raised when loading/repositioning a mask whose voxel spacing differs from its reference image by

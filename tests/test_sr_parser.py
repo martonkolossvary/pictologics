@@ -1079,7 +1079,7 @@ class TestSRDocumentFromFolders:
         for i in range(3):
             _write_dicom(tmp_path / f"sr_{i}.dcm", "1.2.840.10008.5.1.4.1.1.88.33", size=100)
         total = sum(f.stat().st_size for f in tmp_path.iterdir())
-        with patch.object(dicom_utils, "header_worker_pool") as pool:
+        with patch.object(dicom_utils, "worker_pool") as pool:
             with patch("pictologics.utilities.sr_parser.SR_POOL_BYTES", total + 1):
                 batch = SRDocument.from_folders(
                     [tmp_path], show_progress=False, num_workers=num_workers

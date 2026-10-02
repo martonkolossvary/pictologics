@@ -1,0 +1,725 @@
+# Coronary CT Angiography Templates
+# =================================
+#
+# Configurations for radiomics of coronary plaque in CT angiography, in four plaque
+# types. The resegment step of each configuration keeps its HU range:
+#
+#   coronary      all plaque                -99.999 to 3000     HU
+#   coronary_ncp  non-calcified plaque      -99.999 to  350.999 HU
+#   coronary_lap  low-attenuation plaque    -99.999 to   29.999 HU
+#   coronary_cp   calcified plaque          351     to 3000     HU
+#
+# The bounds -99.999, 29.999 and 350.999 keep -100 HU out, keep low-attenuation
+# plaque below 30 HU, and keep non-calcified plaque below the 351 HU of calcified
+# plaque, also for resampled values.
+# Each plaque type has an "orig" configuration (intensity and morphology features),
+# and FBN and FBS configurations (texture, histogram and IVH features). All of them
+# resample to 0.5 mm. The FBS bins start at the lower bound of the HU range (IBSI).
+# Each configuration finds and leaves out the padding value of the image
+# (source_mode auto).
+#
+# Load: RadiomicsPipeline.from_template("coronary")
+
+schema_version: "1.0"
+description: "Coronary CT angiography configurations"
+
+configs:
+  coronary_orig:
+    description: "Coronary plaque (-99.999 to 3000 HU): intensity and morphology features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 3000.0
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_fbn_16:
+    description: "Coronary plaque (-99.999 to 3000 HU): FBN 16 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 16
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_fbn_32:
+    description: "Coronary plaque (-99.999 to 3000 HU): FBN 32 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_fbn_64:
+    description: "Coronary plaque (-99.999 to 3000 HU): FBN 64 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 64
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_fbn_128:
+    description: "Coronary plaque (-99.999 to 3000 HU): FBN 128 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 128
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_fbs_16:
+    description: "Coronary plaque (-99.999 to 3000 HU): FBS 16 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 16.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_fbs_32:
+    description: "Coronary plaque (-99.999 to 3000 HU): FBS 32 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 32.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_fbs_64:
+    description: "Coronary plaque (-99.999 to 3000 HU): FBS 64 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 64.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_fbs_128:
+    description: "Coronary plaque (-99.999 to 3000 HU): FBS 128 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 128.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_ncp_orig:
+    description: "Non-calcified coronary plaque (-99.999 to 350.999 HU): intensity and morphology features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 350.999
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_ncp_fbn_16:
+    description: "Non-calcified coronary plaque (-99.999 to 350.999 HU): FBN 16 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 350.999
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 16
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_ncp_fbn_32:
+    description: "Non-calcified coronary plaque (-99.999 to 350.999 HU): FBN 32 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 350.999
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_ncp_fbn_64:
+    description: "Non-calcified coronary plaque (-99.999 to 350.999 HU): FBN 64 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 350.999
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 64
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_ncp_fbs_16:
+    description: "Non-calcified coronary plaque (-99.999 to 350.999 HU): FBS 16 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 350.999
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 16.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_ncp_fbs_32:
+    description: "Non-calcified coronary plaque (-99.999 to 350.999 HU): FBS 32 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 350.999
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 32.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_ncp_fbs_64:
+    description: "Non-calcified coronary plaque (-99.999 to 350.999 HU): FBS 64 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 350.999
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 64.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_lap_orig:
+    description: "Low-attenuation coronary plaque (-99.999 to 29.999 HU): intensity and morphology features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 29.999
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_lap_fbn_16:
+    description: "Low-attenuation coronary plaque (-99.999 to 29.999 HU): FBN 16 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 29.999
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 16
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_lap_fbn_32:
+    description: "Low-attenuation coronary plaque (-99.999 to 29.999 HU): FBN 32 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 29.999
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_lap_fbn_64:
+    description: "Low-attenuation coronary plaque (-99.999 to 29.999 HU): FBN 64 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 29.999
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 64
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_lap_fbs_16:
+    description: "Low-attenuation coronary plaque (-99.999 to 29.999 HU): FBS 16 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 29.999
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 16.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_lap_fbs_32:
+    description: "Low-attenuation coronary plaque (-99.999 to 29.999 HU): FBS 32 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 29.999
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 32.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_lap_fbs_64:
+    description: "Low-attenuation coronary plaque (-99.999 to 29.999 HU): FBS 64 HU bins from -99.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -99.999
+          range_max: 29.999
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 64.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_cp_orig:
+    description: "Calcified coronary plaque (351 to 3000 HU): intensity and morphology features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 3000.0
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_cp_fbn_16:
+    description: "Calcified coronary plaque (351 to 3000 HU): FBN 16 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 16
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_cp_fbn_32:
+    description: "Calcified coronary plaque (351 to 3000 HU): FBN 32 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_cp_fbn_64:
+    description: "Calcified coronary plaque (351 to 3000 HU): FBN 64 bins; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 64
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_cp_fbs_16:
+    description: "Calcified coronary plaque (351 to 3000 HU): FBS 16 HU bins from 351 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 16.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_cp_fbs_32:
+    description: "Calcified coronary plaque (351 to 3000 HU): FBS 32 HU bins from 351 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 32.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  coronary_cp_fbs_64:
+    description: "Calcified coronary plaque (351 to 3000 HU): FBS 64 HU bins from 351 HU; texture, histogram and IVH features"
+    source_mode: auto
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 3000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 64.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false

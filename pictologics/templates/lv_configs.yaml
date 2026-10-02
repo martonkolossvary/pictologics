@@ -1,0 +1,753 @@
+# Left Ventricle CT Templates
+# ===========================
+#
+# Configurations for CT radiomics of the left ventricular myocardium, in four
+# compartments. The resegment step of each configuration keeps its HU range:
+#
+#   lv        whole myocardium      -179.999 to 2000 HU
+#   lv_fat    fat                   -179.999 to  -30 HU
+#   lv_myo    myocardial tissue      -29     to  350 HU
+#   lv_calc   calcium                351     to 2000 HU
+#
+# The bound -179.999 keeps -180 HU out, also for resampled values.
+# Each compartment has an "orig" configuration (intensity and morphology features),
+# and FBN and FBS configurations (texture, histogram and IVH features). All of them
+# resample to 0.5 mm. The FBS bins start at the lower bound of the HU range (IBSI).
+# CT padding is often stored as -2000 with a rescale intercept of -1024, so each
+# configuration leaves out voxels of -3024 HU (source_mode auto).
+#
+# Load: RadiomicsPipeline.from_template("lv")
+
+schema_version: "1.0"
+description: "Left ventricle CT configurations"
+
+configs:
+  lv_orig:
+    description: "Left ventricular myocardium (-179.999 to 2000 HU): intensity and morphology features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: 2000.0
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fbn_16:
+    description: "Left ventricular myocardium (-179.999 to 2000 HU): FBN 16 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 16
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fbn_32:
+    description: "Left ventricular myocardium (-179.999 to 2000 HU): FBN 32 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fbn_64:
+    description: "Left ventricular myocardium (-179.999 to 2000 HU): FBN 64 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 64
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fbn_128:
+    description: "Left ventricular myocardium (-179.999 to 2000 HU): FBN 128 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 128
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fbs_16:
+    description: "Left ventricular myocardium (-179.999 to 2000 HU): FBS 16 HU bins from -179.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 16.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fbs_32:
+    description: "Left ventricular myocardium (-179.999 to 2000 HU): FBS 32 HU bins from -179.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 32.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fbs_64:
+    description: "Left ventricular myocardium (-179.999 to 2000 HU): FBS 64 HU bins from -179.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 64.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fbs_128:
+    description: "Left ventricular myocardium (-179.999 to 2000 HU): FBS 128 HU bins from -179.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 128.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fat_orig:
+    description: "Myocardial fat (-179.999 to -30 HU): intensity and morphology features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: -30.0
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fat_fbn_16:
+    description: "Myocardial fat (-179.999 to -30 HU): FBN 16 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: -30.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 16
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fat_fbn_32:
+    description: "Myocardial fat (-179.999 to -30 HU): FBN 32 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: -30.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fat_fbn_64:
+    description: "Myocardial fat (-179.999 to -30 HU): FBN 64 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: -30.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 64
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fat_fbs_16:
+    description: "Myocardial fat (-179.999 to -30 HU): FBS 16 HU bins from -179.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: -30.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 16.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fat_fbs_32:
+    description: "Myocardial fat (-179.999 to -30 HU): FBS 32 HU bins from -179.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: -30.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 32.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_fat_fbs_64:
+    description: "Myocardial fat (-179.999 to -30 HU): FBS 64 HU bins from -179.999 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -179.999
+          range_max: -30.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 64.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_myo_orig:
+    description: "Myocardial tissue (-29 to 350 HU): intensity and morphology features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -29.0
+          range_max: 350.0
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_myo_fbn_16:
+    description: "Myocardial tissue (-29 to 350 HU): FBN 16 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -29.0
+          range_max: 350.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 16
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_myo_fbn_32:
+    description: "Myocardial tissue (-29 to 350 HU): FBN 32 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -29.0
+          range_max: 350.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_myo_fbn_64:
+    description: "Myocardial tissue (-29 to 350 HU): FBN 64 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -29.0
+          range_max: 350.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 64
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_myo_fbs_16:
+    description: "Myocardial tissue (-29 to 350 HU): FBS 16 HU bins from -29 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -29.0
+          range_max: 350.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 16.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_myo_fbs_32:
+    description: "Myocardial tissue (-29 to 350 HU): FBS 32 HU bins from -29 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -29.0
+          range_max: 350.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 32.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_myo_fbs_64:
+    description: "Myocardial tissue (-29 to 350 HU): FBS 64 HU bins from -29 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: -29.0
+          range_max: 350.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 64.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_calc_orig:
+    description: "Myocardial calcium (351 to 2000 HU): intensity and morphology features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 2000.0
+      - step: extract_features
+        params:
+          families:
+            - intensity
+            - morphology
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_calc_fbn_16:
+    description: "Myocardial calcium (351 to 2000 HU): FBN 16 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 16
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_calc_fbn_32:
+    description: "Myocardial calcium (351 to 2000 HU): FBN 32 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 32
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_calc_fbn_64:
+    description: "Myocardial calcium (351 to 2000 HU): FBN 64 bins; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBN
+          n_bins: 64
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_calc_fbs_16:
+    description: "Myocardial calcium (351 to 2000 HU): FBS 16 HU bins from 351 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 16.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_calc_fbs_32:
+    description: "Myocardial calcium (351 to 2000 HU): FBS 32 HU bins from 351 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 32.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false
+
+  lv_calc_fbs_64:
+    description: "Myocardial calcium (351 to 2000 HU): FBS 64 HU bins from 351 HU; texture, histogram and IVH features"
+    source_mode: auto
+    sentinel_value: -3024.0
+    steps:
+      - step: resample
+        params:
+          new_spacing: [0.5, 0.5, 0.5]
+      - step: resegment
+        params:
+          range_min: 351.0
+          range_max: 2000.0
+      - step: discretise
+        params:
+          method: FBS
+          bin_width: 64.0
+      - step: extract_features
+        params:
+          families:
+            - texture
+            - histogram
+            - ivh
+          include_spatial_intensity: false
+          include_local_intensity: false

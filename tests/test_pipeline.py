@@ -237,8 +237,9 @@ def test_run_defaults_all_configs(
         mock_ext.return_value = {}
         # Call without config_names: it runs every config, and it warns because the
         # standard ones run too
-        with pytest.warns(UserWarning, match="also the 6 standard ones"):
+        with pytest.warns(UserWarning, match="also the 6 standard ones") as caught:
             res = pipeline.run(mock_image, mock_mask)
+        assert caught[0].filename == __file__  # the warning points to the call of run()
 
         # Should contain all keys present in pipeline._configs
         assert len(res) == len(pipeline._configs)
@@ -724,7 +725,7 @@ def test_step_discretise_fbs_empty_error(
     # FBS attempts to calc n_bins from data. If data empty -> EmptyROIMaskError
     # is caught per-config and a NaN series is returned instead of raising.
     pipeline.add_config(
-        "fbs", [{"step": "discretise", "params": {"method": "FBS", "bin_width": 10}}]
+        "fbs", [{"step": "discretise", "params": {"method": "FBS", "bin_width": 10, "min_val": 0}}]
     )
     mock_apply.return_value = None  # No ROI voxel
     mock_disc.return_value = mock_image
@@ -1116,6 +1117,452 @@ def test_clear_log(pipeline: RadiomicsPipeline) -> None:
     assert len(pipeline._log) == 0
 
 
+def test_get_log_copies_the_entries_with_their_run_time() -> None:
+    # One entry per configuration run, also for an empty ROI and an error, each with its
+    # run time; get_log() returns a copy, so a change of it leaves the log as it is.
+    image = Image(np.arange(1000.0).reshape(10, 10, 10), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    roi = np.zeros((10, 10, 10), dtype=np.uint8)
+    roi[2:8, 2:8, 2:8] = 1
+    mask = Image(roi, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    extract = {"step": "extract_features", "params": {"families": ["intensity"]}}
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("ok", [extract])
+    pipeline.add_config(
+        "empty", [{"step": "resegment", "params": {"range_min": -5, "range_max": -1}}, extract]
+    )
+    pipeline.add_config(
+        "error", [{"step": "filter", "params": {"type": "gabor", "sigma_mm": -1.0}}, extract]
+    )
+    pipeline.run(image, mask, config_names=["ok", "empty", "error"])
+    log = pipeline.get_log()
+    assert [(e["config_name"], e["status"]) for e in log] == [
+        ("ok", "completed"),
+        ("empty", "empty_roi"),
+        ("error", "error"),
+    ]
+    assert all(isinstance(e["elapsed_seconds"], float) and e["elapsed_seconds"] >= 0 for e in log)
+    log[0]["status"] = "changed"
+    log[0]["steps_executed"].clear()
+    assert pipeline.get_log()[0]["status"] == "completed"
+    assert pipeline.get_log()[0]["steps_executed"]
+
+
+def test_log_entries_hold_the_environment_and_a_config_hash(tmp_path: Any) -> None:
+    import hashlib
+
+    import numba
+
+    image = Image(np.arange(1000.0).reshape(10, 10, 10), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    steps = [
+        {"step": "resample", "params": {"new_spacing": (2.0, 2.0, 2.0)}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}},
+    ]
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("a", steps)
+    pipeline.add_config("same", copy.deepcopy(steps))
+    pipeline.add_config("auto", steps, source_mode="auto")
+    with pytest.warns(UserWarning, match="No sentinel value auto-detected"):
+        pipeline.run(image, None, config_names=["a", "same", "auto"])
+    pipeline.run(image, None, config_names=["a"])
+    log = pipeline.get_log()
+    environment = log[0]["environment"]
+    assert set(environment) == {
+        "python", "platform", "numpy", "scipy", "numba", "PyWavelets", "nibabel",
+        "pydicom", "python-gdcm", "threads",
+    }  # fmt: skip
+    assert environment["numpy"] == np.__version__
+    assert environment["threads"] == numba.get_num_threads()
+    # the canonical JSON of the snapshot without the sentinel value found in the image
+    snapshot = {
+        k: v for k, v in log[0]["config_snapshot"].items() if k != "effective_sentinel_value"
+    }
+    text = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+    assert log[0]["config_hash"] == hashlib.sha256(text.encode()).hexdigest()
+    hashes = [entry["config_hash"] for entry in log]
+    assert hashes[0] == hashes[1] == hashes[3] != hashes[2]
+    # a new configuration under the same name gets a new hash
+    pipeline.add_config("same", copy.deepcopy(steps)[1:])
+    pipeline.run(image, None, config_names=["same"])
+    assert pipeline.get_log()[-1]["config_hash"] not in hashes
+    # a configuration saved to a file and loaded again keeps its hash
+    pipeline.save_configs(tmp_path / "configs.yaml")
+    loaded = RadiomicsPipeline.load_configs(tmp_path / "configs.yaml", load_standard=False)
+    loaded.run(image, None, config_names=["a"])
+    assert loaded.get_log()[0]["config_hash"] == hashes[0]
+
+
+def test_run_rois_gives_the_results_of_one_run_per_label(tmp_path: Any) -> None:
+    # Each ROI of a label map gets the results of run() with a mask of its label alone,
+    # also with a NaN voxel in the image and for a label map file (float64 labels).
+    import nibabel as nib
+
+    rng = np.random.default_rng(9)
+    values = rng.normal(40.0, 20.0, (14, 14, 14))
+    values[1, 1, 1] = np.nan
+    image = Image(values, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    labels = np.zeros((14, 14, 14), dtype=np.uint8)
+    labels[2:6, 2:6, 2:6] = 1
+    labels[7:12, 3:9, 4:10] = 3
+    labels[1:3, 9:13, 9:13] = 2
+    label_map = Image(labels, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    nib.save(nib.Nifti1Image(labels, np.eye(4)), tmp_path / "labels.nii.gz")
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "c",
+        [
+            {"step": "resample", "params": {"new_spacing": (0.7, 0.7, 0.7)}},
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+            {
+                "step": "extract_features",
+                "params": {"families": ["intensity", "morphology", "texture"]},
+            },
+        ],
+    )
+    with pytest.warns(UserWarning, match="NaN or infinite"):
+        one_by_one = {
+            str(k): pipeline.run(
+                image,
+                Image((labels == k).astype(np.uint8), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)),
+                config_names="c",
+            )
+            for k in (1, 2, 3)
+        }
+        pipeline.clear_log()
+        rois = pipeline.run_rois(image, label_map, subject_id="s", config_names="c")
+        from_file = pipeline.run_rois(
+            Image(values, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)),
+            str(tmp_path / "labels.nii.gz"),
+            labels={"third": 3, "absent": 7},
+            config_names=["c"],
+        )
+    assert list(rois) == ["1", "2", "3"]
+    for k in rois:
+        assert rois[k]["c"].equals(one_by_one[k]["c"])
+    assert from_file["third"]["c"].equals(one_by_one["3"]["c"])
+    assert from_file["absent"]["c"].isna().all()
+    log = pipeline.get_log()
+    assert [(e["roi"], e["subject_id"], e["status"]) for e in log] == [
+        ("1", "s", "completed"),
+        ("2", "s", "completed"),
+        ("3", "s", "completed"),
+        ("third", None, "completed"),
+        ("absent", None, "empty_roi"),
+    ]
+    assert log[3]["mask_source"] == str(tmp_path / "labels.nii.gz")
+    # label 2 is far from the NaN voxel, so its run gives no warning
+    assert pipeline.run_rois(image, label_map, labels=[2], config_names=["c"]).keys() == {"2"}
+
+
+def test_run_rois_checks_the_labels() -> None:
+    image = Image(np.zeros((4, 4, 4)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    pipeline = RadiomicsPipeline(load_standard=False)
+    for values in (np.full((4, 4, 4), 1.5), np.full((4, 4, 4), -1.0)):
+        with pytest.raises(ValueError, match="whole numbers of 0 or above"):
+            pipeline.run_rois(image, Image(values, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)))
+    label_map = Image(np.ones((4, 4, 4), dtype=np.uint8), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    for labels in ([0], [2.5]):
+        with pytest.raises(ValueError, match="whole number of 1 or above"):
+            pipeline.run_rois(image, label_map, labels=labels)
+
+
+def _batch_cases(folder: Any) -> list[dict[str, Any]]:
+    """Two cases on NIfTI files, and a case whose image file is missing."""
+    import nibabel as nib
+
+    rng = np.random.default_rng(8)
+    cases = []
+    for k in range(2):
+        roi = np.zeros((12, 12, 12), dtype=np.uint8)
+        roi[3:9, 3:9, 3:9] = 1
+        nib.save(
+            nib.Nifti1Image(rng.normal(40.0, 20.0, (12, 12, 12)), np.eye(4)),
+            folder / f"image{k}.nii.gz",
+        )
+        nib.save(nib.Nifti1Image(roi, np.eye(4)), folder / f"mask{k}.nii.gz")
+        cases.append(
+            {
+                "subject_id": f"p/{k}",
+                "image": str(folder / f"image{k}.nii.gz"),
+                "mask": str(folder / f"mask{k}.nii.gz"),
+            }
+        )
+    cases.append({"subject_id": "missing", "image": str(folder / "none.nii.gz")})
+    return cases
+
+
+def _batch_test_pipeline() -> RadiomicsPipeline:
+    extract = {"step": "extract_features", "params": {"families": ["intensity"]}}
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("first", [extract])
+    pipeline.add_config(
+        "empty",
+        [{"step": "resegment", "params": {"range_min": 1000, "range_max": 2000}}, extract],
+        source_mode="auto",
+    )
+    return pipeline
+
+
+def test_run_batch_writes_a_file_per_case_and_resumes(tmp_path: Any) -> None:
+    import pandas as pd
+
+    cases = _batch_cases(tmp_path)
+    pipeline = _batch_test_pipeline()
+    out = tmp_path / "out"
+    table = pipeline.run_batch(cases, out, config_names=["first"], show_progress=False)
+    assert list(table.columns[:5]) == ["subject_id", "status", "error", "warnings", "seconds"]
+    assert table["subject_id"].tolist() == ["p/0", "p/1", "missing"]
+    assert table["status"].tolist() == ["completed", "completed", "failed"]
+    assert table["error"][2].startswith("ValueError: The specified path does not exist")
+    assert pipeline.get_log() == []  # the cases run in another pipeline
+    direct = pipeline.run(cases[0]["image"], cases[0]["mask"], config_names=["first"])
+    assert table.loc[0, "first__mean_intensity_Q4LE"] == direct["first"]["mean_intensity_Q4LE"]
+    assert sorted(p.name for p in (out / "cases").iterdir()) == [
+        "missing.json",
+        "p_0.json",
+        "p_1.json",
+    ]
+    record = json.loads((out / "cases" / "p_0.json").read_text())
+    assert record["config_hashes"] == {"first": pipeline.get_log()[0]["config_hash"]}
+    assert record["image"] == cases[0]["image"] and record["log"][0]["status"] == "completed"
+
+    # the next call runs only the failed case again
+    run_case = RadiomicsPipeline._run_case
+    with patch.object(RadiomicsPipeline, "_run_case", autospec=True, side_effect=run_case) as calls:
+        again = pipeline.run_batch(cases, out, config_names=["first"], show_progress=False)
+        assert [call.args[1]["subject_id"] for call in calls.call_args_list] == ["missing"]
+        pd.testing.assert_frame_equal(again.drop(columns="seconds"), table.drop(columns="seconds"))
+        # another mask path or other configurations run a case again
+        cases[1]["mask"] = cases[0]["mask"]
+        pipeline.run_batch(cases, out, config_names=["first"], show_progress=False)
+        assert [call.args[1]["subject_id"] for call in calls.call_args_list[1:]] == [
+            "p/1",
+            "missing",
+        ]
+        calls.reset_mock()
+        both = pipeline.run_batch(
+            pd.DataFrame(cases), out, config_names=["first", "empty"], show_progress=False
+        )
+        assert len(calls.call_args_list) == 3
+    # an empty ROI in one configuration; a warning of a run
+    assert both["status"].tolist() == ["incomplete", "incomplete", "failed"]
+    assert both["error"][0].startswith("empty: ROI is empty after preprocessing (resegment)")
+    assert "No sentinel value auto-detected" in both["warnings"][0]
+
+
+def test_run_batch_checks_the_cases(tmp_path: Any) -> None:
+    pipeline = _batch_test_pipeline()
+    for cases, message in (
+        (
+            [{"subject_id": "a", "image": "x", "msk": "y"}],
+            "Case 0: unknown key 'msk' \\(did you mean 'mask'\\?\\)",
+        ),
+        ([{"subject_id": "a"}], "Case 0 needs a subject_id and an image"),
+        (
+            [{"subject_id": "a/b", "image": "x"}, {"subject_id": "a_b", "image": "y"}],
+            "The cases 'a/b' and 'a_b' have the same result file name, a_b.json",
+        ),
+    ):
+        with pytest.raises(ValueError, match=message):
+            pipeline.run_batch(cases, tmp_path, show_progress=False)
+
+
+def test_run_batch_with_worker_processes(tmp_path: Any) -> None:
+    # Spawned workers give the results of the cases in this process.
+    import pandas as pd
+
+    cases = _batch_cases(tmp_path)
+    pipeline = _batch_test_pipeline()
+    serial = pipeline.run_batch(
+        cases, tmp_path / "serial", config_names=["first"], show_progress=False
+    )
+    parallel = pipeline.run_batch(
+        cases, tmp_path / "parallel", config_names=["first"], workers=2, show_progress=False
+    )
+    pd.testing.assert_frame_equal(serial.drop(columns="seconds"), parallel.drop(columns="seconds"))
+
+
+def test_run_batch_worker_functions(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The start and the case function of a worker (here in this process).
+    import numba
+
+    from pictologics import pipeline as pipeline_module
+
+    monkeypatch.setattr(pipeline_module, "_BATCH_PIPELINE", None)
+    pipeline = _batch_test_pipeline()
+    setup = ({"first": pipeline.get_config("first")}, {}, True, pipeline.deduplication_rules)
+    threads = numba.get_num_threads()
+    try:
+        pipeline_module._start_batch_worker(setup, 1)
+        assert numba.get_num_threads() == 1
+    finally:
+        numba.set_num_threads(threads)
+    case = _batch_cases(tmp_path)[0]
+    record = pipeline_module._batch_case(case, ["first"], {"first": "x"}, tmp_path / "case.json")
+    assert record["status"] == "completed"
+    assert json.loads((tmp_path / "case.json").read_text())["results"] == record["results"]
+
+
+def test_run_batch_stops_the_workers_on_an_interrupt(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A stop (Ctrl+C) cancels the cases that have not started.
+    from pictologics import pipeline as pipeline_module
+
+    first = _batch_cases(tmp_path)[0]
+    cases = [dict(first, subject_id=f"c{k}") for k in range(6)]
+
+    def interrupted(futures: Any) -> Any:
+        raise KeyboardInterrupt
+        yield  # a generator, as as_completed
+
+    monkeypatch.setattr(pipeline_module, "as_completed", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _batch_test_pipeline().run_batch(
+            cases, tmp_path / "out", config_names=["first"], workers=2, show_progress=False
+        )
+    assert len(list((tmp_path / "out" / "cases").glob("*.json"))) < 6
+
+
+def test_fbs_starts_at_min_val_or_the_resegment_lower_bound() -> None:
+    # IBSI: the FBS bins of every image start at the same value. An FBS step without
+    # min_val starts at the largest lower bound of the resegment steps of the intensity
+    # mask; an FBS IVH discretisation does the same.
+    rng = np.random.default_rng(3)
+    values = rng.normal(40.0, 30.0, (12, 12, 12))
+    image = Image(values, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    mask = Image(np.ones((12, 12, 12), dtype=np.uint8), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    roi_min = float(values[(values >= -20) & (values <= 200)].min())
+    assert roi_min > -19.9  # so the two starts give other bins
+
+    def resegment(low: float, apply_to: str = "both") -> dict[str, Any]:
+        return {
+            "step": "resegment",
+            "params": {"range_min": low, "range_max": 200, "apply_to": apply_to},
+        }
+
+    def fbs(**start: float) -> dict[str, Any]:
+        return {"step": "discretise", "params": {"method": "FBS", "bin_width": 10.0, **start}}
+
+    histogram = {"step": "extract_features", "params": {"families": ["histogram"]}}
+    ivh = {"bin_width": 2.5, "method": "FBS"}
+    configs = {
+        "rule": [resegment(-20), fbs(), histogram],
+        "given": [resegment(-20), fbs(min_val=-20), histogram],
+        "roi_start": [resegment(-20), fbs(min_val=roi_min), histogram],
+        "largest": [resegment(-50), resegment(-20), fbs(), histogram],
+        "own_start": [resegment(-20), fbs(min_val=-100), histogram],
+        "ivh_rule": [
+            resegment(-20),
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_discretisation": ivh},
+            },
+        ],
+        "ivh_given": [
+            resegment(-20),
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_discretisation": {**ivh, "min_val": -20}},
+            },
+        ],
+    }
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    for name, steps in configs.items():
+        pipeline.add_config(name, steps)
+    results = pipeline.run(image, mask, config_names=list(configs))
+    assert results["rule"].equals(results["given"])
+    assert not results["rule"].equals(results["roi_start"])
+    assert results["ivh_rule"].equals(results["ivh_given"])
+    starts = {
+        entry["config_name"]: next(
+            step["min_val_effective"]
+            for step in entry["steps_executed"]
+            if step["step"] == "discretise"
+        )
+        for entry in pipeline.get_log()
+        if not entry["config_name"].startswith("ivh")
+    }
+    assert starts == {
+        "rule": -20.0,
+        "given": -20.0,
+        "roi_start": roi_min,
+        "largest": -20.0,
+        "own_start": -100.0,
+    }
+
+
+def test_fbs_without_a_start_stops() -> None:
+    # Without min_val and without a resegment lower bound of the intensity mask (none, a
+    # resegment of the morph mask alone, or a filter after it), FBS has no start that is
+    # the same in every image: add_config raises, and a config that skipped the check
+    # stops at its discretise step.
+    filtered = [
+        {"step": "resegment", "params": {"range_min": -20, "range_max": 200}},
+        {"step": "filter", "params": {"type": "mean", "support": 3}},
+    ]
+    histogram = {"step": "extract_features", "params": {"families": ["histogram"]}}
+    fbs = {"step": "discretise", "params": {"method": "FBS", "bin_width": 10.0}}
+    cases = {
+        "none": [fbs, histogram],
+        "morph_only": [
+            {
+                "step": "resegment",
+                "params": {"range_min": -20, "range_max": 200, "apply_to": "morph"},
+            },
+            fbs,
+            histogram,
+        ],
+        "filtered": [*filtered, fbs, histogram],
+        "ivh": [
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_discretisation": {"bin_width": 2.5}},
+            }
+        ],
+    }
+    pipeline = RadiomicsPipeline(load_standard=False)
+    for name, steps in cases.items():
+        with pytest.raises(ValueError, match="needs a start that is the same for every image"):
+            pipeline.add_config(name, steps)
+        pipeline.add_config(name, steps, validate=False)
+    image = Image(np.arange(512.0).reshape(8, 8, 8), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    results = pipeline.run(image, None, config_names=list(cases))
+    for name in cases:
+        assert results[name].isna().all()
+    for entry in pipeline.get_log():
+        assert entry["status"] == "error"
+        assert entry["error"].startswith("FBS needs a start that is the same for every image")
+    # a resegment after the filter gives the start again
+    pipeline.add_config(
+        "again",
+        [
+            *filtered,
+            {"step": "resegment", "params": {"range_min": 0, "range_max": 900}},
+            fbs,
+            histogram,
+        ],
+    )
+
+
+def test_package_versions_of_a_package_without_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    from importlib.metadata import PackageNotFoundError
+
+    from pictologics import pipeline as pipeline_module
+
+    def version(name: str) -> str:
+        if name == "python-gdcm":
+            raise PackageNotFoundError(name)
+        return "1.0"
+
+    monkeypatch.setattr(pipeline_module, "version", version)
+    pipeline_module._package_versions.cache_clear()
+    try:
+        versions = pipeline_module._package_versions()
+        assert versions["python-gdcm"] is None and versions["numpy"] == "1.0"
+    finally:
+        pipeline_module._package_versions.cache_clear()
+
+
 def test_empty_roi_check(pipeline: RadiomicsPipeline, mock_image: Image) -> None:
     # Manual check of helper
     state = MagicMock()
@@ -1460,7 +1907,9 @@ def test_step_discretise_fbs_success(
     mock_mask: Image,
 ) -> None:
     pipeline.add_config(
-        "fbs_ok", [{"step": "discretise", "params": {"method": "FBS"}}], validate=False
+        "fbs_ok",
+        [{"step": "discretise", "params": {"method": "FBS", "min_val": 0.0}}],
+        validate=False,
     )
     mock_disc.return_value = mock_image
     mock_apply.return_value = (10.0, 20.0)  # the ROI range of the discretised image
@@ -1474,7 +1923,7 @@ def test_step_discretise_fbs_success(
     pipeline.add_config(
         "fbs_extract",
         [
-            {"step": "discretise", "params": {"method": "FBS"}},
+            {"step": "discretise", "params": {"method": "FBS", "min_val": 0.0}},
             {"step": "extract_features", "params": {"families": ["texture"]}},
         ],
         validate=False,
@@ -4552,7 +5001,7 @@ def test_add_config_lists_every_problem_with_a_hint() -> None:
         {"step": "resample", "params": {}},
     ]
     pipeline = RadiomicsPipeline(load_standard=False)
-    with pytest.raises(ValueError, match="Configuration 'bad' has 21 problem") as error:
+    with pytest.raises(ValueError, match="Configuration 'bad' has 22 problem") as error:
         pipeline.add_config("bad", bad)
     message = str(error.value)
     for expected in (
@@ -4564,6 +5013,7 @@ def test_add_config_lists_every_problem_with_a_hint() -> None:
         "step 4 (discretise): unknown method 'fbn' (did you mean 'FBN'?)",
         "step 5 (discretise): FBN needs a whole n_bins of 1 or more, not 32.5",
         "step 6 (discretise): FBS needs a bin_width above 0, not None",
+        "step 6 (discretise): FBS needs a start that is the same for every image: set min_val",
         "step 7 (discretise): FIXED_CUTOFFS needs cutoffs",
         "step 8 (filter): unknown filter type 'gaussian'",
         "step 9 (filter): unknown parameter 'sigma' (did you mean 'sigma_mm'?)",
@@ -4958,7 +5408,7 @@ def test_discretise_cuts_the_arrays_to_the_roi_box() -> None:
     image = Image(arr, (1.0, 1.0, 1.5), (0.0, 0.0, 0.0))
     mask = Image(labels, image.spacing, image.origin)
     fbn = {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}}
-    fbs = {"step": "discretise", "params": {"method": "FBS", "bin_width": 10.0}}
+    fbs = {"step": "discretise", "params": {"method": "FBS", "bin_width": 10.0, "min_val": 0.0}}
     cutoffs = {"step": "discretise", "params": {"method": "FIXED_CUTOFFS", "cutoffs": [30.0, 60.0]}}
     configs = {
         "fbn": (fbn, ["intensity", "morphology", "texture", "histogram", "ivh"], "full_image"),
@@ -5099,3 +5549,62 @@ def test_resample_computes_only_the_roi_region() -> None:
         whole = pipeline.run(image, mask, config_names=list(configs))
     for name in configs:
         assert boxed[name].equals(whole[name])
+
+
+def test_resample_stops_when_its_grid_cannot_fit_in_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Before a resample, the pipeline checks that the new grid, or the ROI region of it,
+    # fits in the memory of the computer at _GRID_BYTES_PER_VOXEL bytes per voxel. A grid
+    # that does not fit gives the config a MemoryError in its log entry and NaN features.
+    from pictologics import pipeline as pipeline_module
+
+    image = Image(np.ones((10, 10, 10)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    roi = np.zeros((10, 10, 10), dtype=np.uint8)
+    roi[4:6, 4:6, 4:6] = 1
+    mask = Image(roi, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "c",
+        [
+            {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5)}},
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+        ],
+    )
+    # the whole grid: 20 x 20 x 20 voxels x 24 bytes = 192,000 bytes
+    monkeypatch.setattr(pipeline_module, "_physical_memory", lambda: 100_000)
+    assert pipeline.run(image, None, config_names=["c"])["c"].isna().all()
+    entry = pipeline._log[-1]
+    assert entry["status"] == "error" and entry["failed_step"]["step"] == "resample"
+    assert entry["error"].startswith(
+        "Resampling to (0.5, 0.5, 0.5) mm makes a grid of 20 x 20 x 20 voxels."
+    )
+    # with an ROI, only its region is resampled, and the region fits
+    assert pipeline.run(image, mask, config_names=["c"])["c"].notna().all()
+    assert pipeline._log[-1]["status"] == "completed"
+
+
+def test_physical_memory_on_posix_and_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ctypes
+    import sys
+
+    from pictologics.pipeline import _physical_memory
+
+    _physical_memory.cache_clear()
+    assert _physical_memory() == os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+
+    def memory_status(status: Any) -> int:
+        status._obj.total = 16 << 30
+        return 1
+
+    kernel32 = MagicMock()
+    kernel32.GlobalMemoryStatusEx.side_effect = memory_status
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(ctypes, "windll", MagicMock(kernel32=kernel32), raising=False)
+    _physical_memory.cache_clear()
+    try:
+        assert _physical_memory() == 16 << 30
+        # MEMORYSTATUSEX: 2 numbers of 4 bytes and 7 of 8 bytes
+        assert kernel32.GlobalMemoryStatusEx.call_args.args[0]._obj.length == 64
+    finally:
+        _physical_memory.cache_clear()

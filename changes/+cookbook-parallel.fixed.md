@@ -1,0 +1,1 @@
+The parallel batch example of the cookbook (case 4) now gives each worker its share of the threads. It also saves the finished cases before it reports the failed ones. Before, every worker used all threads, and one failed case lost the results of all cases. The cookbook no longer tells you to install tqdm, because Pictologics installs it.

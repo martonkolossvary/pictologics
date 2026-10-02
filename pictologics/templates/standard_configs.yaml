@@ -1,9 +1,11 @@
 # Pictologics Standard Configuration Templates
 # =============================================
 #
-# These are the standard, IBSI-compliant pipeline configurations
-# for radiomics feature extraction. They provide reproducible
-# workflows for research.
+# These are the standard pipeline configurations for radiomics
+# feature extraction. They provide reproducible workflows for research.
+#
+# The FBS configurations are for CT. Their bins start at -1000 HU (air) in
+# every image, so a grey level has the same HU range in every image (IBSI).
 
 schema_version: "1.0"
 description: "Standard pipeline configurations for radiomics feature extraction"
@@ -84,7 +86,7 @@ configs:
   # -----------------------------
 
   standard_fbs_8:
-    description: "Standard FBS-8: 0.5mm isotropic resampling, 8.0 HU bin width"
+    description: "Standard FBS-8: 0.5mm isotropic resampling, 8.0 HU bins from -1000 HU"
     steps:
       - step: resample
         params:
@@ -94,6 +96,7 @@ configs:
         params:
           method: FBS
           bin_width: 8.0
+          min_val: -1000.0
       - step: extract_features
         params:
           families:
@@ -106,7 +109,7 @@ configs:
           include_local_intensity: false
 
   standard_fbs_16:
-    description: "Standard FBS-16: 0.5mm isotropic resampling, 16.0 HU bin width"
+    description: "Standard FBS-16: 0.5mm isotropic resampling, 16.0 HU bins from -1000 HU"
     steps:
       - step: resample
         params:
@@ -116,6 +119,7 @@ configs:
         params:
           method: FBS
           bin_width: 16.0
+          min_val: -1000.0
       - step: extract_features
         params:
           families:
@@ -128,7 +132,7 @@ configs:
           include_local_intensity: false
 
   standard_fbs_32:
-    description: "Standard FBS-32: 0.5mm isotropic resampling, 32.0 HU bin width"
+    description: "Standard FBS-32: 0.5mm isotropic resampling, 32.0 HU bins from -1000 HU"
     steps:
       - step: resample
         params:
@@ -138,6 +142,7 @@ configs:
         params:
           method: FBS
           bin_width: 32.0
+          min_val: -1000.0
       - step: extract_features
         params:
           families:

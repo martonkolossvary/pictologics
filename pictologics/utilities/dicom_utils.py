@@ -12,7 +12,7 @@ import multiprocessing
 import os
 import warnings
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -496,21 +496,34 @@ def get_dicom_phases(
 
 
 @contextmanager
-def header_worker_pool(num_workers: int) -> Iterator[ProcessPoolExecutor]:
-    """A process pool whose workers skip the JIT warm-up.
+def worker_pool(
+    num_workers: int,
+    initializer: Optional[Callable[..., None]] = None,
+    initargs: tuple[Any, ...] = (),
+    spawn: bool = False,
+) -> Iterator[ProcessPoolExecutor]:
+    """A process pool whose workers skip the JIT warm-up at import.
 
     Each spawned worker imports pictologics again, which would compile or load every
-    numba kernel, although the workers only read DICOM headers. The pool starts its
-    workers lazily, so the setting stays in place until the pool closes. A forkserver
-    (the Linux default from Python 3.14) keeps the environment of its first start for
-    all later pools, so the pool then uses spawn, which reads the setting at each start.
+    numba kernel, although a worker that reads DICOM headers needs none, and a worker of
+    `RadiomicsPipeline.run_batch` loads only the kernels it uses from the numba cache. The
+    pool starts its workers lazily, so the setting stays in place until the pool closes.
+    A forkserver (the Linux default from Python 3.14) keeps the environment of its first
+    start for all later pools, so the pool then uses spawn, which reads the setting at
+    each start. `spawn` uses spawn on every platform: a forked child of a process that
+    ran numba kernels in threads can hang.
     """
-    method = multiprocessing.get_start_method()
+    method = "spawn" if spawn else multiprocessing.get_start_method()
     context = multiprocessing.get_context("spawn" if method == "forkserver" else method)
     previous = os.environ.get("PICTOLOGICS_DISABLE_WARMUP")
     os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
     try:
-        with ProcessPoolExecutor(max_workers=num_workers, mp_context=context) as executor:
+        with ProcessPoolExecutor(
+            max_workers=num_workers,
+            mp_context=context,
+            initializer=initializer,
+            initargs=initargs,
+        ) as executor:
             yield executor
     finally:
         if previous is None:

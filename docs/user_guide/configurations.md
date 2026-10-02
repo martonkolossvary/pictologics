@@ -112,7 +112,13 @@ standard_fbn_32:
 
 ### Fixed Bin Size (FBS) Configurations
 
-FBS discretisation uses a **fixed bin width** (in Hounsfield Units for CT), which preserves the physical meaning of intensity values. This is preferred when comparing across studies or when absolute intensity values are clinically meaningful.
+FBS discretisation uses a **fixed bin width** (in Hounsfield Units for CT). A grey level has the same HU range in every image only when the bins start at the same value in every image, so every FBS step has a fixed start. IBSI strongly recommends the lower bound of the resegmentation range as this start:
+
+- An FBS step with `min_val` starts at `min_val`.
+- An FBS step without `min_val` starts at the lower bound of an earlier `resegment` step.
+- Without both, `add_config` raises an error. A start at the minimum of each ROI would give a grey level another HU range in each image.
+
+The standard FBS configurations start at -1000 HU, the HU of air. The [Cardiac CT Templates](#cardiac-ct-templates) start at the lower bound of each resegment range.
 
 | Configuration | Bin Width | Use Case |
 |---------------|-----------|----------|
@@ -124,7 +130,7 @@ FBS discretisation uses a **fixed bin width** (in Hounsfield Units for CT), whic
 
 ```yaml
 standard_fbs_16:
-  description: "Standard FBS-16: 0.5mm isotropic resampling, 16.0 HU bin width"
+  description: "Standard FBS-16: 0.5mm isotropic resampling, 16.0 HU bins from -1000 HU"
   steps:
     - step: resample
       params:
@@ -134,6 +140,7 @@ standard_fbs_16:
       params:
         method: FBS
         bin_width: 16.0
+        min_val: -1000.0
     - step: extract_features
       params:
         families:
@@ -146,13 +153,53 @@ standard_fbs_16:
         include_local_intensity: false
 ```
 
+## Cardiac CT Templates
+
+Two templates of the package hold configurations for cardiac CT. Load a template with `RadiomicsPipeline.from_template()`:
+
+```python
+from pictologics import RadiomicsPipeline
+
+pipeline = RadiomicsPipeline.from_template("lv")
+results = pipeline.run(image, mask, config_names=["lv_myo_orig", "lv_myo_fbs_16"])
+
+# Add a template to a pipeline that has other configurations
+pipeline.merge_configs(RadiomicsPipeline.from_template("coronary"))
+```
+
+Each template has four compartments. The `resegment` step of a configuration keeps the HU range of its compartment. All configurations resample to 0.5 mm and use `source_mode="auto"`.
+
+| Template | Compartment | Prefix | HU range |
+|----------|-------------|--------|----------|
+| `lv` | Whole left ventricular myocardium | `lv_` | -179.999 to 2000 |
+| | Fat | `lv_fat_` | -179.999 to -30 |
+| | Myocardial tissue | `lv_myo_` | -29 to 350 |
+| | Calcium | `lv_calc_` | 351 to 2000 |
+| `coronary` | All coronary plaque | `coronary_` | -99.999 to 3000 |
+| | Non-calcified plaque | `coronary_ncp_` | -99.999 to 350.999 |
+| | Low-attenuation plaque | `coronary_lap_` | -99.999 to 29.999 |
+| | Calcified plaque | `coronary_cp_` | 351 to 3000 |
+
+The lower bounds -179.999 and -99.999 keep -180 HU and -100 HU out, also for resampled values. The upper bounds 29.999 and 350.999 keep low-attenuation plaque below 30 HU and non-calcified plaque below the 351 HU of calcified plaque.
+
+For each compartment, the configurations are:
+
+- `<prefix>orig`: intensity and morphology features.
+- `<prefix>fbn_16`, `<prefix>fbn_32` and `<prefix>fbn_64`: FBN discretisation with 16, 32 or 64 bins; texture, histogram and IVH features.
+- `<prefix>fbs_16`, `<prefix>fbs_32` and `<prefix>fbs_64`: FBS discretisation with bins of 16, 32 or 64 HU; texture, histogram and IVH features. The bins start at the lower bound of the HU range, as IBSI recommends.
+- The whole compartments (`lv_` and `coronary_`) also have `fbn_128` and `fbs_128`.
+
+The `lv` configurations leave out voxels of -3024 HU (`sentinel_value=-3024`): CT padding is often stored as -2000 with a rescale intercept of -1024. The `coronary` configurations find the padding value of each image themselves.
+
+`from_template("standard")` gives the six standard configurations.
+
 ## Choosing the Right Configuration
 
 ### FBN vs FBS: Decision Guide
 
 | Factor | FBN | FBS |
 |--------|-----|-----|
-| **Intensity range** | Variable (adapts to image) | Fixed (preserves HU meaning) |
+| **Intensity range** | Variable (adapts to image) | Fixed: the bins start at the same value in every image (`min_val` or a resegment lower bound) |
 | **Cross-study comparison** | Less suitable | Preferred |
 | **Small ROIs** | Better (ensures bin coverage) | May have empty bins |
 | **CT imaging** | Acceptable | Recommended |
@@ -446,7 +493,7 @@ org_configs = {
     "configs": {
         "org_standard_ct": [
             {"step": "resample", "params": {"new_spacing": [0.5, 0.5, 0.5]}},
-            {"step": "discretise", "params": {"method": "FBS", "bin_width": 25.0}},
+            {"step": "discretise", "params": {"method": "FBS", "bin_width": 25.0, "min_val": -1000}},
             {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture"]}},
         ],
         "org_standard_pet": [
@@ -560,7 +607,7 @@ lung_nodule_config = [
         "step": "keep_largest_component",
         "params": {}
     },
-    # Step 4: Discretise using Fixed Bin Size (preserves HU meaning)
+    # Step 4: Fixed Bin Size; the bins start at -1000 HU, the lower bound of the resegment range
     {
         "step": "discretise",
         "params": {
@@ -630,6 +677,16 @@ pipeline.save_log("logs/test_run_001.json")
 configuration snapshot, executed step parameters, source-mode and sentinel
 information, deduplication settings, mask alignment settings, and error/status
 fields needed to reproduce or audit the run on another machine.
+
+Each entry also records how the values were made:
+
+| Field | Meaning |
+|:------|:--------|
+| `config_hash` | The SHA-256 of the configuration (source mode, sentinel value and steps) as canonical JSON. The same configuration gives the same hash in every run and session, also after `save_configs()` and `load_configs()`. |
+| `environment` | The Python version, the platform, the versions of numpy, scipy, numba, PyWavelets, nibabel, pydicom and python-gdcm, and the numba thread count of the run. |
+| `elapsed_seconds` | The run time of the configuration. |
+
+`pipeline.get_log()` returns a copy of the same entries without a file.
 
 Every executed `filter` step additionally records what was **requested** versus what
 was **effective**, so a parameter that the pipeline defaults, substitutes, or cannot

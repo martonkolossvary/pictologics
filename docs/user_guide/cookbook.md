@@ -251,9 +251,7 @@ You want to:
 ### Notes
 
 !!! note
-    - **Progress bar dependency**: This example uses `tqdm`.
-        - If you are running this outside the library repo, install it with `pip install tqdm`.
-        - If you are adding it to your Poetry-managed project, use `poetry add tqdm`.
+    - **Progress bar**: This example uses `tqdm`, which Pictologics installs.
     - **Segmentation DICOM at arbitrary depth**: The helper `_find_dicom_series_root(...)` looks for the subfolder with
         the most `.dcm` files and uses that as the series root.
     - **Multiple masks in one SEG**: If your segmentation DICOM encodes multiple labels (e.g., values 1..N), the
@@ -309,7 +307,7 @@ You want to:
             "case2_fbs_256",
             [
                 {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-                {"step": "discretise", "params": {"method": "FBS", "bin_width": 256.0}},
+                {"step": "discretise", "params": {"method": "FBS", "bin_width": 256.0, "min_val": -1000.0}},
                 extract_all,
             ],
         )
@@ -470,7 +468,8 @@ You want to:
             pipeline.add_config(
                 f"case3_fbs_{int(bin_width)}",
                 [
-                    {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
+                    # FBS needs the same start in every image: -1000 HU (air), as the standard configs
+                    {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width, "min_val": -1000.0}},
                     extract_all,
                 ],
             )
@@ -560,11 +559,12 @@ You want to:
 ### Notes
 
 !!! note
-    - **Progress bar dependency**: This example uses `tqdm`.
-        - If you are running this outside the library repo, install it with `pip install tqdm`.
-        - If you are adding it to your Poetry-managed project, use `poetry add tqdm`.
+    - **Progress bar**: This example uses `tqdm`, which Pictologics installs.
     - **Multiprocessing requirement**: On Windows/macOS, keep the parallel execution inside
       `if __name__ == "__main__":` (as shown) to avoid process-spawn issues.
+    - **Threads per worker**: Each worker process uses all numba threads unless you limit them. The
+      example gives each of the `n_jobs` workers its share of the cores (`init_worker`), so that the
+      workers do not compete for the same cores.
     - **JIT warmup in parallel workers**: Pictologics performs a Numba JIT warmup at package import.
         With `ProcessPoolExecutor`, each worker is a separate Python process, so warmup happens **once per worker process**
         (on its first import of `pictologics`) and then stays warm for all cases that worker processes.
@@ -572,6 +572,12 @@ You want to:
         You can disable auto-warmup via `PICTOLOGICS_DISABLE_WARMUP=1` if you prefer to skip the upfront cost.
     - **Preprocessing parameters are dataset-dependent**: The `resegment` range here uses the CT HU example
       `[-100, 3000]`. Adjust or remove it for non-CT data.
+
+!!! tip "Simpler: `run_batch`"
+    When each case has one image path and one mask path, `pipeline.run_batch()` does the parallel
+    part for you: workers with their share of the threads, one result file per case, a status
+    table, and resume after a stop. See [Batch Runs with `run_batch`](pipeline.md#batch-runs-with-run_batch).
+    This case merges several segmentation folders for each case, so it keeps its own workers.
 
 !!! tip "Performance Tip: Deduplication"
     This example demonstrates **manual feature separation** combined with parallel processing:
@@ -586,11 +592,19 @@ You want to:
 
 !!! example "Full example script"
     ```python
+    import os
     from concurrent.futures import ProcessPoolExecutor, as_completed
     from pathlib import Path
     import numpy as np
     from pictologics import Image, RadiomicsPipeline, load_image, load_and_merge_images
     from pictologics.results import format_results, save_results
+
+
+    def init_worker(threads):
+        """Give each worker process its share of the numba threads."""
+        import numba
+
+        numba.set_num_threads(threads)
 
 
     def collect_segmentation_series_roots(seg_root):
@@ -717,7 +731,8 @@ You want to:
         errors = []
 
         # Map each case to the worker function
-        with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        threads = max(1, (os.cpu_count() or 1) // n_jobs)
+        with ProcessPoolExecutor(max_workers=n_jobs, initializer=init_worker, initargs=(threads,)) as executor:
             futures = {
                 executor.submit(process_case, str(case_dir), str(log_dir)): case_dir
                 for case_dir in case_dirs
@@ -733,13 +748,13 @@ You want to:
                     finally:
                         pbar.update(1)
 
+        # Final data export: the finished cases, also when other cases failed
+        save_results(rows, output_file)
+        print(f"Wrote {len(rows)} cases to {output_file}")
+
         if errors:
             msg = "\n".join(f"- {case}: {err}" for case, err in errors)
             raise RuntimeError(f"One or more cases failed:\n{msg}")
-
-        # Final data export
-        save_results(rows, output_file)
-        print(f"Wrote {len(rows)} cases to {output_file}")
 
     if __name__ == "__main__":
         main()
@@ -788,6 +803,13 @@ You want to:
     - **`get_segment_info()`** returns metadata about each segment (number, label, algorithm).
     - **`load_seg()` with `combine_segments=False`** returns a dict mapping segment numbers to `Image` objects.
     - **Alignment**: Use `reference_image` to ensure the SEG mask matches the CT geometry.
+
+!!! tip "Faster for segments that do not overlap: `run_rois`"
+    When no voxel belongs to two segments, load the SEG as one label map
+    (`load_seg(seg_file, reference_image=image)`) and call `pipeline.run_rois(image, label_map,
+    labels={seg["segment_label"]: seg["segment_number"] for seg in segments})`. It gives the same
+    features, and it is 2 to 4 times faster with many segments. See
+    [Many ROIs with `run_rois`](pipeline.md#many-rois-with-run_rois).
 
 ### Full example script
 

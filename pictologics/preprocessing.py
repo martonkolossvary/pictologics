@@ -1086,7 +1086,10 @@ def discretise_image(
         n_bins: Number of bins (required for FBN).
         bin_width: Bin width (required for FBS).
         min_val: Minimum value for discretisation.
-                 For FBS, defaults to ROI minimum (or global minimum).
+                 For FBS, defaults to ROI minimum (or global minimum). To compare
+                 images, give FBS the same min_val for every image, as IBSI
+                 recommends (the lower bound of the resegmentation range); the
+                 pipeline always does.
                  For FBN, defaults to ROI minimum.
         max_val: Maximum value for discretisation (FBN only).
                  Defaults to ROI maximum.

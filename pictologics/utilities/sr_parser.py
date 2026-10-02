@@ -430,7 +430,7 @@ class SRDocument:
 
         from tqdm import tqdm
 
-        from .dicom_utils import header_worker_pool
+        from .dicom_utils import worker_pool
 
         # Convert paths to Path objects
         path_objs = [Path(p) for p in paths]
@@ -484,7 +484,7 @@ class SRDocument:
                     documents.append(result["document"])
         else:
             # Parallel processing
-            with header_worker_pool(num_workers) as executor:
+            with worker_pool(num_workers) as executor:
                 results = list(
                     tqdm(
                         executor.map(_process_sr_file_worker, worker_args),

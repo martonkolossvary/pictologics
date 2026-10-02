@@ -22,22 +22,30 @@ import copy
 import datetime
 import difflib
 import functools
+import hashlib
 import inspect
 import itertools
 import json
 import logging
 import math
+import os
 import pickle
+import platform
 import re
+import sys
+import time
 import warnings
 import weakref
 from collections import Counter
+from collections.abc import Iterable, Mapping
+from concurrent.futures import as_completed
 from dataclasses import dataclass, replace
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Optional, cast
 
+import numba
 import numpy as np
 import pandas as pd
 import pywt
@@ -100,7 +108,8 @@ from .preprocessing import (
     resegment_mask,
     round_intensities,
 )
-from .templates import _load_yaml, get_standard_templates
+from .results import _json_safe, format_results
+from .templates import _load_yaml, get_standard_templates, list_template_files, load_template_file
 
 # Schema version for config serialization - increment when format changes
 CONFIG_SCHEMA_VERSION = "1.0"
@@ -116,6 +125,41 @@ def _get_package_version() -> str | None:
         return version("pictologics")
     except PackageNotFoundError:
         return None
+
+
+# The packages whose versions can change the feature values or the loading of images
+_PROVENANCE_PACKAGES = (
+    "numpy",
+    "scipy",
+    "numba",
+    "PyWavelets",
+    "nibabel",
+    "pydicom",
+    "python-gdcm",
+)
+
+
+@functools.cache
+def _package_versions() -> dict[str, str | None]:
+    """The Python version, the platform and the versions of _PROVENANCE_PACKAGES (read once
+    per process; None for a package without metadata)."""
+    versions: dict[str, str | None] = {
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+    }
+    for name in _PROVENANCE_PACKAGES:
+        try:
+            versions[name] = version(name)
+        except PackageNotFoundError:
+            versions[name] = None
+    return versions
+
+
+def _config_hash(snapshot: dict[str, Any]) -> str:
+    """The SHA-256 of a configuration snapshot as canonical JSON: the same configuration
+    gives the same hash in every run, process and session."""
+    text = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +295,25 @@ def _has_roi(array: npt.NDArray[Any]) -> bool:
     return compute_nonzero_bbox(array) is not None
 
 
+# IBSI: "to maintain consistency between samples, we strongly recommend to always set the
+# same minimum value for all samples as defined by the lower bound of the re-segmentation
+# range". A start at the minimum of each ROI gives a grey level another meaning in each image.
+_FBS_START_PROBLEM = (
+    "FBS needs a start that is the same for every image: set min_val, or add a resegment "
+    "step with range_min before it (after the last filter step)"
+)
+
+
+def _fbs_start(params: dict[str, Any], state: PipelineState) -> float:
+    """The first bin edge of an FBS discretisation: its min_val, else the lower bound of the
+    resegment ranges of the intensity mask (see _FBS_START_PROBLEM)."""
+    min_val = params.get("min_val")
+    start = state.resegment_min if min_val is None else float(min_val)
+    if start is None:
+        raise ValueError(f"{_FBS_START_PROBLEM}.")
+    return start
+
+
 def _get_apply_to(params: dict[str, Any], step_name: str) -> str:
     """Return a validated mask target for preprocessing steps that support it."""
     apply_to = params.get("apply_to", "both")
@@ -308,6 +371,52 @@ _CUT_MIN_SIZE = 1 << 16
 # finding the region and filling the image back costs more than it saves (+34 us on an
 # 80-voxel phantom); from 32^3 voxels on, an axial Gabor filter is 4 times faster.
 _FILTER_REGION_MIN = 1 << 12
+# A configuration needs at least this many bytes per voxel of a resampled grid: the image,
+# its masks, the ROI values and their working copies. Measured on a whole 0.5 mm grid of
+# 32 million voxels: 29 for intensity features alone, 36 with a LoG filter, 50 with texture
+# features and 55 with a Simoncelli filter.
+_GRID_BYTES_PER_VOXEL = 24
+
+
+@functools.cache
+def _physical_memory() -> int:
+    """The bytes of physical memory of this computer."""
+    if sys.platform == "win32":
+        import ctypes
+
+        class _MemoryStatus(ctypes.Structure):  # MEMORYSTATUSEX: 2 DWORD, 7 DWORDLONG
+            _fields_ = [("length", ctypes.c_uint32), ("load", ctypes.c_uint32)] + [
+                (name, ctypes.c_uint64)
+                for name in (
+                    "total",
+                    "free",
+                    "page",
+                    "free_page",
+                    "virtual",
+                    "free_virtual",
+                    "extended",
+                )
+            ]
+
+        status = _MemoryStatus()
+        status.length = ctypes.sizeof(status)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+        return int(status.total)
+    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+
+
+def _check_grid_memory(shape: list[int], new_spacing: Any) -> None:
+    """Raise a MemoryError before a resample to a grid of `shape` that cannot fit in the
+    memory of this computer (see _GRID_BYTES_PER_VOXEL)."""
+    need = math.prod(shape) * _GRID_BYTES_PER_VOXEL
+    memory = _physical_memory()
+    if need > memory:
+        raise MemoryError(
+            f"Resampling to {tuple(new_spacing)} mm makes a grid of "
+            f"{' x '.join(map(str, shape))} voxels. It needs at least {need / 2**30:.1f} GB, "
+            f"more than the {memory / 2**30:.1f} GB of memory of this computer. Use a larger "
+            "spacing, or a smaller image or ROI."
+        )
 
 
 def _roi_reach(later_steps: list[dict[str, Any]]) -> Optional[float]:
@@ -576,8 +685,11 @@ def _spacing_problem(spacing: Any) -> Optional[str]:
     return None
 
 
-def _step_problems(name: str, params: dict[str, Any], discretised: bool) -> list[str]:
-    """Problems with the parameter values of one known step."""
+def _step_problems(
+    name: str, params: dict[str, Any], discretised: bool, fbs_start: bool
+) -> list[str]:
+    """Problems with the parameter values of one known step. `fbs_start`: an earlier
+    resegment step gives FBS its start (see _FBS_START_PROBLEM)."""
     problems = []
     if "apply_to" in params and params["apply_to"] not in _MASK_APPLY_TARGETS:
         problems.append(
@@ -603,6 +715,8 @@ def _step_problems(name: str, params: dict[str, Any], discretised: bool) -> list
             problems.append(f"FBS needs a bin_width above 0, not {params.get('bin_width')!r}")
         elif method == "FIXED_CUTOFFS" and not params.get("cutoffs"):
             problems.append("FIXED_CUTOFFS needs cutoffs")
+        if method == "FBS" and params.get("min_val") is None and not fbs_start:
+            problems.append(_FBS_START_PROBLEM)
     elif name == "filter" and params.get("type") == "riesz":
         variant = params.get("variant", "base")
         if variant not in _RIESZ_FUNCTIONS:
@@ -611,6 +725,14 @@ def _step_problems(name: str, params: dict[str, Any], discretised: bool) -> list
         for key in _OPTION_GROUPS:
             if params.get(key) is not None and not isinstance(params[key], dict):
                 problems.append(f"{key} must be a dict, not {params[key]!r}")
+        ivh = params.get("ivh_discretisation")
+        if (
+            isinstance(ivh, dict)
+            and ivh.get("method", "FBS") == "FBS"
+            and ivh.get("min_val") is None
+            and not fbs_start
+        ):
+            problems.append(f"ivh_discretisation: {_FBS_START_PROBLEM}")
         families = params.get("families", _DEFAULT_FEATURE_FAMILIES)
         if isinstance(families, str) or not isinstance(families, (list, tuple)):
             return problems + [f"families must be a list of names, not {families!r}"]
@@ -633,7 +755,7 @@ def _config_problems(steps: Any, source_mode: Any = "full_image") -> list[str]:
     problems = []
     if source_mode not in _SOURCE_MODES:
         problems.append(f"source_mode must be one of {_SOURCE_MODES}, not {source_mode!r}")
-    discretised = False
+    discretised = fbs_start = False
     for index, step in enumerate(steps):
         where = f"step {index}"
         if not isinstance(step, dict):
@@ -666,9 +788,17 @@ def _config_problems(steps: Any, source_mode: Any = "full_image") -> list[str]:
             if key not in allowed:
                 problems.append(f"{where}: unknown parameter '{key}'{_hint(key, allowed)}")
         problems.extend(
-            f"{where}: {problem}" for problem in _step_problems(name, params, discretised)
+            f"{where}: {problem}"
+            for problem in _step_problems(name, params, discretised, fbs_start)
         )
         discretised = discretised or name == "discretise"
+        if name == "resegment":  # as PipelineState.resegment_min
+            fbs_start = fbs_start or (
+                params.get("range_min") is not None
+                and params.get("apply_to", "both") in ("both", "intensity")
+            )
+        elif name == "filter":
+            fbs_start = False
     return problems
 
 
@@ -767,6 +897,9 @@ class PipelineState:
     roi_reach: Optional[float] = None
     grid_shape: Optional[tuple[int, int, int]] = None
     grid_offset: Optional[tuple[int, int, int]] = None  # the first voxel of the region
+    # The lower bound of the resegment ranges of the intensity mask (None after a filter,
+    # whose values have other units): an FBS step without min_val starts its bins there.
+    resegment_min: Optional[float] = None
 
 
 class EmptyROIMaskError(ValueError):
@@ -843,6 +976,9 @@ class RadiomicsPipeline:
         self._last_distance_map: Optional[tuple[Any, Any, npt.NDArray[Any]]] = None
         # The ROI box cuts of run() (see _cut_to_roi), each kept while its array lives
         self._roi_cuts: dict[tuple[int, Any], npt.NDArray[Any]] = {}
+        # (steps, config hash) of each configuration: a configuration changes only with a
+        # new steps list (add_config, merge_configs), so its hash is made once
+        self._config_hashes: dict[str, tuple[Any, str]] = {}
 
         if load_standard:
             self._load_predefined_configs()
@@ -1153,14 +1289,34 @@ class RadiomicsPipeline:
             print(results["standard_fbn_32"].head())
             ```
         """
-        # 1. Load Data
-        if isinstance(image, Path):
-            image = str(image)
-        if isinstance(mask, Path):
-            mask = str(mask)
-        if isinstance(image, str):
-            orig_img = load_image(image)
-            img_source = image
+        mask_settings = (
+            mask_subvoxel_tolerance,
+            mask_subvoxel_warning_threshold,
+            mask_min_overlap_fraction,
+        )
+        orig_img, img_source = self._run_image(image)
+        orig_mask, mask_source, mask_was_generated = self._run_mask(mask, orig_img, mask_settings)
+        _validate_geometry(orig_mask, orig_img, "mask", "image")
+        if isinstance(config_names, str):
+            config_names = [config_names]
+        return self._run_loaded(
+            orig_img,
+            orig_mask,
+            img_source,
+            mask_source,
+            mask_was_generated,
+            subject_id,
+            config_names,
+            self._target_configs(config_names),
+            mask_settings,
+        )
+
+    @staticmethod
+    def _run_image(image: str | Path | Image) -> tuple[Image, str]:
+        """The image of a run (a float64 array) and its source for the log."""
+        if isinstance(image, (str, Path)):
+            orig_img = load_image(str(image))
+            img_source = str(image)
         elif isinstance(image, Image):
             orig_img = image
             img_source = "InMemory"
@@ -1173,61 +1329,57 @@ class RadiomicsPipeline:
             # The loaders give float64. An integer or float32 array would resample in its
             # own type (rounded, and on one core), so an in-memory image gets float64 too.
             orig_img = replace(orig_img, array=orig_img.array.astype(np.float64))
+        return orig_img, img_source
 
-        mask_was_generated = False
+    @staticmethod
+    def _run_mask(
+        mask: str | Path | Image | None,
+        orig_img: Image,
+        mask_settings: tuple[float, float, float],
+    ) -> tuple[Image, str, bool]:
+        """The mask of a run on the grid of `orig_img`, its source for the log, and whether
+        it is a generated full mask."""
+        if isinstance(mask, Path):
+            mask = str(mask)
         if mask is None or (isinstance(mask, str) and mask.strip() == ""):
-            orig_mask = create_full_mask(orig_img)
-            mask_source = "GeneratedFullMask"
-            mask_was_generated = True
-        elif isinstance(mask, str):
-            orig_mask = load_image(
+            return create_full_mask(orig_img), "GeneratedFullMask", True
+        if isinstance(mask, str):
+            tolerance, warning_threshold, overlap = mask_settings
+            loaded = load_image(
                 mask,
                 reference_image=orig_img,
-                subvoxel_tolerance=mask_subvoxel_tolerance,
-                subvoxel_warning_threshold=mask_subvoxel_warning_threshold,
-                min_overlap_fraction=mask_min_overlap_fraction,
+                subvoxel_tolerance=tolerance,
+                subvoxel_warning_threshold=warning_threshold,
+                min_overlap_fraction=overlap,
             )
-            mask_source = mask
-        elif isinstance(mask, Image):
-            orig_mask = mask
-            mask_source = "InMemory"
-        else:
-            raise TypeError(
-                f"mask must be a path, an Image or None, not {type(mask).__name__}; wrap an "
-                "array as Image(array, spacing, origin)."
-            )
+            return loaded, mask, False
+        if isinstance(mask, Image):
+            return mask, "InMemory", False
+        raise TypeError(
+            f"mask must be a path, an Image or None, not {type(mask).__name__}; wrap an "
+            "array as Image(array, spacing, origin)."
+        )
 
-        _validate_geometry(orig_mask, orig_img, "mask", "image")
-
+    def _run_loaded(
+        self,
+        orig_img: Image,
+        orig_mask: Image,
+        img_source: str,
+        mask_source: str,
+        mask_was_generated: bool,
+        subject_id: Optional[str],
+        config_names: Optional[list[str]],
+        target_configs: list[str],
+        mask_settings: tuple[float, float, float],
+        nonfinite: Optional[bool] = None,
+    ) -> dict[str, pd.Series]:
+        """The part of `run()` after the loading: `target_configs` run (see
+        `_target_configs`), and the log records the requested `config_names`. `nonfinite`
+        (whether the image has NaN or infinite values) is found when it is None."""
+        mask_subvoxel_tolerance, mask_subvoxel_warning_threshold, mask_min_overlap_fraction = (
+            mask_settings
+        )
         all_results = {}
-
-        # Determine which configs to run
-        if config_names is None:
-            target_configs = list(self._configs.keys())
-            standard = self.get_all_standard_config_names()
-            if standard:
-                warnings.warn(
-                    f"run() without config_names runs all {len(target_configs)} configurations, "
-                    f"also the {len(standard)} standard ones ({', '.join(standard)}). Pass "
-                    "config_names to choose, or create the pipeline with "
-                    "RadiomicsPipeline(load_standard=False).",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        else:
-            if isinstance(config_names, str):
-                config_names = [config_names]
-            target_configs = []
-            for name in config_names:
-                if name == "all_standard":
-                    target_configs.extend(self.get_all_standard_config_names())
-                elif name in self._configs:
-                    target_configs.append(name)
-                else:
-                    raise ValueError(
-                        f"Configuration '{name}' not found.{_hint(name, self._configs)}"
-                    )
-            target_configs = list(dict.fromkeys(target_configs))  # each name runs once
 
         # Create or regenerate deduplication plan if enabled
         dedup_plan: DeduplicationPlan | None = None
@@ -1239,7 +1391,8 @@ class RadiomicsPipeline:
         self._last_distance_map = None
         self._roi_cuts.clear()
         # NaN or infinite intensities leave the intensity mask before each extraction
-        nonfinite = not _all_finite(orig_img.array)
+        if nonfinite is None:
+            nonfinite = not _all_finite(orig_img.array)
 
         if self._deduplication_enabled and len(target_configs) > 1:
             # Get configs for analysis
@@ -1294,6 +1447,7 @@ class RadiomicsPipeline:
 
         # Run each configuration
         for config_name in target_configs:
+            started = time.perf_counter()
             steps = self._configs[config_name]
             metadata = self._config_metadata.get(config_name, {})
             keys = prefix_keys[config_name]
@@ -1420,12 +1574,15 @@ class RadiomicsPipeline:
                 sentinel_value=detected_sentinel_value,
             )
 
+            snapshot = self._config_snapshot(config_name)
             config_log: dict[str, Any] = {
                 "timestamp": datetime.datetime.now().isoformat(),
                 "schema_version": CONFIG_SCHEMA_VERSION,
                 "pictologics_version": _get_package_version(),
+                "environment": {**_package_versions(), "threads": numba.get_num_threads()},
                 "subject_id": subject_id,
                 "config_name": config_name,
+                "config_hash": self._hash_of(config_name),
                 "image_source": img_source,
                 "mask_source": mask_source,
                 "source_mode": source_mode.value,
@@ -1434,14 +1591,12 @@ class RadiomicsPipeline:
                 "sentinel_auto_detected": sentinel_auto_detected,
                 "sentinel_proportion": sentinel_proportion,
                 "mask_roi_semantics": "nonzero_values_are_roi_membership",
-                "config_snapshot": self._make_serializable(
-                    {
-                        "source_mode": source_mode.value,
-                        "sentinel_value": explicit_sentinel,
-                        "effective_sentinel_value": detected_sentinel_value,
-                        "steps": steps,
-                    }
-                ),
+                "config_snapshot": {
+                    "source_mode": snapshot["source_mode"],
+                    "sentinel_value": snapshot["sentinel_value"],
+                    "effective_sentinel_value": self._make_serializable(detected_sentinel_value),
+                    "steps": snapshot["steps"],
+                },
                 "deduplication": {
                     "enabled": self._deduplication_enabled,
                     "rules_version": self._deduplication_rules.version,
@@ -1513,6 +1668,8 @@ class RadiomicsPipeline:
                         "params": self._make_serializable(params),
                         "status": "completed",
                     }
+                    if step_name == "discretise" and params.get("method") == "FBS":
+                        step_log_entry["min_val_effective"] = state.discretisation_min
                     if step_name == "filter":
                         step_log_entry["boundary_requested"] = state.filter_boundary_requested
                         step_log_entry["boundary_effective"] = state.filter_boundary_effective
@@ -1538,6 +1695,7 @@ class RadiomicsPipeline:
                 config_log["failed_step"] = (
                     current_step if current_step is not None else "initialization"
                 )
+                config_log["elapsed_seconds"] = time.perf_counter() - started
                 self._log.append(config_log)
 
                 # Build a NaN-filled Series with the expected feature names so
@@ -1570,6 +1728,7 @@ class RadiomicsPipeline:
                     if users[key] == 0:
                         shared.pop(key, None)
 
+            config_log["elapsed_seconds"] = time.perf_counter() - started
             self._log.append(config_log)
 
             # Create Series
@@ -1579,6 +1738,383 @@ class RadiomicsPipeline:
         self._last_distance_map = None
         self._roi_cuts.clear()
         return all_results
+
+    def run_rois(
+        self,
+        image: str | Path | Image,
+        rois: str | Path | Image,
+        labels: Optional[Iterable[float] | Mapping[str, float]] = None,
+        subject_id: Optional[str] = None,
+        config_names: Optional[list[str]] = None,
+        mask_subvoxel_tolerance: float = 0.5,
+        mask_subvoxel_warning_threshold: float = 0.01,
+        mask_min_overlap_fraction: float = 0.5,
+    ) -> dict[str, dict[str, pd.Series]]:
+        """
+        Run configurations on each ROI of a label map, with one image load.
+
+        The label map `rois` holds a whole number for each voxel: 0 for the background,
+        and the label of its ROI elsewhere. Each ROI gets the results of `run()` with a
+        mask of that label alone. `run_rois` loads the image once, checks it for NaN
+        values once, and makes each mask only inside the box of its label, so many ROIs
+        take much less time than one `run()` for each of them.
+
+        Args:
+            image: Path to the image, or an Image.
+            rois: Path to the label map (for example a NIfTI file or a DICOM SEG), or an
+                Image, on the grid of the image.
+            labels: The ROIs to run: the labels, or a mapping from ROI names to labels.
+                Default: every label in the map.
+            subject_id: The subject, for the processing log.
+            config_names: The configurations to run, as in `run()`.
+            mask_subvoxel_tolerance: As in `run()`, for a label map path.
+            mask_subvoxel_warning_threshold: As in `run()`, for a label map path.
+            mask_min_overlap_fraction: As in `run()`, for a label map path.
+
+        Returns:
+            For each ROI name (the label as text, such as `"3"`, or the name of the
+            mapping), the results of `run()`: a dictionary from configuration names to
+            feature Series. The log entries of an ROI have its name in `roi`.
+
+        Raises:
+            ValueError: If the label map has values that are not whole numbers or are
+                below 0, or if a label is not a whole number of 1 or above.
+
+        Example:
+            ```python
+            results = pipeline.run_rois("ct.nii.gz", "organs.nii.gz", labels={"liver": 5, "spleen": 1})
+            rows = [
+                format_results(series, meta={"subject_id": "p001", "roi": roi})
+                for roi, series in results.items()
+            ]
+            save_results(rows, "p001_rois.csv")
+            ```
+        """
+        from scipy import ndimage
+
+        mask_settings = (
+            mask_subvoxel_tolerance,
+            mask_subvoxel_warning_threshold,
+            mask_min_overlap_fraction,
+        )
+        orig_img, img_source = self._run_image(image)
+        label_map, mask_source, _ = self._run_mask(rois, orig_img, mask_settings)
+        _validate_geometry(label_map, orig_img, "mask", "image")
+        values = label_map.array
+        whole = values if values.dtype.kind in "ui" else values.astype(np.int64)
+        if (whole is not values and not np.array_equal(whole, values)) or whole.min() < 0:
+            raise ValueError("The labels of an ROI map must be whole numbers of 0 or above.")
+        boxes = ndimage.find_objects(whole)  # the box of each label 1, 2, ..., in one pass
+        chosen: dict[str, float]
+        if labels is None:
+            chosen = {str(k + 1): k + 1 for k, box in enumerate(boxes) if box is not None}
+        elif isinstance(labels, Mapping):
+            chosen = {str(name): label for name, label in labels.items()}
+        else:
+            chosen = {str(label): label for label in labels}
+        for label in chosen.values():
+            if label < 1 or label != int(label):
+                raise ValueError(f"An ROI label must be a whole number of 1 or above, not {label}.")
+        if isinstance(config_names, str):
+            config_names = [config_names]
+        names = self._target_configs(config_names)
+        nonfinite = not _all_finite(orig_img.array)
+        # One mask array for all ROIs: each run fills the box of its label and clears it
+        # after (a run keeps no array of its masks)
+        buffer: npt.NDArray[Any] = np.zeros(values.shape, dtype=np.uint8)
+        mask = replace(label_map, array=buffer)
+        all_results: dict[str, dict[str, pd.Series]] = {}
+        for name, label in chosen.items():
+            box = boxes[int(label) - 1] if label <= len(boxes) else None
+            if box is not None:
+                buffer[box] = whole[box] == label
+            start = len(self._log)
+            all_results[name] = self._run_loaded(
+                orig_img,
+                mask,
+                img_source,
+                mask_source,
+                False,
+                subject_id,
+                config_names,
+                names,
+                mask_settings,
+                nonfinite,
+            )
+            for entry in self._log[start:]:
+                entry["roi"] = name
+            if box is not None:
+                buffer[box] = 0
+        return all_results
+
+    def run_batch(
+        self,
+        cases: Iterable[Mapping[str, Any]] | pd.DataFrame,
+        output_dir: str | Path,
+        config_names: Optional[list[str]] = None,
+        workers: int = 1,
+        show_progress: bool = True,
+    ) -> pd.DataFrame:
+        """
+        Run configurations on many cases, with one result file for each case.
+
+        Each case is a mapping, or a row of a DataFrame, with the `run()` arguments of one
+        image: `subject_id` and `image` (required), `mask`, and the mask settings. When a
+        case ends, `run_batch` writes its result to `output_dir/cases/<subject_id>.json`.
+        A later call with the same output folder skips each case whose file holds the
+        same image, mask and configurations, so a stopped batch goes on where it stopped.
+        A failed case runs again. To run a case again, delete its file.
+
+        With `workers` above 1, the cases run in that many processes, and each process
+        uses its share of the numba threads. Each process holds one case at a time, so
+        the memory need grows with `workers`.
+
+        Args:
+            cases: The cases.
+            output_dir: The folder of the result files.
+            config_names: The configurations to run, as in `run()`.
+            workers: The number of processes.
+            show_progress: Whether to show a progress bar.
+
+        Returns:
+            A DataFrame with one row for each case, in the order of `cases`:
+            `subject_id`; `status` (`"completed"`; `"incomplete"` when a configuration
+            ended with an empty ROI or an error; `"failed"` when the case did not run, for
+            example because its image did not load); `error`; `warnings`; `seconds`; and
+            the features in the wide format of `format_results()`. The file of a case also
+            holds the processing log of its configurations.
+
+        Raises:
+            ValueError: If a case has no `subject_id` or `image`, has an unknown key, or
+                has the file name of another case, or for an unknown configuration name.
+
+        Example:
+            ```python
+            cases = [
+                {"subject_id": "p001", "image": "p001/ct.nii.gz", "mask": "p001/roi.nii.gz"},
+                {"subject_id": "p002", "image": "p002/ct.nii.gz", "mask": "p002/roi.nii.gz"},
+            ]
+            table = pipeline.run_batch(cases, "results", config_names=["study"], workers=4)
+            print(table.loc[table["status"] != "completed", ["subject_id", "error"]])
+            save_results(table, "results/features.csv")
+            ```
+        """
+        from tqdm import tqdm
+
+        records = (
+            cases.to_dict("records")
+            if isinstance(cases, pd.DataFrame)
+            else [dict(case) for case in cases]
+        )
+        names = self._target_configs(config_names)
+        hashes = {name: self._hash_of(name) for name in names}
+        folder = Path(output_dir) / "cases"
+        folder.mkdir(parents=True, exist_ok=True)
+        keys = set(inspect.signature(self.run).parameters) - {"config_names"}
+        paths: list[Path] = []
+        stems: dict[str, str] = {}
+        for index, case in enumerate(records):
+            for key, value in case.items():
+                if key not in keys:
+                    raise ValueError(f"Case {index}: unknown key '{key}'{_hint(key, keys)}.")
+                if isinstance(value, float) and math.isnan(value):  # an empty DataFrame cell
+                    case[key] = None
+            if case.get("subject_id") is None or case.get("image") is None:
+                raise ValueError(f"Case {index} needs a subject_id and an image.")
+            case["subject_id"] = str(case["subject_id"])
+            stem = re.sub(r"[^A-Za-z0-9._-]", "_", case["subject_id"])
+            if stem in stems:
+                raise ValueError(
+                    f"The cases '{stems[stem]}' and '{case['subject_id']}' have the same "
+                    f"result file name, {stem}.json."
+                )
+            stems[stem] = case["subject_id"]
+            paths.append(folder / f"{stem}.json")
+
+        outcomes: dict[int, dict[str, Any]] = {}
+        for index, (case, path) in enumerate(zip(records, paths, strict=True)):
+            if path.exists():
+                record = json.loads(path.read_text(encoding="utf-8"))
+                sources = [_case_source(case["image"]), _case_source(case.get("mask"))]
+                if (
+                    record["status"] != "failed"
+                    and record["config_hashes"] == hashes
+                    and [record["image"], record["mask"]] == sources
+                ):
+                    outcomes[index] = record
+        todo = [index for index in range(len(records)) if index not in outcomes]
+        setup = (
+            {name: self._configs[name] for name in names},
+            {name: self._config_metadata[name] for name in names if name in self._config_metadata},
+            self._deduplication_enabled,
+            self._deduplication_rules,
+        )
+        with tqdm(
+            total=len(records),
+            initial=len(outcomes),
+            desc="Radiomics",
+            unit="case",
+            disable=not show_progress,
+        ) as bar:
+            if workers <= 1 or len(todo) <= 1:
+                runner = _batch_pipeline(*setup)
+                for index in todo:
+                    outcomes[index] = runner._run_case(records[index], names, hashes, paths[index])
+                    bar.update()
+            else:
+                from .utilities.dicom_utils import worker_pool
+
+                threads = max(1, numba.get_num_threads() // workers)
+                with worker_pool(
+                    min(workers, len(todo)),
+                    initializer=_start_batch_worker,
+                    initargs=(setup, threads),
+                    spawn=True,
+                ) as pool:
+                    futures = {
+                        pool.submit(_batch_case, records[i], names, hashes, paths[i]): i
+                        for i in todo
+                    }
+                    try:
+                        for future in as_completed(futures):
+                            outcomes[futures[future]] = future.result()
+                            bar.update()
+                    except BaseException:  # a stop (Ctrl+C) or a lost worker: no new cases
+                        for future in futures:
+                            future.cancel()
+                        raise
+
+        rows = []
+        for index in range(len(records)):
+            record = outcomes[index]
+            meta = {
+                "subject_id": record["subject_id"],
+                "status": record["status"],
+                "error": record["error"],
+                "warnings": " | ".join(record["warnings"]) or None,
+                "seconds": record["seconds"],
+            }
+            results = {
+                name: pd.Series(values, dtype=float) for name, values in record["results"].items()
+            }
+            rows.append(format_results(results, fmt="wide", meta=meta))
+        return pd.DataFrame(rows)
+
+    def _run_case(
+        self,
+        case: dict[str, Any],
+        names: list[str],
+        hashes: dict[str, str],
+        path: Path,
+    ) -> dict[str, Any]:
+        """Run one case of `run_batch`, write its record to `path` and return the record.
+        The file appears as a whole (from a temporary file), so a stop leaves no part."""
+        started = time.perf_counter()
+        record: dict[str, Any] = {
+            "subject_id": case["subject_id"],
+            "image": _case_source(case["image"]),
+            "mask": _case_source(case.get("mask")),
+            "config_hashes": hashes,
+        }
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            try:
+                results = self.run(config_names=names, **case)
+            except Exception as e:
+                record.update(status="failed", error=f"{type(e).__name__}: {e}", results={})
+            else:
+                problems = [
+                    f"{entry['config_name']}: {entry['error']}"
+                    for entry in self._log
+                    if entry["status"] != "completed"
+                ]
+                record.update(
+                    status="incomplete" if problems else "completed",
+                    error="; ".join(problems) or None,
+                    results={
+                        name: {key: float(value) for key, value in series.items()}
+                        for name, series in results.items()
+                    },
+                )
+        record["warnings"] = list(dict.fromkeys(str(warning.message) for warning in caught))
+        record["seconds"] = time.perf_counter() - started
+        record["log"] = self._make_serializable(self._log)
+        self.clear_log()
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(_json_safe(record), default=str, allow_nan=False), encoding="utf-8"
+        )
+        os.replace(temporary, path)
+        return record
+
+    def _target_configs(self, config_names: Optional[list[str]]) -> list[str]:
+        """The configurations that `run()` runs for `config_names`: each name once, with
+        "all_standard" for the standard ones; all configurations for None (with a warning
+        when the standard ones are among them)."""
+        if config_names is None:
+            standard = self.get_all_standard_config_names()
+            if standard:
+                warnings.warn(
+                    f"run() without config_names runs all {len(self._configs)} configurations, "
+                    f"also the {len(standard)} standard ones ({', '.join(standard)}). Pass "
+                    "config_names to choose, or create the pipeline with "
+                    "RadiomicsPipeline(load_standard=False).",
+                    UserWarning,
+                    stacklevel=3,
+                )
+            return list(self._configs)
+        target_configs = []
+        for name in config_names:
+            if name == "all_standard":
+                target_configs.extend(self.get_all_standard_config_names())
+            elif name in self._configs:
+                target_configs.append(name)
+            else:
+                raise ValueError(f"Configuration '{name}' not found.{_hint(name, self._configs)}")
+        return list(dict.fromkeys(target_configs))  # each name runs once
+
+    def _config_snapshot(self, name: str) -> dict[str, Any]:
+        """The source mode, sentinel value and steps of a configuration (JSON-ready): the
+        part of its log snapshot that the config hash covers."""
+        metadata = self._config_metadata.get(name, {})
+        snapshot: dict[str, Any] = self._make_serializable(
+            {
+                "source_mode": SourceMode(metadata.get("source_mode", "full_image")).value,
+                "sentinel_value": metadata.get("sentinel_value"),
+                "steps": self._configs[name],
+            }
+        )
+        return snapshot
+
+    def _hash_of(self, name: str) -> str:
+        """The config hash of a configuration (see `_config_hash`), made again only after
+        the configuration changed."""
+        steps = self._configs[name]
+        cached = self._config_hashes.get(name)
+        if cached is None or cached[0] is not steps:
+            cached = (steps, _config_hash(self._config_snapshot(name)))
+            self._config_hashes[name] = cached
+        return cached[1]
+
+    def get_log(self) -> list[dict[str, Any]]:
+        """
+        Return a copy of the processing log.
+
+        The log has one entry for each configuration that `run()` ran, in run order. An
+        entry holds the configuration name, the subject, the image and mask sources, the
+        status (`"completed"`, `"empty_roi"` or `"error"`), the error and the failed step
+        when there is one, the executed steps, the feature count and the run time
+        (`elapsed_seconds`). The log grows with each run until `clear_log()`.
+
+        Example:
+            ```python
+            results = pipeline.run(image, mask, config_names=["standard_fbn_32"])
+            for entry in pipeline.get_log():
+                if entry["status"] != "completed":
+                    print(entry["config_name"], entry["error"])
+            ```
+        """
+        return copy.deepcopy(self._log)
 
     def clear_log(self) -> None:
         """Clear the in-memory processing log."""
@@ -1634,6 +2170,7 @@ class RadiomicsPipeline:
             # only the region around the ROI box (grown by the reach of the later steps): the
             # arrays then hold that region, with the values of the whole grid.
             region = None
+            grid = _output_grid(state.image.array.shape, state.image.spacing, spacing)[0]
             if state.roi_reach is not None:
                 margin_mm = state.roi_reach
                 region = _roi_region(
@@ -1654,12 +2191,15 @@ class RadiomicsPipeline:
                         ),
                     ),
                 )
-                grid = _output_grid(state.image.array.shape, state.image.spacing, spacing)[0]
                 if all(r.stop - r.start == n for r, n in zip(region, grid, strict=True)):
                     region = None
                 else:
                     state.grid_shape = (int(grid[0]), int(grid[1]), int(grid[2]))
                     state.grid_offset = (region[0].start, region[1].start, region[2].start)
+            _check_grid_memory(
+                [int(n) for n in grid] if region is None else [r.stop - r.start for r in region],
+                spacing,
+            )
 
             # Update Image and raw_image
             state.image = resample_image(
@@ -1728,6 +2268,9 @@ class RadiomicsPipeline:
                 state.intensity_mask = resegment_mask(
                     state.image, state.intensity_mask, range_min, range_max
                 )
+                if range_min is not None:
+                    low = -math.inf if state.resegment_min is None else state.resegment_min
+                    state.resegment_min = max(float(range_min), low)
             if apply_to == "both" and masks_in_sync:
                 state.morph_mask = state.intensity_mask
             elif apply_to in ("morph", "both"):
@@ -1826,6 +2369,8 @@ class RadiomicsPipeline:
             disc_params = params.copy()
             if "method" in disc_params:
                 del disc_params["method"]
+            if method == "FBS":
+                disc_params["min_val"] = state.discretisation_min = _fbs_start(disc_params, state)
 
             # When no later step reads the image away from the ROI, the arrays are cut to
             # the ROI box (grown by the local intensity sphere when a later step reads it),
@@ -2032,6 +2577,7 @@ class RadiomicsPipeline:
                 modality=state.image.modality,
             )
             state.raw_image = state.image  # Update raw_image post-filter
+            state.resegment_min = None
             state.is_filtered = True
             state.filter_type = filter_type
             state.filter_boundary_requested = boundary.name.lower()
@@ -2390,6 +2936,8 @@ class RadiomicsPipeline:
         elif ivh_discretisation:
             ivh_disc_params = ivh_discretisation.copy()
             ivh_method = ivh_disc_params.pop("method", "FBS")
+            if ivh_method == "FBS":
+                ivh_disc_params["min_val"] = _fbs_start(ivh_disc_params, state)
             ivh_disc_bin_width = ivh_disc_params.get("bin_width")
             ivh_disc_min_val = ivh_disc_params.get("min_val")
             # With the bin limits given, the bin rule works voxel by voxel: binning the
@@ -3425,6 +3973,53 @@ class RadiomicsPipeline:
         else:
             raise ValueError(f"Unsupported file extension: {suffix}. Use .json, .yaml, or .yml")
 
+    @classmethod
+    def from_template(cls, name: str, load_standard: bool = False) -> "RadiomicsPipeline":
+        """
+        Create a pipeline with the configurations of a template of the package.
+
+        Templates:
+
+        - `"standard"`: the six standard configurations (`standard_fbn_8` to
+          `standard_fbs_32`).
+        - `"lv"`: CT of the left ventricular myocardium, in four compartments (whole,
+          fat, myocardial tissue and calcium), 30 configurations.
+        - `"coronary"`: coronary plaque in CT angiography, in four plaque types (all,
+          non-calcified, low-attenuation and calcified), 30 configurations.
+
+        Args:
+            name: The template name.
+            load_standard: Whether to also load the standard configurations.
+
+        Returns:
+            New RadiomicsPipeline instance.
+
+        Raises:
+            ValueError: If no template has this name.
+
+        Example:
+            ```python
+            pipeline = RadiomicsPipeline.from_template("coronary")
+            results = pipeline.run(
+                image, mask, config_names=["coronary_cp_orig", "coronary_cp_fbs_16"]
+            )
+
+            # add a template to a pipeline
+            pipeline.merge_configs(RadiomicsPipeline.from_template("lv"))
+            ```
+        """
+        names = sorted(
+            file.removesuffix("_configs.yaml")
+            for file in list_template_files()
+            if file.endswith("_configs.yaml")
+        )
+        if name not in names:
+            raise ValueError(
+                f"Template '{name}' not found.{_hint(name, names)} Templates: {', '.join(names)}."
+            )
+        data = load_template_file(f"{name}_configs.yaml")
+        return cls.from_dict(data, load_standard=load_standard)
+
     def merge_configs(
         self,
         other: "RadiomicsPipeline",
@@ -3578,3 +4173,51 @@ class RadiomicsPipeline:
         for problem in problems:
             warnings.warn(f"Config '{name}' {problem}", UserWarning, stacklevel=2)
         return not problems
+
+
+# ---------------------------------------------------------------------------
+# run_batch: the cases and the workers
+# ---------------------------------------------------------------------------
+
+
+def _case_source(value: Any) -> Optional[str]:
+    """How the record of a run_batch case names its image or mask: the path,
+    "InMemory" for an Image, or None."""
+    if value is None:
+        return None
+    return "InMemory" if isinstance(value, Image) else str(value)
+
+
+def _batch_pipeline(
+    configs: dict[str, list[dict[str, Any]]],
+    metadata: dict[str, dict[str, Any]],
+    deduplicate: bool,
+    rules: DeduplicationRules,
+) -> RadiomicsPipeline:
+    """A pipeline with these configurations, which runs the cases of run_batch (so the
+    log of the calling pipeline stays as it is)."""
+    pipeline = RadiomicsPipeline(
+        deduplicate=deduplicate, deduplication_rules=rules, load_standard=False
+    )
+    pipeline._configs = configs
+    pipeline._config_metadata = metadata
+    return pipeline
+
+
+# The pipeline of a run_batch worker process
+_BATCH_PIPELINE: Optional[RadiomicsPipeline] = None
+
+
+def _start_batch_worker(setup: tuple[Any, ...], threads: int) -> None:
+    """Start a run_batch worker: its share of the numba threads (all thread pools of the
+    package follow it) and its pipeline."""
+    global _BATCH_PIPELINE
+    numba.set_num_threads(threads)
+    _BATCH_PIPELINE = _batch_pipeline(*setup)
+
+
+def _batch_case(
+    case: dict[str, Any], names: list[str], hashes: dict[str, str], path: Path
+) -> dict[str, Any]:
+    """Run one case in a run_batch worker."""
+    return cast(RadiomicsPipeline, _BATCH_PIPELINE)._run_case(case, names, hashes, path)

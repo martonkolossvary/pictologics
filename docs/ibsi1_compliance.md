@@ -26,7 +26,8 @@ pipeline = RadiomicsPipeline()
 
 # A. Digital Phantom Config (FBS 1.0, no resampling)
 config_digital_phantom = [
-    {'step': 'discretise', 'params': {'method': 'FBS', 'bin_width': 1.0}},
+    {'step': 'discretise',
+     'params': {'method': 'FBS', 'bin_width': 1.0, 'min_val': 1.0}},
     {'step': 'extract_features',
      'params': {'families': ['intensity', 'morphology', 'texture', 'histogram', 'ivh'],
                 'include_spatial_intensity': True,
