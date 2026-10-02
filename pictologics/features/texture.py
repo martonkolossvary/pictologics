@@ -869,6 +869,28 @@ def _one_matrix(
     )
 
 
+# A smaller matrix keeps every row and column: finding the empty ones costs more than the
+# features save
+_OCCUPIED_MIN_CELLS = 1 << 10
+
+
+def _occupied(
+    matrix: npt.NDArray[Any], symmetric: bool = False
+) -> tuple[npt.NDArray[Any], npt.NDArray[np.intp], npt.NDArray[np.intp]]:
+    """`matrix` without its rows and columns of zeros, and the 1-based numbers (grey
+    levels, lengths) of the rows and columns that it keeps; a symmetric matrix keeps the
+    same rows and columns. A feature adds only the cells that hold counts, so the
+    features are those of the whole matrix, to the last digits (their sums add fewer
+    zeros); a fixed FBS start, for example, leaves many low levels empty."""
+    if matrix.size < _OCCUPIED_MIN_CELLS:
+        return matrix, np.arange(1, matrix.shape[0] + 1), np.arange(1, matrix.shape[1] + 1)
+    rows = np.flatnonzero(matrix.any(axis=1))
+    cols = rows if symmetric else np.flatnonzero(matrix.any(axis=0))
+    if rows.size < matrix.shape[0] or cols.size < matrix.shape[1]:
+        matrix = matrix[np.ix_(rows, cols)]
+    return matrix, rows + 1, cols + 1
+
+
 def calculate_glcm_features(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[np.floating[Any]],
@@ -956,13 +978,12 @@ def calculate_glcm_features(
     total_sum = np.sum(glcm_sym)
     if total_sum == 0:
         return {}
+    glcm_sym, levels, _ = _occupied(glcm_sym, symmetric=True)
 
     P = glcm_sym / total_sum
 
-    # Indices (0-based from np.indices, convert to 1-based for IBSI)
-    i_idx, j_idx = np.indices((n_bins, n_bins))
-    I = i_idx + 1  # noqa: E741
-    J = j_idx + 1
+    # The 1-based grey levels of the rows and columns that hold counts
+    I, J = np.meshgrid(levels, levels, indexing="ij")  # noqa: E741
 
     features = {}
 
@@ -987,7 +1008,7 @@ def calculate_glcm_features(
     # Optimized using bincount
     k_diff_flat = k_diff.ravel().astype(np.int32)
     P_flat = P.ravel()
-    p_diff = np.bincount(k_diff_flat, weights=P_flat)
+    p_diff = np.bincount(k_diff_flat, weights=P_flat, minlength=n_bins)
 
     mu_diff = features["difference_average_TF7R"]
     k_vals = np.arange(n_bins)
@@ -1003,7 +1024,7 @@ def calculate_glcm_features(
     # Optimized using bincount
     k_sum_flat = k_sum_grid.ravel().astype(np.int32)
     # P_flat is already defined in Difference Variance block
-    p_sum_full = np.bincount(k_sum_flat, weights=P_flat)
+    p_sum_full = np.bincount(k_sum_flat, weights=P_flat, minlength=2 * n_bins + 1)
 
     # Slice from 2.
     p_sum = p_sum_full[2:]
@@ -1075,11 +1096,13 @@ def calculate_glcm_features(
 
     # Information Correlation 1 - R8DG
     HXY = features["joint_entropy_TU9B"]
-    p_x = np.sum(P, axis=1)
+    # The marginal from the counts: exact, so it does not depend on the order of the sums
+    p_x = glcm_sym.sum(axis=1) / total_sum
     mask_px = p_x > 0
     HX = -np.sum(p_x[mask_px] * np.log2(p_x[mask_px]))
 
-    HXY1 = -np.sum(P[mask_p] * np.log2(p_x[I[mask_p] - 1] * p_x[J[mask_p] - 1]))
+    rows, cols = np.nonzero(mask_p)  # in the order of P[mask_p]
+    HXY1 = -np.sum(P[mask_p] * np.log2(p_x[rows] * p_x[cols]))
 
     if HX != 0:
         features["information_correlation_1_R8DG"] = (HXY - HXY1) / HX
@@ -1146,12 +1169,11 @@ def calculate_glrlm_features(
     if N_runs == 0:
         return {}
 
+    glrlm, rows, cols = _occupied(glrlm)
     P = glrlm / N_runs
 
-    n_g, n_r = glrlm.shape
-    i_idx, j_idx = np.indices((n_g, n_r))
-    I = i_idx + 1  # noqa: E741
-    J = j_idx + 1
+    # The 1-based numbers of the rows and columns that hold counts
+    I, J = np.meshgrid(rows, cols, indexing="ij")  # noqa: E741
     I2 = I**2
     J2 = J**2
 
@@ -1833,12 +1855,11 @@ def calculate_gldzm_features(
     if N_zones == 0:
         return {}
 
+    gldzm, rows, cols = _occupied(gldzm)
     P = gldzm / N_zones
 
-    n_g, n_d = gldzm.shape
-    i_idx, j_idx = np.indices((n_g, n_d))
-    I = i_idx + 1  # noqa: E741
-    J = j_idx + 1  # Distance
+    # The 1-based numbers of the rows and columns that hold counts
+    I, J = np.meshgrid(rows, cols, indexing="ij")  # noqa: E741
     I2 = I**2
     J2 = J**2
 
@@ -2059,12 +2080,11 @@ def calculate_ngldm_features(
     if N_s == 0:
         return {}
 
+    ngldm, rows, cols = _occupied(ngldm)
     P = ngldm / N_s
 
-    n_g, n_d = ngldm.shape
-    i_idx, j_idx = np.indices((n_g, n_d))
-    I = i_idx + 1  # noqa: E741
-    J = j_idx + 1  # Dependence count
+    # The 1-based numbers of the rows and columns that hold counts
+    I, J = np.meshgrid(rows, cols, indexing="ij")  # noqa: E741
     I2 = I**2
     J2 = J**2
 

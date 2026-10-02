@@ -269,11 +269,12 @@ def _apply_gabor_to_plane(
     }
     pad_mode_literal = pad_mode_map.get(mode, "constant")
 
-    padded_h = slice_h + 2 * pad_h
-    padded_w = slice_w + 2 * pad_w
+    # A circular convolution as long as the padded slice is enough: the kept part of the
+    # output (the slice) is at least one kernel radius from the ends of the padded slice,
+    # so no wrapped value reaches it
     fshape = (
-        scipy.fft.next_fast_len(padded_h + kernel_shape[0] - 1),
-        scipy.fft.next_fast_len(padded_w + kernel_shape[1] - 1),
+        scipy.fft.next_fast_len(slice_h + 2 * pad_h),
+        scipy.fft.next_fast_len(slice_w + 2 * pad_w),
     )
     kernel_ffts = [scipy.fft.fftn(k, s=fshape) for k in kernels]
 

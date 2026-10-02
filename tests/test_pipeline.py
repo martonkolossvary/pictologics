@@ -204,6 +204,8 @@ def test_run_config_selection(
         pipeline.run(mock_image, mock_mask, config_names=["invalid"])
 
 
+# The mocked preprocessing leaves the image without bins, so the texture family fails
+@pytest.mark.filterwarnings("ignore:The texture features failed:UserWarning")
 def test_run_all_standard_params(
     pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
 ) -> None:
@@ -224,6 +226,9 @@ def test_run_all_standard_params(
         pass
 
 
+# The mocked preprocessing leaves the image without bins, so the texture family of the
+# standard configs fails in the deduplicated path
+@pytest.mark.filterwarnings("ignore:The texture features failed:UserWarning")
 def test_run_defaults_all_configs(
     pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
 ) -> None:
@@ -961,12 +966,15 @@ def test_extract_texture_error_no_discretise(
         validate=False,
     )
 
-    # Config fails -> log error.
-    pipeline.run(mock_image, mock_mask, config_names=["tex_fail"])
+    # The texture family fails alone: its features are NaN, the log entry lists it in
+    # family_errors, and a warning names it.
+    with pytest.warns(UserWarning, match="The texture features failed"):
+        pipeline.run(mock_image, mock_mask, config_names=["tex_fail"])
     log = pipeline._log[-1]
-    assert "error" in log
-    assert "Texture features requested but image is not discretised" in log["error"]
-    assert "You must include a 'discretise' step" in log["error"]
+    assert log["status"] == "completed"
+    error = log["family_errors"]["texture"]
+    assert "Texture features requested but image is not discretised" in error
+    assert "You must include a 'discretise' step" in error
 
 
 @patch("pictologics.pipeline.discretise_image")
@@ -1526,12 +1534,17 @@ def test_fbs_without_a_start_stops() -> None:
             pipeline.add_config(name, steps)
         pipeline.add_config(name, steps, validate=False)
     image = Image(np.arange(512.0).reshape(8, 8, 8), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
-    results = pipeline.run(image, None, config_names=list(cases))
+    with pytest.warns(UserWarning, match="The ivh features failed"):
+        results = pipeline.run(image, None, config_names=list(cases))
     for name in cases:
         assert results[name].isna().all()
+    message = "FBS needs a start that is the same for every image"
     for entry in pipeline.get_log():
-        assert entry["status"] == "error"
-        assert entry["error"].startswith("FBS needs a start that is the same for every image")
+        if entry["config_name"] == "ivh":  # the IVH discretisation fails in its family
+            assert entry["status"] == "completed"
+            assert message in entry["family_errors"]["ivh"]
+        else:
+            assert entry["status"] == "error" and entry["error"].startswith(message)
     # a resegment after the filter gives the start again
     pipeline.add_config(
         "again",
@@ -1820,6 +1833,8 @@ def test_params_explicit_none(
         mock_calc.assert_called()
 
 
+# The mocked texture matrices make the texture family fail (a warning)
+@pytest.mark.filterwarnings("ignore:The texture features failed:UserWarning")
 def test_params_explicit_none_all(
     pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
 ) -> None:
@@ -1897,6 +1912,8 @@ def test_run_subject_id(pipeline: RadiomicsPipeline, mock_image: Image, mock_mas
     assert any(entry["subject_id"] == "P001" for entry in pipeline._log)
 
 
+# The mocked texture matrices make the texture family fail (a warning)
+@pytest.mark.filterwarnings("ignore:The texture features failed:UserWarning")
 @patch("pictologics.pipeline.roi_min_max")
 @patch("pictologics.pipeline.discretise_image")
 def test_step_discretise_fbs_success(
@@ -1989,6 +2006,8 @@ def test_ivh_disc_with_params(
         mock_ivh.assert_called_with(ANY, bin_width=2.5, min_val=0.0)
 
 
+# The mocked texture matrices make the texture family fail (a warning)
+@pytest.mark.filterwarnings("ignore:The texture features failed:UserWarning")
 def test_texture_matrix_params_explicit(
     pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
 ) -> None:
@@ -2209,7 +2228,7 @@ def test_step_filter_riesz_base(
     mock_filter.return_value = mock_image.array
     pipeline.add_config(
         "filter_riesz",
-        [{"step": "filter", "params": {"type": "riesz", "order": 1}}],
+        [{"step": "filter", "params": {"type": "riesz", "order": (1, 0, 0)}}],
     )
 
     pipeline.run(mock_image, mock_mask, config_names=["filter_riesz"])
@@ -2407,7 +2426,7 @@ def test_step_filter_riesz_explicit_boundary_forwarded(
     mock_filter.return_value = mock_image.array
     pipeline.add_config(
         "filter_riesz_boundary",
-        [{"step": "filter", "params": {"type": "riesz", "order": 1, "boundary": "zero"}}],
+        [{"step": "filter", "params": {"type": "riesz", "order": (1, 0, 0), "boundary": "zero"}}],
     )
     pipeline.run(mock_image, mock_mask, config_names=["filter_riesz_boundary"])
     call_kwargs = mock_filter.call_args.kwargs
@@ -2600,7 +2619,7 @@ def test_step_filter_params_effective_riesz_variant_default(
     mock_filter.return_value = mock_image.array
     pipeline.add_config(
         "filter_eff_riesz_base",
-        [{"step": "filter", "params": {"type": "riesz", "order": 1}}],
+        [{"step": "filter", "params": {"type": "riesz", "order": (1, 0, 0)}}],
     )
     pipeline.run(mock_image, mock_mask, config_names=["filter_eff_riesz_base"])
     call_kwargs = mock_filter.call_args.kwargs
@@ -4967,6 +4986,126 @@ def test_merge_configs_marks_the_plan_out_of_date(pipeline: RadiomicsPipeline) -
 
 
 # --- Config checks, input types and small fixes ---
+
+
+def test_add_config_checks_the_filter_values() -> None:
+    for params, message in (
+        ({"type": "wavelet", "level": 0}, "level must be a whole number of 1 or more, not 0"),
+        ({"type": "wavelet", "decomposition": "LH"}, "decomposition must be 3 letters L or H"),
+        ({"type": "simoncelli", "level": -1}, "level must be a whole number of 1 or more, not -1"),
+        ({"type": "riesz", "order": (1, 0)}, "order must be 3 whole numbers of 0 or more"),
+        ({"type": "riesz", "variant": "log", "order": (0, 0, 0)}, "At least one order component"),
+    ):
+        problems = _steps_problems([{"step": "filter", "params": params}])
+        assert len(problems) == 1 and problems[0].startswith(f"step 0 (filter): {message}")
+    assert (
+        _steps_problems([{"step": "filter", "params": {"type": "wavelet", "decomposition": "hhl"}}])
+        == []
+    )
+
+
+def test_masks_with_fractions_give_a_warning() -> None:
+    # Every voxel that is not 0 is ROI, also a voxel of 0.05 of a probability map: a
+    # warning, unless every configuration chooses the ROI with binarize_mask.
+    from pictologics.pipeline import _has_fractions
+
+    spacing, origin = (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)
+    image = Image(np.random.default_rng(4).normal(size=(10, 10, 10)), spacing, origin)
+    probability = np.zeros((10, 10, 10))
+    probability[2:8, 2:8, 2:8] = 0.05
+    probability[4:6, 4:6, 4:6] = 0.95
+    extract = {"step": "extract_features", "params": {"families": ["intensity"]}}
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("plain", [extract])
+    pipeline.add_config(
+        "binarized", [{"step": "binarize_mask", "params": {"threshold": 0.5}}, extract]
+    )
+    mask = Image(probability, spacing, origin)
+    with pytest.warns(
+        UserWarning, match="The mask holds values that are not whole numbers"
+    ) as caught:
+        pipeline.run(image, mask, config_names=["plain"])
+    assert caught[0].filename == __file__
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        pipeline.run(image, mask, config_names=["binarized"])
+        pipeline.run(image, Image(np.ceil(probability), spacing, origin), config_names=["plain"])
+        pipeline.run(
+            image,
+            Image((probability > 0).astype(np.uint8), spacing, origin),
+            config_names=["plain"],
+        )
+        pipeline.run(image, None, config_names=["plain"])
+    # a large mask: its ROI box scan is also the first ROI check, and a sample is read
+    big = np.zeros((48, 48, 32))
+    big[8:40, 8:40, 4:28] = 0.6
+    big_image = Image(np.random.default_rng(5).normal(size=big.shape), spacing, origin)
+    with pytest.warns(UserWarning, match="The mask holds values that are not whole numbers"):
+        result = pipeline.run(big_image, Image(big, spacing, origin), config_names=["plain"])
+    assert result["plain"].notna().all()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        pipeline.run(big_image, Image(np.ceil(big), spacing, origin), config_names=["plain"])
+    assert (
+        pipeline.run(
+            big_image, Image(np.zeros(big.shape), spacing, origin), config_names=["plain"]
+        )["plain"]
+        .isna()
+        .all()
+    )  # an empty float mask: an empty ROI, as before
+    # a large ROI box: a regular sample of it
+    whole = np.ones((80, 80, 80))
+    box = (slice(0, 80), slice(0, 80), slice(0, 80))
+    assert not _has_fractions(whole, box)
+    whole[::4, ::4, ::4] = 0.5  # the voxels of the sample (step 4)
+    assert _has_fractions(whole, box)
+
+
+def test_a_failing_family_leaves_the_other_families(tmp_path: Any) -> None:
+    # An error in one family makes only its features NaN; the log entry lists it, a
+    # warning names it, and the next configuration computes it again (no reuse of a
+    # failure). An empty ROI inside a family stays an empty ROI of the configuration.
+    rng = np.random.default_rng(10)
+    spacing, origin = (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)
+    image = Image(rng.normal(40.0, 20.0, (12, 12, 12)), spacing, origin)
+    roi = np.zeros((12, 12, 12), dtype=np.uint8)
+    roi[3:9, 3:9, 3:9] = 1
+    mask = Image(roi, spacing, origin)
+    steps = [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["intensity", "texture", "histogram"]}},
+    ]
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("a", steps)
+    pipeline.add_config("b", copy.deepcopy(steps))
+    boom = RuntimeError("boom")
+    with (
+        patch("pictologics.pipeline.calculate_glcm_features", side_effect=boom),
+        pytest.warns(UserWarning, match=r"The texture features failed \(RuntimeError: boom\)"),
+    ):
+        results = pipeline.run(image, mask, config_names=["a", "b"])
+    for entry in pipeline.get_log():
+        assert entry["status"] == "completed"
+        assert entry["family_errors"] == {"texture": "RuntimeError: boom"}
+    for name in ("a", "b"):
+        series = results[name]
+        texture = [key for key in series.index if key.startswith(("joint_", "contrast_"))]
+        assert texture and series[texture].isna().all()
+        assert np.isfinite(series["mean_intensity_Q4LE"])
+    # run_batch counts the failed family
+    with patch("pictologics.pipeline.calculate_glcm_features", side_effect=boom):
+        table = pipeline.run_batch(
+            [{"subject_id": "s", "image": image, "mask": mask}],
+            tmp_path,
+            config_names=["a"],
+            show_progress=False,
+        )
+    assert table["status"][0] == "incomplete"
+    assert table["error"][0] == "a (texture): RuntimeError: boom"
+    pipeline.clear_log()
+    with patch.object(pipeline, "_extract_single_family", side_effect=EmptyROIMaskError("none")):
+        pipeline.run(image, mask, config_names=["a"])
+    assert pipeline.get_log()[0]["status"] == "empty_roi"
 
 
 def _steps_problems(steps: list[Any]) -> list[str]:

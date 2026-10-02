@@ -92,7 +92,9 @@ from .filters import (
     simoncelli_wavelet,
     wavelet_transform,
 )
-from .filters.base import resolve_boundary
+from .filters.base import _whole_number, resolve_boundary
+from .filters.riesz import _riesz_order_problem
+from .filters.wavelets import _wavelet_problem
 from .loader import Image, _validate_geometry, create_full_mask, load_image
 from .preprocessing import (
     _all_finite,
@@ -302,6 +304,21 @@ _FBS_START_PROBLEM = (
     "FBS needs a start that is the same for every image: set min_val, or add a resegment "
     "step with range_min before it (after the last filter step)"
 )
+
+
+# The fraction check of a mask reads a regular sample of about this many voxels of its ROI box
+_FRACTION_SAMPLE = 1 << 16
+
+
+def _has_fractions(array: npt.NDArray[Any], box: tuple[slice, slice, slice]) -> bool:
+    """Whether a float mask holds a value that is not a whole number, such as a probability
+    map: checked on a regular sample (every step-th voxel along each axis) of about
+    _FRACTION_SAMPLE voxels of `box`, the box of its nonzero voxels."""
+    part = array[box]
+    step = max(1, round((part.size / _FRACTION_SAMPLE) ** (1 / 3)))
+    sample = part[::step, ::step, ::step]
+    values = sample[sample != 0]
+    return not np.array_equal(values, np.round(values))
 
 
 def _fbs_start(params: dict[str, Any], state: PipelineState) -> float:
@@ -667,13 +684,6 @@ def _filter_parameters(params: dict[str, Any]) -> set[str]:
     return names | {"type", "boundary"}
 
 
-def _whole_number(value: Any) -> bool:
-    """An int, or a float with a whole value (32.0 from a YAML or JSON file)."""
-    return (isinstance(value, (int, np.integer)) and not isinstance(value, bool)) or (
-        isinstance(value, (float, np.floating)) and float(value).is_integer()
-    )
-
-
 def _spacing_problem(spacing: Any) -> Optional[str]:
     """Why a new_spacing is not three positive numbers, or None."""
     try:
@@ -717,10 +727,21 @@ def _step_problems(
             problems.append("FIXED_CUTOFFS needs cutoffs")
         if method == "FBS" and params.get("min_val") is None and not fbs_start:
             problems.append(_FBS_START_PROBLEM)
-    elif name == "filter" and params.get("type") == "riesz":
-        variant = params.get("variant", "base")
-        if variant not in _RIESZ_FUNCTIONS:
-            problems.append(f"unknown riesz variant '{variant}'{_hint(variant, _RIESZ_FUNCTIONS)}")
+    elif name == "filter":
+        filter_type = params.get("type")
+        problem = None
+        if filter_type == "riesz":
+            variant = params.get("variant", "base")
+            if variant not in _RIESZ_FUNCTIONS:
+                problems.append(
+                    f"unknown riesz variant '{variant}'{_hint(variant, _RIESZ_FUNCTIONS)}"
+                )
+            problem = _riesz_order_problem(params.get("order", (1, 0, 0)), 3)
+        elif filter_type == "wavelet":
+            problem = _wavelet_problem(params.get("level", 1), params.get("decomposition", "LHL"))
+        elif filter_type == "simoncelli":
+            problem = _wavelet_problem(params.get("level", 1))
+        problems.extend([problem] if problem else [])
     elif name == "extract_features":
         for key in _OPTION_GROUPS:
             if params.get(key) is not None and not isinstance(params[key], dict):
@@ -979,6 +1000,8 @@ class RadiomicsPipeline:
         # (steps, config hash) of each configuration: a configuration changes only with a
         # new steps list (add_config, merge_configs), so its hash is made once
         self._config_hashes: dict[str, tuple[Any, str]] = {}
+        # The feature families that failed in the configuration that runs now: {family: error}
+        self._family_errors: dict[str, str] = {}
 
         if load_standard:
             self._load_predefined_configs()
@@ -1257,6 +1280,8 @@ class RadiomicsPipeline:
             - If extraction succeeds, values are the computed feature values.
             - If individual features fail (e.g., mesh error, PCA with ≤3 voxels),
                 those features are ``NaN``; successfully computed features are preserved.
+            - If a feature family fails, its features are ``NaN``, a warning names it,
+                and the log entry lists it in ``family_errors``.
             - If the entire configuration fails (empty ROI or unexpected error),
                 all values are ``NaN``.
 
@@ -1380,6 +1405,31 @@ class RadiomicsPipeline:
             mask_settings
         )
         all_results = {}
+        # Every voxel that is not 0 is ROI, also a voxel of 0.05 in a probability map. The
+        # box scan of this check also serves as the first ROI check of the run.
+        roi_box = None
+        fractions = False
+        if (
+            not mask_was_generated
+            and orig_mask.array.dtype.kind == "f"
+            and any(
+                all(step["step"] != "binarize_mask" for step in self._configs[name])
+                for name in target_configs
+            )
+        ):
+            if orig_mask.array.size < _FRACTION_SAMPLE:  # a small mask: read it all
+                fractions = not np.array_equal(orig_mask.array, np.round(orig_mask.array))
+            else:
+                roi_box = compute_nonzero_bbox(orig_mask.array)
+                fractions = roi_box is not None and _has_fractions(orig_mask.array, roi_box)
+        if fractions:
+            warnings.warn(
+                "The mask holds values that are not whole numbers (for example a probability "
+                "map), and every voxel that is not 0 counts as ROI. To choose the ROI, add a "
+                "binarize_mask step with a threshold, for example 0.5.",
+                UserWarning,
+                stacklevel=3,
+            )
 
         # Create or regenerate deduplication plan if enabled
         dedup_plan: DeduplicationPlan | None = None
@@ -1448,6 +1498,7 @@ class RadiomicsPipeline:
         # Run each configuration
         for config_name in target_configs:
             started = time.perf_counter()
+            self._family_errors = {}
             steps = self._configs[config_name]
             metadata = self._config_metadata.get(config_name, {})
             keys = prefix_keys[config_name]
@@ -1620,7 +1671,12 @@ class RadiomicsPipeline:
 
             try:
                 if not roi_checked:
-                    self._ensure_nonempty_roi(state, context="initialization")
+                    if not (
+                        roi_box is not None
+                        and state.intensity_mask.array is orig_mask.array
+                        and state.morph_mask.array is orig_mask.array
+                    ):
+                        self._ensure_nonempty_roi(state, context="initialization")
                     roi_checked = True
 
                 # Continue from the longest prefix that an earlier configuration ran.
@@ -1727,6 +1783,8 @@ class RadiomicsPipeline:
                     users[key] -= 1
                     if users[key] == 0:
                         shared.pop(key, None)
+                if self._family_errors:
+                    config_log["family_errors"] = dict(self._family_errors)
 
             config_log["elapsed_seconds"] = time.perf_counter() - started
             self._log.append(config_log)
@@ -2027,6 +2085,10 @@ class RadiomicsPipeline:
                     f"{entry['config_name']}: {entry['error']}"
                     for entry in self._log
                     if entry["status"] != "completed"
+                ] + [
+                    f"{entry['config_name']} ({family}): {error}"
+                    for entry in self._log
+                    for family, error in entry.get("family_errors", {}).items()
                 ]
                 record.update(
                     status="incomplete" if problems else "completed",
@@ -2700,9 +2762,7 @@ class RadiomicsPipeline:
         bbox_cache: _PassCache = {}
         texture_cache = _texture_cache(families)
         for family in families:
-            results.update(
-                self._extract_single_family(state, family, params, bbox_cache, texture_cache)
-            )
+            results.update(self._guarded_family(state, family, params, bbox_cache, texture_cache))
 
         # Ensure every expected feature key is present (NaN for partial failures)
         self._fill_missing_features(results, families, params)
@@ -2760,13 +2820,13 @@ class RadiomicsPipeline:
                 self._dedup_reused_count += 1
             else:
                 # Compute this family
-                family_results = self._extract_single_family(
+                family_results = self._guarded_family(
                     state, family, params, bbox_cache, texture_cache
                 )
                 results.update(family_results)
 
-                # Cache if we have a signature
-                if cache_key is not None:
+                # Cache if we have a signature (a failed family is computed again)
+                if cache_key is not None and family not in self._family_errors:
                     family_cache[cache_key] = family_results
                 self._dedup_computed_count += 1
 
@@ -2813,6 +2873,29 @@ class RadiomicsPipeline:
         if key not in cache:
             cache[key] = self._masked_values(image, mask, cache)
         return cast(npt.NDArray[np.floating[Any]], cache[key])
+
+    def _guarded_family(
+        self,
+        state: PipelineState,
+        family: str,
+        params: dict[str, Any],
+        bbox_cache: _PassCache,
+        texture_cache: dict[str, Optional[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """`_extract_single_family`, but an error leaves only this family without values
+        (NaN): the error goes to `_family_errors` and to a warning."""
+        try:
+            return self._extract_single_family(state, family, params, bbox_cache, texture_cache)
+        except EmptyROIMaskError:
+            raise
+        except Exception as e:
+            self._family_errors[family] = f"{type(e).__name__}: {e}"
+            warnings.warn(
+                f"The {family} features failed ({type(e).__name__}: {e}); they are NaN.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return {}
 
     def _extract_single_family(
         self,

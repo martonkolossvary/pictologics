@@ -364,7 +364,8 @@ levels:
 |:---|:---|:---|
 | **Whole-configuration failure** | Empty ROI after `resegment` | All features set to `NaN` |
 | **Partial feature failure** | Mesh generation error in morphology, PCA with ≤3 voxels, empty texture matrix | Successfully computed features retain their values; only the missing features are set to `NaN` |
-| **Unexpected runtime error** | Uncaught exception during extraction | All features set to `NaN` |
+| **Feature family failure** | An error inside one family, for example the texture features | The features of that family are `NaN`; the other families keep their values. A warning names the family, and the log entry lists it in `family_errors` |
+| **Unexpected runtime error** | Uncaught exception in a preprocessing step | All features set to `NaN` |
 
 In every case:
 

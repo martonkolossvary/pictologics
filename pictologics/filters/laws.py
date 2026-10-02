@@ -12,9 +12,11 @@ from .base import (
     _SLAB_MIN_SIZE,
     BoundaryCondition,
     _convolve_axes,
+    _float32_cut,
     _normalized_separable_convolve_3d,
     _ordered_map,
     _prepare_masked_image,
+    _slab_ufunc,
     _uniform_filter,
     ensure_float32,
     get_scipy_mode,
@@ -59,10 +61,12 @@ def _separable_convolve_3d(
     g3: npt.NDArray[np.floating[Any]],
     mode: str = "constant",
     threads: Optional[int] = None,
+    last_dtype: Any = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply separable 3D convolution using three 1D kernels, each pass in `threads`
-    threads (default: numba's thread count).
+    threads (default: numba's thread count). With `last_dtype`, the result has that
+    type (see `_convolve_axes`).
 
     This is ~8x faster than full 3D convolution for 5x5x5 kernels:
     - Full 3D: 125 operations per voxel
@@ -79,8 +83,8 @@ def _separable_convolve_3d(
     # Apply 1D convolutions sequentially along each axis. The first pass makes the
     # output array; the others write into it (convolve1d copies each line before it
     # writes that line, so the values are those of passes that make new arrays).
-    result = _convolve_axes(image, (g1, g2, g3), mode, threads)
-    return cast(npt.NDArray[np.floating[Any]], result.astype(image.dtype, copy=False))
+    result = _convolve_axes(image, (g1, g2, g3), mode, threads, last_dtype=last_dtype)
+    return cast(npt.NDArray[np.floating[Any]], result)
 
 
 def _pool_rotations(
@@ -94,7 +98,8 @@ def _pool_rotations(
     `bases` yields one response per key, in the order of the key's first step. For max
     and min pooling, a base changes its sign in place when a step needs the other sign
     (negation is exact); average pooling subtracts it instead. A base is freed after
-    the last step of its key.
+    the last step of its key. The steps run in the calling thread, while the pool makes
+    the next bases (the slab threads are busy with their passes).
     """
     last = {key: i for i, (key, _sign) in enumerate(steps)}
     held: Dict[Tuple[str, str, str], Tuple[npt.NDArray[np.floating[Any]], int]] = {}
@@ -103,7 +108,8 @@ def _pool_rotations(
         base, base_sign = held.pop(key) if key in held else (next(bases), 1)
         if pooling == "average":
             if result is None:  # the first step, the identity rotation, has sign 1
-                result = base.astype(np.float64)
+                kept = base.dtype == np.float64 and last[key] == i
+                result = base if kept else base.astype(np.float64)
             elif sign > 0:
                 result += base
             else:
@@ -361,9 +367,9 @@ def laws_filter(
         bases = _ordered_map(_base, base_perms.values(), workers)
         result = _pool_rotations(bases, steps, pooling)
 
-        # Finalize average pooling
+        # Finalize average pooling (all bases are done: the slab threads are free)
         if pooling == "average" and result is not None:
-            result /= len(rotations)
+            _slab_ufunc(np.true_divide, (result, len(rotations)), result)
     else:
         # Non-rotation-invariant: single separable convolution
         if source_mask is not None:
@@ -371,7 +377,9 @@ def laws_filter(
                 image, source_mask, g1, g2, g3, mode
             )
         else:
-            result = _separable_convolve_3d(image, g1, g2, g3, mode)
+            # Without the energy step, the last pass gives the float32 response
+            last_dtype = None if compute_energy else np.float32
+            result = _separable_convolve_3d(image, g1, g2, g3, mode, last_dtype=last_dtype)
             valid_mask = None
 
     # Compute energy image if requested
@@ -391,6 +399,10 @@ def laws_filter(
 
     if result is None:  # pragma: no cover
         raise RuntimeError("Result should not be None")
+    # float32, as the other filters: the rotation-invariant and masked paths pool or divide
+    # in float64, and a large result copies in threads
+    if result.dtype != np.float32:
+        result = _float32_cut(result, None)
 
     if source_mask is not None and valid_mask is not None:
         return result, valid_mask

@@ -1485,8 +1485,8 @@ def test_laws_rotations_pool_as_the_rotation_loop() -> None:
             result /= len(rotations)
         if energy:
             abs_result = np.abs(result).astype(np.float64)
-            result = uniform_filter(abs_result, size=5, mode="constant").astype(np.float32)
-        return result
+            result = uniform_filter(abs_result, size=5, mode="constant")
+        return result.astype(np.float32)  # every filter gives float32
 
     image = np.random.default_rng(5).normal(size=(11, 10, 9)).astype(np.float32)
     image[:4] = -0.0
@@ -1559,3 +1559,154 @@ def test_filter_threads_follow_the_numba_thread_count() -> None:
         [2, 2],
         [2],
     ]
+
+
+def test_filter_inputs_are_checked() -> None:
+    """Wrong levels, decompositions and Riesz orders raise a clear error; a lowercase
+    decomposition and whole numbers as floats work."""
+    import re
+
+    image = np.random.default_rng(1).normal(size=(12, 12, 12))
+    for call, message in (
+        (
+            lambda: wavelet_transform(image, level=0),
+            "level must be a whole number of 1 or more, not 0",
+        ),
+        (
+            lambda: wavelet_transform(image, level=1.5),
+            "level must be a whole number of 1 or more, not 1.5",
+        ),
+        (
+            lambda: wavelet_transform(image, decomposition="LH"),
+            "decomposition must be 3 letters L or H",
+        ),
+        (
+            lambda: wavelet_transform(image, decomposition="LXH"),
+            "decomposition must be 3 letters L or H",
+        ),
+        (
+            lambda: simoncelli_wavelet(image, level=0),
+            "level must be a whole number of 1 or more, not 0",
+        ),
+        (
+            lambda: riesz_transform(image, order=(1, 0)),
+            "order must be 3 whole numbers of 0 or more",
+        ),
+        (
+            lambda: riesz_transform(image, order=(2, -1, 0)),
+            "order must be 3 whole numbers of 0 or more",
+        ),
+        (lambda: riesz_transform(image, order=1), "order must be 3 whole numbers of 0 or more"),
+        (
+            lambda: riesz_log(image, sigma_mm=1.0, order=(0, 0, 0)),
+            "At least one order component must be > 0",
+        ),
+    ):
+        with pytest.raises(ValueError, match=re.escape(message)):
+            call()
+    assert_array_equal(
+        wavelet_transform(image, decomposition="lhl"), wavelet_transform(image, decomposition="LHL")
+    )
+    assert_array_equal(wavelet_transform(image, level=2.0), wavelet_transform(image, level=2))
+    assert_array_equal(
+        riesz_transform(image, order=[1.0, 0, 0]), riesz_transform(image, order=(1, 0, 0))
+    )
+
+
+def test_transfer_cache_is_safe_for_threads() -> None:
+    """Threads that read and evict the transfer cache at the same time get the right
+    tables."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from pictologics.filters.base import cache_by_bytes
+
+    @cache_by_bytes(3 * 8 * 100)  # room for about three tables
+    def table(n: int) -> np.ndarray:
+        return np.full(100, float(n))
+
+    with ThreadPoolExecutor(8) as pool:
+        tables = list(pool.map(lambda k: table(k % 5), range(400)))
+    for k, values in enumerate(tables):
+        assert_array_equal(values, np.full(100, float(k % 5)))
+
+
+def test_every_filter_returns_float32() -> None:
+    """For a float64 image, every filter returns float32. The Laws and wavelet passes
+    stay in float64, and the last pass writes float32: the values of a cast after it."""
+    from pictologics.filters.base import _convolve_axes
+
+    image = np.random.default_rng(2).normal(size=(14, 14, 14))
+    mask = image > -1.5
+    outputs = {
+        "laws": laws_filter(image, "L5E5W5"),
+        "laws RI": laws_filter(image, "L5E5W5", rotation_invariant=True, pooling="average"),
+        # a symmetric kernel: one pooling step, so the copy at the end gives float32
+        "laws RI one step": laws_filter(image, "L5L5L5", rotation_invariant=True, pooling="max"),
+        "laws energy": laws_filter(image, "L5E5W5", compute_energy=True),
+        "laws masked": laws_filter(image, "L5E5W5", source_mask=mask)[0],
+        "wavelet": wavelet_transform(image, level=2),
+        "wavelet RI": wavelet_transform(image, rotation_invariant=True),
+        "log": laplacian_of_gaussian(image, sigma_mm=1.0, spacing_mm=(1.0, 1.0, 1.0)),
+        "mean": mean_filter(image, support=3),
+        "gabor": gabor_filter(image, sigma_mm=2.0, lambda_mm=4.0),
+        "simoncelli": simoncelli_wavelet(image),
+        "riesz": riesz_transform(image, order=(1, 0, 0)),
+    }
+    assert {name: out.dtype for name, out in outputs.items()} == dict.fromkeys(
+        outputs, np.dtype(np.float32)
+    )
+    kernels = [np.array([1.0, 2.0, -1.0], np.float32)] * 3
+    exact = _convolve_axes(image, kernels, "mirror")
+    assert exact.dtype == np.float64
+    assert_array_equal(
+        _convolve_axes(image, kernels, "mirror", last_dtype=np.float32), exact.astype(np.float32)
+    )
+
+
+def test_gabor_short_fft_is_the_linear_convolution() -> None:
+    """The Gabor FFT is only as long as the padded slice: the kept part is a kernel
+    radius from its ends, so it equals the linear convolution of the padded slice (to
+    float32 rounding), also when the FFT length is the padded length itself."""
+    from scipy.signal import fftconvolve
+
+    sigma, wavelength, gamma, theta = 2.0, 4.0, 1.0, 0.3
+    kernel = _create_gabor_kernel_2d(sigma, wavelength, gamma, theta)
+    pad = kernel.shape[0] // 2
+    rng = np.random.default_rng(3)
+    for size in (64 - 2 * pad, 37):  # an FFT length of 64 = the padded slice; 37: rounded up
+        image = rng.normal(size=(3, size, size + 5))
+        response = _apply_gabor_to_plane(
+            image, sigma, wavelength, gamma, [theta], 0, (1.0, 1.0, 1.0), "mirror", "average",
+            use_parallel=False,
+        )  # fmt: skip
+        for k in range(3):
+            padded = np.pad(image[k], pad, mode="reflect")
+            full = fftconvolve(padded, kernel)  # float64, the whole linear convolution
+            expected = np.abs(full[2 * pad : 2 * pad + size, 2 * pad : 2 * pad + size + 5])
+            np.testing.assert_allclose(response[k], expected, rtol=0, atol=2e-6 * expected.max())
+
+
+def test_slab_ufunc_gives_the_values_of_one_call() -> None:
+    """A ufunc on slabs in threads (large arrays) or in one call gives the same values,
+    with array and number inputs, a cast output and a unary ufunc."""
+    import numba
+
+    from pictologics.filters.base import _SLAB_MIN_SIZE, _slab_ufunc
+
+    rng = np.random.default_rng(4)
+    threads = numba.get_num_threads()
+    numba.set_num_threads(max(2, min(4, numba.config.NUMBA_NUM_THREADS)))
+    try:
+        for size in (1000, _SLAB_MIN_SIZE + 17):
+            a = rng.normal(size=(size // 10, 10))
+            b = rng.normal(size=a.shape)
+            out = np.empty(a.shape, dtype=np.float32)
+            assert _slab_ufunc(np.minimum, (a, b), out) is out
+            assert_array_equal(out, np.minimum(a, b).astype(np.float32))
+            in_place = a.copy()
+            _slab_ufunc(np.true_divide, (in_place, 24), in_place)
+            assert_array_equal(in_place, a / 24)
+            _slab_ufunc(np.negative, (in_place,), in_place)
+            assert_array_equal(in_place, -(a / 24))
+    finally:
+        numba.set_num_threads(threads)

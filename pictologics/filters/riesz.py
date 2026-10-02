@@ -18,6 +18,7 @@ from .base import (
     _prepare_masked_image,
     _slabs,
     _times_mirrored,
+    _whole_number,
     cache_by_bytes,
     ensure_float32,
     resolve_boundary,
@@ -159,18 +160,32 @@ def riesz_transform(
     if source_mask is not None:
         image = _prepare_masked_image(image, source_mask)
 
-    order = _riesz_order(order)
+    order = _riesz_order(order, image.ndim)
     return _apply_with_boundary_padding(
         _riesz_response, image, boundary, _RIESZ_BASE_PAD, order=order
     )
 
 
-def _riesz_order(order: Tuple[int, ...]) -> Tuple[int, ...]:
-    """`order` as a tuple, so that a list-typed order (e.g. from a YAML/JSON pipeline
-    config) stays hashable for the transfer-function cache key."""
+def _riesz_order_problem(order: Any, ndim: int) -> Optional[str]:
+    """Why `order` is not a Riesz order of an image with `ndim` axes, or None."""
+    if not (
+        isinstance(order, (list, tuple))
+        and len(order) == ndim
+        and all(_whole_number(o) and o >= 0 for o in order)
+    ):
+        return f"order must be {ndim} whole numbers of 0 or more, one for each axis, not {order!r}"
     if sum(order) == 0:  # the total order
-        raise ValueError("At least one order component must be > 0")
-    return tuple(order)
+        return "At least one order component must be > 0"
+    return None
+
+
+def _riesz_order(order: Any, ndim: int) -> Tuple[int, ...]:
+    """`order` as a tuple of ints, so that a list-typed order (e.g. from a YAML/JSON
+    pipeline config) stays hashable for the transfer-function cache key."""
+    problem = _riesz_order_problem(order, ndim)
+    if problem:
+        raise ValueError(problem)
+    return tuple(int(o) for o in order)
 
 
 def _riesz_response(
@@ -286,7 +301,7 @@ def riesz_log(
     from .log import laplacian_of_gaussian
 
     boundary = resolve_boundary(boundary)
-    order = _riesz_order(order)
+    order = _riesz_order(order, image.ndim)
 
     def _core(
         arr: npt.NDArray[np.floating[Any]], crop: Optional[Tuple[slice, ...]]
@@ -399,7 +414,7 @@ def riesz_simoncelli(
     from .wavelets import _simoncelli_pad_width, simoncelli_wavelet
 
     boundary = resolve_boundary(boundary)
-    order = _riesz_order(order)
+    order = _riesz_order(order, image.ndim)
 
     # Preprocess once: float32 conversion + source mask zeroing
     image = ensure_float32(image)

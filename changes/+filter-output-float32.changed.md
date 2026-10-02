@@ -1,0 +1,1 @@
+Laws filters without the energy step and wavelet filters without rotation invariance now return float32, as every other filter. Before, they returned float64 for a float64 image, so a full CT map needed twice the memory (629 instead of 315 MB). Their passes still run in float64, so the values move only by the float32 rounding (about 1e-7, relative).

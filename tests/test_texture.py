@@ -2,6 +2,7 @@
 import os
 import unittest
 import warnings
+from typing import Any
 
 # Disable Numba JIT global optimization for coverage analysis
 os.environ["NUMBA_DISABLE_JIT"] = "1"
@@ -693,3 +694,35 @@ class TestGldzmDistanceMap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_texture_features_skip_the_empty_levels(monkeypatch: Any) -> None:
+    """The features add only the matrix rows and columns that hold counts: empty grey
+    levels above the ROI levels give the same features (to the last digits). A matrix
+    below _OCCUPIED_MIN_CELLS keeps all rows and columns (here 0, to test small ones)."""
+    from pictologics.features.texture import _occupied
+
+    small = np.zeros((2, 3))
+    assert _occupied(small)[0] is small and _occupied(small)[2].tolist() == [1, 2, 3]
+    monkeypatch.setattr(texture_module, "_OCCUPIED_MIN_CELLS", 0)
+    full = np.arange(1.0, 13.0).reshape(3, 4)
+    same, rows, cols = _occupied(full)
+    assert same is full and rows.tolist() == [1, 2, 3] and cols.tolist() == [1, 2, 3, 4]
+    sparse = np.zeros((5, 6))
+    sparse[1, 2] = 3.0
+    sparse[3, 5] = 1.0
+    compact, rows, cols = _occupied(sparse)
+    assert compact.tolist() == [[3.0, 0.0], [0.0, 1.0]]
+    assert rows.tolist() == [2, 4] and cols.tolist() == [3, 6]
+    assert _occupied(np.diag([0.0, 2.0, 0.0]), symmetric=True)[1].tolist() == [2]
+
+    rng = np.random.default_rng(12)
+    data = rng.integers(1, 7, (10, 10, 10)).astype(np.float64)
+    data[data == 3] = 2  # level 3 stays empty
+    mask = np.ones((10, 10, 10), dtype=np.uint8)
+    for family in ("glcm", "glrlm", "gldzm", "ngldm"):
+        calculate = getattr(texture_module, f"calculate_{family}_features")
+        six, sixteen = calculate(data, mask, 6), calculate(data, mask, 16)
+        assert six.keys() == sixteen.keys()
+        for key in six:
+            np.testing.assert_allclose(sixteen[key], six[key], rtol=1e-12, err_msg=key)

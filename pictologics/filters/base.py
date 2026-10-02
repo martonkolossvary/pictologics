@@ -2,12 +2,13 @@
 """Base classes and utilities for IBSI 2 filter implementations."""
 
 import os
+import threading
 from collections import OrderedDict, deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, Iterable, Iterator, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, Iterable, Iterator, Optional, Tuple, TypeVar, Union, cast
 
 import numpy as np
 from numba import config as numba_config
@@ -83,36 +84,47 @@ _Array = TypeVar("_Array", bound=npt.NDArray[Any])
 _TRANSFER_CACHE_BYTES = 2 << 30
 
 
+def _whole_number(value: Any) -> bool:
+    """An int, or a float with a whole value (32.0 from a YAML or JSON file)."""
+    return (isinstance(value, (int, np.integer)) and not isinstance(value, bool)) or (
+        isinstance(value, (float, np.floating)) and float(value).is_integer()
+    )
+
+
 def cache_by_bytes(
     max_bytes: int,
 ) -> Callable[[Callable[..., _Array]], Callable[..., _Array]]:
     """Least-recently-used cache of array results, bounded by their total bytes.
 
     The newest result always stays cached, even when it alone is larger than
-    `max_bytes`. Arguments must be hashable. `cache_clear()` drops every result.
+    `max_bytes`. Arguments must be hashable. `cache_clear()` drops every result. A lock
+    makes the cache safe for threads: a thread waits while another builds a result.
     """
 
     def decorate(func: Callable[..., _Array]) -> Callable[..., _Array]:
         cache: OrderedDict[Any, _Array] = OrderedDict()
         total = 0
+        lock = threading.Lock()
 
         @wraps(func)
         def cached(*args: Any) -> _Array:
             nonlocal total
-            if args in cache:
-                cache.move_to_end(args)
-                return cache[args]
-            value = func(*args)
-            cache[args] = value
-            total += value.nbytes
-            while total > max_bytes and len(cache) > 1:
-                total -= cache.popitem(last=False)[1].nbytes
-            return value
+            with lock:
+                if args in cache:
+                    cache.move_to_end(args)
+                    return cache[args]
+                value = func(*args)
+                cache[args] = value
+                total += value.nbytes
+                while total > max_bytes and len(cache) > 1:
+                    total -= cache.popitem(last=False)[1].nbytes
+                return value
 
         def cache_clear() -> None:
             nonlocal total
-            cache.clear()
-            total = 0
+            with lock:
+                cache.clear()
+                total = 0
 
         cached.cache_clear = cache_clear  # type: ignore[attr-defined]
         return cached
@@ -406,6 +418,24 @@ def _slab_pass(
     return output
 
 
+def _slab_ufunc(ufunc: Any, inputs: Tuple[Any, ...], out: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """`ufunc(*inputs, out=out)` with the "same_kind" casting (each input an array of the
+    shape of `out`, or a number), on slabs of the first axis in the slab threads for a
+    large array. Each value comes from the same operation as in one call."""
+    threads = get_num_threads()
+    if out.size < _SLAB_MIN_SIZE or threads < 2:
+        return cast(npt.NDArray[Any], ufunc(*inputs, out=out, casting="same_kind"))
+    edges = np.linspace(0, out.shape[0], min(threads, out.shape[0]) + 1).astype(int)
+
+    def run(k: int) -> None:
+        part = slice(edges[k], edges[k + 1])
+        parts = (x[part] if isinstance(x, np.ndarray) else x for x in inputs)
+        ufunc(*parts, out=out[part], casting="same_kind")
+
+    list(_slab_pool().map(run, range(edges.size - 1)))
+    return out
+
+
 def _per_axis(value: Any, ndim: int) -> tuple[Any, ...]:
     """A scalar or a sequence as one value per axis (scipy's _normalize_sequence)."""
     if isinstance(value, (list, tuple, np.ndarray)):
@@ -487,16 +517,20 @@ def _convolve_axes(
     mode: str,
     threads: Optional[int] = None,
     output: Optional[npt.NDArray[Any]] = None,
+    last_dtype: Any = None,
 ) -> npt.NDArray[Any]:
     """1-D convolutions along the axes in order (kernels[axis], one per axis), the first
     into `output` (default: a new array of the image type; may be the image) and the
     others in place, as the filters make them with convolve1d; each pass in
-    `_slab_pass`."""
+    `_slab_pass`. With `last_dtype`, the last pass writes a new array of that type: scipy
+    computes in double, so the values are those of a cast after the pass."""
     first = partial(convolve1d, weights=kernels[0], mode=mode)
     result = _slab_pass(first, image, 0, output, threads)
     for axis in range(1, len(kernels)):
         one = partial(convolve1d, weights=kernels[axis], mode=mode)
-        _slab_pass(one, result, axis, result, threads)
+        last = axis == len(kernels) - 1 and last_dtype is not None
+        target = np.empty(result.shape, dtype=last_dtype) if last else result
+        result = _slab_pass(one, result, axis, target, threads)
     return result
 
 

@@ -22,6 +22,7 @@ from .base import (
     _slab_pass,
     _slabs,
     _times_mirrored,
+    _whole_number,
     cache_by_bytes,
     ensure_float32,
     get_scipy_mode,
@@ -95,6 +96,12 @@ def wavelet_transform(
         )
         ```
     """
+    problem = _wavelet_problem(level, decomposition)
+    if problem:
+        raise ValueError(problem)
+    level = int(level)
+    decomposition = decomposition.upper()
+
     # Convert to float32
     image = ensure_float32(image)
 
@@ -174,7 +181,25 @@ def wavelet_transform(
             result /= len(rotations)
         return result.astype(np.float32)  # type: ignore[union-attr]
     else:
-        return _apply_undecimated_wavelet_3d(image, lo, hi, level, decomposition, mode)
+        return _apply_undecimated_wavelet_3d(
+            image, lo, hi, level, decomposition, mode, last_dtype=np.float32
+        )
+
+
+def _wavelet_problem(level: Any, decomposition: Any = None) -> Optional[str]:
+    """Why a wavelet level (or a 3-D decomposition such as "LHL") is not valid, or None."""
+    if not _whole_number(level) or level < 1:
+        return f"level must be a whole number of 1 or more, not {level!r}"
+    if decomposition is not None and not (
+        isinstance(decomposition, str)
+        and len(decomposition) == 3
+        and set(decomposition.upper()) <= {"L", "H"}
+    ):
+        return (
+            "decomposition must be 3 letters L or H, one for each axis (for example 'LHL'), "
+            f"not {decomposition!r}"
+        )
+    return None
 
 
 def _apply_undecimated_wavelet_3d(
@@ -185,10 +210,12 @@ def _apply_undecimated_wavelet_3d(
     decomposition: str,
     mode: str,
     threads: Optional[int] = None,
+    last_dtype: Any = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply undecimated 3D wavelet decomposition using à trous algorithm. The passes run
-    in `_slab_pass` with `threads` threads.
+    in `_slab_pass` with `threads` threads. With `last_dtype`, the last pass writes a
+    new array of that type (scipy computes in double: the values of a cast after it).
 
     For level j, filters are upsampled by inserting 2^(j-1) - 1 zeros.
     """
@@ -214,7 +241,11 @@ def _apply_undecimated_wavelet_3d(
                     convolve1d, image, axis, None, threads, weights=weights, mode=mode
                 )
             else:
-                _slab_pass(convolve1d, result, axis, result, threads, weights=weights, mode=mode)
+                last = j == level and axis == 2 and last_dtype is not None
+                target = np.empty(result.shape, dtype=last_dtype) if last else result
+                result = _slab_pass(
+                    convolve1d, result, axis, target, threads, weights=weights, mode=mode
+                )
     return cast(npt.NDArray[np.floating[Any]], result)
 
 
@@ -372,6 +403,10 @@ def simoncelli_wavelet(
         response = simoncelli_wavelet(image, level=1)
         ```
     """
+    problem = _wavelet_problem(level)
+    if problem:
+        raise ValueError(problem)
+    level = int(level)
     boundary = resolve_boundary(boundary)
 
     # Convert to float32
