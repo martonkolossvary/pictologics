@@ -732,30 +732,6 @@ colorama = ">=0.4"
 pypi = ["pip (>=24.0)", "platformdirs (>=4.2)", "wheel (>=0.42)"]
 
 [[package]]
-name = "highdicom"
-version = "0.27.0"
-description = "High-level DICOM abstractions."
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = [
-    {file = "highdicom-0.27.0-py3-none-any.whl", hash = "sha256:90a14ef75f67b7df2c3fd83df9c0bddd787dfdfab2b08c8c68828207389aed3f"},
-    {file = "highdicom-0.27.0.tar.gz", hash = "sha256:4999b62a4fc1e58ae1d25eb12058dae3b83d816a6214c00e342356a3ad0774f2"},
-]
-
-[package.dependencies]
-numpy = ">=1.19"
-pillow = ">=8.3"
-pydicom = ">=3.0.1"
-pyjpegls = ">=1.0.0"
-typing-extensions = ">=4.0.0"
-
-[package.extras]
-docs = ["sphinx-autodoc-typehints (==1.17.0)", "sphinx-pyreverse (==0.0.17)", "sphinx-rtd-theme (==1.0.0)", "sphinxcontrib-autoprogram (==0.1.7)", "sphinxcontrib-websupport (==1.2.4)"]
-libjpeg = ["pylibjpeg (>=2.0)", "pylibjpeg-libjpeg (>=2.1)", "pylibjpeg-openjpeg (>=2.0.0)"]
-test = ["mypy (==1.15.0)", "pytest (==8.3.5)", "pytest-cov (==6.1.1)", "pytest-flake8 (==1.3.0)"]
-
-[[package]]
 name = "id"
 version = "1.5.0"
 description = "A tool for generating OIDC identities"
@@ -2077,45 +2053,6 @@ files = [
 windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
-name = "pyjpegls"
-version = "1.5.1"
-description = "JPEG-LS for Python via CharLS C++ Library"
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "pyjpegls-1.5.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:2efb0cd87f4fea1b4a58649b92dc64d7290424e08374f4ef7bc19caf99370584"},
-    {file = "pyjpegls-1.5.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:0eadf1c7adc934361dad2d0a9e22b14271b22067063568c85e71e4e752be0521"},
-    {file = "pyjpegls-1.5.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:261c6dc80fe1071631b1c42b877ecb8d9cf9c5d5c8189a18eaa96349ab42fde3"},
-    {file = "pyjpegls-1.5.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:29bbb8be9193cc88d8bb442d9459da31119dcf76c07b10f44e0926d48620c33b"},
-    {file = "pyjpegls-1.5.1-cp310-cp310-win_amd64.whl", hash = "sha256:3fa5009833bb5234698d8d77b3e693810a8ef740eadceebb5650164618f4b2c1"},
-    {file = "pyjpegls-1.5.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:14b870392e6796ea0e2fac226e97ac730a634549923c475d173bc9c291f02658"},
-    {file = "pyjpegls-1.5.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e206e4ade507f6a3066a134d04a68b7c2570a2365f18e43ee2b01a08f3efcd30"},
-    {file = "pyjpegls-1.5.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:496ae75dc1b06a5e3fb6893593665fa40093e18a162de518ee0609c77cb7d4fe"},
-    {file = "pyjpegls-1.5.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8ec9eb9f7bd5332f86b3c9749f17aa8429a7965acfa7f2ab568eb11b70631472"},
-    {file = "pyjpegls-1.5.1-cp311-cp311-win_amd64.whl", hash = "sha256:acbe5ba2dde9b97bb98571a17a949bfbba7c9e40e78dfb79c08ecc568db50cee"},
-    {file = "pyjpegls-1.5.1-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:a5430dcd735bc4c0c1eb478510d73a5178a4743cbad1d72113926accdd738921"},
-    {file = "pyjpegls-1.5.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:c3e6355a4bc9d3da46f7d4377793576b261bf60df297cea7167b3556adb98eb7"},
-    {file = "pyjpegls-1.5.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:45630167eb37990701854f882455f4611c24902a2de1d27635076c3fed4a04a7"},
-    {file = "pyjpegls-1.5.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5e8c7257bfd1700d563c4fdc60a8794519e00da21798221d964271bc5a027a49"},
-    {file = "pyjpegls-1.5.1-cp312-cp312-win_amd64.whl", hash = "sha256:14d7cf5e61ffdb9343a888dde5e3f9b7e527cc805c31c7f48a1e2cdb73d9d9fa"},
-    {file = "pyjpegls-1.5.1-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:bba892f411091a0de0736f39ac8da11e667a929fbc1e474657f1291d5e303d37"},
-    {file = "pyjpegls-1.5.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:0080024c9e9e6be7bb0276ea54510488c28c8c9f2c0841049c64ab8b66d899f2"},
-    {file = "pyjpegls-1.5.1-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:dfecd3ea08ff2df367eb90791e3ff5288ccc0293fc13e99adc5542629a97a493"},
-    {file = "pyjpegls-1.5.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fb56f056868561a1e49995bcbbe7ba8c38d56838d5c975ef5a0ff887d9189230"},
-    {file = "pyjpegls-1.5.1-cp313-cp313-win_amd64.whl", hash = "sha256:5812655f1fbb93bd2666ff05616bf3c7eae2474c6c4f8bf8afb6d5e5c0d6e9cf"},
-    {file = "pyjpegls-1.5.1-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:a3cd66a6435c6cc27ab287997f966304b17b55a371beb11ed267e0874133668a"},
-    {file = "pyjpegls-1.5.1-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:80531a7a6c57ac85ee4e0f39c98097d4e8cac28a7fb897f26ad1571f85f0b512"},
-    {file = "pyjpegls-1.5.1-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ef8c9a18b7c2b512a9b665cf3407b8403938263fced4933a997a558c24e2750d"},
-    {file = "pyjpegls-1.5.1-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:747919893b160ff61f67dfb69593f9653c2597bb5b481baa2a7a315ea26c588e"},
-    {file = "pyjpegls-1.5.1-cp39-cp39-win_amd64.whl", hash = "sha256:51579d55f38ce96e593f14168fb2df062b5101e55ffd7ec59e0d8b926d9a3122"},
-    {file = "pyjpegls-1.5.1.tar.gz", hash = "sha256:d0fe09dfb7f75ce78e3b1e0519912a42f1827d68bbc3609652f4f8743c956025"},
-]
-
-[package.dependencies]
-numpy = ">=2.0"
-
-[[package]]
 name = "pymdown-extensions"
 version = "10.17.2"
 description = "Extension pack for Python Markdown."
@@ -2226,6 +2163,42 @@ files = [
 
 [package.dependencies]
 six = ">=1.5"
+
+[[package]]
+name = "python-gdcm"
+version = "3.2.6"
+description = "Grassroots DICOM runtime libraries"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "python_gdcm-3.2.6-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:36589fdbea8585769a86a248cd7463e71963ce46f281d95441fe8be9062f3009"},
+    {file = "python_gdcm-3.2.6-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:8f42c4edcfeeb3c9627d6960754cbc20defa19303d490274d446444146998a22"},
+    {file = "python_gdcm-3.2.6-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2d5733a7efd21911b844a0d437547717af05f082b69235619efb3cc7691274ee"},
+    {file = "python_gdcm-3.2.6-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c335886556712b6d1965f1d22f253962ce8ee020511917ee8908f07ae7291252"},
+    {file = "python_gdcm-3.2.6-cp310-cp310-win_amd64.whl", hash = "sha256:0f11b5938d96a6866ead9547fdeffcbf254301dbbf35173923ada72d2e348907"},
+    {file = "python_gdcm-3.2.6-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:b22521413ee0b61acdf7f8ea7fe3d51ba7173d4754eb1f62d29b782059877ac6"},
+    {file = "python_gdcm-3.2.6-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:a68bb0f582294cf21297b45856e0a20c7742fdedfa5ba4d313d226b6b5e6c36a"},
+    {file = "python_gdcm-3.2.6-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:7d6033cc01b62e96b928eb8e35b520f2f7a640919f3a569b043c1e64010de0c7"},
+    {file = "python_gdcm-3.2.6-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:716e8a20de03e6a90035ee4575b19bb4b204e219a428509b686c1c28ef6de2d9"},
+    {file = "python_gdcm-3.2.6-cp311-cp311-win_amd64.whl", hash = "sha256:c752d94d92239c6bda313a514edd8bd5a17167c751d4ab1bdad82c6b559c5213"},
+    {file = "python_gdcm-3.2.6-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:cd32d810ff1500fde0554ef06a2f46c6bcfcbf05fdb673c62dfd40eaf611fef4"},
+    {file = "python_gdcm-3.2.6-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:ec91dd1a7bab0c235d3dcdfe0c7a4703a684a1e16cd8b092e609c4269565c76a"},
+    {file = "python_gdcm-3.2.6-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:7623ef789b1ba5bff0d3dfa5486e1afa27b9a33d9a81d15b4bb05c01a2570db0"},
+    {file = "python_gdcm-3.2.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:512d0d903e12c5ad389939a257817bf182ce288431b3d474d62cb0c0833b8b56"},
+    {file = "python_gdcm-3.2.6-cp312-cp312-win_amd64.whl", hash = "sha256:3ad86fffde082e068a9ebef940be21079c5d80dae30787eaaccf822ecaac964d"},
+    {file = "python_gdcm-3.2.6-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:43517d1a7615319e5140c73b412ee903a612d90e91f9ead379b0ede15dc69a31"},
+    {file = "python_gdcm-3.2.6-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:ec2912f4cf10e2a415141351d16c96a288a227450d4bc92fa89aef1c633c998e"},
+    {file = "python_gdcm-3.2.6-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:aaf96a75beb20403e7d1b66a6cbc307327fcbf6b0bd848a6290e2b7968e49598"},
+    {file = "python_gdcm-3.2.6-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:69c987d3f1b3a2a9936288f312f1ea2192e39fa6c0be28159b06a1906b8d56ed"},
+    {file = "python_gdcm-3.2.6-cp313-cp313-win_amd64.whl", hash = "sha256:b2025a8a06a4363f25e4a8ebec8741d8ddf0376dc78f87b7b88b83f625a5f22f"},
+    {file = "python_gdcm-3.2.6-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:c0525c26c5ab59d4e93119d097ea44cb045af339bbd4ef4ee4a5edee260bf424"},
+    {file = "python_gdcm-3.2.6-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:d514d840028c30786e729ba0946470612eee3854e1faf2ae767f6ee83c19aa6e"},
+    {file = "python_gdcm-3.2.6-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f44cf5ea4acdaacb465dede71842096c0ede26718f4fd8ceae8efb64a94c2d75"},
+    {file = "python_gdcm-3.2.6-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:aea109691afe754ae317909b9776a7547859bdb4340e512e5733eec16bf8b0ba"},
+    {file = "python_gdcm-3.2.6-cp314-cp314-win_amd64.whl", hash = "sha256:9ea4e0d723137ae1af1d5283301b609c00087844906ef75efcfacaafe98f90e7"},
+    {file = "python_gdcm-3.2.6.tar.gz", hash = "sha256:2f16eaea7a8c736279492f829d7f95002237a7fb2ea9c3ae85175498e1cd3dad"},
+]
 
 [[package]]
 name = "pytz"
@@ -2771,6 +2744,7 @@ files = [
     {file = "typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548"},
     {file = "typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466"},
 ]
+markers = {main = "python_version == \"3.12\""}
 
 [[package]]
 name = "tzdata"
@@ -2848,4 +2822,4 @@ watchmedo = ["PyYAML (>=3.10)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "8ab3d00c2ce1fc5f096fb39a873c6e16793d754ec216e7b793b75e3af548a63e"
+content-hash = "d02a6ca947ccb5c67cba79e0b8c753459fc9e660f9bc29a3478ba149bd5e6eb0"

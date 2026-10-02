@@ -333,10 +333,13 @@ class TestSaveResults:
         assert isinstance(content, list)
         assert content[0]["a"] == 1
 
-        """Test that unknown extensions default to CSV."""
+        """An unknown extension raises (it silently got CSV text before); file_format
+        still chooses CSV."""
         data = {"a": 1}
         path = tmp_path / "output.unknown"
-        save_results(data, path)
+        with pytest.raises(ValueError, match="Unknown file type '.unknown'"):
+            save_results(data, path)
+        save_results(data, path, file_format="csv")
 
         assert path.exists()
         # Read as CSV to verify
@@ -348,3 +351,70 @@ class TestSaveResults:
         """Test passing an invalid file_format."""
         with pytest.raises(ValueError, match="Unsupported export format"):
             save_results({"a": 1}, tmp_path / "out.txt", file_format="xml")
+
+
+def _strict_json(text: str) -> object:
+    """Parse JSON like a strict reader: the NaN and Infinity tokens are errors."""
+
+    def reject(token: str) -> None:
+        raise ValueError(f"not JSON: {token}")
+
+    return json.loads(text, parse_constant=reject)
+
+
+def test_json_output_writes_nan_as_null(tmp_path: Path) -> None:
+    # NaN and infinite values become null in every JSON output, so strict readers
+    # (JavaScript, jq) accept it; CSV keeps them as before.
+    with pytest.raises(ValueError, match="not JSON: NaN"):
+        _strict_json("[NaN]")  # the old output
+    results = {"c": pd.Series({"a": 1.0, "b": float("nan"), "c": float("inf")})}
+    wide = _strict_json(format_results(results, output_type="json"))
+    assert wide == {"c__a": 1.0, "c__b": None, "c__c": None}
+    long = _strict_json(format_results(results, fmt="long", output_type="json"))
+    assert [row["value"] for row in long] == [1.0, None, None]
+    row = format_results(results, output_type="dict")
+    for data in (row, [row], pd.DataFrame([row])):
+        path = tmp_path / "out.json"
+        save_results(data, path)
+        assert _strict_json(path.read_text()) == [{"c__a": 1.0, "c__b": None, "c__c": None}]
+
+
+def test_save_results_file_types_and_folders(tmp_path: Path) -> None:
+    # Known extensions only (a .parquet file got CSV text before); .tsv separates by
+    # tabs; no extension means CSV; a missing folder is created.
+    row = {"id": "x", "c__a": 1.0}
+    with pytest.raises(ValueError, match="Unknown file type '.parquet'"):
+        save_results(row, tmp_path / "out.parquet")
+    save_results(row, tmp_path / "new" / "deep" / "out.tsv")
+    assert (tmp_path / "new" / "deep" / "out.tsv").read_text().splitlines() == [
+        "id\tc__a",
+        "x\t1.0",
+    ]
+    save_results(row, tmp_path / "plain")
+    assert (tmp_path / "plain").read_text().splitlines() == ["id,c__a", "x,1.0"]
+    save_results(row, tmp_path / "forced.txt", file_format="tsv")
+    assert (tmp_path / "forced.txt").read_text().startswith("id\tc__a")
+
+
+def test_long_format_columns_match_rows_of_the_old_build() -> None:
+    # The long table, built as columns, holds the rows of the old row-by-row build:
+    # meta columns first, then config, feature_key and value; a meta key with a
+    # standard name holds the standard value at its meta position.
+    results = {
+        "a": pd.Series({"f1": 1.0, "f2": float("nan")}),
+        "b": pd.Series({"f1": 3.0}),
+    }
+    meta = {"subject_id": "s1", "value": "meta", "site": 7}
+    expected = []
+    for config_name, series in results.items():
+        for key, value in series.items():
+            row = dict(meta)
+            row.update({"config": config_name, "feature_key": key, "value": value})
+            expected.append(
+                {k: row[k] for k in ["subject_id", "value", "site", "config", "feature_key"]}
+            )
+    rows = format_results(results, fmt="long", meta=meta, output_type="dict")
+    assert [list(r) for r in rows] == [list(e) for e in expected]
+    assert str(rows) == str(expected)  # NaN compares unequal, its text does not
+    frame = format_results(results, fmt="long", meta=meta, output_type="pandas")
+    pd.testing.assert_frame_equal(frame, pd.DataFrame(expected))

@@ -65,32 +65,6 @@ class TestWarmup(unittest.TestCase):
                 any("warmup failed" in str(x.message).lower() for x in runtime_warnings)
             )
 
-    @patch("pictologics.warmup.numba.get_num_threads")
-    def test_warmup_fallback_logic(self, mock_get_threads: MagicMock) -> None:
-        """Test fallback logic when get_num_threads fails."""
-        mock_get_threads.side_effect = Exception("Numba error")
-
-        # We need to ensure the rest of the warmup can still run or at least start
-        # This will hit lines 65-66 in warmup.py
-        with patch("pictologics.warmup.numba.config") as mock_config:
-            mock_config.NUMBA_NUM_THREADS = 2
-            # We mock the internal heavy functions to avoid running them fully here
-            # since we only care about the thread logic at the start of _warmup_texture
-            with (
-                patch("pictologics.warmup._warmup_intensity"),
-                patch("pictologics.warmup._warmup_morphology"),
-                patch("pictologics.warmup.texture") as _mock_texture_mod,
-            ):
-                from pictologics.warmup import warmup_jit
-
-                # Suppress expected warmup failure warning (mocked texture causes failure)
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    warmup_jit()
-
-                # Check if it tried to access the fallback config
-                _ = mock_config.NUMBA_NUM_THREADS
-
     def test_warmup_integration_data_setup_coverage(self) -> None:
         """Integration test: the data-setup code in each _warmup_* helper runs (and
         compiles/executes the kernels on dummy data) without raising."""
@@ -104,10 +78,3 @@ class TestWarmup(unittest.TestCase):
         _warmup_texture()
         _warmup_intensity()
         _warmup_morphology()
-
-    def test_warmup_texture_thread_config_fallback(self) -> None:
-        """A non-integer NUMBA_NUM_THREADS falls back to a single thread."""
-        from pictologics.warmup import _warmup_texture
-
-        with patch("pictologics.warmup.numba.config.NUMBA_NUM_THREADS", "invalid"):
-            _warmup_texture()  # int("invalid") -> ValueError -> n_threads = 1

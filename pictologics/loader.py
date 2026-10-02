@@ -83,14 +83,27 @@ def _direction_matrix(direction: Any) -> npt.NDArray[np.float64]:
     return matrix
 
 
+# Modalities that do not tell the source format: in-memory images and merged masks
+_UNKNOWN_FRAME_MODALITIES = frozenset({"Unknown", "MergedImage", "Image", ""})
+
+
+def _world_frame(image: Image) -> Optional[str]:
+    """ "RAS" for an image from NIfTI, "LPS" from DICOM, None when the source is unknown."""
+    if image.modality == "Nifti":
+        return "RAS"
+    return None if image.modality in _UNKNOWN_FRAME_MODALITIES else "LPS"
+
+
 def _warn_if_mixed_coordinate_frames(image: Image, reference: Image) -> None:
     """Warn when NIfTI- and DICOM-sourced images are combined geometrically.
 
     NIfTI geometry is in the RAS+ world frame while DICOM geometry is in LPS+
     (see module docstring). Detection is heuristic: images loaded from NIfTI
-    carry ``modality == "Nifti"``, everything else is assumed DICOM-sourced.
+    carry ``modality == "Nifti"``, and DICOM images their DICOM modality. In-memory
+    images (modality "Unknown") and merged masks have no known frame, so they do
+    not warn.
     """
-    if (image.modality == "Nifti") != (reference.modality == "Nifti"):
+    if {_world_frame(image), _world_frame(reference)} == {"RAS", "LPS"}:
         warnings.warn(
             "Mixing NIfTI- and DICOM-sourced images: NIfTI geometry is in the "
             "RAS+ world frame while DICOM geometry is in LPS+, and no conversion "
@@ -262,28 +275,6 @@ def _get_dicom_frame_rescale(ds: Any, frame_index: int) -> tuple[float, float]:
     )
 
 
-def _apply_dicom_rescale(
-    data: npt.NDArray[Any],
-    ds: Any,
-) -> npt.NDArray[Any]:
-    """Apply top-level, shared, or per-frame DICOM rescale to stored pixel data."""
-    if data.ndim != 3:
-        slope, intercept = _get_dicom_frame_rescale(ds, 0)
-        if slope != 1.0 or intercept != 0.0:
-            return data.astype(np.float64) * slope + intercept
-        return data
-
-    frame_params = [_get_dicom_frame_rescale(ds, frame_idx) for frame_idx in range(data.shape[0])]
-    if all(slope == 1.0 and intercept == 0.0 for slope, intercept in frame_params):
-        return data
-
-    scaled = data.astype(np.float64)
-    for frame_idx, (slope, intercept) in enumerate(frame_params):
-        if slope != 1.0 or intercept != 0.0:
-            scaled[frame_idx] = scaled[frame_idx] * slope + intercept
-    return scaled
-
-
 @dataclass(eq=False)
 class Image:
     """
@@ -379,10 +370,8 @@ class Image:
         """
         if isinstance(mask, Image):
             _validate_geometry(mask, self, "source mask", "image")
-            # Explicit cast to bool to satisfy type checker
-            mask_arr = (mask.array > 0).astype(bool)
-        else:
-            mask_arr = (mask > 0).astype(bool)
+        values: npt.NDArray[Any] = mask.array if isinstance(mask, Image) else mask
+        mask_arr: npt.NDArray[np.bool_] = np.greater(values, 0)
 
         if mask_arr.shape != self.array.shape:
             raise ValueError(
@@ -395,7 +384,7 @@ class Image:
             origin=self.origin,
             direction=(self.direction if self.direction is None else self.direction.copy()),
             modality=self.modality,
-            source_mask=mask_arr.astype(bool),
+            source_mask=mask_arr,
         )
 
 
@@ -490,6 +479,45 @@ def _position_in_reference(
         ValueError: If spacing, direction, sub-voxel tolerance, or minimum overlap
             fraction checks fail.
     """
+    data, source, target = _placement(
+        image,
+        reference,
+        transpose_axes,
+        subvoxel_tolerance,
+        subvoxel_warning_threshold,
+        min_overlap_fraction,
+    )
+    # Output array with the reference shape, filled with fill_value, and the data in place
+    output = np.full(reference.array.shape, fill_value, dtype=data.dtype)
+    if source is not None and target is not None:
+        output[target] = data[source]
+    return Image(
+        array=output,
+        spacing=reference.spacing,
+        origin=reference.origin,
+        direction=reference.direction,
+        modality=image.modality,
+    )
+
+
+_Box = tuple[slice, slice, slice]
+
+
+def _placement(
+    image: Image,
+    reference: Image,
+    transpose_axes: tuple[int, int, int] | None,
+    subvoxel_tolerance: float,
+    subvoxel_warning_threshold: float,
+    min_overlap_fraction: float,
+) -> tuple[npt.NDArray[Any], Optional[_Box], Optional[_Box]]:
+    """Where `image` lies in the voxel grid of `reference`.
+
+    Returns the (transposed) image data, the box of the data inside the reference, and
+    the box in the reference that it fills; both boxes are None without overlap (only
+    with `min_overlap_fraction=0`, after a warning). The checks are those of
+    `_position_in_reference`.
+    """
     _warn_if_mixed_coordinate_frames(image, reference)
 
     # 0. Validate parameters
@@ -571,14 +599,11 @@ def _position_in_reference(
             "Snapping to nearest voxel. For precise sub-voxel alignment, "
             "resampling should be used.",
             UserWarning,
-            stacklevel=2,
+            stacklevel=3,
         )
     voxel_offset = voxel_offset_rounded.astype(int)
 
-    # 6. Create output array with reference shape, filled with fill_value
-    output = np.full(reference.array.shape, fill_value, dtype=data.dtype)
-
-    # 7. Calculate copy ranges with boundary clipping
+    # 6. Calculate copy ranges with boundary clipping
     # Source (cropped image) ranges
     src_start = np.array([max(0, -voxel_offset[i]) for i in range(3)])
     src_end = np.array(
@@ -589,7 +614,7 @@ def _position_in_reference(
     dst_start = np.array([max(0, voxel_offset[i]) for i in range(3)])
     dst_end = dst_start + (src_end - src_start)
 
-    # 8. Validate overlap fraction between mask and reference image
+    # 7. Validate overlap fraction between mask and reference image
     intersection_vol = int(np.prod(np.maximum(0, src_end - src_start)))
     mask_vol = int(np.prod(data.shape))
     overlap_fraction = intersection_vol / mask_vol if mask_vol > 0 else 0.0
@@ -609,35 +634,41 @@ def _position_in_reference(
             "Cropped image does not overlap with reference volume. "
             f"Image origin: {image.origin}, Reference origin: {reference.origin}",
             UserWarning,
-            stacklevel=2,
+            stacklevel=3,
         )
-        return Image(
-            array=output,
-            spacing=reference.spacing,
-            origin=reference.origin,
-            direction=reference.direction,
-            modality=image.modality,
-        )
+        return data, None, None
 
-    # 9. Copy data to correct position
-    output[
-        dst_start[0] : dst_end[0],
-        dst_start[1] : dst_end[1],
-        dst_start[2] : dst_end[2],
-    ] = data[
-        src_start[0] : src_end[0],
-        src_start[1] : src_end[1],
-        src_start[2] : src_end[2],
-    ]
-
-    # 10. Return new Image with reference geometry
-    return Image(
-        array=output,
-        spacing=reference.spacing,
-        origin=reference.origin,
-        direction=reference.direction,
-        modality=image.modality,
+    source = (
+        slice(src_start[0], src_end[0]),
+        slice(src_start[1], src_end[1]),
+        slice(src_start[2], src_end[2]),
     )
+    target = (
+        slice(dst_start[0], dst_end[0]),
+        slice(dst_start[1], dst_end[1]),
+        slice(dst_start[2], dst_end[2]),
+    )
+    return data, source, target
+
+
+def _merge_into(
+    merged: npt.NDArray[Any], current: npt.NDArray[Any], fill_value: float, rule: str
+) -> None:
+    """Merge `current` into `merged` in place.
+
+    Voxels where `merged` holds the fill value take the values of `current`; where both
+    hold values, the conflict rule decides ("max", "min", "last"; "first" keeps them).
+    """
+    present = current != fill_value
+    taken = merged != fill_value
+    np.copyto(merged, current, where=present & ~taken)
+    overlap = present & taken
+    if rule == "max":
+        np.maximum(merged, current, out=merged, where=overlap)
+    elif rule == "min":
+        np.minimum(merged, current, out=merged, where=overlap)
+    elif rule == "last":
+        np.copyto(merged, current, where=overlap)
 
 
 def _find_best_dicom_series_dir(root: Path) -> Path:
@@ -696,7 +727,7 @@ def _is_dicom_seg(path: str) -> bool:
 
 
 def load_image(
-    path: str | Path,
+    path: str | Path | Sequence[str | Path] | Any,
     dataset_index: int = 0,
     recursive: bool = False,
     reference_image: Optional[Image] = None,
@@ -706,6 +737,7 @@ def load_image(
     subvoxel_tolerance: float = 0.5,
     subvoxel_warning_threshold: float = 0.01,
     min_overlap_fraction: float = 0.5,
+    series_uid: Optional[str] = None,
 ) -> Image:
     """
     Load a medical image from a file path or directory.
@@ -730,8 +762,11 @@ def load_image(
         ("World Coordinate Frames").
 
     Args:
-        path (str | Path): The absolute or relative path to the image file (e.g., .nii.gz,
-            .dcm or file with no extension) or the directory containing DICOM files.
+        path (str | Path | list | DicomPhaseInfo): The absolute or relative path to the
+            image file (e.g., .nii.gz, .dcm or file with no extension) or the directory
+            containing DICOM files. It can also be the DICOM files of one series: a list
+            of file paths, or a ``DicomPhaseInfo`` from ``get_dicom_phases()``, which
+            loads that phase without reading the other files of the folder again.
         dataset_index (int, optional): For multi-volume datasets, specifies which
             volume to extract (0-indexed). This works for:
 
@@ -739,6 +774,8 @@ def load_image(
             - **Multi-phase DICOM series**: Selects which phase to load (e.g., cardiac
               phases, temporal positions, echo numbers). Use
               ``pictologics.utilities.get_dicom_phases()`` to discover available phases.
+            - **Enhanced multiframe DICOM files**: Selects the phase when the frames
+              hold more than one volume (frames at repeated positions).
 
             Defaults to 0 (the first volume/phase).
         recursive (bool, optional): If True and `path` is a directory, recursively searches
@@ -757,8 +794,9 @@ def load_image(
             repositioning (default: 0.0). Only used when reference_image is provided.
         apply_rescale (bool): If True (default), apply RescaleSlope and RescaleIntercept
             transformation for DICOM files to convert stored pixel values to real-world
-            values (e.g., Hounsfield Units for CT). NIfTI files always apply their scaling
-            factors via nibabel's get_fdata(). Set to False if you need raw stored values.
+            values (e.g., Hounsfield Units for CT). The DICOM image is then float64, also
+            without rescale tags, like a NIfTI image (nibabel's get_fdata()). Set to False
+            if you need raw stored values.
         subvoxel_tolerance (float): Maximum permitted fractional-voxel offset when
             repositioning (default: 0.5). Only used when reference_image is provided.
             See ``_position_in_reference`` for full description.
@@ -768,13 +806,18 @@ def load_image(
         min_overlap_fraction (float): Minimum fraction of the mask volume that must
             intersect with the reference image space (default: 0.5). Only used when
             reference_image is provided.
+        series_uid (str | None): The SeriesInstanceUID of the series to load when a DICOM
+            folder holds more than one image series (for example two reconstructions of
+            one scan). Without it, such a folder raises an error that lists the series.
+            Only used for DICOM folders.
 
     Returns:
         Image: An `Image` object containing the 3D numpy array and metadata (spacing, origin, etc.).
 
     Raises:
         ValueError: If the path does not exist, the file format is not supported,
-            or the file is corrupt/unreadable.
+            the file is corrupt/unreadable, or a DICOM folder holds more than one
+            image series and ``series_uid`` does not choose one.
 
     Example:
         **Loading a NIfTI file:**
@@ -843,6 +886,19 @@ def load_image(
         img = load_image("cardiac_ct/", dataset_index=4)
         ```
     """
+    phase_files = getattr(path, "file_paths", None)  # a DicomPhaseInfo
+    if phase_files is not None or isinstance(path, (list, tuple)):
+        loaded_image = _load_dicom_series(
+            phase_files if phase_files is not None else path,
+            dataset_index,
+            apply_rescale,
+            series_uid,
+        )
+        if reference_image is not None:
+            _warn_if_mixed_coordinate_frames(loaded_image, reference_image)
+            _validate_geometry(loaded_image, reference_image, "loaded image", "reference image")
+        return loaded_image
+
     path = str(path)
     path_obj = Path(path)
     if not path_obj.exists():
@@ -853,7 +909,7 @@ def load_image(
             target_path = path_obj
             if recursive:
                 target_path = _find_best_dicom_series_dir(path_obj)
-            loaded_image = _load_dicom_series(target_path, dataset_index, apply_rescale)
+            loaded_image = _load_dicom_series(target_path, dataset_index, apply_rescale, series_uid)
         elif path.lower().endswith((".nii", ".nii.gz")):
             loaded_image = _load_nifti(path, dataset_index)
         else:
@@ -885,7 +941,9 @@ def load_image(
                 return seg_result
 
             try:
-                loaded_image = _load_dicom_file(path, apply_rescale)
+                loaded_image = _load_dicom_file(path, apply_rescale, dataset_index)
+            except _DicomContentError:
+                raise
             except Exception as read_error:
                 raise ValueError(
                     f"Unsupported file format or unable to read file: {path}"
@@ -1068,26 +1126,19 @@ def load_and_merge_images(
             except Exception as e:
                 raise ValueError(f"Failed to load image '{path}': {e}") from e
 
-            # Reposition to reference space
-            repositioned = _position_in_reference(
+            # Where the image lies in reference space; outside its box it is all fill,
+            # so only the box merges (the repositioned full-size array is not made)
+            data, source, target = _placement(
                 current_image,
                 reference_image,
-                fill_value,
                 transpose_axes,
                 subvoxel_tolerance,
                 subvoxel_warning_threshold,
                 min_overlap_fraction,
             )
-
-            # Validate geometry after repositioning
-            _validate_geometry(
-                repositioned,
-                reference_image,
-                f"repositioned image '{path}'",
-                "reference image",
-            )
-
-            current_array = repositioned.array
+            if source is None or target is None:
+                continue
+            current_array = data[source]
 
             # Apply relabeling: replace all non-zero values with mask index + 1
             if relabel_masks:
@@ -1095,34 +1146,7 @@ def load_and_merge_images(
                 current_array = np.where(current_array != fill_value, label_value, fill_value)
 
             # Merge with conflict resolution
-            if i == 0:
-                # First image: just copy non-fill values
-                non_fill_mask = current_array != fill_value
-                merged_array[non_fill_mask] = current_array[non_fill_mask]
-            else:
-                # Subsequent images: apply conflict resolution
-                # Overlap: non-fill in both
-                overlap_mask = (merged_array != fill_value) & (current_array != fill_value)
-                # New data: fill in merged, non-fill in current
-                new_data_mask = (merged_array == fill_value) & (current_array != fill_value)
-
-                # Apply new data
-                merged_array[new_data_mask] = current_array[new_data_mask]
-
-                # Resolve conflicts
-                if np.any(overlap_mask):
-                    if conflict_resolution == "max":
-                        merged_array[overlap_mask] = np.maximum(
-                            merged_array[overlap_mask], current_array[overlap_mask]
-                        )
-                    elif conflict_resolution == "min":
-                        merged_array[overlap_mask] = np.minimum(
-                            merged_array[overlap_mask], current_array[overlap_mask]
-                        )
-                    elif conflict_resolution == "last":
-                        merged_array[overlap_mask] = current_array[overlap_mask]
-                    elif conflict_resolution == "first":
-                        pass  # Keep existing values
+            _merge_into(merged_array[target], current_array, fill_value, conflict_resolution)
 
         # Use reference geometry for output
         consensus_spacing = reference_image.spacing
@@ -1142,7 +1166,7 @@ def load_and_merge_images(
         except Exception as e:
             raise ValueError(f"Failed to load first image '{image_paths[0]}': {e}") from e
 
-        merged_array = consensus_image.array.astype(np.float64)
+        merged_array = consensus_image.array.astype(np.float64, copy=False)
 
         # Apply relabeling for the first image
         if relabel_masks:
@@ -1171,27 +1195,8 @@ def load_and_merge_images(
                     current_array.dtype
                 )
 
-            # Identify regions
-            overlap_mask = (merged_array != 0) & (current_array != 0)
-            new_data_mask = (merged_array == 0) & (current_array != 0)
-
-            # Apply new data
-            merged_array[new_data_mask] = current_array[new_data_mask]
-
-            # Resolve conflicts
-            if np.any(overlap_mask):
-                if conflict_resolution == "max":
-                    merged_array[overlap_mask] = np.maximum(
-                        merged_array[overlap_mask], current_array[overlap_mask]
-                    )
-                elif conflict_resolution == "min":
-                    merged_array[overlap_mask] = np.minimum(
-                        merged_array[overlap_mask], current_array[overlap_mask]
-                    )
-                elif conflict_resolution == "last":
-                    merged_array[overlap_mask] = current_array[overlap_mask]
-                elif conflict_resolution == "first":
-                    pass  # Already have the 'first' value
+            # Merge with conflict resolution
+            _merge_into(merged_array, current_array, 0, conflict_resolution)
 
         consensus_spacing = consensus_image.spacing
         consensus_origin = consensus_image.origin
@@ -1383,6 +1388,15 @@ def _nifti_float64(nii_img: Any, dataset_index: int) -> npt.NDArray[Any]:
     its copy are not made.
     """
     proxy = nii_img.dataobj
+    if isinstance(proxy, ArrayProxy) and len(proxy.shape) == 4:
+        # Read only the requested volume, scaled as get_fdata scales (nibabel keeps the
+        # slope and intercept in float64): the other volumes are never read or kept.
+        if not 0 <= dataset_index < proxy.shape[3]:
+            raise ValueError(
+                f"Dataset index {dataset_index} is out of bounds for 4D image "
+                f"with {proxy.shape[3]} volumes."
+            )
+        return _row_order(np.asarray(proxy[..., dataset_index], dtype=np.float64))
     if (
         isinstance(proxy, ArrayProxy)
         and len(proxy.shape) == 3
@@ -1454,7 +1468,10 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
 
 
 def _load_dicom_series(
-    path: str | Path, dataset_index: int = 0, apply_rescale: bool = True
+    path: str | Path | Sequence[str | Path],
+    dataset_index: int = 0,
+    apply_rescale: bool = True,
+    series_uid: Optional[str] = None,
 ) -> Image:
     """
     Load a DICOM series (a set of DICOM files) from a directory.
@@ -1462,6 +1479,13 @@ def _load_dicom_series(
     This function reads all DICOM files in the directory, detects multi-phase
     acquisitions (e.g., cardiac phases, temporal positions), and loads the
     requested phase. Slices are sorted spatially to reconstruct the 3D volume.
+
+    **Series:**
+    Files without image pixel data (RTSTRUCT, RTPLAN, SR) and SEG or RT dose
+    objects are not slices, so they are skipped. A folder with more than one image
+    series (two reconstructions, a scout series) needs ``series_uid``; the series
+    never mix. Images of another orientation or size than most images of the
+    series are left out, with a warning.
 
     **Multi-Phase Detection:**
     The function automatically detects multi-phase series using the same logic
@@ -1480,32 +1504,49 @@ def _load_dicom_series(
     If spatial tags are missing, it falls back to `InstanceNumber`.
 
     Args:
-        path: Directory containing the DICOM files.
+        path: Directory containing the DICOM files, or the DICOM files themselves.
         dataset_index: For multi-phase series, which phase to load (0-indexed).
             Default is 0, which loads the first (or only) phase.
         apply_rescale: If True (default), apply RescaleSlope and RescaleIntercept
             to convert stored pixel values to real-world values (e.g., Hounsfield
-            Units for CT). Set to False to get raw stored values.
+            Units for CT); the image is float64 then, also without rescale tags. Set
+            to False to get raw stored values.
+        series_uid: The SeriesInstanceUID of the series to load when the folder
+            holds more than one image series.
 
     Returns:
         Image: A standardized `Image` object.
 
     Raises:
         ValueError: If no DICOM files are found, if they cannot be read/sorted,
-            or if dataset_index is out of range for the available phases.
+            if the folder holds more than one image series and ``series_uid`` does
+            not choose one, or if dataset_index is out of range for the available
+            phases.
 
     See Also:
         ``pictologics.utilities.get_dicom_phases()``: Discover available phases.
     """
-    from pictologics.utilities.dicom_utils import MULTI_PHASE_TAGS, split_dicom_phases
+    from pictologics.utilities.dicom_utils import (
+        _DEFER_SIZE,
+        _is_image_instance,
+        _select_image_series,
+        _series_metadata,
+        split_dicom_phases,
+    )
 
     # List candidate files; non-DICOM files are skipped during the metadata
     # read below (dcmread rejects them), avoiding a separate is_dicom pass
     # that would open every file twice.
-    path_obj = Path(path)
-    files = [p for p in path_obj.iterdir() if p.is_file()]
+    if isinstance(path, (str, Path)):
+        files = [p for p in Path(path).iterdir() if p.is_file()]
+        source: Any = path
+    else:
+        files = [Path(f) for f in path]
+        source = files[0].parent if files else "the given files"
     if not files:
-        raise ValueError(f"No DICOM files found in directory: {path}")
+        raise ValueError(f"No DICOM files found in directory: {source}")
+    if dataset_index < 0:
+        raise ValueError(f"dataset_index must be 0 or more, not {dataset_index}.")
 
     # Extract metadata for phase detection. Each file is parsed once: the pixel data (and
     # other large values) are read from the file only when used, for the selected phase.
@@ -1514,37 +1555,17 @@ def _load_dicom_series(
     for f in files:
         try:
             dcm = pydicom.dcmread(f, defer_size=_DEFER_SIZE)
-            datasets[f] = dcm
-            meta: dict[str, Any] = {
-                "file_path": f,
-                "InstanceNumber": getattr(dcm, "InstanceNumber", None),
-            }
-            # Extract position
-            try:
-                ipp = dcm.ImagePositionPatient
-                meta["ImagePositionPatient"] = (
-                    float(ipp[0]),
-                    float(ipp[1]),
-                    float(ipp[2]),
-                )
-            except (AttributeError, IndexError, TypeError):
-                meta["ImagePositionPatient"] = None
-
-            # Extract multi-phase tags
-            for tag in MULTI_PHASE_TAGS:
-                val = getattr(dcm, tag, None)
-                if val is not None:
-                    meta[tag] = val
-
-            file_metadata.append(meta)
         except Exception:
             continue
+        if _is_image_instance(dcm):
+            datasets[f] = dcm
+            file_metadata.append(_series_metadata(dcm, f))
 
     if not file_metadata:
-        raise ValueError(f"Could not read any DICOM files from: {path}")
+        raise ValueError(f"Could not read any DICOM files with image data from: {source}")
 
-    # Detect and split phases
-    phases = split_dicom_phases(file_metadata)
+    # One image series, split into its phases
+    phases = split_dicom_phases(_select_image_series(file_metadata, series_uid, source))
 
     # Validate dataset_index
     if dataset_index >= len(phases):
@@ -1584,6 +1605,8 @@ def _load_dicom_series(
     # slices are freed while their pixels are stacked
     ref = slices[0]
     positions = [getattr(s, "ImagePositionPatient", None) for s in slices]
+    if all(p is not None for p in positions):
+        _warn_on_uneven_slices(positions, slice_normal, source)
     volume = _stack_slices(slices, apply_rescale)
 
     # Spacing
@@ -1635,9 +1658,65 @@ def _load_dicom_series(
     )
 
 
-# Series headers are parsed once; values above this size (the pixel data) are read from
-# the file when used, for the selected phase only.
-_DEFER_SIZE = "4 KB"
+def _warn_on_uneven_slices(positions: list[Any], normal: npt.NDArray[Any], source: Any) -> None:
+    """Warn when the slice positions are uneven or leave the slice normal.
+
+    The slices stack with one spacing, so after a missing slice every slice sits one step
+    off, and positions that move sideways (a gantry tilt) shear the image.
+    """
+    points = np.asarray([[float(v) for v in p] for p in positions], dtype=np.float64)
+    if len(points) < 3:
+        return
+    steps = np.diff(points @ normal)
+    median = float(np.median(steps))
+    if median > 0 and (steps.max() > 1.5 * median or steps.min() < 0.5 * median):
+        warnings.warn(
+            f"The slices of {source} are not evenly spaced: the steps between them go from "
+            f"{steps.min():g} to {steps.max():g} mm (median {median:g} mm). Slices are "
+            "missing or overlap, so the image is wrong after the first uneven step.",
+            UserWarning,
+            stacklevel=3,
+        )
+    span = points[-1] - points[0]
+    length = float(np.linalg.norm(span))
+    cosine = min(1.0, abs(float(span @ normal)) / length) if length > 0 else 1.0
+    if np.degrees(np.arccos(cosine)) > 0.5:
+        warnings.warn(
+            f"The slices of {source} move sideways by {np.degrees(np.arccos(cosine)):.1f} "
+            "degrees from the slice "
+            "normal (for example a gantry tilt). The loader does not correct this, so the "
+            "image is sheared.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
+# The elements that hold the pixel data of a DICOM dataset
+_PIXEL_KEYWORDS = ("PixelData", "FloatPixelData", "DoubleFloatPixelData")
+
+
+def _decoded_pixels(ds: Any) -> npt.NDArray[Any]:
+    """The pixel array of one DICOM dataset (pydicom with python-gdcm and Pillow decodes
+    RLE, JPEG Lossless, JPEG-LS, JPEG 2000 and baseline JPEG); an error names the file
+    and the cause."""
+    try:
+        pixels: npt.NDArray[Any] = ds.pixel_array
+        return pixels
+    except Exception as e:
+        raise _DicomContentError(
+            "Failed to extract pixel arrays from DICOM slices: cannot decode "
+            f"{getattr(ds, 'filename', None) or 'a slice'} ({e})."
+        ) from e
+
+
+def _check_one_sample(samples: Any, source: Any) -> None:
+    """Colour (RGB) pixel data has no single value per voxel to measure."""
+    if isinstance(samples, int) and samples > 1:
+        raise _DicomContentError(
+            f"{source} holds colour pixel data ({samples} samples per pixel). Radiomics "
+            "needs one value per voxel; convert the image to grey values first."
+        )
+
 
 # Slices with equal values of these tags decode to 2D arrays of one shape and type (when
 # SamplesPerPixel and NumberOfFrames are 1 or absent).
@@ -1654,52 +1733,53 @@ _SLICE_LAYOUT_TAGS = (
 def _stack_slices(slices: list[Any], apply_rescale: bool) -> npt.NDArray[Any]:
     """(X, Y, Z) volume of the sorted slices; empties `slices` as it goes.
 
-    A slice with a RescaleSlope other than 1 or a RescaleIntercept other than 0 becomes
-    `pixels.astype(np.float64) * slope + intercept`; the others keep their stored values.
-    A large rescaled series of 2D slices with one shape and pixel type takes one tiled
-    kernel from the stored-type stack into the row-order float64 output, and each slice
-    (its file bytes and decoded pixels) is freed once copied. Other series stack the
-    slices, then turn a large volume to row order, like NIfTI data.
+    With `apply_rescale`, every slice becomes float64, times its RescaleSlope and plus its
+    RescaleIntercept when they differ from 1 and 0. So a DICOM image without rescale tags
+    resamples and filters as the same image from NIfTI does. Without `apply_rescale`, the
+    stored values and type stay. A large float64 series of 2D slices with one shape and
+    pixel type takes one tiled kernel from the stored-type stack into the row-order
+    output, and each slice (its file bytes and decoded pixels) is freed once copied.
+    Other series stack the slices, then turn a large volume to row order, like NIfTI data.
     """
     # pydicom pixel_array is (Rows, Columns) -> (Y, X); the stack is (Z, Y, X) and its
     # (X, Y, Z) view is in column order
-    try:
-        slopes = np.ones(len(slices))
-        intercepts = np.zeros(len(slices))
-        if apply_rescale:
-            for k, s in enumerate(slices):
-                slopes[k] = float(getattr(s, "RescaleSlope", 1.0))
-                intercepts[k] = float(getattr(s, "RescaleIntercept", 0.0))
-        rescaled = (slopes != 1.0) | (intercepts != 0.0)
-        layout = [tuple(getattr(s, key, None) for key in _SLICE_LAYOUT_TAGS) for s in slices]
-        rows, columns, _, _, samples, frames = layout[0]
-        fused = (
-            bool(rescaled.any())
-            and all(item == layout[0] for item in layout)
-            and samples in (None, 1)
-            and frames in (None, 1)
-            and isinstance(rows, int)
-            and isinstance(columns, int)
-            and rows * columns * len(slices) >= _ROW_ORDER_MIN_SIZE
-        )
-        if fused:
-            first = slices[0].pixel_array
-            stack = np.empty((len(slices),) + first.shape, dtype=first.dtype)
-            for k in range(len(slices)):
-                stack[k] = first if k == 0 else slices[k].pixel_array
-                slices[k] = None
-            return _float_row_order(
-                stack.transpose(2, 1, 0), slopes, intercepts, rescaled, rescaled
-            )
-        pixel_data = []
+    layout = [tuple(getattr(s, key, None) for key in _SLICE_LAYOUT_TAGS) for s in slices]
+    for item in layout:
+        _check_one_sample(item[4], "The DICOM series")
+    slopes = np.ones(len(slices))
+    intercepts = np.zeros(len(slices))
+    if apply_rescale:
+        for k, s in enumerate(slices):
+            slopes[k] = float(getattr(s, "RescaleSlope", 1.0))
+            intercepts[k] = float(getattr(s, "RescaleIntercept", 0.0))
+    rescaled = (slopes != 1.0) | (intercepts != 0.0)
+    rows, columns, _, _, samples, frames = layout[0]
+    fused = (
+        apply_rescale
+        and all(item == layout[0] for item in layout)
+        and samples in (None, 1)
+        and frames in (None, 1)
+        and isinstance(rows, int)
+        and isinstance(columns, int)
+        and rows * columns * len(slices) >= _ROW_ORDER_MIN_SIZE
+    )
+    if fused:
+        first = _decoded_pixels(slices[0])
+        stack = np.empty((len(slices),) + first.shape, dtype=first.dtype)
         for k in range(len(slices)):
-            pixels = slices[k].pixel_array
-            if rescaled[k]:
-                pixels = pixels.astype(np.float64) * slopes[k] + intercepts[k]
-            pixel_data.append(pixels)
+            stack[k] = first if k == 0 else _decoded_pixels(slices[k])
             slices[k] = None
-    except Exception as e:
-        raise ValueError("Failed to extract pixel arrays from DICOM slices.") from e
+        return _float_row_order(stack.transpose(2, 1, 0), slopes, intercepts, rescaled, rescaled)
+    pixel_data = []
+    for k in range(len(slices)):
+        pixels = _decoded_pixels(slices[k])
+        if apply_rescale:
+            pixels = pixels.astype(np.float64)
+            if rescaled[k]:
+                pixels *= slopes[k]
+                pixels += intercepts[k]
+        pixel_data.append(pixels)
+        slices[k] = None
 
     volume = np.moveaxis(np.stack(pixel_data), 0, -1)  # Result: (Y, X, Z)
     pixel_data.clear()  # the stack holds the slices now; free them before the copy
@@ -1707,7 +1787,45 @@ def _stack_slices(slices: list[Any], apply_rescale: bool) -> npt.NDArray[Any]:
     return _row_order(_ensure_3d(volume))
 
 
-def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
+class _DicomContentError(ValueError):
+    """A readable DICOM file whose content cannot load as asked; `load_image` shows it."""
+
+
+def _phase_frames(
+    dcm: Any, positions: list[npt.NDArray[np.float64]], dataset_index: int, source: Any
+) -> npt.NDArray[np.intp]:
+    """The frame indices of one volume of an enhanced multiframe object.
+
+    Frames at repeated positions hold several volumes (time points, cardiac phases).
+    They split like the files of a series: by the per-frame temporal position index or
+    cardiac phase, else by their order at each position.
+    """
+    from pictologics.utilities.dicom_utils import split_dicom_phases
+
+    metadata: list[dict[str, Any]] = []
+    for index, group in enumerate(dcm.PerFrameFunctionalGroupsSequence):
+        meta: dict[str, Any] = {
+            "file_path": index,
+            "InstanceNumber": index + 1,
+            "ImagePositionPatient": tuple(positions[index]),
+        }
+        content = _functional_group_item(group, "FrameContentSequence")
+        if getattr(content, "TemporalPositionIndex", None) is not None:
+            meta["TemporalPositionIdentifier"] = int(content.TemporalPositionIndex)
+        cardiac = _functional_group_item(group, "CardiacSynchronizationSequence")
+        if getattr(cardiac, "NominalPercentageOfCardiacPhase", None) is not None:
+            meta["NominalPercentageOfCardiacPhase"] = float(cardiac.NominalPercentageOfCardiacPhase)
+        metadata.append(meta)
+    phases = split_dicom_phases(metadata)
+    if not 0 <= dataset_index < len(phases):
+        raise _DicomContentError(
+            f"dataset_index {dataset_index} is out of range: {source} holds "
+            f"{len(phases)} volume(s)."
+        )
+    return np.array([meta["file_path"] for meta in phases[dataset_index]], dtype=np.intp)
+
+
+def _load_dicom_file(path: str, apply_rescale: bool = True, dataset_index: int = 0) -> Image:
     """
     Load a single DICOM file as a 3D image.
 
@@ -1727,24 +1845,28 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
         path (str): Path to the DICOM file.
         apply_rescale (bool): If True (default), apply RescaleSlope and RescaleIntercept
             to convert stored pixel values to real-world values (e.g., Hounsfield
-            Units for CT). Set to False to get raw stored values.
+            Units for CT); the image is float64 then, also without rescale tags. Set to
+            False to get raw stored values.
+        dataset_index (int): The volume to load when the frames of a multiframe file
+            hold more than one (frames at repeated positions, split by their temporal
+            position or cardiac phase, else by their order). Default 0.
 
     Returns:
         Image: A standardized `Image` object.
 
     Raises:
-        ValueError: If the file is not a valid DICOM file.
+        ValueError: If the file is not a valid DICOM file, holds colour pixel data, or
+            has no volume at `dataset_index`.
     """
     try:
         dcm = pydicom.dcmread(path)
-        data = dcm.pixel_array
     except Exception as e:
         raise ValueError(f"Corrupt or invalid DICOM file '{path}': {e}") from e
-
-    # Apply rescale while the native DICOM frame axis is still intact.  Enhanced
-    # multiframe objects may store distinct transforms per frame.
-    if apply_rescale:
-        data = _apply_dicom_rescale(data, dcm)
+    _check_one_sample(getattr(dcm, "SamplesPerPixel", None), path)
+    data = _decoded_pixels(dcm)
+    for keyword in _PIXEL_KEYWORDS:  # the decoded array holds the pixels now
+        if keyword in dcm:
+            delattr(dcm, keyword)
 
     # Enhanced multiframe objects store geometry in functional groups rather
     # than top-level tags; resolve shared items once (top level takes precedence).
@@ -1768,33 +1890,46 @@ def _load_dicom_file(path: str, apply_rescale: bool = True) -> Image:
             slice_cosine = np.array([0.0, 0.0, 1.0])
             direction = np.eye(3)
 
-    # Sort multiframe data spatially when per-frame positions are available
-    # (frame storage order is not guaranteed to match spatial order). Rescale
-    # has already been applied, so reordering frames here is safe.
+    # The frames of the requested volume, sorted spatially when per-frame positions are
+    # available (frame storage order is not guaranteed to match spatial order)
     frame_positions = None
+    frames = np.arange(data.shape[0]) if data.ndim == 3 else np.zeros(1, dtype=np.intp)
     if data.ndim == 3:
         frame_positions = _per_frame_positions(dcm, data.shape[0])
-        if frame_positions is not None:
-            order = np.argsort([float(np.dot(p, slice_cosine)) for p in frame_positions])
-            if not np.array_equal(order, np.arange(len(order))):
-                data = data[order]
-            frame_positions = [frame_positions[i] for i in order]
+    if frame_positions is not None:
+        frames = _phase_frames(dcm, frame_positions, dataset_index, path)
+        order = np.argsort([float(np.dot(frame_positions[f], slice_cosine)) for f in frames])
+        frames = frames[order]
+        frame_positions = [frame_positions[f] for f in frames]
+        _warn_on_uneven_slices(frame_positions, slice_cosine, path)
+    elif dataset_index != 0:
+        raise _DicomContentError(
+            f"dataset_index {dataset_index} is out of range: {path} holds one volume."
+        )
 
-    # Handle dimensions
-    # DICOM pixel_array format:
-    #   - 2D: (Rows, Columns) = (Y, X)
-    #   - 3D: (Frames, Rows, Columns) = (Z, Y, X) or (Rows, Columns, Frames) depending on source
-    # We standardize to (X, Y, Z) to match _load_dicom_series behavior
-    if data.ndim == 2:
-        # (Y, X) -> (X, Y)
-        data = np.swapaxes(data, 0, 1)
-    elif data.ndim == 3:
-        # Most DICOM 3D data (including SEG) is (Frames/Z, Rows/Y, Columns/X)
-        # We need (X, Y, Z), so swap axes appropriately
-        # From (Z, Y, X) to (X, Y, Z): swap 0<->2
-        data = np.swapaxes(data, 0, 2)  # (Z, Y, X) -> (X, Y, Z)
-
-    data = _row_order(_ensure_3d(data))
+    # DICOM pixel_array is (Rows, Columns) = (Y, X) for one frame and (Frames, Rows,
+    # Columns) = (Z, Y, X) for many; the output is (X, Y, Z). With apply_rescale every
+    # frame becomes float64, times its slope and plus its intercept (enhanced multiframe
+    # objects may store one transform per frame).
+    if data.ndim == 3 and not np.array_equal(frames, np.arange(data.shape[0])):
+        data = data[frames]
+    stack = data[np.newaxis] if data.ndim == 2 else data  # (Z, Y, X)
+    if apply_rescale:
+        params = np.array([_get_dicom_frame_rescale(dcm, int(f)) for f in frames])
+        slopes, intercepts = params[:, 0].copy(), params[:, 1].copy()
+        rescaled = (slopes != 1.0) | (intercepts != 0.0)
+        if stack.size >= _ROW_ORDER_MIN_SIZE:
+            data = _float_row_order(
+                stack.transpose(2, 1, 0), slopes, intercepts, rescaled, rescaled
+            )
+        else:
+            scaled = stack.astype(np.float64)
+            for k in np.flatnonzero(rescaled):
+                scaled[k] *= slopes[k]
+                scaled[k] += intercepts[k]
+            data = _row_order(scaled.transpose(2, 1, 0))
+    else:
+        data = _row_order(stack.transpose(2, 1, 0))
 
     # Metadata extraction
     try:

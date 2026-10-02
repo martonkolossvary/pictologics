@@ -26,14 +26,14 @@ import math
 import os
 import warnings
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
 import numpy as np
 import scipy.fft
 from numba import get_num_threads, jit, prange
 from numpy import typing as npt
 
-from ._utils import compute_nonzero_bbox
+from ._utils import PRANGE_ONLY, compute_nonzero_bbox
 
 if TYPE_CHECKING:
     from ..loader import Image
@@ -221,7 +221,7 @@ def _calculate_spatial_features_numba(
     return numer_moran, numer_geary, sum_weights
 
 
-@jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
+@jit(nopython=True, parallel=PRANGE_ONLY, fastmath=True, cache=True)  # type: ignore
 def _calculate_local_mean_numba(
     data: npt.NDArray[np.floating[Any]],
     mask_indices: npt.NDArray[np.integer[Any]],
@@ -256,6 +256,51 @@ def _calculate_local_mean_numba(
             means[i] = sum_val / count
 
     return means
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _row_prefix_sums_numba(data: npt.NDArray[Any], out: npt.NDArray[np.float64]) -> None:
+    """out[x, y, k] = the sum of data[x, y, :k] (float64), for the sphere sums."""
+    for x in prange(data.shape[0]):
+        for y in range(data.shape[1]):
+            s = 0.0
+            out[x, y, 0] = 0.0
+            for z in range(data.shape[2]):
+                s += float(data[x, y, z])
+                out[x, y, z + 1] = s
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _approximate_local_means_numba(
+    prefix: npt.NDArray[np.float64],
+    mask_indices: npt.NDArray[np.integer[Any]],
+    row_dx: npt.NDArray[np.int64],
+    row_dy: npt.NDArray[np.int64],
+    row_dz: npt.NDArray[np.int64],
+) -> npt.NDArray[np.float64]:
+    """The sphere mean of each ROI voxel from the row prefix sums: one subtraction per
+    sphere row (dx, dy, -dz..dz), clipped to the image. Close to the exact local mean;
+    `_local_peaks_two_stage` bounds the difference."""
+    nx, ny, nz1 = prefix.shape
+    nz = nz1 - 1
+    out = np.empty(mask_indices.shape[0], dtype=np.float64)
+    for i in prange(mask_indices.shape[0]):
+        x = mask_indices[i, 0]
+        y = mask_indices[i, 1]
+        z = mask_indices[i, 2]
+        s = 0.0
+        count = 0
+        for r in range(row_dx.shape[0]):
+            xx = x + row_dx[r]
+            yy = y + row_dy[r]
+            if xx < 0 or yy < 0 or xx >= nx or yy >= ny:
+                continue
+            lo = max(z - row_dz[r], 0)
+            hi = min(z + row_dz[r] + 1, nz)
+            s += prefix[xx, yy, hi] - prefix[xx, yy, lo]
+            count += hi - lo
+        out[i] = s / count
+    return out
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
@@ -325,6 +370,130 @@ def _percentile_ranks(n: int, dtype: np.dtype[Any]) -> npt.NDArray[np.intp]:
     return np.where(index - below == 0, below, below + 1).astype(np.intp)
 
 
+# From this many float64 values on, the order statistics come from a radix select: one
+# parallel pass for the key range, one parallel count of 65,536 key buckets over that
+# range, then a partition of the few values in the buckets of the ranks. Below it, one
+# partition is faster (measured).
+_RADIX_SELECT_MIN = 130_000
+_SIGN_BIT = np.uint64(1 << 63)
+_ALL_BITS = np.uint64(0xFFFFFFFFFFFFFFFF)
+
+
+@jit(nopython=True, inline="always", cache=True)  # type: ignore
+def _float_key(bits: np.uint64) -> np.uint64:
+    """The float64 order as an unsigned order: flip the sign bit of a positive value and
+    every bit of a negative one."""
+    return bits ^ _ALL_BITS if bits >> np.uint64(63) else bits ^ _SIGN_BIT
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _key_range_numba(
+    values: npt.NDArray[np.float64],
+    bits: npt.NDArray[np.uint64],
+    lo: npt.NDArray[np.uint64],
+    hi: npt.NDArray[np.uint64],
+) -> None:
+    """lo[t] and hi[t]: the smallest and the largest key of chunk t. A chunk with a NaN
+    sets hi[t] = 0 < lo[t] and stops."""
+    n = bits.size
+    n_chunks = lo.size
+    size = (n + n_chunks - 1) // n_chunks
+    for t in prange(n_chunks):
+        low = _ALL_BITS
+        high = np.uint64(0)
+        for i in range(t * size, min(n, (t + 1) * size)):
+            if values[i] != values[i]:
+                low = _ALL_BITS
+                high = np.uint64(0)
+                break
+            k = _float_key(bits[i])
+            if k < low:
+                low = k
+            if k > high:
+                high = k
+        lo[t] = low
+        hi[t] = high
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _bucket_counts_numba(
+    bits: npt.NDArray[np.uint64], shift: int, base: np.uint64, counts: npt.NDArray[np.int64]
+) -> None:
+    """counts[t, h]: the values of chunk t in bucket h = (key >> shift) - base."""
+    n = bits.size
+    n_chunks = counts.shape[0]
+    size = (n + n_chunks - 1) // n_chunks
+    for t in prange(n_chunks):
+        for i in range(t * size, min(n, (t + 1) * size)):
+            counts[t, (_float_key(bits[i]) >> np.uint64(shift)) - base] += 1
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _bucket_values_numba(
+    bits: npt.NDArray[np.uint64],
+    values: npt.NDArray[np.float64],
+    shift: int,
+    base: np.uint64,
+    wanted: npt.NDArray[np.bool_],
+    chunk_counts: npt.NDArray[np.int64],
+    out: npt.NDArray[np.float64],
+) -> None:
+    """Copy the values whose bucket h has wanted[h] into `out`, chunk by chunk in parallel.
+    chunk_counts[t] holds the number of them in chunk t (the chunks of
+    `_bucket_counts_numba`); the order inside `out` does not matter."""
+    n = bits.size
+    n_chunks = chunk_counts.size
+    size = (n + n_chunks - 1) // n_chunks
+    for t in prange(n_chunks):
+        c = 0
+        for k in range(t):
+            c += chunk_counts[k]
+        for i in range(t * size, min(n, (t + 1) * size)):
+            if wanted[(_float_key(bits[i]) >> np.uint64(shift)) - base]:
+                out[c] = values[i]
+                c += 1
+
+
+def _radix_select(
+    values: npt.NDArray[np.float64], ranks: npt.NDArray[np.intp]
+) -> Optional[npt.NDArray[np.float64]]:
+    """The values at the sorted 0-based `ranks` (np.partition's values), or None when the
+    array holds a NaN.
+
+    The 65,536 buckets split the key range of the data evenly (keys order like the
+    floats), so close values spread over many buckets. The values of the buckets of the
+    ranks are copied out and partitioned at the ranks inside them: a partition, not a
+    sort, so data that crowd into few buckets cost about one partition of all values.
+    """
+    values = np.ascontiguousarray(values)
+    bits = values.view(np.uint64)
+    threads = get_num_threads()
+    lo = np.empty(threads, dtype=np.uint64)
+    hi = np.empty(threads, dtype=np.uint64)
+    _key_range_numba(values, bits, lo, hi)
+    if (hi < lo).any():
+        return None
+    low, high = int(lo.min()), int(hi.max())
+    shift = max(0, (high - low).bit_length() - 16)
+    base = np.uint64(low >> shift)
+    counts = np.zeros((threads, 1 << 16), dtype=np.int64)
+    _bucket_counts_numba(bits, shift, base, counts)
+    per_bucket = counts.sum(axis=0)
+    below = np.concatenate(([0], np.cumsum(per_bucket)))  # values in lower buckets
+    buckets = np.searchsorted(below[1:], ranks, side="right")
+    wanted = np.zeros(1 << 16, dtype=np.bool_)
+    wanted[buckets] = True
+    kept = np.where(wanted, per_bucket, 0)
+    candidates = np.empty(int(kept.sum()), dtype=np.float64)
+    _bucket_values_numba(
+        bits, values, shift, base, wanted, counts[:, wanted].sum(axis=1), candidates
+    )
+    # A rank sits in its bucket after the candidates of the lower wanted buckets
+    lower = np.cumsum(kept) - kept
+    at = lower[buckets] + ranks - below[buckets]
+    return np.partition(candidates, np.unique(at))[at]
+
+
 def _order_statistics(values: npt.NDArray[Any]) -> tuple[Any, ...]:
     """P10, P25, P75, P90 and the median of a non-empty array.
 
@@ -337,6 +506,16 @@ def _order_statistics(values: npt.NDArray[Any]) -> tuple[Any, ...]:
     ranks = _percentile_ranks(n, values.dtype)
     half = n // 2
     low = half - 1 + n % 2  # lower middle rank (the middle rank when n is odd)
+    if values.dtype == np.float64 and n >= _RADIX_SELECT_MIN:
+        picked = _radix_select(values, np.concatenate((ranks, [low, half])))
+        if picked is not None:
+            return (
+                picked[0],
+                picked[1],
+                picked[2],
+                picked[3],
+                np.mean(picked[4:6] if n % 2 == 0 else picked[4:5]),
+            )
     part = np.partition(values, np.unique(np.concatenate((ranks, [low, half, n - 1]))))
     if part.dtype.kind == "f" and np.isnan(part[-1]):
         return np.nan, np.nan, np.nan, np.nan, np.nan
@@ -411,10 +590,14 @@ def calculate_intensity_features(
     var_val = float(np.var(values, ddof=0))
     features["intensity_variance_ECT3"] = float(var_val)
 
-    # 4.1.3 Intensity skewness (KE2A)
-    if var_val == 0.0:
-        features["intensity_skewness_KE2A"] = np.nan
-        features["intensity_kurtosis_IPH6"] = np.nan
+    # 4.1.3 Intensity skewness (KE2A) and 4.1.4 kurtosis (IPH6). IBSI defines both as 0
+    # when the variance is 0. Equal values can give a variance of about 1e-34 (a mean of
+    # 0.1 values is not exact), so equal values count as 0 variance here.
+    min_val = np.min(values)
+    max_val = np.max(values)
+    if var_val == 0.0 or min_val == max_val:
+        features["intensity_skewness_KE2A"] = 0.0
+        features["intensity_kurtosis_IPH6"] = 0.0
     else:
         m2, m3, m4 = _central_moments_2_3_4(values, float(mean_val))
         denom = m2**1.5
@@ -436,14 +619,12 @@ def calculate_intensity_features(
     features["median_intensity_Y12H"] = float(median_val)
 
     # 4.1.6 Minimum intensity (1GSF)
-    min_val = np.min(values)
     features["minimum_intensity_1GSF"] = float(min_val)
 
     features["10th_intensity_percentile_QG58"] = float(p10)
     features["90th_intensity_percentile_8DWT"] = float(p90)
 
     # 4.1.9 Maximum intensity (84IY)
-    max_val = np.max(values)
     features["maximum_intensity_84IY"] = float(max_val)
 
     # 4.1.10 Intensity interquartile range (SALO)
@@ -567,10 +748,11 @@ def calculate_intensity_histogram_features(
     var_disc = float(np.var(disc, ddof=0))
     features["discretised_intensity_variance_CH89"] = float(var_disc)
 
-    # 4.2.3 Discretised intensity skewness (88K1)
+    # 4.2.3 Discretised intensity skewness (88K1) and 4.2.4 kurtosis (C3I7): 0 when the
+    # variance is 0 (IBSI)
     if var_disc == 0.0:
-        features["discretised_intensity_skewness_88K1"] = np.nan
-        features["discretised_intensity_kurtosis_C3I7"] = np.nan
+        features["discretised_intensity_skewness_88K1"] = 0.0
+        features["discretised_intensity_kurtosis_C3I7"] = 0.0
     else:
         m2, m3, m4 = _central_moments_2_3_4(disc, float(mean_disc))
         denom = m2**1.5
@@ -711,10 +893,7 @@ def calculate_ivh_features(
     N = len(discretised_values)
 
     vals = np.asarray(discretised_values)
-    sorted_vals = np.sort(vals)
-    # np.searchsorted converts an integer array to float64 on each call with a float
-    # threshold. Convert it one time; the comparisons stay the same.
-    sorted_f = sorted_vals.astype(np.float64, copy=False)
+    count_below, kth, unique_vals, below_unique = _sorted_view(vals)
 
     # -------------------------------------------------------------------------
     # 1. Volume Fractions
@@ -724,14 +903,13 @@ def calculate_ivh_features(
 
     # Fallback to data min/max if still None
     if t_min is None or t_max is None:
-        t_min_idx = float(sorted_vals[0])
-        t_max_idx = float(sorted_vals[-1])
+        t_min_idx = float(kth(0))
+        t_max_idx = float(kth(N - 1))
         val_range_idx = t_max_idx - t_min_idx
 
         def get_volume_fraction_at_intensity_fraction_indices(frac: float) -> float:
             threshold_idx = t_min_idx + frac * val_range_idx
-            idx = int(np.searchsorted(sorted_f, threshold_idx, side="left"))
-            count = N - idx
+            count = N - count_below(threshold_idx)
             return float(count / N)
 
         features["volume_at_intensity_fraction_0.10_BC2M_10"] = (
@@ -755,8 +933,7 @@ def calculate_ivh_features(
             else:
                 threshold_idx = threshold_val
 
-            idx = int(np.searchsorted(sorted_f, threshold_idx, side="left"))
-            count = N - idx
+            count = N - count_below(threshold_idx)
             return float(count / N)
 
         features["volume_at_intensity_fraction_0.10_BC2M_10"] = (
@@ -781,18 +958,18 @@ def calculate_ivh_features(
             and min_val is None
             and bin_width > 0
             and float(bin_width) == 1.0
-            and np.issubdtype(sorted_vals.dtype, np.integer)
+            and np.issubdtype(vals.dtype, np.integer)
         ):
             target_count = int(np.floor(vol_frac * N))
             if target_count <= 0:
-                return float(sorted_vals[-1])
+                return float(kth(N - 1))
 
             # Smallest integer threshold t such that count(vals >= t) <= target_count.
             # Let k = N - target_count. We need searchsorted(t) >= k.
             k = N - target_count
-            v = int(sorted_vals[k - 1])
+            v = int(kth(k - 1))
             t = v + 1
-            vmax = int(sorted_vals[-1])
+            vmax = int(kth(N - 1))
             if t > vmax:
                 t = vmax
             return float(t)
@@ -819,11 +996,11 @@ def calculate_ivh_features(
                     idx = np.arange(num_steps + 1, dtype=np.float64)
                     candidates = g_min + idx * bin_width
             else:
-                candidates = sorted_f
+                # The values that occur: the first one that meets the condition below is
+                # the first such value of all the sorted values
+                candidates = unique_vals.astype(np.float64)
         else:
-            candidates = sorted_vals
-        # Float candidates search the float64 copy; the values themselves search as they are.
-        search_vals = sorted_vals if bin_width is None else sorted_f
+            candidates = unique_vals
 
         target_count = int(np.floor(vol_frac * N))
 
@@ -842,8 +1019,7 @@ def calculate_ivh_features(
             else:
                 check_val = val
 
-            idx = np.searchsorted(search_vals, check_val, side="left")
-            count = N - idx
+            count = N - count_below(check_val)
 
             if count <= target_count:
                 ans_idx = mid
@@ -869,15 +1045,6 @@ def calculate_ivh_features(
     # -------------------------------------------------------------------------
     # IVH Curve: Volume Fraction (phi) vs Intensity (I)
     # We construct the curve points from the unique values in the data.
-    # sorted_vals is already sorted, so unique values are found in O(N) via a
-    # neighbour-difference mask instead of np.unique's redundant O(N log N) sort.
-    if sorted_vals.size == 0:  # pragma: no cover  # unreachable: empty input returns at func top
-        unique_vals = sorted_vals
-    else:
-        keep = np.empty(sorted_vals.shape, dtype=bool)
-        keep[0] = True
-        np.not_equal(sorted_vals[1:], sorted_vals[:-1], out=keep[1:])
-        unique_vals = sorted_vals[keep]
     if len(unique_vals) == 1:
         # If there is only one discretised intensity, AUC is 0 by definition.
         features["area_under_the_ivh_curve_9CMM"] = 0.0
@@ -895,17 +1062,82 @@ def calculate_ivh_features(
         else:
             intensities_arr = unique_vals.astype(np.float64)
 
-        # Calculate volume fractions
-        # searchsorted returns first index where val fits.
-        # Since sorted_vals is sorted, all elements >= val are from searchsorted(val) onwards.
-        indices = np.searchsorted(sorted_vals, unique_vals, side="left")
-        counts = N - indices
+        # Calculate volume fractions: the values >= each unique value
+        counts = N - below_unique
         fractions = counts.astype(np.float64) / float(N)
 
         # Trapezoidal integration of fraction(I) over I.
         features["area_under_the_ivh_curve_9CMM"] = float(np.trapezoid(fractions, intensities_arr))
 
     return features
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _value_counts_numba(values: npt.NDArray[Any], low: int, counts: npt.NDArray[np.int64]) -> None:
+    """counts[c, v - low] += 1 for each value v of part c of `values` (the parts run in
+    parallel, each into its own row)."""
+    n = values.size
+    parts = counts.shape[0]
+    for c in prange(parts):
+        row = counts[c]
+        for i in range(c * n // parts, (c + 1) * n // parts):
+            row[values[i] - low] += 1
+
+
+# From this many whole-number values on, the IVH counts the values in threads instead of
+# sorting them. Measured: below, the sort is as fast (starting the threads costs about
+# 80 us, and numpy's bincount is slow on runs of equal values).
+_PARALLEL_COUNT_MIN = 1 << 17
+
+
+def _value_counts(values: npt.NDArray[Any], low: int, size: int) -> npt.NDArray[np.int64]:
+    """The number of times each value low + j occurs in the 1-D integer `values`, for j in
+    range(size): parts in threads, each part into its own row (a row per thread only
+    where `size` is small next to the values)."""
+    data = values if values.dtype in (np.int32, np.int64) else values.astype(np.int64)
+    parts = max(1, min(get_num_threads(), values.size // max(size, 1 << 14)))
+    counts = np.zeros((parts, size), dtype=np.int64)
+    _value_counts_numba(data, low, counts)
+    return cast(npt.NDArray[np.int64], counts.sum(axis=0))
+
+
+def _sorted_view(
+    values: npt.NDArray[Any],
+) -> tuple[Callable[[Any], Any], Callable[[int], Any], npt.NDArray[Any], npt.NDArray[np.intp]]:
+    """What the IVH reads from the sorted 1-D `values`: count_below(t), the number of
+    values below t; kth(k), the k-th smallest value (from 0); the values that occur,
+    ascending; and the number of values below each of them. Many integer values over a
+    range not much longer than the values take one count per value instead of a sort."""
+    if (
+        values.dtype.kind in "iu"
+        and values.dtype != np.uint64
+        and values.size >= _PARALLEL_COUNT_MIN
+    ):
+        low = min(int(values.min()), 0)  # counts from 0, or from a negative minimum
+        if int(values.max()) - low < 2 * values.size + 65536:
+            counts = _value_counts(values, low, int(values.max()) - low + 1)
+            cum = np.cumsum(counts)  # the values at or below low + j
+            occur = np.flatnonzero(counts)
+
+            def count_below_int(t: Any) -> int:
+                j = math.ceil(t) - low  # the integers below t are those below ceil(t)
+                return 0 if j <= 0 else int(cum[min(j, cum.size) - 1])
+
+            def kth_int(k: int) -> int:
+                return low + int(np.searchsorted(cum, k, side="right"))
+
+            return count_below_int, kth_int, occur + low, cum[occur] - counts[occur]
+    sorted_vals = np.sort(values)
+    # np.searchsorted converts an integer array to float64 on each call with a float
+    # threshold. Convert it one time; the comparisons stay the same.
+    sorted_f = sorted_vals.astype(np.float64, copy=False)
+    # Unique values from the neighbour differences of the sorted values (no second sort)
+    first = np.empty(sorted_vals.shape, dtype=bool)
+    first[0] = True
+    np.not_equal(sorted_vals[1:], sorted_vals[:-1], out=first[1:])
+    starts = np.flatnonzero(first)
+
+    return sorted_f.searchsorted, sorted_vals.__getitem__, sorted_vals[starts], starts
 
 
 # The FFT sums use about 27 bytes per point of their grid (measured peak); 32 leaves a
@@ -1029,10 +1261,10 @@ def calculate_spatial_intensity_features(
         float(image.spacing[2]),
     )
 
-    # The ROI (mask > 0) in its bounding box (an empty mask gives an empty box). Its
-    # voxels keep their full-image order, so `intensities` is the same as data[mask > 0].
+    # The ROI (mask != 0) in its bounding box (an empty mask gives an empty box). Its
+    # voxels keep their full-image order, so `intensities` is the same as data[mask != 0].
     bbox = compute_nonzero_bbox(mask_array) or (slice(0, 0),) * 3
-    roi = mask_array[bbox] > 0
+    roi = mask_array[bbox] != 0
     intensities = np.ascontiguousarray(data[bbox][roi].astype(np.float64))
 
     N = len(intensities)
@@ -1097,6 +1329,52 @@ _LOCAL_PEAK_RADIUS_MM = 6.2035
 # Measured crossover: below 2^15 voxels, the box search of the local intensity crop costs
 # more than the crop saves.
 _LOCAL_CROP_MIN_SIZE = 1 << 15
+
+
+# From this many (ROI voxel, sphere offset) pairs on, the local peaks take two stages.
+_TWO_STAGE_MIN_WORK = 1 << 24
+
+
+def _local_peaks_two_stage(
+    data: npt.NDArray[Any],
+    mask_indices: npt.NDArray[np.int32],
+    offsets: npt.NDArray[np.int32],
+) -> Optional[tuple[float, float]]:
+    """The global and the local intensity peak, the values of `_calculate_local_mean_numba`
+    and `_calculate_local_peaks_numba` bit for bit, with the exact kernel on few voxels.
+
+    Stage 1 gives every ROI voxel an approximate sphere mean from row prefix sums (one
+    subtraction per sphere row). Both means differ from the true one by at most
+    t = 2 u A (rows (2 L^2 + 4) + offsets^2), with u the unit roundoff, A the largest
+    |intensity| and L the row length (summation bounds of the prefix sums, the row
+    differences and the kernel sum, in any order). So the voxel with the largest exact
+    mean has an approximate mean within 2 t of the largest one, and stage 2 runs the
+    exact kernel only on those voxels and on the maximum-intensity voxels (the local
+    peak). None (use the kernel on all voxels) when an intensity is not finite.
+    """
+    largest = max(abs(float(data.max())), abs(float(data.min())))
+    if not math.isfinite(largest):
+        return None
+    rows: dict[tuple[int, int], int] = {}
+    for dx, dy, dz in offsets.tolist():
+        rows[(dx, dy)] = max(rows.get((dx, dy), 0), abs(dz))
+    row_dx = np.array([dx for dx, _ in rows], dtype=np.int64)
+    row_dy = np.array([dy for _, dy in rows], dtype=np.int64)
+    row_dz = np.array(list(rows.values()), dtype=np.int64)
+    prefix = np.empty(data.shape[:2] + (data.shape[2] + 1,), dtype=np.float64)
+    _row_prefix_sums_numba(data, prefix)
+    approx = _approximate_local_means_numba(prefix, mask_indices, row_dx, row_dy, row_dz)
+    del prefix
+    length = data.shape[2] + 1
+    bound = 2.0**-52 * largest * (len(rows) * (2.0 * length * length + 4.0) + offsets.shape[0] ** 2)
+    near_best = np.flatnonzero(approx >= approx.max() - 2.0 * bound)
+    values = data[mask_indices[:, 0], mask_indices[:, 1], mask_indices[:, 2]]
+    brightest = np.flatnonzero(values == values.max())
+    selected = np.union1d(near_best, brightest)  # sorted
+    exact = _calculate_local_mean_numba(data, np.ascontiguousarray(mask_indices[selected]), offsets)
+    global_peak = exact[np.searchsorted(selected, near_best)].max()
+    local_peak = exact[np.searchsorted(selected, brightest)].max()
+    return float(global_peak), float(local_peak)
 
 
 def calculate_local_intensity_features(
@@ -1169,18 +1447,21 @@ def calculate_local_intensity_features(
         mask_array = mask_array[crop]
 
     # Get ROI indices
-    x_idx, y_idx, z_idx = np.where(mask_array > 0)
+    x_idx, y_idx, z_idx = np.where(mask_array != 0)
     if len(x_idx) == 0:
         return features
 
     mask_indices = np.ascontiguousarray(np.stack([x_idx, y_idx, z_idx], axis=1).astype(np.int32))
 
-    # Calculate local means only for ROI voxels
-    roi_means = _calculate_local_mean_numba(data, mask_indices, offsets)
-
-    # Compute both peaks without allocating ROI intensity arrays.
-    global_peak, local_peak = _calculate_local_peaks_numba(data, mask_indices, roi_means)
-    features["global_intensity_peak_0F91"] = float(global_peak)
-    features["local_intensity_peak_VJGA"] = float(local_peak)
+    peaks = None
+    if mask_indices.shape[0] * offsets.shape[0] >= _TWO_STAGE_MIN_WORK:
+        peaks = _local_peaks_two_stage(data, mask_indices, offsets)
+    if peaks is None:
+        # Calculate local means only for ROI voxels
+        roi_means = _calculate_local_mean_numba(data, mask_indices, offsets)
+        # Compute both peaks without allocating ROI intensity arrays.
+        peaks = _calculate_local_peaks_numba(data, mask_indices, roi_means)
+    features["global_intensity_peak_0F91"] = float(peaks[0])
+    features["local_intensity_peak_VJGA"] = float(peaks[1])
 
     return features

@@ -1,0 +1,1 @@
+Texture features of a one-slice image use the 4 in-plane directions and the in-plane GLDZM distance map, as for a 2D image. Before, 9 of the 13 directions left the slice: every voxel was a run of length 1 in them, and every zone had the distance 1. A one-slice ROI in a 3D image keeps the 3D rule.

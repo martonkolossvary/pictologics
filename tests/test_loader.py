@@ -7,6 +7,7 @@ warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 import os
 
 import numpy as np
+import pytest
 
 os.environ["NUMBA_DISABLE_JIT"] = "1"
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
@@ -28,6 +29,13 @@ from pictologics.loader import (
     load_and_merge_images,
     load_image,
 )
+
+
+def _image_mock() -> MagicMock:
+    """A mock DICOM image dataset: `in` finds its pixel data, as for a real image."""
+    dataset = MagicMock()
+    dataset.__contains__.return_value = True
+    return dataset
 
 
 class TestLoader(unittest.TestCase):
@@ -210,7 +218,7 @@ class TestLoader(unittest.TestCase):
         mock_path_obj.is_dir.return_value = True
 
         load_image("some_dir")
-        mock_load_series.assert_called_once_with(mock_path_obj, 0, True)
+        mock_load_series.assert_called_once_with(mock_path_obj, 0, True, None)
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader._load_nifti")
@@ -238,7 +246,7 @@ class TestLoader(unittest.TestCase):
         mock_path_obj.is_dir.return_value = False
 
         load_image("image.dcm")
-        mock_load_dcm.assert_called_once_with("image.dcm", True)
+        mock_load_dcm.assert_called_once_with("image.dcm", True, 0)
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader._load_dicom_file")
@@ -251,7 +259,7 @@ class TestLoader(unittest.TestCase):
 
         # Should try dicom loader if extension doesn't match nifti
         load_image("image.unknown")
-        mock_load_dcm.assert_called_once_with("image.unknown", True)
+        mock_load_dcm.assert_called_once_with("image.unknown", True, 0)
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader._load_dicom_file")
@@ -416,7 +424,7 @@ class TestLoader(unittest.TestCase):
         mock_split_phases.return_value = [[{"file_path": f} for f in files]]
         slices = []
         for z in range(3):
-            s = MagicMock()
+            s = _image_mock()
             s.pixel_array = np.arange(6, dtype=np.int16).reshape(2, 3) + 10 * z  # (Y, X)
             s.ImagePositionPatient = [0.0, 0.0, float(z)]
             s.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
@@ -433,7 +441,7 @@ class TestLoader(unittest.TestCase):
             with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", limit):
                 img = _load_dicom_series("dicom_dir")
             np.testing.assert_array_equal(img.array, expected)
-            self.assertEqual(img.array.dtype, np.int16)
+            self.assertEqual(img.array.dtype, np.float64)  # apply_rescale gives float64
             self.assertTrue(getattr(img.array.flags, order))
 
     def test_slice_spacing_prefers_positions_over_a_wrong_tag(self) -> None:
@@ -469,7 +477,7 @@ class TestLoader(unittest.TestCase):
         mock_split_phases.return_value = [[{"file_path": f} for f in files]]
         slices = []
         for z in range(4):
-            s = MagicMock()
+            s = _image_mock()
             s.pixel_array = np.zeros((2, 3), dtype=np.int16)
             s.ImagePositionPatient = [0.0, 0.0, 0.625 * z]
             s.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
@@ -535,7 +543,7 @@ class TestLoader(unittest.TestCase):
         mock_split_phases.return_value = [[{"file_path": file1}, {"file_path": file2}]]
 
         # Create mock slices
-        slice1 = MagicMock()
+        slice1 = _image_mock()
         slice1.pixel_array = np.zeros((512, 512))  # Y, X
         slice1.ImagePositionPatient = [0.0, 0.0, 0.0]
         slice1.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]  # Identity
@@ -546,7 +554,7 @@ class TestLoader(unittest.TestCase):
         slice1.Modality = "CT"
         del slice1.SpacingBetweenSlices  # Ensure falls back to SliceThickness
 
-        slice2 = MagicMock()
+        slice2 = _image_mock()
         slice2.pixel_array = np.zeros((512, 512))
         slice2.ImagePositionPatient = [0.0, 0.0, 1.0]  # Z=1
         slice2.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
@@ -589,7 +597,7 @@ class TestLoader(unittest.TestCase):
         mock_is_dicom.return_value = True
         mock_split_phases.return_value = [[{"file_path": file1}, {"file_path": file2}]]
 
-        slice1 = MagicMock()
+        slice1 = _image_mock()
         slice1.pixel_array = np.array([[10]], dtype=np.uint16)
         slice1.ImagePositionPatient = [0.0, 0.0, 0.0]
         slice1.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
@@ -600,7 +608,7 @@ class TestLoader(unittest.TestCase):
         slice1.Modality = "CT"
         del slice1.SpacingBetweenSlices
 
-        slice2 = MagicMock()
+        slice2 = _image_mock()
         slice2.pixel_array = np.array([[10]], dtype=np.uint16)
         slice2.ImagePositionPatient = [0.0, 0.0, 1.0]
         slice2.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
@@ -648,7 +656,7 @@ class TestLoader(unittest.TestCase):
         mock_split_phases.return_value = [[{"file_path": file1}, {"file_path": file2}]]
 
         # Slices without ImagePositionPatient/Orientation
-        slice1 = MagicMock()
+        slice1 = _image_mock()
         slice1.pixel_array = np.zeros((10, 10))
         del slice1.ImagePositionPatient
         del slice1.ImageOrientationPatient
@@ -656,7 +664,7 @@ class TestLoader(unittest.TestCase):
         slice1.RescaleSlope = 1.0
         slice1.RescaleIntercept = 0.0
 
-        slice2 = MagicMock()
+        slice2 = _image_mock()
         slice2.pixel_array = np.zeros((10, 10))
         del slice2.ImagePositionPatient
         del slice2.ImageOrientationPatient
@@ -692,7 +700,7 @@ class TestLoader(unittest.TestCase):
         # Mock split_dicom_phases to return single phase with all files
         mock_split_phases.return_value = [[{"file_path": file1}, {"file_path": file2}]]
 
-        slice1 = MagicMock()
+        slice1 = _image_mock()
         slice1.pixel_array = np.zeros((10, 10))
         slice1.ImagePositionPatient = [0.0, 0.0, 0.0]
         slice1.PixelSpacing = [0.5, 0.5]
@@ -701,7 +709,7 @@ class TestLoader(unittest.TestCase):
         del slice1.SliceThickness
         del slice1.SpacingBetweenSlices
 
-        slice2 = MagicMock()
+        slice2 = _image_mock()
         slice2.pixel_array = np.zeros((10, 10))
         slice2.ImagePositionPatient = [0.0, 0.0, 2.0]  # 2mm diff
         slice2.PixelSpacing = [0.5, 0.5]
@@ -832,10 +840,19 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(img.origin, (3.0, 4.0, 5.0))
 
     def test_warn_if_mixed_coordinate_frames(self) -> None:
+        # NIfTI with DICOM warns; an in-memory image or a merged mask has no known frame.
+        import warnings
+
         nifti = Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0), modality="Nifti")
         dicom = Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0), modality="CT")
         with self.assertWarns(UserWarning):
             _warn_if_mixed_coordinate_frames(nifti, dicom)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            for other in ("Unknown", "MergedImage"):
+                unknown = Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0), modality=other)
+                _warn_if_mixed_coordinate_frames(nifti, unknown)
+                _warn_if_mixed_coordinate_frames(unknown, dicom)
 
     @patch("pictologics.loader._is_dicom_seg")
     @patch("pictologics.loader.Path")
@@ -889,7 +906,7 @@ class TestLoader(unittest.TestCase):
         mock_Path_cls.return_value.iterdir.return_value = [file1]
         mock_is_dicom.return_value = True
 
-        slice1 = MagicMock()
+        slice1 = _image_mock()
         slice1.ImagePositionPatient = [0.0, 0.0, 0.0]
         slice1.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
 
@@ -914,7 +931,7 @@ class TestLoader(unittest.TestCase):
         mock_Path_cls.return_value.iterdir.return_value = [file1]
         mock_is_dicom.return_value = True
 
-        slice1 = MagicMock()
+        slice1 = _image_mock()
         slice1.pixel_array = np.zeros((10, 10))
         slice1.ImagePositionPatient = [0.0, 0.0, 0.0]
         slice1.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
@@ -943,7 +960,7 @@ class TestLoader(unittest.TestCase):
         mock_Path_cls.return_value.iterdir.return_value = [file1]
         mock_is_dicom.return_value = True
 
-        slice1 = MagicMock()
+        slice1 = _image_mock()
         slice1.pixel_array = np.zeros((10, 10))
         slice1.ImagePositionPatient = [0.0, 0.0, 0.0]
         slice1.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
@@ -990,7 +1007,7 @@ class TestLoader(unittest.TestCase):
         mock_Path_cls.return_value.iterdir.return_value = [file1]
         mock_is_dicom.return_value = True
 
-        slice1 = MagicMock()
+        slice1 = _image_mock()
         # Simulate missing attributes
         del slice1.ImagePositionPatient
         del slice1.PixelSpacing
@@ -1019,7 +1036,7 @@ class TestLoader(unittest.TestCase):
         mock_Path_cls.return_value.iterdir.return_value = [file1]
         mock_is_dicom.return_value = True
 
-        dcm = MagicMock()
+        dcm = _image_mock()
         dcm.InstanceNumber = 1
         dcm.ImagePositionPatient = [0, 0, 0]
         mock_dcmread.return_value = dcm
@@ -2399,14 +2416,19 @@ def test_dicom_series_reads_each_file_once_and_rescales_in_one_pass(
     assert large.array.flags.c_contiguous and small.array.flags.f_contiguous
     assert large.spacing == small.spacing == (0.75, 0.5, 2.0)
 
-    # No rescale: the stored values, stored type
+    # No rescale tags: float64 values (the fused kernel for a large series), as from
+    # NIfTI; with apply_rescale=False the stored values in their stored type
     plain = tmp_path / "plain"
     plain.mkdir()
     expected = _write_series(plain, [(1.0, 0.0)] * 3)
-    with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
-        image = _load_dicom_series(plain)
-    assert image.array.dtype == np.int16
-    np.testing.assert_array_equal(image.array, expected)
+    for limit in (1 << 20, 8):
+        with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", limit):
+            image = _load_dicom_series(plain)
+        assert image.array.dtype == np.float64
+        np.testing.assert_array_equal(image.array, expected)
+    raw = _load_dicom_series(plain, apply_rescale=False)
+    assert raw.array.dtype == np.int16
+    np.testing.assert_array_equal(raw.array, expected)
 
 
 def test_nifti_loads_the_values_of_get_fdata_in_one_pass(tmp_path: "os.PathLike[str]") -> None:
@@ -2464,3 +2486,434 @@ def test_load_image_accepts_path_objects(tmp_path: "os.PathLike[str]") -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --- Series choice, phases and geometry checks (synthetic files, no patient data) ---
+
+
+def _write_slice(
+    path: "os.PathLike[str]",
+    *,
+    series: str = "1.2.826.0.1.3680043.2.1125.10",
+    number: int = 1,
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    pixels: "np.ndarray | None" = None,
+    orientation: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+    sop_class: str = "1.2.840.10008.5.1.4.1.1.2",
+    **tags: object,
+) -> None:
+    """One synthetic CT slice; `pixels` is (Rows, Columns), or (Rows, Columns, 3) for RGB."""
+    from pathlib import Path
+
+    import pydicom
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+    pixels = np.zeros((4, 3), np.int16) if pixels is None else pixels
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = sop_class
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = pydicom.Dataset()
+    ds.file_meta = meta
+    ds.SOPClassUID, ds.SOPInstanceUID = sop_class, meta.MediaStorageSOPInstanceUID
+    ds.SeriesInstanceUID, ds.Modality, ds.InstanceNumber = series, "CT", number
+    ds.Rows, ds.Columns = pixels.shape[:2]
+    ds.PixelSpacing, ds.SliceThickness = [0.5, 0.75], 1.5
+    ds.ImagePositionPatient = list(position)
+    ds.ImageOrientationPatient = list(orientation)
+    if pixels.ndim == 3:
+        ds.SamplesPerPixel, ds.PhotometricInterpretation, ds.PlanarConfiguration = 3, "RGB", 0
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 8, 8, 7, 0
+    else:
+        ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 1
+    ds.PixelData = np.ascontiguousarray(pixels).tobytes()
+    for key, value in tags.items():
+        setattr(ds, key, value)
+    ds.save_as(Path(path), enforce_file_format=True)
+
+
+def test_dicom_folder_with_two_series_needs_a_series_uid(tmp_path: "os.PathLike[str]") -> None:
+    # Two reconstructions at the same positions never mix: the error names both series,
+    # and series_uid loads one of them.
+    from pathlib import Path
+
+    from pictologics.utilities import get_dicom_phases
+
+    folder = Path(tmp_path)
+    for k in range(3):
+        for uid, value, number, text in (("1.2.3.1", 100, 2, "soft"), ("1.2.3.2", 900, 3, "lung")):
+            _write_slice(
+                folder / f"{text}{k}.dcm", series=uid, number=k + 1, position=(0.0, 0.0, 1.5 * k),
+                pixels=np.full((4, 3), value, np.int16), SeriesNumber=number, SeriesDescription=text,
+            )  # fmt: skip
+    with pytest.raises(ValueError, match="holds 2 image series") as error:
+        load_image(folder)
+    assert "1.2.3.1: series 2, CT, 'soft', 3 files" in str(error.value)
+    image = load_image(folder, series_uid="1.2.3.2")
+    assert image.array.shape == (3, 4, 3) and np.all(image.array == 900.0)
+    with pytest.raises(ValueError, match="Series 9.9 is not in"):
+        load_image(folder, series_uid="9.9")
+    with pytest.raises(ValueError, match="holds 2 image series"):
+        get_dicom_phases(folder)
+    assert [p.num_slices for p in get_dicom_phases(folder, series_uid="1.2.3.1")] == [3]
+
+
+def test_dicom_folder_skips_objects_that_are_not_slices(tmp_path: "os.PathLike[str]") -> None:
+    # An RTSTRUCT (no pixel data), an RT dose grid and a SEG in the folder of a scan are not
+    # its slices; a scout of the same series with another orientation is left out.
+    from pathlib import Path
+
+    import pydicom
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+    folder = Path(tmp_path)
+    for k in range(3):
+        _write_slice(folder / f"{k}.dcm", number=k + 1, position=(0.0, 0.0, 1.5 * k))
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.481.3"  # RT Structure Set
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    rt = pydicom.Dataset()
+    rt.file_meta = meta
+    rt.SOPClassUID, rt.SOPInstanceUID = (
+        meta.MediaStorageSOPClassUID,
+        meta.MediaStorageSOPInstanceUID,
+    )
+    rt.SeriesInstanceUID, rt.Modality = "1.2.3.7", "RTSTRUCT"
+    rt.save_as(folder / "rtstruct.dcm", enforce_file_format=True)
+    _write_slice(folder / "dose.dcm", series="1.2.3.8", sop_class="1.2.840.10008.5.1.4.1.1.481.2")
+    _write_slice(folder / "seg.dcm", series="1.2.3.9", sop_class="1.2.840.10008.5.1.4.1.1.66.4")
+    assert load_image(folder).array.shape == (3, 4, 3)
+    _write_slice(folder / "scout.dcm", number=9, orientation=(0.0, 1.0, 0.0, 0.0, 0.0, -1.0))
+    with pytest.warns(UserWarning, match="Left out 1 of the 4 images"):
+        assert load_image(folder).array.shape == (3, 4, 3)
+    only_rt = Path(tmp_path) / "rt_only"
+    only_rt.mkdir()
+    rt.save_as(only_rt / "rtstruct.dcm", enforce_file_format=True)
+    with pytest.raises(ValueError, match="Could not read any DICOM files with image data"):
+        load_image(only_rt)
+
+
+def test_dicom_series_warns_on_missing_slices_and_tilt(tmp_path: "os.PathLike[str]") -> None:
+    # A missing slice or positions that move sideways (a gantry tilt) give a warning; an
+    # even, straight series does not.
+    import warnings
+    from pathlib import Path
+
+    for name, positions in (
+        ("even", [(0.0, 0.0, 1.5 * k) for k in range(4)]),
+        ("gap", [(0.0, 0.0, 1.5 * k) for k in (0, 1, 2, 4, 5)]),
+        ("tilt", [(0.0, 0.5 * k, 1.5 * k) for k in range(4)]),
+    ):
+        folder = Path(tmp_path) / name
+        folder.mkdir()
+        for k, position in enumerate(positions):
+            _write_slice(folder / f"{k}.dcm", number=k + 1, position=position)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        load_image(Path(tmp_path) / "even")
+    with pytest.warns(
+        UserWarning, match="not evenly spaced: the steps between them go from 1.5 to 3 mm"
+    ):
+        load_image(Path(tmp_path) / "gap")
+    with pytest.warns(UserWarning, match="move sideways by 18.4 degrees"):
+        load_image(Path(tmp_path) / "tilt")
+
+
+def test_colour_dicom_is_an_error(tmp_path: "os.PathLike[str]") -> None:
+    # RGB pixel data has no single value per voxel: a clear error for a file and a series.
+    from pathlib import Path
+
+    rgb = np.zeros((4, 3, 3), np.uint8)
+    folder = Path(tmp_path)
+    for k in range(2):
+        _write_slice(folder / f"{k}.dcm", number=k + 1, position=(0.0, 0.0, 1.5 * k), pixels=rgb)
+    with pytest.raises(ValueError, match=r"colour pixel data \(3 samples per pixel\)"):
+        load_image(folder)
+    with pytest.raises(ValueError, match=r"colour pixel data \(3 samples per pixel\)"):
+        load_image(folder / "0.dcm")
+
+
+def test_decode_errors_name_the_file_and_the_cause() -> None:
+    from pictologics.loader import _decoded_pixels
+
+    dataset = MagicMock()
+    type(dataset).pixel_array = PropertyMock(side_effect=RuntimeError("no plugin"))
+    dataset.filename = "slice.dcm"
+    with pytest.raises(ValueError, match=r"cannot decode slice.dcm \(no plugin\)\.$"):
+        _decoded_pixels(dataset)
+
+
+@pytest.mark.parametrize(
+    ("compression", "max_error"),
+    [
+        ("rle_lossless", 0),
+        ("jpeg_lossless_sv1", 0),
+        ("jpeg_lossless_p14", 0),
+        ("jpegls_lossless", 0),
+        ("jpegls_near_lossless", 3),  # the near-lossless bound of the file
+        ("jpeg2000_lossless", 0),
+        ("jpeg2000", 64),
+        ("jpeg_baseline_8bit", 8),
+    ],
+)
+def test_compressed_dicom_series_load(
+    tmp_path: "os.PathLike[str]", compression: str, max_error: int
+) -> None:
+    # Synthetic two-slice CT series, stored once in each compression (JPEG-LS made with
+    # pyjpegls, JPEG Lossless with GDCM, baseline JPEG and JPEG 2000 with Pillow, RLE with
+    # pydicom): load_image decodes them and applies the rescale (intercept -1024 for the
+    # 12-bit series; the 8-bit baseline series has none). Lossless data comes back exactly.
+    from pathlib import Path
+
+    folder = Path(tmp_path)
+    with np.load(Path(__file__).parent / "data" / "dicom_codecs.npz") as stored:
+        for k in range(2):
+            (folder / f"{k}.dcm").write_bytes(stored[f"file_{compression}_{k}"].tobytes())
+        pixels = np.stack([stored[f"pixels_{compression}_{k}"] for k in range(2)])  # (Z, Y, X)
+    expected = np.transpose(pixels.astype(np.float64), (2, 1, 0))
+    if compression != "jpeg_baseline_8bit":
+        expected -= 1024.0
+    image = load_image(folder)
+    assert image.array.shape == expected.shape == (20, 16, 2)
+    assert np.max(np.abs(image.array - expected)) <= max_error
+
+
+def test_single_dicom_files_load_as_float64(tmp_path: "os.PathLike[str]") -> None:
+    # Without rescale tags (or with slope 1 and intercept 0) a file is float64 too, like
+    # the same NIfTI image; apply_rescale=False keeps the stored type. A single volume has
+    # no dataset_index 1, and a series no negative one.
+    from pathlib import Path
+
+    from pictologics.loader import _load_dicom_series
+
+    pixels = np.arange(12, dtype=np.int16).reshape(4, 3)
+    path = Path(tmp_path) / "one.dcm"
+    _write_slice(path, pixels=pixels)
+    image = load_image(path)
+    assert image.array.dtype == np.float64
+    np.testing.assert_array_equal(image.array[..., 0], pixels.T)
+    assert load_image(path, apply_rescale=False).array.dtype == np.int16
+    with pytest.raises(ValueError, match="dataset_index 1 is out of range: .* holds one volume"):
+        load_image(path, dataset_index=1)
+    with pytest.raises(ValueError, match="dataset_index must be 0 or more"):
+        _load_dicom_series(Path(tmp_path), dataset_index=-1)
+
+
+def _write_multiframe(
+    path: "os.PathLike[str]",
+    frames: list[tuple[float, "int | None", "float | None", float, float]],
+) -> np.ndarray:
+    """An enhanced MR file; each frame is (z, temporal index, cardiac phase %, slope,
+    intercept), its pixels are 10 * frame + (row, column) pattern. Returns the stored frames."""
+    from pathlib import Path
+
+    import pydicom
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.sequence import Sequence
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+    stored = np.stack(
+        [np.arange(6, dtype=np.int16).reshape(3, 2) + 10 * k for k in range(len(frames))]
+    )
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.4.1"  # Enhanced MR Image
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = pydicom.Dataset()
+    ds.file_meta = meta
+    ds.SOPClassUID, ds.SOPInstanceUID = (
+        meta.MediaStorageSOPClassUID,
+        meta.MediaStorageSOPInstanceUID,
+    )
+    ds.Modality, ds.NumberOfFrames = "MR", len(frames)
+    ds.Rows, ds.Columns = 3, 2
+    ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 1
+    shared = pydicom.Dataset()
+    shared.PixelMeasuresSequence = Sequence([pydicom.Dataset()])
+    shared.PixelMeasuresSequence[0].PixelSpacing = [0.5, 0.5]
+    shared.PixelMeasuresSequence[0].SliceThickness = 1.0
+    shared.PlaneOrientationSequence = Sequence([pydicom.Dataset()])
+    shared.PlaneOrientationSequence[0].ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+    ds.SharedFunctionalGroupsSequence = Sequence([shared])
+    groups = []
+    for z, temporal, cardiac, slope, intercept in frames:
+        group = pydicom.Dataset()
+        group.PlanePositionSequence = Sequence([pydicom.Dataset()])
+        group.PlanePositionSequence[0].ImagePositionPatient = [0.0, 0.0, z]
+        group.FrameContentSequence = Sequence([pydicom.Dataset()])
+        if temporal is not None:
+            group.FrameContentSequence[0].TemporalPositionIndex = temporal
+        if cardiac is not None:
+            group.CardiacSynchronizationSequence = Sequence([pydicom.Dataset()])
+            group.CardiacSynchronizationSequence[0].NominalPercentageOfCardiacPhase = cardiac
+        group.PixelValueTransformationSequence = Sequence([pydicom.Dataset()])
+        group.PixelValueTransformationSequence[0].RescaleSlope = slope
+        group.PixelValueTransformationSequence[0].RescaleIntercept = intercept
+        groups.append(group)
+    ds.PerFrameFunctionalGroupsSequence = Sequence(groups)
+    ds.PixelData = stored.tobytes()
+    ds.save_as(Path(path), enforce_file_format=True)
+    return stored
+
+
+def test_multiframe_volumes_split_like_series(tmp_path: "os.PathLike[str]") -> None:
+    # Frames at repeated positions hold several volumes: dataset_index picks one, by the
+    # temporal position index, the cardiac phase, or else the frame order. The frames are
+    # sorted and rescaled one by one (float64), in the fused path for large volumes too.
+    from pathlib import Path
+
+    folder = Path(tmp_path)
+    # stored in the order (t1 z2), (t2 z2), (t1 z0), (t2 z0), (t1 z1), (t2 z1)
+    layout = [(2.0, 1), (2.0, 2), (0.0, 1), (0.0, 2), (1.0, 1), (1.0, 2)]
+    rescale = [(2.0, -5.0), (1.0, 0.0), (1.0, 3.0), (0.5, 0.0), (1.0, 0.0), (1.0, 0.0)]
+    cases = {
+        "temporal": [(z, t, None, *rescale[k]) for k, (z, t) in enumerate(layout)],
+        "cardiac": [(z, None, 30.0 * t, *rescale[k]) for k, (z, t) in enumerate(layout)],
+        "order": [(z, None, None, *rescale[k]) for k, (z, _) in enumerate(layout)],
+    }
+    for name, frames in cases.items():
+        path = folder / f"{name}.dcm"
+        stored = _write_multiframe(path, frames)
+        for index, wanted in ((0, (2, 4, 0)), (1, (3, 5, 1))):
+            expected = np.stack(
+                [stored[f].astype(np.float64) * rescale[f][0] + rescale[f][1] for f in wanted],
+                axis=0,
+            ).transpose(2, 1, 0)
+            for limit in (1 << 20, 8):
+                with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", limit):
+                    image = load_image(path, dataset_index=index)
+                np.testing.assert_array_equal(image.array.view(np.uint64), expected.view(np.uint64))
+                assert image.spacing == (0.5, 0.5, 1.0) and image.origin == (0.0, 0.0, 0.0)
+        with pytest.raises(ValueError, match="dataset_index 2 is out of range: .* holds 2 volume"):
+            load_image(path, dataset_index=2)
+
+
+def _merge_full(arrays: list[np.ndarray], fill: float, rule: str) -> np.ndarray:
+    """The merge of full-size arrays, written out voxel set by voxel set."""
+    merged = np.full(arrays[0].shape, fill)
+    for full in arrays:
+        present, taken = full != fill, merged != fill
+        merged[present & ~taken] = full[present & ~taken]
+        both = present & taken
+        if rule == "max":
+            merged[both] = np.maximum(merged[both], full[both])
+        elif rule == "min":
+            merged[both] = np.minimum(merged[both], full[both])
+        elif rule == "last":
+            merged[both] = full[both]
+    return merged
+
+
+def test_merging_masks_in_their_boxes_equals_the_full_size_merge(
+    tmp_path: "os.PathLike[str]",
+) -> None:
+    # Box-only merging gives the merge of the repositioned full-size masks, for every
+    # conflict rule, with and without relabelling and with fill values 0 and 7. A mask
+    # outside the reference is skipped (min_overlap_fraction=0, after a warning). The
+    # standard mode (masks on the reference grid) merges the same way.
+    from pathlib import Path
+
+    import nibabel as nib
+
+    from pictologics.loader import _position_in_reference
+
+    rng = np.random.default_rng(5)
+    reference = Image(np.zeros((20, 18, 12)), (1.0, 1.0, 2.0), (0.0, 0.0, 0.0))
+    boxes = [((2, 3, 1), (8, 7, 5)), ((5, 6, 3), (9, 8, 6)), ((15, 12, 8), (10, 10, 6))]
+    paths, full_paths = [], []
+    for k, (offset, shape) in enumerate(boxes):
+        affine = np.diag([1.0, 1.0, 2.0, 1.0])
+        affine[:3, 3] = np.array(offset) * (1.0, 1.0, 2.0)
+        data = rng.integers(0, 4, shape).astype(np.float64) * (k + 1)
+        paths.append(Path(tmp_path) / f"box{k}.nii.gz")
+        nib.save(nib.Nifti1Image(data, affine), paths[-1])
+        full = np.zeros(reference.array.shape)
+        full[2 + k : 10 + k, 3:9, 1:6] = data[:8, :6, :5] if k < 2 else 0.0
+        full_paths.append(Path(tmp_path) / f"full{k}.nii.gz")
+        nib.save(nib.Nifti1Image(full, np.diag([1.0, 1.0, 2.0, 1.0])), full_paths[-1])
+    outside = Path(tmp_path) / "outside.nii.gz"
+    away = np.diag([1.0, 1.0, 2.0, 1.0])
+    away[:3, 3] = (40.0, 40.0, 80.0)
+    nib.save(nib.Nifti1Image(np.ones((4, 4, 4)), away), outside)
+    for fill in (0.0, 7.0):
+        for rule in ("max", "min", "first", "last"):
+            for relabel in (False, True):
+                with pytest.warns(UserWarning, match="does not overlap"):
+                    merged = load_and_merge_images(
+                        [*paths, outside], reference_image=reference, reposition_to_reference=True,
+                        conflict_resolution=rule, relabel_masks=relabel, fill_value=fill,
+                        min_overlap_fraction=0.0,
+                    )  # fmt: skip
+                arrays = []
+                for i, path in enumerate(paths):
+                    full = _position_in_reference(
+                        load_image(path), reference, fill, min_overlap_fraction=0.0
+                    ).array
+                    arrays.append(np.where(full != fill, i + 1, fill) if relabel else full)
+                np.testing.assert_array_equal(merged.array, _merge_full(arrays, fill, rule))
+    for rule in ("max", "min", "first", "last"):
+        merged = load_and_merge_images(full_paths, conflict_resolution=rule)
+        expected = _merge_full([load_image(p).array for p in full_paths], 0.0, rule)
+        np.testing.assert_array_equal(merged.array, expected)
+
+
+def test_4d_nifti_reads_only_the_requested_volume(tmp_path: "os.PathLike[str]") -> None:
+    # One volume of a 4D file is read and scaled as get_fdata scales, bit for bit; the
+    # image does not keep the other volumes (its array owns its own memory).
+    from pathlib import Path
+
+    import nibabel as nib
+
+    rng = np.random.default_rng(4)
+    data = (rng.random((7, 6, 5, 4)) * 300).astype(np.int16)
+    nii = nib.Nifti1Image(data, np.diag([0.5, 0.5, 2.0, 1.0]))
+    nii.header.set_slope_inter(0.1, -7.3)
+    path = Path(tmp_path) / "four.nii"
+    nib.save(nii, path)
+    full = nib.load(path).get_fdata()
+    for k in range(4):
+        for limit in (1 << 20, 8):
+            with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", limit):
+                image = load_image(path, dataset_index=k)
+            np.testing.assert_array_equal(image.array.view(np.uint64), full[..., k].view(np.uint64))
+            assert image.array.base is None or image.array.base.size == image.array.size
+    with pytest.raises(ValueError, match="Dataset index 4 is out of bounds for 4D image"):
+        load_image(path, dataset_index=4)
+
+
+def test_load_image_takes_the_files_of_one_phase(tmp_path: "os.PathLike[str]") -> None:
+    # A DicomPhaseInfo from get_dicom_phases, or a list of files, loads that phase and
+    # reads only its files; the image equals the one from dataset_index.
+    from pathlib import Path
+
+    import pydicom
+
+    from pictologics.utilities import get_dicom_phases
+
+    folder = Path(tmp_path)
+    for phase in range(3):
+        for k in range(4):
+            _write_slice(
+                folder / f"p{phase}_{k}.dcm", number=phase * 4 + k + 1, position=(0.0, 0.0, 1.5 * k),
+                pixels=np.full((4, 3), 100 * phase + k, np.int16),
+                NominalPercentageOfCardiacPhase=30 * phase,
+            )  # fmt: skip
+    phases = get_dicom_phases(folder)
+    assert [p.num_slices for p in phases] == [4, 4, 4]
+    with patch("pictologics.loader.pydicom.dcmread", side_effect=pydicom.dcmread) as reads:
+        image = load_image(phases[1])
+    assert reads.call_count == 4
+    np.testing.assert_array_equal(image.array, load_image(folder, dataset_index=1).array)
+    files = [str(f) for f in phases[2].file_paths]
+    np.testing.assert_array_equal(
+        load_image(files).array, load_image(folder, dataset_index=2).array
+    )
+    reference = load_image(folder)
+    assert load_image(phases[0], reference_image=reference).array.shape == reference.array.shape
+    with pytest.raises(ValueError, match="No DICOM files found"):
+        load_image([])

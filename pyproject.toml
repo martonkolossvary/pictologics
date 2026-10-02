@@ -34,8 +34,7 @@ numpy = [
 ]
 scipy = "^1.16.3"
 nibabel = ">=3.2.0"
-pydicom = ">=2.2.0"
-highdicom = ">=0.22.0"
+pydicom = ">=3.0.1"  # the SEG reader uses pydicom.pixels
 numba = "^0.67.0"
 pandas = ">=2.0.0"
 tqdm = "^4.66.0"
@@ -43,6 +42,9 @@ matplotlib = "^3.10.0"
 Pillow = "^11.1.0"
 PyWavelets = "^1.4"
 pyyaml = ">=6.0"
+# Decodes compressed DICOM data with pydicom: JPEG Lossless, JPEG-LS, JPEG 2000 (and
+# baseline JPEG, which Pillow also reads)
+python-gdcm = ">=3.0.10"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0.0"
@@ -109,8 +111,8 @@ filterwarnings = [
 
 [tool.coverage.run]
 source = ["pictologics"]
-# Python 3.12's sys.monitoring: the default tracer made `import highdicom` take 33 s
-# instead of 0.2 s, and the real highdicom SEG tests many minutes.
+# Python 3.12's sys.monitoring: the default tracer is many times slower (it made the
+# import of highdicom, a former test dependency, take 33 s instead of 0.2 s).
 core = "sysmon"
 omit = ["tests/*", "dev/*", "docs/*"]
 

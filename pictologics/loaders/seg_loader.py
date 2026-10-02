@@ -6,11 +6,13 @@ This module provides functionality for loading DICOM Segmentation objects
 as pictologics Image instances. SEG files are specialized DICOM objects
 that store segmentation masks with multi-segment support.
 
-Uses highdicom for robust SEG parsing and extraction.
+The files are read with pydicom, and the frames are decoded one at a time, only
+for the requested segments.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -31,6 +33,7 @@ def load_seg(
     subvoxel_tolerance: float = 0.5,
     subvoxel_warning_threshold: float = 0.01,
     min_overlap_fraction: float = 0.5,
+    fractional_threshold: float = 0.5,
 ) -> "Image | dict[int, Image]":
     """Load a DICOM SEG file as a mask Image.
 
@@ -78,9 +81,14 @@ def load_seg(
             is emitted during reference alignment.
         min_overlap_fraction: Minimum fraction of mask volume that must overlap
             the reference image during alignment.
+        fractional_threshold: For a FRACTIONAL SEG (probability or occupancy), a
+            voxel is in a segment when its value is at least this fraction of the
+            MaximumFractionalValue (and above 0). Default 0.5. BINARY and LABELMAP
+            SEGs do not use it.
 
     Returns:
-        If combine_segments is True: A single Image with segment labels.
+        If combine_segments is True: A single Image with segment labels; the labels
+        are uint8, or uint16 for segment numbers above 255.
         If combine_segments is False: A dict of {segment_number: Image}.
 
     Raises:
@@ -117,23 +125,13 @@ def load_seg(
         assert mask.array.shape == ct.array.shape
         ```
     """
-    import highdicom as hd
+    from pydicom.pixels.utils import iter_pixels
 
     from pictologics.loader import Image, _row_order
 
-    path_obj = Path(path)
-    if not path_obj.exists():
-        raise FileNotFoundError(f"SEG file not found: {path}")
-
-    # Load the DICOM SEG using highdicom
-    try:
-        seg = hd.seg.segread(str(path_obj))
-    except Exception as e:
-        raise ValueError(f"Failed to load DICOM SEG file: {e}") from e
-
-    # Verify it's a SEG object
-    if not hasattr(seg, "SegmentSequence"):
-        raise ValueError(f"File is not a valid DICOM SEG object: {path}")
+    if not 0.0 <= fractional_threshold <= 1.0:
+        raise ValueError(f"fractional_threshold must be in [0, 1], not {fractional_threshold}.")
+    seg = _read_seg(path)
 
     # Get available segment numbers
     available_segments = [s.SegmentNumber for s in seg.SegmentSequence]
@@ -151,18 +149,25 @@ def load_seg(
                 )
         target_segments = segment_numbers
 
-    # Extract geometry information from the SEG
-    spacing, origin, direction = _extract_seg_geometry(seg)
+    # Where each frame goes, and the geometry
+    n_frames = int(getattr(seg, "NumberOfFrames", 1) or 1)
+    layout = _frame_layout(seg, n_frames)
+    spacing, origin, direction = _extract_seg_geometry(seg, layout)
 
-    # Extract pixel array - shape is typically (frames, rows, cols)
-    pixel_array = seg.pixel_array
-
-    # Get the number of segments and frames
-    n_frames = pixel_array.shape[0] if pixel_array.ndim == 3 else 1
+    # Decode only the frames of the requested segments (a label map: all frames)
+    wanted = set(target_segments)
+    indices = [
+        i
+        for i in range(n_frames)
+        if layout.slices[i] < layout.n_slices
+        and (_is_labelmap(seg) or layout.segments[i] in wanted)
+    ]
+    frames = zip(indices, iter_pixels(seg, indices=indices), strict=True)
+    level = _inside_level(seg, fractional_threshold)
 
     if combine_segments:
         # Create combined label image
-        combined_array = _extract_combined_segments(seg, pixel_array, target_segments, n_frames)
+        combined_array = _extract_combined_segments(seg, frames, target_segments, layout, level)
 
         # Reorder axes from (Z, Y, X) or (frames, rows, cols) to (X, Y, Z); a large mask
         # goes to row order, like the images.
@@ -192,14 +197,11 @@ def load_seg(
         # Return dict of individual segment masks
         result_dict: dict[int, Image] = {}
 
+        masks = _extract_segment_masks(seg, frames, target_segments, layout, level)
         for seg_num in target_segments:
-            mask_array = _extract_single_segment(seg, pixel_array, seg_num, n_frames)
-
             # Reorder axes from (Z, Y, X) to (X, Y, Z)
-            mask_array = np.transpose(mask_array, (2, 1, 0))
-
             mask_image = Image(
-                array=_row_order(mask_array.astype(np.uint8)),
+                array=_row_order(np.transpose(masks.pop(seg_num), (2, 1, 0))),
                 spacing=spacing,
                 origin=origin,
                 direction=direction,
@@ -222,8 +224,36 @@ def load_seg(
         return result_dict
 
 
+def _read_seg(path: str | Path, stop_before_pixels: bool = False) -> pydicom.Dataset:
+    """Read a DICOM SEG file (Segmentation or Label Map Segmentation Storage)."""
+    from pictologics.loader import _SEG_SOP_CLASSES
+
+    path_obj = Path(path)
+    if not path_obj.exists():
+        raise FileNotFoundError(f"SEG file not found: {path}")
+    try:
+        seg = pydicom.dcmread(str(path_obj), stop_before_pixels=stop_before_pixels)
+    except Exception as e:
+        raise ValueError(f"Failed to load DICOM SEG file: {e}") from e
+    if str(getattr(seg, "SOPClassUID", "")) not in _SEG_SOP_CLASSES or not hasattr(
+        seg, "SegmentSequence"
+    ):
+        raise ValueError(f"File is not a valid DICOM SEG object: {path}")
+    return seg
+
+
+def _inside_level(seg: pydicom.Dataset, fractional_threshold: float) -> float:
+    """The smallest stored value inside a segment: 1 (values above 0), or for a
+    FRACTIONAL SEG the threshold fraction of its MaximumFractionalValue."""
+    if str(getattr(seg, "SegmentationType", "")) != "FRACTIONAL":
+        return 1.0
+    maximum = float(getattr(seg, "MaximumFractionalValue", 255) or 255)
+    return max(fractional_threshold * maximum, 1.0)
+
+
 def _extract_seg_geometry(
     seg: pydicom.Dataset,
+    layout: "_FrameLayout | None" = None,
 ) -> tuple[
     tuple[float, float, float],
     tuple[float, float, float],
@@ -231,11 +261,13 @@ def _extract_seg_geometry(
 ]:
     """Extract spatial geometry from a DICOM SEG object.
 
-    Attempts to extract spacing, origin, and direction from the SEG's
-    SharedFunctionalGroupsSequence or PerFrameFunctionalGroupsSequence.
+    The pixel measures and the orientation come from the SharedFunctionalGroupsSequence,
+    else from the first PerFrameFunctionalGroupsSequence item (the standard allows
+    either place).
 
     Args:
         seg: The loaded DICOM SEG dataset.
+        layout: The frame layout of the SEG (from `_frame_layout`); found when None.
 
     Returns:
         Tuple of (spacing, origin, direction) where:
@@ -243,37 +275,34 @@ def _extract_seg_geometry(
         - origin: (x, y, z) position of first voxel in mm
         - direction: 3x3 direction cosine matrix or None
     """
+    from pictologics.loader import _shared_functional_group_item
+
     # Default values
     spacing = (1.0, 1.0, 1.0)
     origin = (0.0, 0.0, 0.0)
     direction = None
 
-    # Try to get from SharedFunctionalGroupsSequence
-    if hasattr(seg, "SharedFunctionalGroupsSequence") and seg.SharedFunctionalGroupsSequence:
-        shared_fg = seg.SharedFunctionalGroupsSequence[0]
+    pm = _shared_functional_group_item(seg, "PixelMeasuresSequence")
+    if pm is not None and getattr(pm, "PixelSpacing", None):
+        row_spacing = float(pm.PixelSpacing[0])
+        col_spacing = float(pm.PixelSpacing[1])
+        slice_thickness = float(getattr(pm, "SliceThickness", 1.0) or 1.0)
+        # Spacing in (X, Y, Z) = (col, row, slice)
+        spacing = (col_spacing, row_spacing, slice_thickness)
 
-        # Get pixel spacing from PixelMeasuresSequence
-        if hasattr(shared_fg, "PixelMeasuresSequence") and shared_fg.PixelMeasuresSequence:
-            pm = shared_fg.PixelMeasuresSequence[0]
-            if hasattr(pm, "PixelSpacing") and pm.PixelSpacing:
-                row_spacing = float(pm.PixelSpacing[0])
-                col_spacing = float(pm.PixelSpacing[1])
-                slice_thickness = float(getattr(pm, "SliceThickness", 1.0) or 1.0)
-                # Spacing in (X, Y, Z) = (col, row, slice)
-                spacing = (col_spacing, row_spacing, slice_thickness)
-
-        # Get orientation from PlaneOrientationSequence
-        if hasattr(shared_fg, "PlaneOrientationSequence") and shared_fg.PlaneOrientationSequence:
-            po = shared_fg.PlaneOrientationSequence[0]
-            if hasattr(po, "ImageOrientationPatient") and po.ImageOrientationPatient:
-                iop = [float(x) for x in po.ImageOrientationPatient]
-                row_cosines = np.array(iop[:3])
-                col_cosines = np.array(iop[3:6])
-                slice_cosines = np.cross(row_cosines, col_cosines)
-                direction = np.column_stack([row_cosines, col_cosines, slice_cosines])
+    po = _shared_functional_group_item(seg, "PlaneOrientationSequence")
+    if po is not None and getattr(po, "ImageOrientationPatient", None):
+        iop = [float(x) for x in po.ImageOrientationPatient]
+        row_cosines = np.array(iop[:3])
+        col_cosines = np.array(iop[3:6])
+        slice_cosines = np.cross(row_cosines, col_cosines)
+        direction = np.column_stack([row_cosines, col_cosines, slice_cosines])
 
     # Origin and slice step from the frame positions (see _frame_layout)
-    layout = _frame_layout(seg, len(getattr(seg, "PerFrameFunctionalGroupsSequence", None) or []))
+    if layout is None:
+        layout = _frame_layout(
+            seg, len(getattr(seg, "PerFrameFunctionalGroupsSequence", None) or [])
+        )
     if layout.first_position is not None:
         origin = layout.first_position
     if layout.step is not None:
@@ -343,10 +372,11 @@ def _frame_layout(seg: pydicom.Dataset, n_frames: int) -> _FrameLayout:
         slices = [dim_slices.get(i, i) for i in range(n_frames)]
         return _FrameLayout(segments, slices, n_slices, None, None)
 
+    from pictologics.loader import _shared_functional_group_item
+
     normal = np.array([0.0, 0.0, 1.0])
-    shared = getattr(seg, "SharedFunctionalGroupsSequence", None)
-    po = getattr(shared[0], "PlaneOrientationSequence", None) if shared else None
-    iop = _numbers(getattr(po[0], "ImageOrientationPatient", None), 6) if po else None
+    po = _shared_functional_group_item(seg, "PlaneOrientationSequence")
+    iop = _numbers(getattr(po, "ImageOrientationPatient", None), 6)
     if iop is not None:
         normal = np.cross(iop[:3], iop[3:])
     pos = np.array(positions)
@@ -356,8 +386,8 @@ def _frame_layout(seg: pydicom.Dataset, n_frames: int) -> _FrameLayout:
     slices_arr = np.zeros(n_frames, dtype=np.int64)
     if len(levels) > 1:
         step = float(np.min(np.diff(levels)))
-        pm = getattr(shared[0], "PixelMeasuresSequence", None) if shared else None
-        declared = getattr(pm[0], "SpacingBetweenSlices", None) if pm else None
+        pm = _shared_functional_group_item(seg, "PixelMeasuresSequence")
+        declared = getattr(pm, "SpacingBetweenSlices", None)
         if isinstance(declared, (int, float)) and declared > 0:
             ratio = step / float(declared)
             if abs(ratio - round(ratio)) < 1e-3:
@@ -375,70 +405,78 @@ def _frame_layout(seg: pydicom.Dataset, n_frames: int) -> _FrameLayout:
 
 def _extract_combined_segments(
     seg: pydicom.Dataset,
-    pixel_array: npt.NDArray[np.floating[Any]],
+    frames: Iterable[tuple[int, npt.NDArray[Any]]],
     target_segments: list[int],
-    n_frames: int,
-) -> npt.NDArray[np.floating[Any]]:
+    layout: _FrameLayout,
+    level: float = 1.0,
+) -> npt.NDArray[Any]:
     """Extract and combine multiple segments into a single label array.
 
     Args:
         seg: The DICOM SEG dataset.
-        pixel_array: The raw pixel array from the SEG.
+        frames: (frame index, decoded frame) pairs; frames of other segments may be left out.
         target_segments: List of segment numbers to include.
-        n_frames: Number of frames in the SEG.
+        layout: The frame layout of the SEG (from `_frame_layout`).
+        level: The smallest stored value inside a segment (see `_inside_level`).
 
     Returns:
-        3D numpy array with segment numbers as voxel values.
+        3D (Z, Y, X) array with segment numbers as voxel values: uint8, or uint16 for
+        segment numbers above 255.
     """
-    layout = _frame_layout(seg, n_frames)
     labelmap = _is_labelmap(seg)
+    wanted = set(target_segments)
+    dtype = np.uint8 if max(target_segments, default=0) <= 255 else np.uint16
     # Create output array: (Z, Y, X) = (slices, rows, cols)
-    combined = np.zeros((layout.n_slices, seg.Rows, seg.Columns), dtype=np.uint8)
-    for frame_idx in range(n_frames):
+    combined = np.zeros((layout.n_slices, seg.Rows, seg.Columns), dtype=dtype)
+    for frame_idx, frame_data in frames:
         seg_num = layout.segments[frame_idx]
         if layout.slices[frame_idx] >= layout.n_slices:
             continue
-        frame_data = pixel_array[frame_idx] if pixel_array.ndim == 3 else pixel_array
         if labelmap:
             # The pixel values are the segment numbers
             keep = np.isin(frame_data, target_segments)
             combined[layout.slices[frame_idx]][keep] = frame_data[keep]
-        elif seg_num in target_segments:
+        elif seg_num in wanted:
             # Add to combined array (higher segment numbers overwrite lower)
-            combined[layout.slices[frame_idx]][frame_data > 0] = seg_num
+            combined[layout.slices[frame_idx]][frame_data >= level] = seg_num
     return combined
 
 
-def _extract_single_segment(
+def _extract_segment_masks(
     seg: pydicom.Dataset,
-    pixel_array: npt.NDArray[np.floating[Any]],
-    segment_number: int,
-    n_frames: int,
-) -> npt.NDArray[np.floating[Any]]:
-    """Extract a single segment as a binary mask.
+    frames: Iterable[tuple[int, npt.NDArray[Any]]],
+    target_segments: list[int],
+    layout: _FrameLayout,
+    level: float = 1.0,
+) -> dict[int, npt.NDArray[np.uint8]]:
+    """Extract each segment as a binary mask, in one pass over the frames.
 
     Args:
         seg: The DICOM SEG dataset.
-        pixel_array: The raw pixel array from the SEG.
-        segment_number: The segment number to extract.
-        n_frames: Number of frames in the SEG.
+        frames: (frame index, decoded frame) pairs; frames of other segments may be left out.
+        target_segments: The segment numbers to extract.
+        layout: The frame layout of the SEG (from `_frame_layout`).
+        level: The smallest stored value inside a segment (see `_inside_level`).
 
     Returns:
-        3D binary numpy array for the specified segment.
+        {segment number: 3D (Z, Y, X) uint8 mask}.
     """
-    layout = _frame_layout(seg, n_frames)
     labelmap = _is_labelmap(seg)
-    result = np.zeros((layout.n_slices, seg.Rows, seg.Columns), dtype=np.uint8)
-    for frame_idx in range(n_frames):
-        if layout.slices[frame_idx] >= layout.n_slices or not (
-            labelmap or layout.segments[frame_idx] == segment_number
-        ):
+    masks = {
+        n: np.zeros((layout.n_slices, seg.Rows, seg.Columns), dtype=np.uint8)
+        for n in target_segments
+    }
+    for frame_idx, frame_data in frames:
+        k = layout.slices[frame_idx]
+        if k >= layout.n_slices:
             continue
-        frame_data = pixel_array[frame_idx] if pixel_array.ndim == 3 else pixel_array
-        # A label map holds the segment numbers themselves
-        in_segment = frame_data == segment_number if labelmap else frame_data > 0
-        result[layout.slices[frame_idx]] = in_segment.astype(np.uint8)
-    return result
+        if labelmap:
+            # A label map holds the segment numbers themselves
+            for number, mask in masks.items():
+                mask[k] = frame_data == number
+        elif layout.segments[frame_idx] in masks:
+            masks[layout.segments[frame_idx]][k] = frame_data >= level
+    return masks
 
 
 def _align_to_reference(
@@ -506,19 +544,7 @@ def get_segment_info(path: str | Path) -> list[dict[str, str | int]]:
             print(f"{seg['segment_number']}: {seg['segment_label']}")
         ```
     """
-    import highdicom as hd
-
-    path_obj = Path(path)
-    if not path_obj.exists():
-        raise FileNotFoundError(f"SEG file not found: {path}")
-
-    try:
-        seg = hd.seg.segread(str(path_obj))
-    except Exception as e:
-        raise ValueError(f"Failed to load DICOM SEG file: {e}") from e
-
-    if not hasattr(seg, "SegmentSequence"):
-        raise ValueError(f"File is not a valid DICOM SEG object: {path}")
+    seg = _read_seg(path, stop_before_pixels=True)  # the header only
 
     segments = []
     for segment in seg.SegmentSequence:

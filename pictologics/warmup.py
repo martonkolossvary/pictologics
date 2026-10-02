@@ -17,12 +17,11 @@ import os
 import warnings
 from typing import Any
 
-import numba
 import numpy as np
 import numpy.typing as npt
 
 # Private imports to access Numba kernels directly
-from .features import _mc_tables, _utils, intensity, morphology, texture
+from .features import _utils, intensity, morphology, texture
 
 
 def warmup_jit() -> None:
@@ -64,7 +63,7 @@ def _warmup_texture() -> None:
     # Shared dummy data
     shape = (4, 4, 4)
     n_bins = 5
-    mask = np.ones(shape, dtype=np.uint8)
+    mask: npt.NDArray[Any] = np.ones(shape, dtype=np.uint8)
 
     # Bounding-box scan is specialized by mask dtype AND memory layout; cropped masks
     # (mask[bbox]) are non-contiguous views, so compile both the C-contiguous and the
@@ -89,89 +88,39 @@ def _warmup_texture() -> None:
     _utils._roi_min_max_numba(data_i32[1:, 1:, 1:], mask[1:, 1:, 1:])
     _utils._roi_min_max_serial_numba(data_i32, mask)
     _utils._roi_min_max_serial_numba(data_i32[1:, 1:, 1:], mask[1:, 1:, 1:])
-    # Use a predictable random state or just zeros/ones to avoid runtime variation
-    base = np.zeros(shape, dtype=np.uint8)
-    base[::2] = 1  # Add some variation
-
-    # Match the production callers in texture.py
-    try:
-        n_threads = int(numba.config.NUMBA_NUM_THREADS)
-    except (ValueError, TypeError):
-        n_threads = 1  # Fallback
-
-    # _calculate_local_features_numba is specialized by dtype; the dispatch code casts
-    # discretised data to uint8 (n_bins <= 256) or int32, never other integer types.
-    for dtype in (np.uint8, np.int32):
-        data_int = base.astype(dtype, copy=False)
-        texture._calculate_local_features_numba(
-            data_int,
-            mask,
-            n_bins,
-            calc_glcm=True,
-            calc_glrlm=True,
-            calc_ngtdm=True,
-            calc_ngldm=True,
-            offsets_26=texture.OFFSETS_26,
-            directions_13=texture.DIRECTIONS_13,
-            ngldm_alpha=0,
-            n_threads=n_threads,
-            merge_directions=True,
-        )
-
+    # GLCM Ng_eff: the binned box crop with the row-order texture ROI (a uint8 view)
+    roi_u8 = np.ascontiguousarray(mask[1:, 1:, 1:])
+    _utils._roi_min_max_numba(data_i32[1:, 1:, 1:], roi_u8)
+    _utils._roi_min_max_serial_numba(data_i32[1:, 1:, 1:], roi_u8)
+    # The texture kernels. The grey-level volume build is specialized by the type and
+    # layout of the discretised image: int32, a strided box crop in the pipeline and
+    # C-contiguous for an ROI that fills the image; the ROI is a fresh bool array. The
+    # local and zone kernels read one uint16 volume, so they compile once, with merged
+    # (compact) and per-direction tables alike. Levels are 1-based in [1, n_bins].
+    levels: npt.NDArray[Any] = np.zeros((5, 5, 5), dtype=np.int32)
+    levels[1:, 1:, 1:] = 1
+    levels[1::2, 1:, 1:] = 2  # some variation
+    box = levels[1:, 1:, 1:]
+    for data in (box, np.ascontiguousarray(box)):
+        texture._texture_matrices(data, mask, n_bins, compact=True)
+        # Small volumes take the serial volume kernel; large ones this parallel one
+        vol = np.zeros(tuple(s + 2 for s in data.shape), dtype=np.uint16)
+        counts = np.empty((data.shape[0], 2), dtype=np.int64)
+        texture._texture_volume_numba(data, mask != 0, n_bins, vol, counts)
+    texture.calculate_all_texture_matrices(box, mask, n_bins)
+    # The parallel zeroing of large thread tables
+    texture._zero_fill_numba(np.ones(3, dtype=np.uint32))
+    # The levels that occur, for the compact tables of many grey levels
+    texture._levels_seen_numba(np.zeros((3, 3, 3), dtype=np.uint16), np.zeros((3, 2), np.bool_))
     # GLDZM distance-transform kernel: its input is always a fresh bool array from a
-    # comparison (`mask != 0` in the matrix path, `mask > 0` in the standalone GLDZM
-    # path). A comparison keeps the memory order of its input: C-ordered masks give a
-    # C-contiguous array.
-    texture._chamfer_distance_taxicab_numba(mask.astype(np.bool_))
-
-    # Zone features warmup (GLSZM/GLDZM). Numba's lazy dispatch specializes on the
-    # exact dtype AND layout of every array argument, so mirror the production calls
-    # exactly: the discretised image (int32) is a strided bbox-cropped view in the
-    # common case but C-contiguous for full-volume ROIs — compile both. For C-ordered
-    # masks the mask is a C-contiguous uint8 array (a view of the bool ROI in the matrix
-    # path, a copy in the standalone paths) and the distance map is always an int32
-    # strided view (real GLDZM maps and the GLSZM-only dummy alike). Grey levels are
-    # 1-based in [1, n_bins]. The kernels pad-and-copy their inputs; nothing is
-    # modified in place.
-    zone_pad: npt.NDArray[Any] = np.zeros((5, 5, 5), dtype=np.int32)
-    zone_pad[1:, 1:, 1:] = base + 1
-    data_strided = zone_pad[1:, 1:, 1:]
-    data_contig: npt.NDArray[Any] = np.ascontiguousarray(data_strided)
-    dist_map: npt.NDArray[Any] = np.ones((5, 5, 5), dtype=np.int32)[1:, 1:, 1:]
-    max_zones = int(np.prod(shape))
-
-    # Use the pool to get buffers
-    pool = texture._ZoneBufferPool.get_instance()
-    res_gl, res_size, res_dist, stack = pool.get_buffers(max_zones)
-
-    for zone_data in (data_strided, data_contig):
-        texture._calculate_zone_features_serial_numba(
-            zone_data,
-            mask,
-            dist_map,
-            n_bins,
-            res_gl,
-            res_size,
-            res_dist,
-            stack,
-            calc_glszm=True,
-            calc_gldzm=True,
-            dense_glszm=False,  # the pipeline asks for GLSZM cells
-        )
-        texture._calculate_zone_features_numba(
-            zone_data,
-            mask,
-            dist_map,
-            n_bins,
-            res_gl,
-            res_size,
-            res_dist,
-            stack,
-            n_chunks=2,  # >1 so the cross-chunk merge path is compiled too
-            calc_glszm=True,
-            calc_gldzm=True,
-            dense_glszm=False,
-        )
+    # comparison, so a C-contiguous array.
+    dist = texture._chamfer_distance_taxicab_numba(mask.astype(np.bool_))
+    # The parallel zone kernels of large volumes, on this small one (with and without the
+    # distance map)
+    for distance in (dist, texture._NO_DISTANCE):
+        vol, counts = texture._texture_volume(box, mask != 0, n_bins)
+        gldzm = distance is dist
+        texture._zone_matrices(vol, counts, distance, n_bins, True, gldzm, False, parallel=True)
 
 
 def _warmup_intensity() -> None:
@@ -184,6 +133,11 @@ def _warmup_intensity() -> None:
     intensity._central_moments_2_3_4(values, mean_val)
     intensity._mean_abs_dev(values, mean_val)
     intensity._robust_mean_abs_dev(values, lower=0.0, upper=10.0)
+    # The value counts of the IVH: int32 binned values (other integers go to int64)
+    for dtype in (np.int32, np.int64):
+        intensity._value_counts_numba(
+            np.array([1, 2, 2], dtype=dtype), 0, np.zeros((1, 3), np.int64)
+        )
 
     # Discretised images are int32 (see discretise_image) and apply_mask preserves
     # dtype, so the histogram feature path calls these helpers with int32 arrays;
@@ -223,9 +177,30 @@ def _warmup_intensity() -> None:
 
     # calculate_local_intensity_features passes a crop of the image: a strided view, or
     # the C-contiguous array itself when the crop covers all of it. Compile both layouts.
-    for local_data in (data, data[1:, 1:, 1:]):
+    # float32 data: the responses of the filters. The two-stage search reads the row
+    # prefix sums (float64) of the same crops.
+    rows = np.zeros(1, dtype=np.int64)
+    data32 = data.astype(np.float32)
+    for local_data in (data, data[1:, 1:, 1:], data32, data32[1:, 1:, 1:]):
         roi_means = intensity._calculate_local_mean_numba(local_data, mask_indices, offsets)
         intensity._calculate_local_peaks_numba(local_data, mask_indices, roi_means)
+        prefix = np.empty(local_data.shape[:2] + (local_data.shape[2] + 1,), dtype=np.float64)
+        intensity._row_prefix_sums_numba(local_data, prefix)
+    intensity._approximate_local_means_numba(prefix, mask_indices, rows, rows, rows)
+    # Order statistics of large ROIs: the radix select kernels
+    bits = values.view(np.uint64)
+    edge = np.empty(1, dtype=np.uint64)
+    intensity._key_range_numba(values, bits, edge, edge.copy())
+    intensity._bucket_counts_numba(bits, 48, np.uint64(0), np.zeros((1, 1 << 16), dtype=np.int64))
+    intensity._bucket_values_numba(
+        bits,
+        values,
+        48,
+        np.uint64(0),
+        np.ones(1 << 16, dtype=np.bool_),
+        np.array([bits.size]),
+        np.empty(bits.size),
+    )
 
 
 def _warmup_morphology() -> None:
@@ -244,11 +219,19 @@ def _warmup_morphology() -> None:
     morphology._accumulate_moments_from_mask_numba(mask[1:, 1:, 1:])
     morphology._accumulate_intensity_weighted_moments_numba(mask, img)
     morphology._accumulate_intensity_weighted_moments_numba(mask[1:, 1:, 1:], img[1:, 1:, 1:])
+    # float32 images: the responses of the filters
+    img32 = img.astype(np.float32)
+    morphology._accumulate_intensity_weighted_moments_numba(mask, img32)
+    morphology._accumulate_intensity_weighted_moments_numba(mask[1:, 1:, 1:], img32[1:, 1:, 1:])
+    # A mask of another type becomes a row-order uint8 copy of the crop; the image crop
+    # stays a strided view
+    row_mask = np.ascontiguousarray(mask[1:, 1:, 1:])
+    morphology._accumulate_intensity_weighted_moments_numba(row_mask, img[1:, 1:, 1:])
+    morphology._accumulate_intensity_weighted_moments_numba(row_mask, img32[1:, 1:, 1:])
 
     # Marching cubes (the mask with its zero border)
-    morphology._marching_cubes_numba(
-        np.pad(mask, 1), _mc_tables.EDGE_TABLE, _mc_tables.TRIANGLE_TABLE, _mc_tables.TRIANGLE_COUNT
-    )
+    morphology._mesh(np.pad(mask, 1), np.zeros(3), np.ones(3))
+    morphology._column_stats_numba(np.ones((4, 3), dtype=np.float64))
 
     # 2. Point Cloud / Mesh Operations
     # Simple pyramid (5 verts)
@@ -267,7 +250,8 @@ def _warmup_morphology() -> None:
 
     # OMBB
     center = np.ascontiguousarray(np.array([0.5, 0.5, 0.5], dtype=np.float64))
-    evecs = np.ascontiguousarray(np.eye(3, dtype=np.float64))
+    # np.linalg.eigh gives its eigenvectors in column order
+    evecs = np.asfortranarray(np.eye(3, dtype=np.float64))
     morphology._ombb_extents_numba(verts, center, evecs)
     morphology._max_pairwise_distance_numba(verts)
     morphology._hull_candidates_numba(verts, np.ones(3, dtype=np.float64))
@@ -283,7 +267,7 @@ def _warmup_morphology() -> None:
     mvee_points = np.ascontiguousarray(
         np.concatenate([verts, [[1.0, 1.0, 0.0], [1.0, 0.0, 1.0]]], axis=0)
     )
-    morphology._mvee_khachiyan_numba(mvee_points, tol=0.1)
+    morphology._mvee_khachiyan_numba(mvee_points)  # production omits tol
 
 
 def _warmup_filters() -> None:
@@ -299,7 +283,11 @@ def _warmup_filters() -> None:
         col = np.asfortranarray(np.ones((4, 4, 4), dtype=dtype))
         loader._to_row_order_numba(col, np.empty((4, 4, 4), dtype=dtype))
     ones, flags = np.ones(4), np.ones(4, dtype=np.bool_)
-    for stored in (*loader._ROW_ORDER_DTYPES, np.float32):  # float32: NIfTI PET and MR data
+    # Every stored type of the fused NIfTI load (int8, int32 and uint32 too), and float32
+    stored_types: list[Any] = list(
+        dict.fromkeys((*loader._ROW_ORDER_DTYPES, *loader._NIFTI_FUSED_DTYPES))
+    )
+    for stored in stored_types:
         col = np.asfortranarray(np.ones((4, 4, 4), dtype=stored))
         loader._to_float_row_order_numba(col, ones, ones, flags, flags, np.empty((4, 4, 4)))
 
@@ -310,6 +298,8 @@ def _warmup_filters() -> None:
     binned = np.empty(flat.size, dtype=np.int32)
     preprocessing._discretise_fbn_numba(flat, 4.0, 0.0, 10.0, binned)
     preprocessing._discretise_fbs_numba(flat, 2.5, 0.0, binned)
+    preprocessing._discretise_cutoffs_numba(flat, np.array([2.0, 5.0]), True, binned)
+    preprocessing._nonfinite_blocks_numba(flat, np.zeros(1, dtype=np.uint8))
 
     for m_dtype in (np.float64, np.uint8, np.bool_):
         m_flat = np.ones(flat.size, dtype=m_dtype)
@@ -325,20 +315,23 @@ def _warmup_filters() -> None:
     src = np.ones((4, 4, 4), dtype=np.float64)
     scale = np.array([1.1, 1.1, 1.1])
     shift = np.zeros(3)
+    start = np.zeros(3, dtype=np.int64)  # the first voxel of the computed region
     out3 = np.empty((3, 3, 3), dtype=np.float64)
     out_u8 = np.empty((3, 3, 3), dtype=np.uint8)
-    preprocessing._resample_trilinear_numba(src, scale, shift, False, math.nan, out3)
-    preprocessing._resample_trilinear_numba(src, scale, shift, False, 0.5, out_u8)  # masks
+    preprocessing._resample_trilinear_numba(src, scale, shift, start, False, math.nan, out3)
+    preprocessing._resample_trilinear_numba(src, scale, shift, start, False, 0.5, out_u8)
     preprocessing._resample_trilinear_numba(  # uint8 images and masks
-        src.astype(np.uint8), scale, shift, True, math.nan, out_u8
+        src.astype(np.uint8), scale, shift, start, True, math.nan, out_u8
     )
     for s_dtype in (np.float64, np.uint8, np.bool_):
         src_d = src.astype(s_dtype)
         out_d = np.empty((3, 3, 3), dtype=s_dtype)
-        preprocessing._resample_nearest_numba(src_d, scale, shift, out_d)
+        preprocessing._resample_nearest_numba(src_d, scale, shift, start, out_d)
     valid = np.ones((4, 4, 4), dtype=np.bool_)
     out_valid = np.empty((3, 3, 3), dtype=np.bool_)
-    preprocessing._resample_trilinear_masked_numba(src, valid, scale, shift, 0.5, out3, out_valid)
+    preprocessing._resample_trilinear_masked_numba(
+        src, valid, scale, shift, start, 0.5, out3, out_valid
+    )
 
     # 2. Warmup affine_transform (scipy fallback for cubic / exotic boundary modes)
     # Small 3D array

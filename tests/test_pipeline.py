@@ -25,6 +25,14 @@ from pictologics.pipeline import EmptyROIMaskError, PipelineState, RadiomicsPipe
 # --- Fixtures ---
 
 
+@pytest.fixture(autouse=True)
+def _region_paths_for_small_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ROI box cut and the filter region also for the small test images (see
+    _CUT_MIN_SIZE and _FILTER_REGION_MIN)."""
+    monkeypatch.setattr("pictologics.pipeline._CUT_MIN_SIZE", 0)
+    monkeypatch.setattr("pictologics.pipeline._FILTER_REGION_MIN", 0)
+
+
 @pytest.fixture
 def mock_image() -> Image:
     """A simple 10x10x10 dummy image."""
@@ -227,12 +235,23 @@ def test_run_defaults_all_configs(
         patch.object(pipeline, "_extract_features") as mock_ext,
     ):
         mock_ext.return_value = {}
-        # Call without config_names
-        res = pipeline.run(mock_image, mock_mask)
+        # Call without config_names: it runs every config, and it warns because the
+        # standard ones run too
+        with pytest.warns(UserWarning, match="also the 6 standard ones"):
+            res = pipeline.run(mock_image, mock_mask)
 
         # Should contain all keys present in pipeline._configs
         assert len(res) == len(pipeline._configs)
         assert len(res) >= 6  # At least standard ones
+
+        # Without standard configs there is no warning
+        own = RadiomicsPipeline(load_standard=False)
+        own.add_config(
+            "mine", [{"step": "extract_features", "params": {"families": ["intensity"]}}]
+        )
+        with patch.object(own, "_extract_features", return_value={}), warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert list(own.run(mock_image, mock_mask)) == ["mine"]
 
 
 # --- Preprocessing Step Tests ---
@@ -271,6 +290,7 @@ def test_step_resample_success(
         interpolation="bspline",
         round_intensities=False,
         source_mask=None,
+        region=None,  # the ROI box covers the whole grid
     )
 
 
@@ -341,12 +361,24 @@ def test_step_resample_roi_only_diverged_masks_intersect_independently(
         direction=np.eye(3),
         modality="mask",
     )
-    mock_resample.side_effect = [mock_image, morph_res, intensity_res]
+    mock_resample.side_effect = [mock_image, morph_res, intensity_res] * 2
     mock_intersect.return_value = mock_mask
 
+    # An ROI of all ones gives a source mask with no invalid voxel, which changes no mask.
     pipeline.run(mock_image, mock_mask, config_names=["res_roi_div"])
+    assert mock_intersect.call_count == 0
 
-    # morph_mask and intensity_mask were each intersected with the source mask separately.
+    # With voxels outside the ROI, morph_mask and intensity_mask were each intersected
+    # with the source mask separately.
+    roi = Image(
+        array=np.ones((10, 10, 10), dtype=np.uint8),
+        spacing=(1.0, 1.0, 1.0),
+        origin=(0.0, 0.0, 0.0),
+        direction=np.eye(3),
+        modality="mask",
+    )
+    roi.array[0] = 0
+    pipeline.run(mock_image, roi, config_names=["res_roi_div"])
     assert mock_intersect.call_count == 2
 
 
@@ -680,7 +712,7 @@ def test_step_discretise(
     mock_disc.assert_called_with(mock_image, method="FBN", roi_mask=ANY, n_bins=16)
 
 
-@patch("pictologics.pipeline.apply_mask")
+@patch("pictologics.pipeline.roi_min_max")
 @patch("pictologics.pipeline.discretise_image")
 def test_step_discretise_fbs_empty_error(
     mock_disc: MagicMock,
@@ -694,7 +726,7 @@ def test_step_discretise_fbs_empty_error(
     pipeline.add_config(
         "fbs", [{"step": "discretise", "params": {"method": "FBS", "bin_width": 10}}]
     )
-    mock_apply.return_value = np.array([])  # Empty
+    mock_apply.return_value = None  # No ROI voxel
     mock_disc.return_value = mock_image
 
     results = pipeline.run(mock_image, mock_mask, config_names=["fbs"])
@@ -708,7 +740,7 @@ def test_step_discretise_fbs_empty_error(
 
 
 def test_step_unknown(pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image) -> None:
-    pipeline.add_config("unknown", [{"step": "fake_step"}])
+    pipeline.add_config("unknown", [{"step": "fake_step"}], validate=False)
     pipeline.run(mock_image, mock_mask, config_names=["unknown"])
 
     log = pipeline._log[-1]
@@ -923,7 +955,9 @@ def test_extract_texture_error_no_discretise(
     mock_mask: Image,
 ) -> None:
     pipeline.add_config(
-        "tex_fail", [{"step": "extract_features", "params": {"families": ["texture"]}}]
+        "tex_fail",
+        [{"step": "extract_features", "params": {"families": ["texture"]}}],
+        validate=False,
     )
 
     # Config fails -> log error.
@@ -952,7 +986,7 @@ def test_extract_texture_success(
         "glrlm": 1,
         "glszm": 1,
         "glszm_cells": 1,
-        "roi": 1,
+        "roi": np.ones((1, 1, 1), dtype=bool),
         "gldzm": 1,
         "ngtdm_s": 1,
         "ngtdm_n": 1,
@@ -1175,6 +1209,7 @@ def test_empty_roi_nan_series_with_texture(
             {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
             {"step": "extract_features", "params": {"families": ["texture"]}},
         ],
+        validate=False,
     )
     results = pipeline.run(mock_image, empty_mask, config_names=["tex_fail"])
     series = results["tex_fail"]
@@ -1264,6 +1299,7 @@ def test_params_type_errors(
                 },
             }
         ],
+        validate=False,
     )
 
     pipeline.run(mock_image, mock_mask, config_names=["type_err"])
@@ -1295,6 +1331,7 @@ def test_params_type_errors_all(
                     },
                 }
             ],
+            validate=False,
         )
         # Note: we need "texture" family to hit texture_matrix_params check?
         # Actually code checks params BEFORE family logic?
@@ -1376,6 +1413,7 @@ def test_params_explicit_none_all(
                     },
                 }
             ],
+            validate=False,
         )
 
         # Need pre-discretisation for texture, or implicit discretise step in config?
@@ -1412,7 +1450,7 @@ def test_run_subject_id(pipeline: RadiomicsPipeline, mock_image: Image, mock_mas
     assert any(entry["subject_id"] == "P001" for entry in pipeline._log)
 
 
-@patch("pictologics.pipeline.apply_mask")
+@patch("pictologics.pipeline.roi_min_max")
 @patch("pictologics.pipeline.discretise_image")
 def test_step_discretise_fbs_success(
     mock_disc: MagicMock,
@@ -1421,9 +1459,11 @@ def test_step_discretise_fbs_success(
     mock_image: Image,
     mock_mask: Image,
 ) -> None:
-    pipeline.add_config("fbs_ok", [{"step": "discretise", "params": {"method": "FBS"}}])
+    pipeline.add_config(
+        "fbs_ok", [{"step": "discretise", "params": {"method": "FBS"}}], validate=False
+    )
     mock_disc.return_value = mock_image
-    mock_apply.return_value = np.array([10, 20])
+    mock_apply.return_value = (10.0, 20.0)  # the ROI range of the discretised image
 
     # Run should not fail
     pipeline.run(mock_image, mock_mask, config_names=["fbs_ok"])
@@ -1437,6 +1477,7 @@ def test_step_discretise_fbs_success(
             {"step": "discretise", "params": {"method": "FBS"}},
             {"step": "extract_features", "params": {"families": ["texture"]}},
         ],
+        validate=False,
     )
 
     with (
@@ -1778,6 +1819,7 @@ def test_step_filter_missing_type(
     pipeline.add_config(
         "filter_no_type",
         [{"step": "filter", "params": {"support": 5}}],  # Missing 'type'
+        validate=False,
     )
 
     pipeline.run(mock_image, mock_mask, config_names=["filter_no_type"])
@@ -1795,6 +1837,7 @@ def test_step_filter_unknown_type(
     pipeline.add_config(
         "filter_bad_type",
         [{"step": "filter", "params": {"type": "invalid_filter"}}],
+        validate=False,
     )
 
     pipeline.run(mock_image, mock_mask, config_names=["filter_bad_type"])
@@ -2264,6 +2307,7 @@ def test_step_resample_missing_param(
     pipeline.add_config(
         "resample_no_spacing",
         [{"step": "resample", "params": {"interpolation": "linear"}}],  # Missing new_spacing
+        validate=False,
     )
 
     pipeline.run(mock_image, mock_mask, config_names=["resample_no_spacing"])
@@ -3120,9 +3164,9 @@ def test_extract_texture_with_ngldm_alpha(
     pipeline.run(mock_image, mock_mask, config_names=["cfg1", "cfg2"])
 
     mock_ngldm.assert_called()
-    # Verify ngldm_alpha was passed through
+    # ngldm_alpha passes as the whole number of the same integer test: |d| <= 0.5 is d == 0
     call_kwargs = mock_matrices.call_args.kwargs
-    assert call_kwargs.get("ngldm_alpha") == 0.5
+    assert call_kwargs.get("ngldm_alpha") == 0
 
 
 # --- IVH Feature Edge Cases ---
@@ -3849,7 +3893,7 @@ def _filter_config(include_resample: bool) -> list[dict[str, Any]]:
         {"step": "filter", "params": {"type": "riesz", "variant": "log", "sigma_mm": 1.0}},
         {
             "step": "extract_features",
-            "params": {"features": ["stat_mean"], "families": ["intensity"]},
+            "params": {"families": ["intensity"]},
         },
     ]
     return steps
@@ -3945,7 +3989,7 @@ def test_pipeline_auto_sentinel_percentage_reports_exact_value_below_threshold()
 
 def test_pipeline_auto_no_sentinel_warns_and_continues(sm_image: Image, sm_mask: Image) -> None:
     pipeline = RadiomicsPipeline()
-    config = [{"step": "extract_features", "params": {"features": ["stat_mean"]}}]
+    config = [{"step": "extract_features", "params": {"families": ["intensity"]}}]
     pipeline.add_config("auto_none", config, source_mode="auto")
 
     with pytest.warns(UserWarning, match="No sentinel value auto-detected"):
@@ -4017,7 +4061,7 @@ def test_pipeline_laws_rotation_invariant_source_mask(sm_image: Image, sm_mask: 
         },
         {
             "step": "extract_features",
-            "params": {"features": ["stat_mean"], "families": ["intensity"]},
+            "params": {"families": ["intensity"]},
         },
     ]
     pipeline.add_config("laws_rot", config, source_mode="roi_only")
@@ -4216,11 +4260,13 @@ def test_configurations_share_identical_preprocessing() -> None:
 
 def test_filters_of_the_roi_region_keep_every_feature() -> None:
     # A filter that no later step needs outside the ROI filters only the ROI region plus
-    # its reach (LoG, wavelets, the Laws response, the slices of an axial Gabor filter);
-    # every feature stays bit for bit. The mean filter, the Laws energy and a Gabor filter
-    # averaged over three planes keep the full grid.
+    # its reach (LoG, wavelets, the Laws response), or for running sums (mean, Laws
+    # energy) from the image start to the region end plus the reach. Gabor filters only
+    # the slices through the region, in each of its planes. Every feature stays bit for
+    # bit.
     from pictologics import pipeline as pipeline_module
-    from pictologics.filters import gabor_filter, laplacian_of_gaussian
+    from pictologics.filters import laplacian_of_gaussian
+    from pictologics.filters.gabor import _apply_gabor_to_plane
 
     rng = np.random.default_rng(81)
     img = Image(rng.normal(0.0, 50.0, (40, 36, 28)), (1.0, 1.0, 1.5), (0.0, 0.0, 0.0))
@@ -4264,16 +4310,73 @@ def test_filters_of_the_roi_region_keep_every_feature() -> None:
 
     with (
         patch("pictologics.pipeline.laplacian_of_gaussian", wraps=laplacian_of_gaussian) as spy,
-        patch("pictologics.pipeline.gabor_filter", wraps=gabor_filter) as gabor_spy,
+        patch(
+            "pictologics.filters.gabor._apply_gabor_to_plane", wraps=_apply_gabor_to_plane
+        ) as plane_spy,
     ):
         limited = run()
     assert spy.call_args[0][0].size < img.array.size  # the LoG read only the region
-    axial, planes = (call.args[0].shape for call in gabor_spy.call_args_list)
-    assert axial[:2] == img.array.shape[:2] and axial[2] < img.array.shape[2]
-    assert planes == img.array.shape
+    assert len(plane_spy.call_args_list) == 4  # axial: one plane; averaged: three
+    for call in plane_spy.call_args_list:
+        axis = call.kwargs["plane_axis"]
+        assert call.args[0].shape[axis] < img.array.shape[axis]
     with patch.object(pipeline_module, "_needs_full_grid", return_value=True):
         full_grid = run()
     for name in filters:
+        assert limited[name].equals(full_grid[name])
+
+
+def test_roi_region_filters_with_periodic_edges_and_source_masks() -> None:
+    # A periodic boundary reads the other image end, so an axis where the filtered part
+    # meets an image end is filtered whole. The roi_only source mask is cut with the
+    # image, and without local intensity the region is the ROI box. Every feature stays
+    # bit for bit.
+    from pictologics import pipeline as pipeline_module
+    from pictologics.filters import mean_filter
+
+    rng = np.random.default_rng(82)
+    img = Image(rng.normal(0.0, 50.0, (40, 36, 28)), (1.0, 1.0, 1.5), (0.0, 0.0, 0.0))
+    labels = np.zeros(img.array.shape)
+    labels[0:8, 14:22, 10:16] = 1.0  # meets the image start along axis 0
+    mask = Image(labels, img.spacing, img.origin)
+    filters = {
+        "log": {"type": "log", "sigma_mm": 1.5, "boundary": "periodic"},
+        "wavelet": {"type": "wavelet", "decomposition": "LHL", "boundary": "periodic"},
+        "laws_energy": {
+            "type": "laws",
+            "kernel": "L5E5E5",
+            "compute_energy": True,
+            "boundary": "periodic",
+        },
+        "mean": {"type": "mean", "support": 5, "boundary": "periodic"},
+        "mean_mirror": {"type": "mean", "support": 5},
+    }
+    configs = [
+        (f"{name}_{mode}", params, mode)
+        for name, params in filters.items()
+        for mode in ("full_image", "roi_only")
+    ]
+    names = [name for name, _, _ in configs]
+
+    def run() -> dict[str, Any]:
+        pipeline = RadiomicsPipeline(load_standard=False)
+        for name, params, mode in configs:
+            pipeline.add_config(name, [
+                {"step": "filter", "params": dict(params)},
+                {"step": "extract_features", "params": {"families": ["intensity"]}},
+            ], source_mode=mode)  # fmt: skip
+        return pipeline.run(img, mask, config_names=names)
+
+    with patch("pictologics.pipeline.mean_filter", wraps=mean_filter) as spy:
+        limited = run()
+    shapes = {call.args[0].shape for call in spy.call_args_list}
+    assert shapes == {img.array.shape, (11, 25, 19)}  # periodic: whole; mirror: box end + 3
+    for call in spy.call_args_list:
+        if "source_mask" in call.kwargs:
+            assert call.kwargs["source_mask"].shape == call.args[0].shape
+    with patch.object(pipeline_module, "_needs_full_grid", return_value=True):
+        full_grid = run()
+    for name in names:
         assert limited[name].equals(full_grid[name])
 
 
@@ -4298,10 +4401,8 @@ def test_run_does_the_start_up_once_per_run(sm_mask: Image) -> None:
             pipeline_module, "detect_sentinel_value", wraps=pipeline_module.detect_sentinel_value
         ) as detect,
         patch.object(
-            pipeline_module,
-            "create_source_mask_from_sentinel",
-            wraps=pipeline_module.create_source_mask_from_sentinel,
-        ) as sentinel_mask,
+            pipeline_module, "_source_mask", wraps=pipeline_module._source_mask
+        ) as source_mask,
         patch.object(
             RadiomicsPipeline, "_ensure_nonempty_roi", autospec=True, side_effect=check
         ) as roi_check,
@@ -4309,7 +4410,8 @@ def test_run_does_the_start_up_once_per_run(sm_mask: Image) -> None:
     ):
         together = pipeline.run(image, sm_mask, config_names=names)
     assert detect.call_count == 1
-    assert sentinel_mask.call_count == 2  # the detected value and the explicit value
+    # The detected value, the explicit value, and the ROI
+    assert source_mask.call_count == 3
     contexts = [call.kwargs["context"] for call in roi_check.call_args_list]
     assert contexts.count("initialization") == 1
     messages = [str(w.message) for w in record if "Auto-detected" in str(w.message)]
@@ -4381,7 +4483,10 @@ def test_run_reuses_the_plan_while_the_configs_and_rules_stay() -> None:
         assert analyzer.call_count == 1 and pipeline.last_deduplication_plan is plan
         for name in first:
             assert first[name].equals(second[name])
-        steps_b[0]["params"]["n_bins"] = 8.0  # the stored config is the caller's list
+        steps_b[0]["params"]["n_bins"] = 8  # the pipeline keeps its own copy
+        pipeline.run(image, mask)
+        assert analyzer.call_count == 1
+        pipeline.add_config("b", steps_b)  # a changed config: a new plan
         pipeline.run(image, mask)
         assert analyzer.call_count == 2
         pipeline.run(image, mask, config_names=["b", "a"])
@@ -4392,7 +4497,7 @@ def test_run_reuses_the_plan_while_the_configs_and_rules_stay() -> None:
         pipeline.run(image, mask, config_names=["b", "a"])
         assert analyzer.call_count == 4
         # A parameter that pickle cannot write: the plan is built for every run.
-        steps_b.append({"step": "note", "params": {"made_by": lambda: None}})
+        pipeline._configs["b"].append({"step": "note", "params": {"made_by": lambda: None}})
         for _ in range(2):
             pipeline.run(image, mask)
         assert analyzer.call_count == 6
@@ -4410,3 +4515,587 @@ def test_merge_configs_marks_the_plan_out_of_date(pipeline: RadiomicsPipeline) -
     pipeline.merge_configs(other)
     data = pipeline.to_dict(config_names=["cfg1", "cfg2"], include_deduplication=True)
     assert "last_plan" not in data["deduplication"]
+
+
+# --- Config checks, input types and small fixes ---
+
+
+def _steps_problems(steps: list[Any]) -> list[str]:
+    from pictologics.pipeline import _config_problems
+
+    return _config_problems(steps)
+
+
+def test_add_config_lists_every_problem_with_a_hint() -> None:
+    # A config mistake raises one error at add_config that lists every problem, with
+    # the closest valid name; validate=False keeps the old structure-only check.
+    bad = [
+        {"step": "resampel", "params": {"new_spacing": (1, 1, 1)}},
+        {"step": "resample", "params": {"new_spacing": 1.0}},
+        {"step": "resegment", "params": {"min": -100, "max": 400}},
+        {"step": "binarize_mask", "params": {"mask_value": 2, "apply_to": "all"}},
+        {"step": "discretise", "params": {"method": "fbn", "n_bins": 32}},
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32.5}},
+        {"step": "discretise", "params": {"method": "FBS"}},
+        {"step": "discretise", "params": {"method": "FIXED_CUTOFFS"}},
+        {"step": "filter", "params": {"type": "gaussian"}},
+        {"step": "filter", "params": {"type": "log", "sigma": 2.0}},
+        {"step": "filter", "params": {"type": "riesz", "variant": "logg"}},
+        {"step": "filter", "params": {"type": "laws", "kernel": "L5E5E5", "kernels": "x"}},
+        {"step": "extract_features", "params": {"familes": ["intensity"]}},
+        {
+            "step": "extract_features",
+            "params": {"families": ["texure", "shape"], "ivh_params": "x"},
+        },
+        {"step": "extract_features", "params": {"families": "texture"}},
+        {"step": "round_intensities", "params": ["x"]},
+        {"step": "resample", "params": {}},
+    ]
+    pipeline = RadiomicsPipeline(load_standard=False)
+    with pytest.raises(ValueError, match="Configuration 'bad' has 21 problem") as error:
+        pipeline.add_config("bad", bad)
+    message = str(error.value)
+    for expected in (
+        "step 0: unknown step type 'resampel' (did you mean 'resample'?)",
+        "step 1 (resample): new_spacing must be three positive numbers, not 1.0",
+        "step 2 (resegment): unknown parameter 'min'",
+        "step 3 (binarize_mask): unknown parameter 'mask_value' (did you mean 'mask_values'?)",
+        "step 3 (binarize_mask): apply_to must be one of ('both', 'morph', 'intensity'), not 'all'",
+        "step 4 (discretise): unknown method 'fbn' (did you mean 'FBN'?)",
+        "step 5 (discretise): FBN needs a whole n_bins of 1 or more, not 32.5",
+        "step 6 (discretise): FBS needs a bin_width above 0, not None",
+        "step 7 (discretise): FIXED_CUTOFFS needs cutoffs",
+        "step 8 (filter): unknown filter type 'gaussian'",
+        "step 9 (filter): unknown parameter 'sigma' (did you mean 'sigma_mm'?)",
+        "step 10 (filter): unknown riesz variant 'logg' (did you mean 'log'?)",
+        "step 11 (filter): unknown parameter 'kernels' (did you mean 'kernel'?)",
+        "step 12 (extract_features): unknown parameter 'familes' (did you mean 'families'?)",
+        "step 13 (extract_features): ivh_params must be a dict, not 'x'",
+        "step 13 (extract_features): unknown feature family 'texure' (did you mean 'texture'?)",
+        "step 13 (extract_features): unknown feature family 'shape'",
+        "step 14 (extract_features): families must be a list of names, not 'texture'",
+        "step 15 (round_intensities): params must be a dictionary",
+        "step 16 (resample): missing parameter 'new_spacing'",
+    ):
+        assert expected in message, expected
+    pipeline.add_config("bad", bad, validate=False)  # the old structure-only check
+    assert pipeline.get_config("bad") == bad
+    # texture features need an earlier discretise step; histogram and IVH do not
+    assert _steps_problems([{"step": "extract_features", "params": {"families": ["glcm"]}}]) == [
+        "step 0 (extract_features): the 'glcm' features need an earlier 'discretise' step"
+    ]
+    assert (
+        _steps_problems(
+            [{"step": "extract_features", "params": {"families": ["histogram", "ivh"]}}]
+        )
+        == []
+    )
+    # structure problems, and the source mode
+    from pictologics.pipeline import _config_problems
+
+    assert _config_problems("steps") == ["steps must be a list"]
+    assert _config_problems(["x", {"params": {}}], "roi") == [
+        "source_mode must be one of ('full_image', 'roi_only', 'auto'), not 'roi'",
+        "step 0: must be a dictionary",
+        "step 1: missing 'step' key",
+    ]
+
+
+def test_configs_from_files_warn_and_check_the_source_mode() -> None:
+    # A configuration file still loads with mistakes (validate=True warns), but an
+    # unknown source mode fails at load time, not inside run().
+    data = {
+        "schema_version": "1.1",
+        "configs": {
+            "c": {
+                "steps": [
+                    {
+                        "step": "extract_features",
+                        "params": {"families": ["intensity"], "familes": []},
+                    }
+                ]
+            }
+        },
+    }
+    with pytest.warns(UserWarning, match="unknown parameter 'familes'"):
+        pipeline = RadiomicsPipeline.from_dict(data, validate=True)
+    assert pipeline.list_configs() == ["c"]
+    data["configs"]["c"]["source_mode"] = "roi"
+    with pytest.raises(ValueError, match="source_mode must be one of"):
+        RadiomicsPipeline.from_dict(data)
+
+
+def test_add_config_keeps_its_own_copy_and_takes_the_enum(sm_image: Image, sm_mask: Image) -> None:
+    from pictologics.pipeline import SourceMode
+
+    steps = [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["histogram"]}},
+    ]
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("fbn8", steps, source_mode=SourceMode.AUTO)
+    steps[0]["params"]["n_bins"] = 64  # an edit to build the next config
+    pipeline.add_config("fbn64", steps)
+    assert pipeline.get_config("fbn8")[0]["params"]["n_bins"] == 8
+    assert pipeline._config_metadata["fbn8"]["source_mode"] == "auto"
+
+
+def test_run_checks_its_inputs_and_config_names(sm_image: Image, sm_mask: Image) -> None:
+    # An array (not an Image) is a clear TypeError; one name may be a str; a name given
+    # twice runs once; an unknown name gets a hint.
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "intensity", [{"step": "extract_features", "params": {"families": ["intensity"]}}]
+    )
+    with pytest.raises(TypeError, match="image must be a path or an Image, not ndarray"):
+        pipeline.run(sm_image.array, sm_mask, config_names=["intensity"])
+    with pytest.raises(TypeError, match="mask must be a path, an Image or None, not ndarray"):
+        pipeline.run(sm_image, sm_mask.array, config_names=["intensity"])
+    pipeline.clear_log()
+    results = pipeline.run(sm_image, sm_mask, config_names="intensity")
+    assert list(results) == ["intensity"]
+    pipeline.run(sm_image, sm_mask, config_names=["intensity", "intensity"])
+    assert len(pipeline._log) == 2  # one entry per run
+    with pytest.raises(ValueError, match="'intensty' not found. \\(did you mean 'intensity'\\?\\)"):
+        pipeline.run(sm_image, sm_mask, config_names=["intensty"])
+
+
+def test_in_memory_images_of_any_type_give_the_float64_features() -> None:
+    # An int16 or float32 in-memory image gives the features of the same float64 image
+    # (it no longer resamples in its own type: rounded, and on one core).
+    from scipy import ndimage
+
+    rng = np.random.default_rng(7)
+    hu = np.round(ndimage.gaussian_filter(rng.normal(0, 1, (40, 40, 16)), 1.2) * 300 + 40)
+    labels = np.zeros(hu.shape, np.uint8)
+    labels[10:30, 8:30, 4:12] = 1
+    mask = Image(labels, (0.7, 0.7, 2.3), (0.0, 0.0, 0.0))
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [
+        {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
+        {"step": "extract_features", "params": {"families": ["intensity", "glcm"]}},
+    ])  # fmt: skip
+    expected = pipeline.run(Image(hu, (0.7, 0.7, 2.3), (0.0, 0.0, 0.0)), mask, config_names=["c"])[
+        "c"
+    ]
+    for dtype in (np.int16, np.float32):
+        image = Image(hu.astype(dtype), (0.7, 0.7, 2.3), (0.0, 0.0, 0.0))
+        result = pipeline.run(image, mask, config_names=["c"])["c"]
+        assert result.equals(expected), dtype
+        assert image.array.dtype == dtype  # the caller's image is not changed
+
+
+def test_whole_number_floats_from_files_work(sm_image: Image, sm_mask: Image) -> None:
+    # n_bins 32.0 and ngldm_alpha 1.0 (from YAML or JSON) give the features of 32 and 1.
+    def config(n_bins: Any, alpha: Any) -> dict[str, Any]:
+        return {
+            "steps": [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
+                {
+                    "step": "extract_features",
+                    "params": {
+                        "families": ["glcm", "ngldm"],
+                        "texture_matrix_params": {"ngldm_alpha": alpha},
+                    },
+                },
+            ]
+        }
+
+    data = {
+        "schema_version": "1.1",
+        "configs": {"floats": config(32.0, 1.0), "ints": config(32, 1)},
+    }
+    pipeline = RadiomicsPipeline.from_dict(data)
+    results = pipeline.run(sm_image, sm_mask, config_names=["floats", "ints"])
+    assert not results["floats"].isna().any()
+    assert results["floats"].equals(results["ints"])
+
+
+def test_numpy_numbers_in_params_with_deduplication(sm_image: Image, sm_mask: Image) -> None:
+    # A new_spacing of numpy integers no longer stops run() when deduplication is on.
+    pipeline = RadiomicsPipeline(load_standard=False)
+    for n in (8, 16):
+        pipeline.add_config(f"c{n}", [
+            {"step": "resample", "params": {"new_spacing": tuple(np.array([1, 1, 1]))}},
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": n}},
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+        ])  # fmt: skip
+    pipeline.run(sm_image, sm_mask)
+    assert [entry["status"] for entry in pipeline._log] == ["completed", "completed"]
+
+
+def test_roi_check_and_background_selection_helpers() -> None:
+    from pictologics.pipeline import _has_roi, _selects_background, _spacing_problem
+
+    for shape in ((8, 8, 8), (128, 128, 64)):  # small: ndarray.any; large: the box scan
+        mask = np.zeros(shape, np.uint8)
+        assert not _has_roi(mask)
+        mask[3, 4, 5] = 1
+        assert _has_roi(mask)
+    cases = [
+        ({}, False), ({"threshold": 0.0}, True), ({"threshold": 0.5}, False),
+        ({"threshold": None}, False), ({"mask_values": (0, 2)}, True),
+        ({"mask_values": (1, 2)}, False), ({"mask_values": [0, 3]}, True),
+        ({"mask_values": [1]}, False), ({"mask_values": 0}, True), ({"mask_values": 2}, False),
+    ]  # fmt: skip
+    for params, expected in cases:
+        assert _selects_background(params) is expected, params
+    assert (
+        _spacing_problem((1.0, 1.0)) == "new_spacing must be three positive numbers, not (1.0, 1.0)"
+    )
+    assert _spacing_problem((0, 1, 1)) is not None and _spacing_problem([1, 1, 1]) is None
+
+
+def test_binarize_selecting_background_after_a_filter_uses_the_full_grid() -> None:
+    # A binarize_mask that keeps mask value 0 makes the whole image the ROI, so the
+    # filter before it must filter the full grid (the ROI region alone left zeros).
+    from scipy.ndimage import gaussian_filter
+
+    from pictologics.filters import wavelet_transform
+
+    rng = np.random.default_rng(21)
+    arr = gaussian_filter(rng.normal(size=(40, 40, 30)), 1.0) * 100 + 40
+    labels = np.zeros(arr.shape)
+    labels[15:22, 16:23, 12:17] = 1.0
+    image = Image(arr, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    mask = Image(labels, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("all", [
+        {"step": "filter", "params": {"type": "wavelet", "wavelet": "db2", "level": 1, "decomposition": "LLL"}},
+        {"step": "binarize_mask", "params": {"threshold": 0.0}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}},
+    ])  # fmt: skip
+    mean = pipeline.run(image, mask, config_names=["all"])["all"]["mean_intensity_Q4LE"]
+    full = wavelet_transform(arr, "db2", 1, "LLL", boundary="mirror")
+    assert mean == pytest.approx(float(np.mean(full.astype(np.float64))), rel=1e-12)
+
+
+def test_source_masks_keep_labels_above_255(sm_image: Image) -> None:
+    # In roi_only mode a uint16 label of 300 stays 300 (uint8 made it 44), so a later
+    # binarize_mask for label 300 finds its voxels.
+    labels = np.zeros(sm_image.array.shape, np.uint16)
+    labels[8:18, 8:18, 8:18] = 300
+    mask = Image(labels, sm_image.spacing, sm_image.origin)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("label300", [
+        {"step": "resample", "params": {"new_spacing": sm_image.spacing}},
+        {"step": "binarize_mask", "params": {"mask_values": [300]}},
+        {"step": "extract_features", "params": {"families": ["morphology"]}},
+    ], source_mode="roi_only")  # fmt: skip
+    result = pipeline.run(sm_image, mask, config_names=["label300"])["label300"]
+    assert pipeline._log[-1]["status"] == "completed"
+    assert result["volume_voxel_counting_YEKZ"] > 0
+
+
+def test_negative_labels_are_roi_in_every_family(sm_image: Image) -> None:
+    # Every nonzero label is ROI membership: a label of -1 gives the features of label 1
+    # in all families (some steps used `> 0` before).
+    labels = np.zeros(sm_image.array.shape)
+    labels[6:20, 7:19, 6:18] = 1.0
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("all", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
+        {"step": "extract_features", "params": {
+            "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
+            "include_spatial_intensity": True, "include_local_intensity": True,
+        }},
+    ])  # fmt: skip
+    positive = pipeline.run(sm_image, Image(labels, sm_image.spacing, sm_image.origin))["all"]
+    negative = pipeline.run(sm_image, Image(-labels, sm_image.spacing, sm_image.origin))["all"]
+    assert not positive.isna().all()
+    assert positive.equals(negative)
+
+
+def test_texture_families_listed_one_by_one_share_one_pass(sm_mask: Image) -> None:
+    # Texture families listed one by one take one matrix pass and give the features of
+    # 'texture', in the order of the list. With dedup, only the families that are not
+    # in the cache join the pass.
+    from pictologics import pipeline as pipeline_module
+    from pictologics.features import FEATURE_NAMES
+
+    rng = np.random.default_rng(4)
+    image = Image(rng.normal(50.0, 20.0, (20, 20, 20)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    disc = {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}}
+    listed = ["ngldm", "intensity", "texture_glcm", "glrlm", "glszm", "gldzm", "ngtdm"]
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    pipeline.add_config(
+        "all", [disc, {"step": "extract_features", "params": {"families": ["texture"]}}]
+    )
+    pipeline.add_config(
+        "listed", [disc, {"step": "extract_features", "params": {"families": listed}}]
+    )
+    matrices = pipeline_module._texture_matrices
+    with patch.object(pipeline_module, "_texture_matrices", wraps=matrices) as pass_count:
+        out = pipeline.run(image, sm_mask, config_names=["all", "listed"])
+    assert pass_count.call_count == 2
+    texture = out["listed"].drop(list(FEATURE_NAMES["intensity"]))
+    order = [
+        key
+        for family in ("ngldm", "glcm", "glrlm", "glszm", "gldzm", "ngtdm")
+        for key in FEATURE_NAMES[family]
+    ]
+    assert list(texture.index) == order
+    assert texture.equals(out["all"][order])
+
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "one", [disc, {"step": "extract_features", "params": {"families": ["glcm"]}}]
+    )
+    pipeline.add_config(
+        "two",
+        [disc, {"step": "extract_features", "params": {"families": ["glcm", "glrlm", "ngtdm"]}}],
+    )
+    with patch.object(pipeline_module, "_texture_matrices", wraps=matrices) as pass_count:
+        out = pipeline.run(image, sm_mask, config_names=["one", "two"])
+    flags = [
+        {name for name in ("glcm", "glrlm", "ngtdm") if call.kwargs[f"calc_{name}"]}
+        for call in pass_count.call_args_list
+    ]
+    assert flags == [{"glcm"}, {"glrlm", "ngtdm"}]
+    assert out["two"][list(FEATURE_NAMES["glcm"])].equals(out["one"])
+
+
+def test_roi_values_and_distance_map_are_made_once(sm_mask: Image) -> None:
+    # The histogram and the IVH read one gather of the binned ROI values. Configurations
+    # that share their masks reuse the GLDZM distance map of the last texture pass; new
+    # masks (here after resegment) get their own map. The values are those of separate
+    # runs, and run() keeps no map after it ends.
+    from pictologics import pipeline as pipeline_module
+    from pictologics.features import texture as texture_module
+
+    rng = np.random.default_rng(8)
+    image = Image(rng.normal(50.0, 20.0, (20, 20, 20)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    resample = {"step": "resample", "params": {"new_spacing": (0.8, 0.8, 0.8)}}
+    families = {"families": ["intensity", "histogram", "ivh", "gldzm"]}
+    configs = {
+        "fbn_8": [resample, {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}}],
+        "fbn_16": [resample, {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}}],
+        "reseg": [
+            resample,
+            {"step": "resegment", "params": {"range_min": 20.0, "range_max": 80.0}},
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        ],
+    }
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    for name, steps in configs.items():
+        pipeline.add_config(name, [*steps, {"step": "extract_features", "params": families}])
+    with (
+        patch.object(pipeline_module, "apply_mask", wraps=pipeline_module.apply_mask) as gathers,
+        patch.object(
+            texture_module,
+            "_chamfer_distance_taxicab_numba",
+            wraps=texture_module._chamfer_distance_taxicab_numba,
+        ) as maps,
+    ):
+        together = pipeline.run(image, sm_mask, config_names=list(configs))
+    assert gathers.call_count == 2 * len(configs)  # raw values and binned values
+    assert maps.call_count == 2  # the resampled masks, and the resegmented ones
+    assert pipeline._last_distance_map is None
+    for name in configs:
+        alone = pipeline.run(image, sm_mask, config_names=[name])
+        assert together[name].equals(alone[name])
+
+
+def test_nan_and_infinite_voxels_leave_the_intensity_mask(sm_mask: Image) -> None:
+    # A NaN or infinite voxel has no intensity: each configuration leaves it out of the
+    # intensity mask, with a warning, and keeps the morphological mask. The intensity
+    # features are those of the finite ROI values. With no finite ROI voxel, the
+    # configuration ends as an empty ROI.
+    from pictologics.features.intensity import calculate_intensity_features
+
+    rng = np.random.default_rng(2)
+    clean = rng.normal(100.0, 20.0, (20, 20, 20))
+    image = clean.copy()
+    image[7, 8, 9] = np.nan
+    image[10, 10, 10] = np.inf
+    families = ["intensity", "morphology", "texture", "histogram", "ivh"]
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "c",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+            {"step": "extract_features", "params": {"families": families}},
+        ],
+    )
+
+    def run(array: np.ndarray) -> Any:
+        return pipeline.run(Image(array, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), sm_mask, "c")["c"]
+
+    with pytest.warns(UserWarning, match="Left out 2 ROI voxels with a NaN or infinite"):
+        out = run(image)
+    assert not out.isna().any()
+    assert out["volume_RNU0"] == run(clean)["volume_RNU0"]
+    roi = sm_mask.array != 0
+    roi[7, 8, 9] = roi[10, 10, 10] = False
+    for key, value in calculate_intensity_features(clean[roi]).items():
+        assert out[key] == value
+
+    # A NaN outside the ROI leaves the ROI as it is, with no warning
+    outside = clean.copy()
+    outside[0, 0, 0] = np.nan
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert run(outside).equals(run(clean))
+
+    with pytest.warns(UserWarning, match="Left out 1,000 ROI voxels"):
+        out = run(np.full(clean.shape, np.nan))
+    assert out.isna().all() and pipeline._log[-1]["status"] == "empty_roi"
+
+
+def test_discretise_cuts_the_arrays_to_the_roi_box() -> None:
+    # Without a resample, the discretise step cuts the images and masks to the ROI box
+    # (grown by the local intensity sphere when a later step reads it) before binning, in
+    # each source mode; the features are those of the whole grid, bit for bit.
+    from pictologics import pipeline as pipeline_module
+    from pictologics.preprocessing import discretise_image
+
+    rng = np.random.default_rng(7)
+    arr = rng.normal(50.0, 20.0, (40, 36, 30))
+    arr[:3] = -1000.0  # padding for the auto source mode
+    labels = np.zeros(arr.shape, np.uint8)
+    labels[12:20, 10:18, 8:14] = 1
+    image = Image(arr, (1.0, 1.0, 1.5), (0.0, 0.0, 0.0))
+    mask = Image(labels, image.spacing, image.origin)
+    fbn = {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}}
+    fbs = {"step": "discretise", "params": {"method": "FBS", "bin_width": 10.0}}
+    cutoffs = {"step": "discretise", "params": {"method": "FIXED_CUTOFFS", "cutoffs": [30.0, 60.0]}}
+    configs = {
+        "fbn": (fbn, ["intensity", "morphology", "texture", "histogram", "ivh"], "full_image"),
+        "fbs_local": (
+            fbs,
+            ["intensity", "spatial_intensity", "local_intensity", "morphology", "texture"],
+            "full_image",
+        ),
+        "cutoffs": (cutoffs, ["texture", "histogram"], "roi_only"),
+        "auto": (fbn, ["intensity", "texture"], "auto"),
+    }
+
+    def run() -> dict[str, Any]:
+        pipeline = RadiomicsPipeline(load_standard=False)
+        for name, (step, families, mode) in configs.items():
+            steps = [dict(step), {"step": "extract_features", "params": {"families": families}}]
+            pipeline.add_config(name, steps, source_mode=mode)
+        with pytest.warns(UserWarning, match="Auto-detected sentinel value -1000"):
+            return pipeline.run(image, mask, config_names=list(configs))
+
+    with patch.object(pipeline_module, "discretise_image", wraps=discretise_image) as spy:
+        boxed = run()
+    shapes = {call.args[0].array.shape for call in spy.call_args_list}
+    assert (8, 8, 6) in shapes and arr.shape not in shapes  # the box, or the box grown
+    with patch.object(pipeline_module, "_roi_reach", return_value=None):
+        whole = run()
+    for name in configs:
+        assert boxed[name].equals(whole[name])
+
+
+def test_roi_cuts_are_copies_kept_while_their_array_lives() -> None:
+    # A cut is a copy, also when the box spans whole planes (a view would keep the whole
+    # array alive); states that share an array share its cut, and the cut goes when the
+    # array goes.
+    import gc
+
+    from pictologics.pipeline import PipelineState, _cut_to_roi
+
+    labels = np.zeros((8, 4, 5), dtype=np.uint8)
+    labels[2:5] = 1  # whole planes
+    grid = Image(np.arange(160.0).reshape(8, 4, 5), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    mask = Image(labels, grid.spacing, grid.origin)
+    cuts: dict[Any, Any] = {}
+    states = [PipelineState(grid, grid, mask, mask, roi_reach=0.0) for _ in range(2)]
+    for state in states:
+        _cut_to_roi(state, cuts)
+    first, second = states
+    assert first.image.array.base is None and first.image.array.shape == (3, 4, 5)
+    assert second.image.array is first.image.array and len(cuts) == 2  # image and mask
+    assert first.grid_offset == (2, 0, 0) and first.grid_shape == (8, 4, 5)
+    del grid, mask, states, first, second, labels
+    gc.collect()
+    assert not cuts
+
+
+def test_small_images_are_not_cut_before_binning(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Below _CUT_MIN_SIZE voxels, a discretise step bins the whole grid: finding and
+    # cutting the box would cost more than it saves. A filter still filters the region,
+    # down to _FILTER_REGION_MIN voxels.
+    from pictologics import pipeline as pipeline_module
+    from pictologics.filters import mean_filter
+    from pictologics.preprocessing import discretise_image
+
+    monkeypatch.setattr(pipeline_module, "_CUT_MIN_SIZE", 1 << 16)
+    monkeypatch.setattr(pipeline_module, "_FILTER_REGION_MIN", 1 << 12)
+    rng = np.random.default_rng(23)
+    image = Image(rng.normal(50.0, 20.0, (30, 30, 30)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    labels = np.zeros(image.array.shape, np.uint8)
+    labels[10:15, 10:15, 10:15] = 1
+    mask = Image(labels, image.spacing, image.origin)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [
+        {"step": "filter", "params": {"type": "mean", "support": 3}},
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["intensity", "texture"]}},
+    ])  # fmt: skip
+    with (
+        patch.object(pipeline_module, "mean_filter", wraps=mean_filter) as filters,
+        patch.object(pipeline_module, "discretise_image", wraps=discretise_image) as bins,
+    ):
+        pipeline.run(image, mask, config_names=["c"])
+    assert filters.call_args.args[0].size < image.array.size
+    assert bins.call_args.args[0].array.shape == image.array.shape
+    # Below _FILTER_REGION_MIN voxels, the filter takes the whole image too
+    tiny = Image(image.array[:15, :15, :15], image.spacing, image.origin)
+    with patch.object(pipeline_module, "mean_filter", wraps=mean_filter) as filters:
+        pipeline.run(tiny, Image(labels[:15, :15, :15], image.spacing, image.origin), "c")
+    assert filters.call_args.args[0].shape == tiny.array.shape
+
+
+def test_resample_computes_only_the_roi_region() -> None:
+    # When only ROI-local steps follow, the resample computes the region around the ROI
+    # box, grown by the local intensity sphere when a later step needs it; a filter needs
+    # the whole grid. The features are those of the whole grid, bit for bit (the mesh is
+    # made in the index frame of the whole grid).
+    from pictologics import pipeline as pipeline_module
+    from pictologics.preprocessing import resample_image
+
+    rng = np.random.default_rng(6)
+    image = Image(rng.normal(50.0, 20.0, (24, 24, 24)), (2.0, 2.0, 2.0), (0.0, 0.0, 0.0))
+    roi = np.zeros((24, 24, 24), dtype=np.uint8)
+    roi[10:14, 10:14, 10:14] = 1
+    mask = Image(roi, (2.0, 2.0, 2.0), (0.0, 0.0, 0.0))
+    resample = {"step": "resample", "params": {"new_spacing": (1.5, 1.5, 1.5)}}
+    disc = {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}}
+    families = ["intensity", "morphology", "texture", "histogram", "ivh"]
+    configs = {
+        "plain": [resample, disc, {"step": "extract_features", "params": {"families": families}}],
+        "local": [
+            resample,
+            disc,
+            {
+                "step": "extract_features",
+                "params": {"families": ["intensity"], "include_local_intensity": True},
+            },
+        ],
+        "filter": [
+            resample,
+            {"step": "filter", "params": {"type": "mean", "support": 3}},
+            disc,
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+        ],
+    }
+    pipeline = RadiomicsPipeline(load_standard=False, deduplicate=False)
+    for name, steps in configs.items():
+        pipeline.add_config(name, steps)
+    with patch.object(pipeline_module, "resample_image", wraps=resample_image) as calls:
+        boxed = pipeline.run(image, mask, config_names=list(configs))
+    regions = {}
+    for call in calls.call_args_list:
+        if call.args[0].array.shape == image.array.shape:  # the image (and masks) of a config
+            regions.setdefault(call.kwargs.get("region"), 0)
+    sizes = sorted(
+        (r[0].stop - r[0].start) if r is not None else 32 for r in regions
+    )  # 32 = the whole new grid
+    assert len(regions) == 3 and sizes[0] < sizes[1] < sizes[2] == 32
+    with patch.object(pipeline_module, "_roi_reach", return_value=None):
+        whole = pipeline.run(image, mask, config_names=list(configs))
+    for name in configs:
+        assert boxed[name].equals(whole[name])

@@ -10,7 +10,7 @@ os.environ["NUMBA_DISABLE_JIT"] = "1"
 # Must be done BEFORE importing numpy
 warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
-from unittest.mock import PropertyMock, patch
+from unittest.mock import patch
 
 import numpy as np
 
@@ -24,7 +24,6 @@ class TestTextureFeatures(unittest.TestCase):
         self.data = np.random.randint(1, 5, self.shape)
         self.mask = np.ones(self.shape, dtype=int)
         self.n_bins = 16
-        texture_module._ZoneBufferPool._instance = None
 
     def test_calculate_all_matrices_basic(self):
         matrices = texture_module.calculate_all_texture_matrices(self.data, self.mask, self.n_bins)
@@ -85,21 +84,20 @@ class TestTextureFeatures(unittest.TestCase):
         )
         self.assertEqual(f, {})
 
-    def test_ngtdm_ngldm_casting_and_threads(self):
-        with patch("pictologics.features.texture.numba.config") as mock_config:
-            type(mock_config).NUMBA_NUM_THREADS = PropertyMock(side_effect=AttributeError)
-            texture_module.calculate_ngtdm_features(self.data, self.mask, self.n_bins)
-            texture_module.calculate_ngldm_features(self.data, self.mask, self.n_bins)
+    def test_ngtdm_ngldm_many_levels(self):
+        n_bins = 1000
+        data = np.random.randint(1, n_bins, self.shape)
+        self.assertIn(
+            "coarseness_QCDE", texture_module.calculate_ngtdm_features(data, self.mask, n_bins)
+        )
+        self.assertIn(
+            "low_dependence_emphasis_SODN",
+            texture_module.calculate_ngldm_features(data, self.mask, n_bins),
+        )
 
-        n_bins_32 = 1000
-        data_32 = np.random.randint(1, n_bins_32, self.shape)
-        texture_module.calculate_ngtdm_features(data_32, self.mask, n_bins_32)
-        texture_module.calculate_ngldm_features(data_32, self.mask, n_bins_32)
-
-        n_bins_16 = 1000
-        data_16 = np.random.randint(1, n_bins_16, self.shape)
-        texture_module.calculate_ngtdm_features(data_16, self.mask, n_bins_16)
-        texture_module.calculate_ngldm_features(data_16, self.mask, n_bins_16)
+    def test_more_levels_than_the_kernels_hold(self):
+        with self.assertRaises(ValueError):
+            texture_module.calculate_all_texture_matrices(self.data, self.mask, 70_000)
 
     def test_missing_coverage_branches(self):
         with self.assertRaises(ValueError):
@@ -134,17 +132,6 @@ class TestTextureFeatures(unittest.TestCase):
         data_small = np.ones(shape_small, dtype=int)
         mask_small = np.ones(shape_small, dtype=int)
         texture_module.calculate_all_texture_matrices(data_small, mask_small, self.n_bins)
-
-    def test_zone_features_buffer_pool_resize(self):
-        mask_small = np.zeros(self.shape, dtype=int)
-        mask_small[2, 2, 2] = 1
-        texture_module.calculate_zone_features(self.data, mask_small, self.data, self.n_bins)
-
-        mask_large = np.ones(self.shape, dtype=int)
-        texture_module.calculate_zone_features(self.data, mask_large, self.data, self.n_bins)
-
-        # Reuse path
-        texture_module.calculate_zone_features(self.data, mask_small, self.data, self.n_bins)
 
     def test_glrlm_boundary_conditions(self):
         data = np.zeros((3, 3, 5), dtype=int)
@@ -218,6 +205,20 @@ class TestTextureFeatures(unittest.TestCase):
         m = texture_module.calculate_all_texture_matrices(data_bad, mask, self.n_bins)
         self.assertEqual(np.sum(m["glcm"]), 0)
 
+    def test_invalid_levels_leave_the_texture_roi(self):
+        # An ROI voxel with a level outside [1, n_bins] (0 is the bin of NaN) takes no part:
+        # the compact ROI leaves it out, and the matrices are those of the ROI without it.
+        data = np.random.default_rng(1).integers(1, 5, self.shape)
+        data[2, 2, 2] = 0
+        data[1, 1, 1] = self.n_bins + 3
+        compact = texture_module._texture_matrices(data, self.mask, self.n_bins, compact=True)
+        clean = self.mask.copy()
+        clean[2, 2, 2] = clean[1, 1, 1] = 0
+        expected = texture_module._texture_matrices(data, clean, self.n_bins, compact=True)
+        np.testing.assert_array_equal(compact["roi"], clean != 0)
+        for key in ("glcm", "glrlm", "ngtdm_s", "ngtdm_n", "ngldm", "glszm_cells"):
+            np.testing.assert_array_equal(compact[key], expected[key])
+
     def test_glrlm_safe_path_mask_toggle(self):
         mask = np.zeros(self.shape, dtype=int)
         mask[2, 2, 2] = 1
@@ -236,50 +237,17 @@ class TestTextureFeatures(unittest.TestCase):
         m = texture_module.calculate_all_texture_matrices(data, self.mask, n_bins)
         self.assertIn("glcm", m)
 
-    def test_numba_thread_config_value_error(self):
-        with patch("pictologics.features.texture.numba.config") as mock_config:
-            # Setting it to a non-integer string causes ValueError in int()
-            type(mock_config).NUMBA_NUM_THREADS = PropertyMock(return_value="invalid")
-
-            # 1. Main wrapper (Lines 703-704 check)
-            m = texture_module.calculate_all_texture_matrices(self.data, self.mask, self.n_bins)
-            self.assertIn("glcm", m)
-
-            # 2. NGTDM (Lines 1654-1655 check)
-            texture_module.calculate_ngtdm_features(self.data, self.mask, self.n_bins)
-
-            # 3. NGLDM (Lines 1795-1796 check)
-            texture_module.calculate_ngldm_features(self.data, self.mask, self.n_bins)
-
-    def test_glcm_coverage_combinations(self):
-        # Hits lines 820 (uint8 mask), 827 (high bins), 832-833 (thread config error in GLCM)
-        # 1. uint8 mask
-        mask_u8 = self.mask.astype(np.uint8)
-
-        # 2. n_bins > 256 for int32 cast path (line 827)
+    def test_glcm_uint8_mask_many_levels(self):
         n_bins = 300
         data = np.random.randint(1, n_bins, self.shape)
-
-        # 3. Thread config error (line 832-833)
-        with patch("pictologics.features.texture.numba.config") as mock_config:
-            type(mock_config).NUMBA_NUM_THREADS = PropertyMock(return_value="invalid")
-
-            # This calls calculate_glcm_features which has the specific try/except block
-            f = texture_module.calculate_glcm_features(data, mask_u8, n_bins)
-            self.assertIn("contrast_ACUI", f)
+        f = texture_module.calculate_glcm_features(data, self.mask.astype(np.uint8), n_bins)
+        self.assertIn("contrast_ACUI", f)
 
     def test_glcm_zero_sum(self):
         # Line 859: if total_sum == 0
         glcm = np.zeros((13, 2, 2), dtype=float)
         f = texture_module.calculate_glcm_features(self.data, self.mask, n_bins=2, glcm_matrix=glcm)
         self.assertEqual(f, {})
-
-    def test_glrlm_fallback_coverage(self):
-        # 1. Thread config fallback in GLRLM (lines 1037-1040)
-        with patch("pictologics.features.texture.numba.config") as mock_config:
-            type(mock_config).NUMBA_NUM_THREADS = PropertyMock(return_value="invalid")
-            f = texture_module.calculate_glrlm_features(self.data, self.mask, self.n_bins)
-            self.assertIn("short_runs_emphasis_22OV", f)
 
     def test_glrlm_high_bitdepth_coverage(self):
         # Hits lines 1031-1034 (casting logic in calculate_glrlm_features)
@@ -394,24 +362,17 @@ class TestTextureFeatures(unittest.TestCase):
         calc_gldzm=True,
         dense_glszm=True,
     ):
-        texture_module._ZoneBufferPool._instance = None
-        pool = texture_module._ZoneBufferPool.get_instance()
-        max_zones = max(int(np.count_nonzero(mask)), 1)
-        res_gl, res_size, res_dist, stack = pool.get_buffers(max_zones)
-        return texture_module._calculate_zone_features_numba(
-            data,
-            mask,
-            dist_map,
-            self.n_bins,
-            res_gl,
-            res_size,
-            res_dist,
-            stack,
-            n_chunks,
-            calc_glszm,
-            calc_gldzm,
-            dense_glszm,
-        )
+        """The zone matrices with `n_chunks` threads, so at most that many z-chunks (also
+        for these small volumes, which else take one serial fill)."""
+        vol, counts = texture_module._texture_volume(data, np.asarray(mask) != 0, self.n_bins)
+        dist = np.pad(dist_map.astype(np.int32), 1)
+        with (
+            patch.object(texture_module.numba, "get_num_threads", return_value=n_chunks),
+            patch.object(texture_module, "_ZONE_PARALLEL_MIN_SIZE", 0),
+        ):
+            return texture_module._zone_matrices(
+                vol, counts, dist, self.n_bins, calc_glszm, calc_gldzm, dense_glszm
+            )
 
     def test_parallel_zone_kernel_merge(self):
         """A single-grey column spanning z is labelled per-chunk, then the boundary
@@ -427,6 +388,71 @@ class TestTextureFeatures(unittest.TestCase):
         self.assertEqual(int(glszm.sum()), 1)  # the per-chunk sub-zones merged into one
         self.assertEqual(int(gldzm.sum()), 1)
 
+    def test_thread_tables_add_up_in_parallel(self):
+        # Large thread tables add up in parallel blocks, with the sums of numpy.
+        rng = np.random.default_rng(2)
+        tables = rng.integers(0, 1000, (3, 2, 5, 4097)).astype(np.uint32)
+        expected = tables.sum(axis=0, dtype=np.uint64)
+        with patch.object(texture_module, "_PARALLEL_SUM_MIN_CELLS", 1):
+            got = texture_module._thread_sum(tables)
+        np.testing.assert_array_equal(got, expected)
+        self.assertEqual(got.dtype, np.uint64)
+
+    def test_large_thread_tables_hold_only_the_levels_that_occur(self):
+        # Above _COMPACT_TABLE_BYTES, the GLCM and GLRLM thread tables hold only the grey
+        # levels that occur and go back to all levels: the matrices of the full tables.
+        # When every level occurs, or no GLCM or GLRLM is asked for, the rows stay g - 1.
+        rng = np.random.default_rng(19)
+        mask = np.ones((10, 11, 12), dtype=np.uint8)
+        sparse = rng.choice([3, 50, 51, 300], size=mask.shape).astype(np.int32)
+        every = (np.arange(mask.size).reshape(mask.shape) % 300 + 1).astype(np.int32)
+        for data in (sparse, every):
+            for compact in (True, False):
+                full = texture_module._texture_matrices(data, mask, 300, compact=compact)
+                with patch.object(texture_module, "_COMPACT_TABLE_BYTES", 0):
+                    rows = texture_module._texture_matrices(data, mask, 300, compact=compact)
+                for key, value in full.items():
+                    np.testing.assert_array_equal(rows[key], value)
+        vol, _ = texture_module._texture_volume(sparse, mask != 0, 300)
+        large = texture_module._COMPACT_TABLE_BYTES + 1
+        levels = texture_module._table_levels(vol, 300, large)
+        np.testing.assert_array_equal(levels, [2, 49, 50, 299])
+        self.assertIsNone(texture_module._table_levels(vol, 300, large - 1))  # small tables
+        both = texture_module._texture_matrices(sparse, mask, 300, compact=True)
+        with patch.object(texture_module, "_COMPACT_TABLE_BYTES", 0):
+            alone = texture_module._texture_matrices(
+                sparse, mask, 300, compact=True, calc_glcm=False, calc_glrlm=False
+            )
+        for key in ("ngtdm_s", "ngtdm_n", "ngldm"):
+            np.testing.assert_array_equal(alone[key], both[key])
+
+    def test_large_thread_tables_are_zeroed_in_threads(self):
+        # Large GLCM and GLRLM thread tables are zeroed in parallel blocks: the matrices
+        # are those of np.zeros tables.
+        rng = np.random.default_rng(28)
+        data = rng.integers(1, 9, (6, 7, 5)).astype(np.int32)
+        mask = np.ones(data.shape, dtype=np.uint8)
+        expected = texture_module._texture_matrices(data, mask, 8)
+        with patch.object(texture_module, "_PARALLEL_ZERO_MIN", 1):
+            got = texture_module._texture_matrices(data, mask, 8)
+        for key, value in expected.items():
+            np.testing.assert_array_equal(got[key], value)
+        flat = np.arange(70_000, dtype=np.uint32)
+        texture_module._zero_fill_numba(flat)
+        self.assertFalse(flat.any())
+
+    def test_large_volumes_build_the_grey_levels_in_threads(self):
+        # The parallel volume kernel of large volumes gives the serial one's volume and
+        # counts (an ROI voxel with a level outside [1, n_bins] stays 0).
+        rng = np.random.default_rng(25)
+        data = rng.integers(0, 10, (6, 5, 4)).astype(np.int32)
+        roi = rng.random(data.shape) > 0.3
+        serial = texture_module._texture_volume(data, roi, 8)
+        with patch.object(texture_module, "_PARALLEL_VOLUME_MIN", 0):
+            parallel = texture_module._texture_volume(data, roi, 8)
+        for got, expected in zip(parallel, serial, strict=True):
+            np.testing.assert_array_equal(got, expected)
+
     def test_uf_find_path_compression(self):
         """_uf_find flattens a multi-hop parent chain onto the root."""
         parent = np.array([0, 0, 1, 2, 3], dtype=np.int32)  # 4 -> 3 -> 2 -> 1 -> 0
@@ -441,16 +467,16 @@ class TestTextureFeatures(unittest.TestCase):
         mask[:, 1, 1] = 1
         dist = np.zeros((depth, 3, 3), dtype=np.int32)
 
-        # n_chunks < 1 clamps up to 1; n_chunks > depth clamps down to depth
-        self._run_parallel_zone_kernel(data, mask, dist, n_chunks=0)
-        self._run_parallel_zone_kernel(data, mask, dist, n_chunks=100)
+        # More threads than slices: one chunk per slice
+        glszm, _ = self._run_parallel_zone_kernel(data, mask, dist, n_chunks=100)
+        self.assertEqual(int(glszm.sum()), 1)
         # calc_gldzm=False uses the dummy distance buffer
         self._run_parallel_zone_kernel(data, mask, dist, n_chunks=2, calc_gldzm=False)
         # all-zero distances -> max_dist_val falls back to 1
         glszm, _ = self._run_parallel_zone_kernel(data, mask, dist, n_chunks=2)
         self.assertEqual(int(glszm.sum()), 1)
 
-        # ROI voxels with an out-of-range grey level are marked invalid and skipped
+        # ROI voxels with an out-of-range grey level take no part (no zone)
         data_bad = np.full((depth, 3, 3), self.n_bins + 5, dtype=int)
         glszm_bad, _ = self._run_parallel_zone_kernel(data_bad, mask, dist, n_chunks=2)
         self.assertEqual(int(glszm_bad.sum()), 0)
@@ -520,8 +546,8 @@ class TestTextureFeatures(unittest.TestCase):
         return np.stack([gl_idx, sz_idx, glszm[gl_idx, sz_idx]]).astype(np.uint32)
 
     def test_glszm_cells_match_dense_matrix(self):
-        """Cell mode lists the non-zero GLSZM cells in np.nonzero order, in both zone
-        kernels, also when the few large zones go through the sorted path."""
+        """Cell mode lists the non-zero GLSZM cells in np.nonzero order, with one chunk and
+        with three, also when the few large zones go through the sorted path."""
         data = np.ones((3, 15, 15), dtype=int)
         mask_u8 = np.zeros((3, 15, 15), dtype=np.uint8)
         # Separate zones (26-connectivity): three equal bars (grey 2, size 3), one of size 4,
@@ -537,26 +563,22 @@ class TestTextureFeatures(unittest.TestCase):
         self.assertEqual(int(dense[1, 2]), 3)  # the repeated (grey 2, size 3) cell
         for dense_cells in (1 << 18, 2 * self.n_bins):  # table only; table width 2 + sorting
             with patch("pictologics.features.texture._GLSZM_DENSE_CELLS", dense_cells):
-                cells, _ = texture_module._zone_features(
-                    data, mask_u8, dist, self.n_bins, True, True, False
-                )
-                np.testing.assert_array_equal(cells, self._dense_cells(dense))
-                par_dense, _ = self._run_parallel_zone_kernel(data, mask_u8, dist, n_chunks=3)
-                par_cells, _ = self._run_parallel_zone_kernel(
-                    data, mask_u8, dist, n_chunks=3, dense_glszm=False
-                )
-                np.testing.assert_array_equal(par_cells, self._dense_cells(par_dense))
-        # No GLSZM requested: an empty cell array from both kernels.
-        cells, _ = texture_module._zone_features(
-            data, mask_u8, dist, self.n_bins, False, True, False
-        )
-        self.assertEqual(cells.shape, (3, 0))
+                for n_chunks in (1, 3):
+                    par_dense, _ = self._run_parallel_zone_kernel(data, mask_u8, dist, n_chunks)
+                    np.testing.assert_array_equal(par_dense, dense)
+                    par_cells, _ = self._run_parallel_zone_kernel(
+                        data, mask_u8, dist, n_chunks, dense_glszm=False
+                    )
+                    np.testing.assert_array_equal(par_cells, self._dense_cells(dense))
+        # No GLSZM requested: an empty cell array.
         par_cells, _ = self._run_parallel_zone_kernel(
             data, mask_u8, dist, n_chunks=3, calc_glszm=False, dense_glszm=False
         )
         self.assertEqual(par_cells.shape, (3, 0))
 
-    def test_compact_matrices_empty_and_zone_placeholder(self):
+    def test_compact_matrices_empty_and_left_out(self):
+        # An empty ROI gives empty matrices; the compact mode leaves out the matrices that
+        # are not asked for, and the full mode gives zero placeholders.
         empty = texture_module._texture_matrices(
             self.data, np.zeros(self.shape), self.n_bins, compact=True
         )
@@ -568,18 +590,52 @@ class TestTextureFeatures(unittest.TestCase):
         no_zones = texture_module._texture_matrices(
             self.data, self.mask, self.n_bins, calc_glszm=False, calc_gldzm=False, compact=True
         )
-        self.assertEqual(no_zones["glszm_cells"].shape, (3, 0))
+        self.assertNotIn("glszm_cells", no_zones)
+        self.assertIn("glcm", no_zones)
+        local = {"calc_glcm": False, "calc_glrlm": False, "calc_ngtdm": False, "calc_ngldm": False}
+        zones_only = texture_module._texture_matrices(
+            self.data, self.mask, self.n_bins, compact=True, **local
+        )
+        self.assertEqual(set(zones_only), {"glszm_cells", "gldzm", "roi", "distance_map"})
+        full = texture_module._texture_matrices(self.data, self.mask, self.n_bins, **local)
+        self.assertFalse(full["glcm"].any())
+        no_zones_full = texture_module._texture_matrices(
+            self.data, self.mask, self.n_bins, calc_glszm=False, calc_gldzm=False
+        )
+        self.assertEqual(no_zones_full["glszm"].shape, (self.n_bins, 1))
 
-    def test_parallel_zone_dispatch(self):
-        """>= 2^17 voxels with >1 thread routes calculate_zone_features to the parallel kernel."""
-        with patch("pictologics.features.texture.numba.config.NUMBA_NUM_THREADS", 4):
-            shape = (32, 64, 64)  # 131072 == 2^17
-            data = np.ones(shape, dtype=int)
-            mask = np.zeros(shape, dtype=int)
-            mask[:, 0, 0] = 1
-            dist_map = np.zeros(shape, dtype=np.int32)
-            glszm, _ = texture_module.calculate_zone_features(data, mask, dist_map, self.n_bins)
-            self.assertEqual(int(glszm.sum()), 1)
+
+class TestOneSliceImages(unittest.TestCase):
+    """A one-slice image (an axis of size 1) gets the in-plane texture: the GLCM and the
+    GLRLM use the 4 in-plane directions, and the GLDZM distance map is the in-plane one.
+    A one-slice ROI in a 3D image keeps the 3D rule."""
+
+    def test_in_plane_directions_and_distances(self) -> None:
+        data = np.ones((1, 7, 7), dtype=int)
+        data[0, 2:5, 2:5] = 2
+        mask = np.ones((1, 7, 7), dtype=np.uint8)
+        m = texture_module.calculate_all_texture_matrices(data, mask, 2)
+        self.assertEqual(int(m["glrlm"].reshape(13, -1).any(axis=1).sum()), 4)
+        self.assertEqual(int(m["gldzm"][1, 2]), 1)  # the 3x3 zone of level 2: distance 3
+        f = texture_module.calculate_glrlm_features(data, mask, 2)
+        self.assertAlmostEqual(f["run_percentage_9ZK5"], float(m["glrlm"].sum()) / (49 * 4))
+        self.assertEqual(
+            texture_module.calculate_glrlm_features(data, mask, 2, glrlm_matrix=m["glrlm"]), f
+        )
+        self.assertEqual(
+            texture_module.calculate_all_texture_features(data, mask, 2)["run_percentage_9ZK5"],
+            f["run_percentage_9ZK5"],
+        )
+        g = texture_module.calculate_gldzm_features(data, mask, 2)
+        self.assertAlmostEqual(g["large_distance_emphasis_MB4I"], (1 + 9) / 2)
+
+        data_3d = np.ones((3, 7, 7), dtype=int)
+        data_3d[1] = data[0]
+        mask_3d = np.zeros((3, 7, 7), dtype=np.uint8)
+        mask_3d[1] = 1
+        m3 = texture_module.calculate_all_texture_matrices(data_3d, mask_3d, 2)
+        self.assertEqual(int(m3["glrlm"].reshape(13, -1).any(axis=1).sum()), 13)
+        self.assertEqual(m3["gldzm"].shape, (2, 1))  # every zone 1 step from the next slice
 
 
 class TestRoiVoxelCount(unittest.TestCase):

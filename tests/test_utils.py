@@ -50,6 +50,19 @@ class TestRoiMinMax:
     def test_empty_mask_returns_none(self):
         assert roi_min_max(np.zeros((3, 3, 3)), np.zeros((3, 3, 3), dtype=int)) is None
 
+    def test_non_finite_values_are_skipped(self):
+        # NaN and infinite values are no ROI intensities, in both kernels; an ROI with no
+        # finite value gives None.
+        for shape in ((3, 3, 3), (128, 64, 64)):
+            data = np.full(shape, np.nan)
+            mask = np.zeros(shape, dtype=np.uint8)
+            mask[:2, :2, :2] = 1
+            assert roi_min_max(data, mask) is None
+            data[0, 0, :2] = (np.inf, -np.inf)
+            data[1, 1, 1] = 4.0
+            data[0, 1, 0] = -2.0
+            assert roi_min_max(data, mask) == (-2.0, 4.0)
+
     def test_shape_mismatch_raises(self):
         with pytest.raises(ValueError, match="two 3D arrays of equal shape"):
             roi_min_max(np.zeros((3, 3, 3)), np.zeros((3, 3, 4)))

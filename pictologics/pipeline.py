@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import copy
 import datetime
+import difflib
 import functools
+import inspect
 import itertools
 import json
 import logging
@@ -28,6 +30,7 @@ import math
 import pickle
 import re
 import warnings
+import weakref
 from collections import Counter
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -48,7 +51,7 @@ from .deduplication import (
     get_default_rules,
 )
 from .features import FEATURE_NAMES
-from .features._utils import compute_nonzero_bbox, merge_bboxes
+from .features._utils import compute_nonzero_bbox, merge_bboxes, roi_min_max
 from .features.intensity import (
     _LOCAL_PEAK_RADIUS_MM,
     calculate_intensity_features,
@@ -59,7 +62,9 @@ from .features.intensity import (
 )
 from .features.morphology import calculate_morphology_features
 from .features.texture import (
+    _directions,
     _glszm_features_from_cells,
+    _planar_axes,
     _texture_matrices,
     calculate_glcm_features,
     calculate_gldzm_features,
@@ -82,8 +87,11 @@ from .filters import (
 from .filters.base import resolve_boundary
 from .loader import Image, _validate_geometry, create_full_mask, load_image
 from .preprocessing import (
+    _all_finite,
+    _output_grid,
+    _region_origin,
+    _roi_region,
     apply_mask,
-    create_source_mask_from_sentinel,
     detect_sentinel_value,
     discretise_image,
     filter_outliers,
@@ -207,6 +215,23 @@ def _feature_name_families(family: str) -> list[str]:
     return [texture_family if texture_family is not None else family]
 
 
+# Memo of one extraction pass: the nonzero box of each mask (key: the id of the mask
+# array) and the ROI values of each state image (key: the ids of the image and mask
+# arrays). The state holds these arrays for the whole pass, so an id names one array.
+_PassCache = dict[Any, Any]
+
+
+def _texture_cache(families: list[str]) -> dict[str, Optional[dict[str, Any]]]:
+    """The texture families (glcm, glrlm, ...) of `families`, each with no results yet.
+    The first texture family computed fills them all from one matrix pass."""
+    return dict.fromkeys(
+        name
+        for family in families
+        if _normalize_texture_family(family) is not None
+        for name in _feature_name_families(family)
+    )
+
+
 def _mask_values_file_form(value: Any) -> Any:
     """Keep a binarize_mask range apart from a list of label values in files.
 
@@ -216,6 +241,14 @@ def _mask_values_file_form(value: Any) -> Any:
     if isinstance(value, tuple) and len(value) == 2:
         return {"range": list(value)}
     return value
+
+
+def _has_roi(array: npt.NDArray[Any]) -> bool:
+    """Whether a mask has a nonzero voxel. A large mask takes the parallel box scan;
+    `ndarray.any` reads it in one thread (22 % of a 1 mm CT run)."""
+    if array.size < 1 << 20:
+        return bool(array.any())
+    return compute_nonzero_bbox(array) is not None
 
 
 def _get_apply_to(params: dict[str, Any], step_name: str) -> str:
@@ -249,8 +282,8 @@ def _prefix_keys(steps: list[dict[str, Any]], metadata: dict[str, Any]) -> list[
         if step["step"] == "extract_features":
             break
         part: tuple[Any, ...] = (step["step"], _canonical(step.get("params", {})))
-        if step["step"] == "filter":  # whether it may filter the ROI region only
-            part += (_needs_full_grid(steps[index + 1 :]),)
+        if step["step"] in ("filter", "resample", "discretise"):  # how much of the image it keeps
+            part += (_roi_reach(steps[index + 1 :]),)
         parts.append(repr(part))
         keys.append("|".join(parts))
     return keys
@@ -258,19 +291,67 @@ def _prefix_keys(steps: list[dict[str, Any]], metadata: dict[str, Any]) -> list[
 
 def _needs_full_grid(later_steps: list[dict[str, Any]]) -> bool:
     """Whether a later step reads a filtered image outside the ROI region (another
-    filter or a resample); otherwise a filter computes only the region around the ROI."""
-    return any(step["step"] in ("filter", "resample") for step in later_steps)
+    filter, a resample, or a binarize_mask that selects mask value 0, so voxels outside
+    the ROI); otherwise a filter computes only the region around the ROI."""
+    return any(
+        step["step"] in ("filter", "resample")
+        or (step["step"] == "binarize_mask" and _selects_background(step.get("params") or {}))
+        for step in later_steps
+    )
+
+
+# From this many voxels on, a discretise step cuts the arrays to the ROI box (see
+# _cut_to_roi). Measured: on smaller images, finding and cutting the box costs more than
+# the binning it saves (about 50 us a configuration).
+_CUT_MIN_SIZE = 1 << 16
+# From this many voxels on, a filter may filter only the ROI region. Measured: below,
+# finding the region and filling the image back costs more than it saves (+34 us on an
+# 80-voxel phantom); from 32^3 voxels on, an axial Gabor filter is 4 times faster.
+_FILTER_REGION_MIN = 1 << 12
+
+
+def _roi_reach(later_steps: list[dict[str, Any]]) -> Optional[float]:
+    """How far (mm) outside the ROI box the later steps read: the radius of the local
+    intensity sphere when a later step computes the local peaks, else 0. None when a later
+    step reads the whole image (see _needs_full_grid); a filter, a resample or a
+    discretise step then keeps the whole grid."""
+    if _needs_full_grid(later_steps):
+        return None
+    local = any(
+        step["step"] == "extract_features" and _reads_local_peak(step.get("params") or {})
+        for step in later_steps
+    )
+    return _LOCAL_PEAK_RADIUS_MM if local else 0.0
+
+
+def _reads_local_peak(params: dict[str, Any]) -> bool:
+    """Whether an extract_features step computes the local intensity peaks."""
+    families = params.get("families", _DEFAULT_FEATURE_FAMILIES)
+    return "local_intensity" in families or (
+        "intensity" in families and bool(params.get("include_local_intensity", False))
+    )
+
+
+def _selects_background(params: dict[str, Any]) -> bool:
+    """Whether a binarize_mask step keeps mask voxels of value 0."""
+    values = params.get("mask_values")
+    if values is None:
+        threshold = params.get("threshold", 0.5)
+        return threshold is not None and float(threshold) <= 0
+    if isinstance(values, tuple) and len(values) == 2:
+        return bool(values[0] <= 0 <= values[1])
+    return 0 in (values if isinstance(values, (list, tuple)) else [values])
 
 
 def _filter_reach(
     filter_type: str, params: dict[str, Any], spacing: tuple[float, float, float]
-) -> Optional[tuple[Optional[int], Optional[int], Optional[int]]]:
+) -> Optional[tuple[int, int, int]]:
     """Voxels that a filter output reads on each side, per axis, for the filters whose
     values do not depend on where the image ends: separable convolutions (LoG, wavelets,
-    the Laws response), and along axis 2 the axial Gabor filter, which filters each
-    slice on its own (None: the filter reads the whole axis). None for the others: FFT
-    filters, and the running sums of the mean filter and the Laws energy, whose rounding
-    depends on where a line starts."""
+    the Laws response). The running sums of the mean filter and the Laws energy round in
+    an order that starts at the line start, so their reach is negative: they read from
+    the image start (see _filter_crop). None for the FFT filters and Gabor (which takes
+    the region itself)."""
     if filter_type == "log":
         spacing_mm = np.broadcast_to(np.asarray(params["spacing_mm"], dtype=float), (3,))
         truncate = params.get("truncate", 4.0)
@@ -280,19 +361,135 @@ def _filter_reach(
         n = pywt.Wavelet(params.get("wavelet", "db2")).dec_len
         reach = sum((n - 1) * 2 ** (j - 1) + 1 for j in range(1, params.get("level", 1) + 1))
         return (reach, reach, reach)
-    if filter_type == "laws" and not params.get("compute_energy", False):
+    if filter_type == "laws":
         kernels = params.get("kernel", "L5E5E5")
         half = max(int(kernels[i + 1]) for i in range(0, len(kernels), 2)) // 2 + 1
+        if params.get("compute_energy", False):
+            half = -(half + params.get("energy_distance", 7) + 1)
         return (half, half, half)
-    if filter_type == "gabor" and not params.get("average_over_planes", False):
-        return (None, None, 0)
+    if filter_type == "mean":
+        reach = -(params.get("support", 15) // 2 + 1)
+        return (reach, reach, reach)
     return None
 
 
-def _intersect_mask(mask: Image, valid_mask: npt.NDArray[np.bool_]) -> Image:
-    """Return mask intersected with a boolean validity mask."""
+def _filter_crop(
+    region: tuple[slice, slice, slice],
+    reach: tuple[int, int, int],
+    shape: tuple[int, ...],
+    periodic: bool,
+) -> tuple[slice, slice, slice]:
+    """The part of the image that a filter reads for its values in `region`: the region
+    grown by the reach on both sides, or for a negative reach (running sums) from the
+    image start to the region end plus the reach. With a periodic boundary, the whole
+    axis where the part meets an image end (the filter then reads the other end)."""
+    crop = []
+    for r, h, n in zip(region, reach, shape, strict=True):
+        lo, hi = (0, r.stop - h) if h < 0 else (r.start - h, r.stop + h)
+        if periodic and (lo <= 0 or hi >= n):
+            lo, hi = 0, n
+        crop.append(slice(max(lo, 0), min(hi, n)))
+    return crop[0], crop[1], crop[2]
+
+
+def _cut_to_roi(state: "PipelineState", cuts: dict[tuple[int, Any], npt.NDArray[Any]]) -> None:
+    """Cut the images and masks of `state` to the ROI box, grown by `state.roi_reach` (mm),
+    when the box is smaller than the arrays. grid_shape and grid_offset keep the place of
+    the box in the whole grid. `cuts` keeps each cut while its array lives, so states that
+    share an array (and the memos that compare arrays by identity) share its cut."""
+    shape = state.image.array.shape
+    margin_mm = cast(float, state.roi_reach)
+    bbox = cast(
+        tuple[slice, slice, slice],
+        merge_bboxes(
+            compute_nonzero_bbox(state.morph_mask.array),
+            compute_nonzero_bbox(state.intensity_mask.array),
+        ),
+    )  # the ROI checks keep the masks non-empty
+    grow = [math.ceil(margin_mm / s) + 1 if margin_mm else 0 for s in state.image.spacing]
+    rs = [
+        slice(max(b.start - g, 0), min(b.stop + g, n))
+        for b, g, n in zip(bbox, grow, shape, strict=True)
+    ]
+    region = (rs[0], rs[1], rs[2])
+    if all(r.stop - r.start == n for r, n in zip(region, shape, strict=True)):
+        return
+    bounds = tuple((r.start, r.stop) for r in region)
+
+    def piece(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
+        key = (id(array), bounds)
+        if key not in cuts:  # a copy: a view would keep the whole array alive
+            cuts[key] = np.array(array[region], order="C")
+            weakref.finalize(array, cuts.pop, key, None)
+        return cuts[key]
+
+    def part(image: Image) -> Image:
+        return Image(
+            array=piece(image.array),
+            spacing=image.spacing,
+            origin=_region_origin(image.origin, image.direction, image.spacing, region),
+            direction=image.direction,
+            modality=image.modality,
+            source_mask=None if image.source_mask is None else piece(image.source_mask),
+        )
+
+    state.image, state.raw_image = part(state.image), part(state.raw_image)
+    state.morph_mask, state.intensity_mask = part(state.morph_mask), part(state.intensity_mask)
+    if state.source_mask is not None:
+        state.source_mask = part(state.source_mask)
+    offset = state.grid_offset or (0, 0, 0)
+    state.grid_shape = state.grid_shape or (int(shape[0]), int(shape[1]), int(shape[2]))
+    state.grid_offset = (
+        offset[0] + region[0].start,
+        offset[1] + region[1].start,
+        offset[2] + region[2].start,
+    )
+
+
+def _source_mask(valid: npt.NDArray[Any], grid: Image) -> Image:
+    """A source mask (True = valid voxel) on the grid of `grid`."""
     return Image(
-        array=(mask.array * valid_mask).astype(np.uint8),
+        array=valid,
+        spacing=grid.spacing,
+        origin=grid.origin,
+        direction=grid.direction,
+        modality="SOURCE_MASK",
+    )
+
+
+def _finite_intensity_mask(state: PipelineState, config_name: str) -> PipelineState:
+    """`state` with the ROI voxels of non-finite intensity (NaN or infinite) left out of
+    the intensity mask, with a warning. IBSI marks voxels outside the ROI with NaN, and
+    such a voxel has no intensity for any feature. The morphological mask stays as it is.
+
+    Raises:
+        EmptyROIMaskError: If no ROI voxel has a finite intensity.
+    """
+    mask = state.intensity_mask.array
+    # The ROI checks of the steps keep the intensity mask non-empty
+    box = cast(tuple[slice, slice, slice], compute_nonzero_bbox(mask))
+    bad = (mask[box] != 0) & ~np.isfinite(state.raw_image.array[box])
+    n_bad = int(np.count_nonzero(bad))
+    if n_bad == 0:
+        return state
+    finite = mask.copy()
+    finite[box][bad] = 0
+    msg = (
+        f"Left out {n_bad:,} ROI voxels with a NaN or infinite intensity from the "
+        f"intensity mask of config '{config_name}'."
+    )
+    logging.warning(msg)
+    warnings.warn(msg, UserWarning, stacklevel=3)
+    if not _has_roi(finite):
+        raise EmptyROIMaskError(f"No ROI voxel of config '{config_name}' has a finite intensity.")
+    return replace(state, intensity_mask=replace(state.intensity_mask, array=finite))
+
+
+def _intersect_mask(mask: Image, valid_mask: npt.NDArray[Any]) -> Image:
+    """Return mask intersected with a boolean validity mask, in the type of the mask
+    (labels of 256 and more stay as they are)."""
+    return Image(
+        array=np.where(valid_mask, mask.array, 0).astype(mask.array.dtype, copy=False),
         spacing=mask.spacing,
         origin=mask.origin,
         direction=mask.direction,
@@ -316,6 +513,163 @@ def _feature_uses_intensity_mask(feature_key: str, family: str) -> bool:
 # Most codes are 4 characters; a small number (e.g. ``1PR``) are 3.
 # An optional trailing ``_\d+`` suffix covers IVH keys like ``_BC2M_10``.
 _IBSI_CODE_RE = re.compile(r"_([A-Z0-9]{3,4})(?:_\d+)?$")
+
+
+_SOURCE_MODES = ("full_image", "roi_only", "auto")
+# extract_features options that hold the keyword arguments of one feature function
+_OPTION_GROUPS = (
+    "spatial_intensity_params",
+    "local_intensity_params",
+    "texture_matrix_params",
+    "ivh_params",
+    "ivh_discretisation",
+)
+_DISCRETISE_METHODS = ("FBN", "FBS", "FIXED_CUTOFFS")
+_RIESZ_FUNCTIONS = {"base": riesz_transform, "log": riesz_log, "simoncelli": riesz_simoncelli}
+_FILTER_FUNCTIONS: dict[str, Any] = {
+    "mean": mean_filter,
+    "log": laplacian_of_gaussian,
+    "laws": laws_filter,
+    "gabor": gabor_filter,
+    "wavelet": wavelet_transform,
+    "simoncelli": simoncelli_wavelet,
+    "riesz": riesz_transform,
+}
+
+
+def _hint(word: Any, options: Any) -> str:
+    """' (did you mean ...?)' for the closest option (any letter case), or ''."""
+    by_lower = {str(o).lower(): str(o) for o in options}
+    match = difflib.get_close_matches(str(word).lower(), list(by_lower), n=1)
+    return f" (did you mean '{by_lower[match[0]]}'?)" if match else ""
+
+
+def _filter_parameters(params: dict[str, Any]) -> set[str]:
+    """The step parameters that the filter of a filter step takes (its keyword arguments)."""
+    filter_type = str(params["type"])
+    function = _FILTER_FUNCTIONS[filter_type]
+    if filter_type == "riesz":
+        function = _RIESZ_FUNCTIONS.get(params.get("variant", "base"), riesz_transform)
+    names = set(list(inspect.signature(function).parameters)[1:]) - {"source_mask", "region"}
+    if filter_type == "laws":
+        names = (names - {"kernels"}) | {"kernel"}  # the step's 'kernel' is the first argument
+    if filter_type == "riesz":
+        names.add("variant")
+    return names | {"type", "boundary"}
+
+
+def _whole_number(value: Any) -> bool:
+    """An int, or a float with a whole value (32.0 from a YAML or JSON file)."""
+    return (isinstance(value, (int, np.integer)) and not isinstance(value, bool)) or (
+        isinstance(value, (float, np.floating)) and float(value).is_integer()
+    )
+
+
+def _spacing_problem(spacing: Any) -> Optional[str]:
+    """Why a new_spacing is not three positive numbers, or None."""
+    try:
+        values = [float(s) for s in spacing]
+    except (TypeError, ValueError):
+        return f"new_spacing must be three positive numbers, not {spacing!r}"
+    if len(values) != 3 or not all(v > 0 for v in values):
+        return f"new_spacing must be three positive numbers, not {spacing!r}"
+    return None
+
+
+def _step_problems(name: str, params: dict[str, Any], discretised: bool) -> list[str]:
+    """Problems with the parameter values of one known step."""
+    problems = []
+    if "apply_to" in params and params["apply_to"] not in _MASK_APPLY_TARGETS:
+        problems.append(
+            f"apply_to must be one of {_MASK_APPLY_TARGETS}, not {params['apply_to']!r}"
+        )
+    if name == "resample":
+        if "new_spacing" not in params:
+            problems.append("missing parameter 'new_spacing'")
+        else:
+            problem = _spacing_problem(params["new_spacing"])
+            problems.extend([problem] if problem else [])
+    elif name == "discretise":
+        method = params.get("method", "FBN")
+        if method not in _DISCRETISE_METHODS:
+            problems.append(f"unknown method '{method}'{_hint(method, _DISCRETISE_METHODS)}")
+        elif method == "FBN" and not (
+            _whole_number(params.get("n_bins")) and params["n_bins"] >= 1
+        ):
+            problems.append(f"FBN needs a whole n_bins of 1 or more, not {params.get('n_bins')!r}")
+        elif method == "FBS" and not (
+            isinstance(params.get("bin_width"), (int, float)) and params["bin_width"] > 0
+        ):
+            problems.append(f"FBS needs a bin_width above 0, not {params.get('bin_width')!r}")
+        elif method == "FIXED_CUTOFFS" and not params.get("cutoffs"):
+            problems.append("FIXED_CUTOFFS needs cutoffs")
+    elif name == "filter" and params.get("type") == "riesz":
+        variant = params.get("variant", "base")
+        if variant not in _RIESZ_FUNCTIONS:
+            problems.append(f"unknown riesz variant '{variant}'{_hint(variant, _RIESZ_FUNCTIONS)}")
+    elif name == "extract_features":
+        for key in _OPTION_GROUPS:
+            if params.get(key) is not None and not isinstance(params[key], dict):
+                problems.append(f"{key} must be a dict, not {params[key]!r}")
+        families = params.get("families", _DEFAULT_FEATURE_FAMILIES)
+        if isinstance(families, str) or not isinstance(families, (list, tuple)):
+            return problems + [f"families must be a list of names, not {families!r}"]
+        known = sorted(
+            set(FEATURE_NAMES) | {"texture"} | {f"texture_{f}" for f in _TEXTURE_FAMILIES}
+        )
+        for family in families:
+            if family not in known:
+                problems.append(f"unknown feature family '{family}'{_hint(family, known)}")
+            elif _normalize_texture_family(family) is not None and not discretised:
+                problems.append(f"the '{family}' features need an earlier 'discretise' step")
+    return problems
+
+
+def _config_problems(steps: Any, source_mode: Any = "full_image") -> list[str]:
+    """Everything wrong with a configuration, one message per problem ("step 2
+    (resample): ..."). An empty list means the configuration is valid."""
+    if not isinstance(steps, list):
+        return ["steps must be a list"]
+    problems = []
+    if source_mode not in _SOURCE_MODES:
+        problems.append(f"source_mode must be one of {_SOURCE_MODES}, not {source_mode!r}")
+    discretised = False
+    for index, step in enumerate(steps):
+        where = f"step {index}"
+        if not isinstance(step, dict):
+            problems.append(f"{where}: must be a dictionary")
+            continue
+        name = step.get("step")
+        if not name:
+            problems.append(f"{where}: missing 'step' key")
+            continue
+        if name not in RadiomicsPipeline._VALID_STEPS:
+            problems.append(
+                f"{where}: unknown step type '{name}'{_hint(name, RadiomicsPipeline._VALID_STEPS)}"
+            )
+            continue
+        where = f"{where} ({name})"
+        params = step.get("params") or {}
+        if not isinstance(params, dict):
+            problems.append(f"{where}: params must be a dictionary")
+            continue
+        if name == "filter" and params.get("type") not in _FILTER_FUNCTIONS:
+            filter_type = params.get("type")
+            problems.append(
+                f"{where}: unknown filter type {filter_type!r}{_hint(filter_type, _FILTER_FUNCTIONS)}"
+            )
+            continue
+        allowed = (
+            _filter_parameters(params) if name == "filter" else RadiomicsPipeline._VALID_STEPS[name]
+        )
+        for key in params:
+            if key not in allowed:
+                problems.append(f"{where}: unknown parameter '{key}'{_hint(key, allowed)}")
+        problems.extend(
+            f"{where}: {problem}" for problem in _step_problems(name, params, discretised)
+        )
+        discretised = discretised or name == "discretise"
+    return problems
 
 
 class SourceMode(Enum):
@@ -405,9 +759,14 @@ class PipelineState:
     source_mask: Optional[Image] = None
     sentinel_detected: bool = False
     sentinel_value: Optional[float] = None
-    # No later step reads the image outside the ROI region, so a filter may compute
-    # only that region (the rest is 0).
-    limit_to_roi: bool = False
+    # How far (mm) outside the ROI box the steps after a filter, a resample or a discretise
+    # step read (see _roi_reach), so that the step computes only that region: a filter
+    # writes 0 outside it, a resample makes only that region of the new grid, a discretise
+    # step cuts the arrays to it. None: the whole image. grid_shape is the whole grid when
+    # the arrays hold a region.
+    roi_reach: Optional[float] = None
+    grid_shape: Optional[tuple[int, int, int]] = None
+    grid_offset: Optional[tuple[int, int, int]] = None  # the first voxel of the region
 
 
 class EmptyROIMaskError(ValueError):
@@ -480,6 +839,10 @@ class RadiomicsPipeline:
         # Deduplication statistics (reset on each run)
         self._dedup_reused_count: int = 0
         self._dedup_computed_count: int = 0
+        # (morph mask, intensity mask, GLDZM distance map) of the last texture pass in run()
+        self._last_distance_map: Optional[tuple[Any, Any, npt.NDArray[Any]]] = None
+        # The ROI box cuts of run() (see _cut_to_roi), each kept while its array lives
+        self._roi_cuts: dict[tuple[int, Any], npt.NDArray[Any]] = {}
 
         if load_standard:
             self._load_predefined_configs()
@@ -603,8 +966,9 @@ class RadiomicsPipeline:
         self,
         name: str,
         steps: list[dict[str, Any]],
-        source_mode: str = "full_image",
+        source_mode: "str | SourceMode" = "full_image",
         sentinel_value: Optional[float] = None,
+        validate: bool = True,
     ) -> "RadiomicsPipeline":
         """
         Add a processing configuration.
@@ -629,11 +993,18 @@ class RadiomicsPipeline:
                 - "auto": Auto-detect sentinel values; emit warning if found.
             sentinel_value: If specified, explicitly set the sentinel value instead
                 of auto-detecting. Only used when source_mode is "roi_only" or "auto".
+            validate: If True (default), check the steps now: the step names, the
+                parameter names of each step and each filter type, the feature family
+                names, the discretise method and its bin settings, and that texture
+                features have an earlier 'discretise' step. A mistake raises one
+                ValueError that lists every problem (with the closest valid name), so
+                it cannot give silent NaN columns later. False only checks the
+                structure.
 
         Raises:
             ValueError: If `steps` is not a list, if `source_mode` is not one of
-                "full_image", "roi_only", "auto", or if any step is not a dict
-                or is missing the 'step' key.
+                "full_image", "roi_only", "auto", if any step is not a dict or is
+                missing the 'step' key, or (with `validate`) for any problem above.
 
         Note:
             - Texture features require a prior 'discretise' step.
@@ -678,17 +1049,29 @@ class RadiomicsPipeline:
             raise ValueError("Configuration must be a list of steps")
 
         # Validate source_mode
-        valid_modes = {"full_image", "roi_only", "auto"}
-        if source_mode not in valid_modes:
-            raise ValueError(f"Invalid source_mode '{source_mode}'. Must be one of: {valid_modes}")
+        if isinstance(source_mode, SourceMode):
+            source_mode = source_mode.value
+        if source_mode not in _SOURCE_MODES:
+            raise ValueError(
+                f"Invalid source_mode '{source_mode}'. Must be one of: {set(_SOURCE_MODES)}"
+            )
 
         for step in steps:
             if not isinstance(step, dict):
                 raise ValueError("Each step must be a dictionary")
             if "step" not in step:
                 raise ValueError("Each step must have a 'step' key")
+        if validate:
+            problems = _config_problems(steps, source_mode)
+            if problems:
+                raise ValueError(
+                    f"Configuration '{name}' has {len(problems)} problem(s):\n  - "
+                    + "\n  - ".join(problems)
+                )
 
-        self._configs[name] = steps
+        # The pipeline keeps its own copy: a later edit of the caller's list (to build
+        # the next configuration from it) must not change this one.
+        self._configs[name] = copy.deepcopy(steps)
         self._config_metadata[name] = {
             "source_mode": source_mode,
             "sentinel_value": sentinel_value,
@@ -778,9 +1161,18 @@ class RadiomicsPipeline:
         if isinstance(image, str):
             orig_img = load_image(image)
             img_source = image
-        else:
+        elif isinstance(image, Image):
             orig_img = image
             img_source = "InMemory"
+        else:
+            raise TypeError(
+                f"image must be a path or an Image, not {type(image).__name__}; wrap an "
+                "array as Image(array, spacing, origin)."
+            )
+        if orig_img.array.dtype != np.float64:
+            # The loaders give float64. An integer or float32 array would resample in its
+            # own type (rounded, and on one core), so an in-memory image gets float64 too.
+            orig_img = replace(orig_img, array=orig_img.array.astype(np.float64))
 
         mask_was_generated = False
         if mask is None or (isinstance(mask, str) and mask.strip() == ""):
@@ -796,9 +1188,14 @@ class RadiomicsPipeline:
                 min_overlap_fraction=mask_min_overlap_fraction,
             )
             mask_source = mask
-        else:
+        elif isinstance(mask, Image):
             orig_mask = mask
             mask_source = "InMemory"
+        else:
+            raise TypeError(
+                f"mask must be a path, an Image or None, not {type(mask).__name__}; wrap an "
+                "array as Image(array, spacing, origin)."
+            )
 
         _validate_geometry(orig_mask, orig_img, "mask", "image")
 
@@ -807,7 +1204,19 @@ class RadiomicsPipeline:
         # Determine which configs to run
         if config_names is None:
             target_configs = list(self._configs.keys())
+            standard = self.get_all_standard_config_names()
+            if standard:
+                warnings.warn(
+                    f"run() without config_names runs all {len(target_configs)} configurations, "
+                    f"also the {len(standard)} standard ones ({', '.join(standard)}). Pass "
+                    "config_names to choose, or create the pipeline with "
+                    "RadiomicsPipeline(load_standard=False).",
+                    UserWarning,
+                    stacklevel=2,
+                )
         else:
+            if isinstance(config_names, str):
+                config_names = [config_names]
             target_configs = []
             for name in config_names:
                 if name == "all_standard":
@@ -815,7 +1224,10 @@ class RadiomicsPipeline:
                 elif name in self._configs:
                     target_configs.append(name)
                 else:
-                    raise ValueError(f"Configuration '{name}' not found.")
+                    raise ValueError(
+                        f"Configuration '{name}' not found.{_hint(name, self._configs)}"
+                    )
+            target_configs = list(dict.fromkeys(target_configs))  # each name runs once
 
         # Create or regenerate deduplication plan if enabled
         dedup_plan: DeduplicationPlan | None = None
@@ -824,6 +1236,10 @@ class RadiomicsPipeline:
         # Reset deduplication statistics for this run
         self._dedup_reused_count = 0
         self._dedup_computed_count = 0
+        self._last_distance_map = None
+        self._roi_cuts.clear()
+        # NaN or infinite intensities leave the intensity mask before each extraction
+        nonfinite = not _all_finite(orig_img.array)
 
         if self._deduplication_enabled and len(target_configs) > 1:
             # Get configs for analysis
@@ -903,13 +1319,7 @@ class RadiomicsPipeline:
             elif source_mode == SourceMode.ROI_ONLY:
                 # Use ROI mask as source mask
                 if source_key not in source_masks:
-                    source_masks[source_key] = Image(
-                        array=(orig_mask.array > 0).astype(np.uint8),
-                        spacing=orig_mask.spacing,
-                        origin=orig_mask.origin,
-                        direction=orig_mask.direction,
-                        modality="SOURCE_MASK",
-                    )
+                    source_masks[source_key] = _source_mask(orig_mask.array != 0, orig_mask)
                 source_mask = source_masks[source_key]
 
             elif source_mode == SourceMode.AUTO:
@@ -978,8 +1388,9 @@ class RadiomicsPipeline:
 
                 if sentinel_detected and detected_sentinel_value is not None:
                     if source_key not in source_masks:
-                        source_masks[source_key] = create_source_mask_from_sentinel(
-                            orig_img, detected_sentinel_value
+                        # create_source_mask_from_sentinel as bool, with no uint8 copy
+                        source_masks[source_key] = _source_mask(
+                            orig_img.array != detected_sentinel_value, orig_img
                         )
                     source_mask = source_masks[source_key]
             if source_users[source_key] == 0:
@@ -1071,18 +1482,27 @@ class RadiomicsPipeline:
                     current_step = step_def
                     step_name = step_def["step"]
                     params = step_def.get("params", {})
-                    if step_name == "filter":
-                        state.limit_to_roi = not _needs_full_grid(steps[index + 1 :])
+                    if step_name in ("filter", "resample"):
+                        state.roi_reach = _roi_reach(steps[index + 1 :])
+                    elif step_name == "discretise":  # a small image is not cut
+                        state.roi_reach = (
+                            _roi_reach(steps[index + 1 :])
+                            if state.image.array.size >= _CUT_MIN_SIZE
+                            else None
+                        )
 
                     # Execute Step
                     if step_name == "extract_features":
+                        extract_state = (
+                            _finite_intensity_mask(state, config_name) if nonfinite else state
+                        )
                         # Use deduplication if plan exists
                         if dedup_plan is not None:
                             features = self._extract_features_with_dedup(
-                                state, params, config_name, dedup_plan, family_cache
+                                extract_state, params, config_name, dedup_plan, family_cache
                             )
                         else:
-                            features = self._extract_features(state, params)
+                            features = self._extract_features(extract_state, params)
                         config_features.update(features)
                     else:
                         self._execute_preprocessing_step(state, step_name, params)
@@ -1099,7 +1519,15 @@ class RadiomicsPipeline:
                         step_log_entry["params_requested"] = state.filter_params_requested
                         step_log_entry["params_effective"] = state.filter_params_effective
                     config_log["steps_executed"].append(step_log_entry)
-                    if index < len(keys) and users[keys[index]] > 1 and keys[index] not in shared:
+                    if (
+                        index < len(keys)
+                        and users[keys[index]] > 1
+                        and keys[index] not in shared
+                        # a later config starts here, not only past here: else the
+                        # state (maybe a full image) would stay unused
+                        and users[keys[index]]
+                        > (users[keys[index + 1]] if index + 1 < len(keys) else 0)
+                    ):
                         shared[keys[index]] = (replace(state), list(config_log["steps_executed"]))
                 config_log["status"] = "completed"
                 config_log["result_feature_count"] = len(config_features)
@@ -1148,6 +1576,8 @@ class RadiomicsPipeline:
             series = pd.Series(config_features)
             all_results[config_name] = series
 
+        self._last_distance_map = None
+        self._roi_cuts.clear()
         return all_results
 
     def clear_log(self) -> None:
@@ -1161,7 +1591,7 @@ class RadiomicsPipeline:
         step explicitly binarizes/selects labels first. Each check reads the whole
         mask, so a morph mask that is the intensity mask's array is not read again.
         """
-        has_intensity_roi = bool(state.intensity_mask.array.any())
+        has_intensity_roi = _has_roi(state.intensity_mask.array)
         if not has_intensity_roi:
             raise EmptyROIMaskError(
                 "ROI is empty after preprocessing "
@@ -1170,7 +1600,7 @@ class RadiomicsPipeline:
             )
         if state.morph_mask.array is state.intensity_mask.array:
             return
-        has_morph_roi = bool(state.morph_mask.array.any())
+        has_morph_roi = _has_roi(state.morph_mask.array)
         if not has_morph_roi:
             raise EmptyROIMaskError(
                 "ROI is empty after preprocessing "
@@ -1200,6 +1630,37 @@ class RadiomicsPipeline:
             if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
                 source_mask_arg = state.source_mask
 
+            # When no later step reads the new grid away from the ROI, the resample computes
+            # only the region around the ROI box (grown by the reach of the later steps): the
+            # arrays then hold that region, with the values of the whole grid.
+            region = None
+            if state.roi_reach is not None:
+                margin_mm = state.roi_reach
+                region = _roi_region(
+                    cast(
+                        tuple[slice, slice, slice],
+                        merge_bboxes(
+                            compute_nonzero_bbox(state.morph_mask.array),
+                            compute_nonzero_bbox(state.intensity_mask.array),
+                        ),
+                    ),  # the ROI checks keep the masks non-empty
+                    state.image.array.shape,
+                    state.image.spacing,
+                    spacing,
+                    cast(
+                        tuple[int, int, int],
+                        tuple(
+                            math.ceil(margin_mm / s) + 1 if margin_mm > 0 else 0 for s in spacing
+                        ),
+                    ),
+                )
+                grid = _output_grid(state.image.array.shape, state.image.spacing, spacing)[0]
+                if all(r.stop - r.start == n for r, n in zip(region, grid, strict=True)):
+                    region = None
+                else:
+                    state.grid_shape = (int(grid[0]), int(grid[1]), int(grid[2]))
+                    state.grid_offset = (region[0].start, region[1].start, region[2].start)
+
             # Update Image and raw_image
             state.image = resample_image(
                 state.image,
@@ -1207,18 +1668,14 @@ class RadiomicsPipeline:
                 interpolation=interp_img,
                 round_intensities=round_intensities_flag,
                 source_mask=source_mask_arg,
+                region=region,
             )
             state.raw_image = state.image  # Keep raw_image in sync before discretisation
 
-            # Propagate source_mask from resampled image if it was used
+            # Propagate source_mask from resampled image if it was used (one bool array,
+            # shared: nothing changes a source mask in place)
             if state.image.has_source_mask and state.image.source_mask is not None:
-                state.source_mask = Image(
-                    array=state.image.source_mask.astype(np.uint8),
-                    spacing=state.image.spacing,
-                    origin=state.image.origin,
-                    direction=state.image.direction,
-                    modality="SOURCE_MASK",
-                )
+                state.source_mask = _source_mask(state.image.source_mask, state.image)
 
             # Update Masks
             thresh_arg = mask_thresh if interp_mask != "nearest" else None
@@ -1232,6 +1689,7 @@ class RadiomicsPipeline:
                 spacing,
                 interpolation=interp_mask,
                 mask_threshold=thresh_arg,
+                region=region,
             )
             if masks_in_sync:
                 state.intensity_mask = state.morph_mask
@@ -1241,14 +1699,15 @@ class RadiomicsPipeline:
                     spacing,
                     interpolation=interp_mask,
                     mask_threshold=thresh_arg,
+                    region=region,
                 )
 
             # CRITICAL: If valid source mask exists, apply it to both masks.
             # This prevents background (often 0 after resampling) from being
             # considered part of the ROI if the resegmentation range includes 0.
-            if state.source_mask is not None:
-                # Ensure binary mask semantics
-                valid_mask = state.source_mask.array > 0
+            # A source mask with no invalid voxel changes no mask.
+            valid_mask = None if state.source_mask is None else state.source_mask.array
+            if valid_mask is not None and not valid_mask.all():
                 masks_in_sync = state.morph_mask.array is state.intensity_mask.array
                 state.morph_mask = _intersect_mask(state.morph_mask, valid_mask)
                 if masks_in_sync:
@@ -1368,6 +1827,12 @@ class RadiomicsPipeline:
             if "method" in disc_params:
                 del disc_params["method"]
 
+            # When no later step reads the image away from the ROI, the arrays are cut to
+            # the ROI box (grown by the local intensity sphere when a later step reads it),
+            # so that the binning and the features work on the box only.
+            if state.roi_reach is not None:
+                _cut_to_roi(state, self._roi_cuts)
+
             state.image = cast(
                 Image,
                 discretise_image(
@@ -1380,14 +1845,16 @@ class RadiomicsPipeline:
 
             state.is_discretised = True
             state.discretisation_method = method
-            state.n_bins = params.get("n_bins")
+            n_bins = params.get("n_bins")
+            state.n_bins = int(n_bins) if n_bins is not None else None  # 32.0 from a file
             state.bin_width = params.get("bin_width")
 
-            # If FBS, n_bins is dynamic. We can estimate it from the result.
+            # If FBS, n_bins is dynamic: the largest bin in the ROI (one fused pass over
+            # the masks, not a gather of the whole grid)
             if method == "FBS":
-                masked_vals = apply_mask(state.image, state.intensity_mask)
-                if len(masked_vals) > 0:
-                    state.n_bins = int(np.max(masked_vals))
+                found = roi_min_max(state.image.array, state.intensity_mask.array)
+                if found is not None:
+                    state.n_bins = int(found[1])
                 else:
                     raise EmptyROIMaskError(
                         "ROI is empty after preprocessing (discretise). "
@@ -1426,7 +1893,7 @@ class RadiomicsPipeline:
             # filters exclude sentinel voxels (normalized convolution for mean/log/laws,
             # zero-fill for the FFT-based ones).
             if state.source_mode != SourceMode.FULL_IMAGE and state.source_mask is not None:
-                filter_params["source_mask"] = state.source_mask.array > 0
+                filter_params["source_mask"] = state.source_mask.array
 
             img_arr = state.image.array
             if filter_type == "log":
@@ -1434,27 +1901,41 @@ class RadiomicsPipeline:
 
             # When no later step reads the image outside the ROI, a filter whose values
             # do not depend on where the image ends filters only the ROI region (grown by
-            # the local intensity sphere) plus its reach; the rest of the image is 0.
+            # the local intensity sphere when a later step reads it) and the part that
+            # the region reads; the rest of the image is 0. A source mask is cut the same.
             region = None
             reach = _filter_reach(filter_type, {**params, **filter_params}, state.image.spacing)
-            if state.limit_to_roi and reach is not None and "source_mask" not in filter_params:
+            takes_region = filter_type == "gabor"  # it filters whole slices through the region
+            if (
+                state.roi_reach is not None
+                and (reach is not None or takes_region)
+                and img_arr.size >= _FILTER_REGION_MIN
+            ):
                 bbox = merge_bboxes(
                     compute_nonzero_bbox(state.morph_mask.array),
                     compute_nonzero_bbox(state.intensity_mask.array),
                 )
                 if bbox is not None:
                     shape = img_arr.shape
-                    grow = [math.ceil(_LOCAL_PEAK_RADIUS_MM / s) + 1 for s in state.image.spacing]
+                    margin_mm = state.roi_reach
+                    grow = [
+                        math.ceil(margin_mm / s) + 1 if margin_mm else 0
+                        for s in state.image.spacing
+                    ]
                     rs = [
                         slice(max(b.start - g, 0), min(b.stop + g, n))
                         for b, g, n in zip(bbox, grow, shape, strict=True)
                     ]
                     region = (rs[0], rs[1], rs[2])
-                    crop = tuple(
-                        slice(0, n) if h is None else slice(max(r.start - h, 0), min(r.stop + h, n))
-                        for r, h, n in zip(rs, reach, shape, strict=True)
-                    )
-                    img_arr = img_arr[crop]
+                    if reach is None:  # Gabor: the result is the region
+                        crop = region
+                    else:
+                        crop = _filter_crop(
+                            region, reach, shape, boundary is BoundaryCondition.PERIODIC
+                        )
+                        img_arr = img_arr[crop]
+                        if "source_mask" in filter_params:
+                            filter_params["source_mask"] = filter_params["source_mask"][crop]
 
             # Each branch calls its filter; mean/log/laws return (result, valid_mask)
             # when a source mask is supplied, the others return a bare array. The
@@ -1476,7 +1957,7 @@ class RadiomicsPipeline:
             elif filter_type == "gabor":
                 filter_params["boundary"] = boundary
                 filter_params.setdefault("spacing_mm", state.image.spacing)
-                result = gabor_filter(img_arr, **filter_params)
+                result = gabor_filter(img_arr, **filter_params, region=region)
             elif filter_type == "wavelet":
                 filter_params["boundary"] = boundary
                 result = wavelet_transform(img_arr, **filter_params)
@@ -1532,6 +2013,8 @@ class RadiomicsPipeline:
             # normalised to the effective value (covering the FFT-based filters'
             # own "periodic" default when no boundary was explicitly requested).
             effective_params = dict(filter_params)
+            if "source_mask" in effective_params:  # the whole mask, not the part filtered
+                effective_params["source_mask"] = state.source_mask.array  # type: ignore[union-attr]
             effective_params["boundary"] = boundary_effective
             if filter_type == "laws":
                 effective_params["kernel"] = kernel
@@ -1668,9 +2151,12 @@ class RadiomicsPipeline:
 
         # Nonzero mask bboxes are memoised per extraction pass, so morphology and
         # repeated (single-family) texture calls don't rescan the full volume.
-        bbox_cache: dict[int, Optional[tuple[slice, slice, slice]]] = {}
+        bbox_cache: _PassCache = {}
+        texture_cache = _texture_cache(families)
         for family in families:
-            results.update(self._extract_single_family(state, family, params, bbox_cache))
+            results.update(
+                self._extract_single_family(state, family, params, bbox_cache, texture_cache)
+            )
 
         # Ensure every expected feature key is present (NaN for partial failures)
         self._fill_missing_features(results, families, params)
@@ -1705,7 +2191,8 @@ class RadiomicsPipeline:
         families = params.get("families", _DEFAULT_FEATURE_FAMILIES)
 
         # Nonzero mask bboxes are memoised per extraction pass (see _extract_features).
-        bbox_cache: dict[int, Optional[tuple[slice, slice, slice]]] = {}
+        bbox_cache: _PassCache = {}
+        cache_keys = {}
         for family in families:
             # Normalize texture aliases so raw subfamily and texture_* requests
             # share the same signature/cache behavior.
@@ -1713,8 +2200,13 @@ class RadiomicsPipeline:
 
             # Get signature from plan using (config_name, family) tuple key
             sig = plan.signatures.get((config_name, sig_family))
-            cache_key = (sig_family, sig.hash) if sig else None
-
+            cache_keys[family] = (sig_family, sig.hash) if sig else None
+        # The texture families still to compute share one matrix pass
+        texture_cache = _texture_cache(
+            [family for family in families if cache_keys[family] not in family_cache]
+        )
+        for family in families:
+            cache_key = cache_keys[family]
             if cache_key is not None and cache_key in family_cache:
                 # Reuse cached results
                 cached = family_cache[cache_key]
@@ -1722,7 +2214,9 @@ class RadiomicsPipeline:
                 self._dedup_reused_count += 1
             else:
                 # Compute this family
-                family_results = self._extract_single_family(state, family, params, bbox_cache)
+                family_results = self._extract_single_family(
+                    state, family, params, bbox_cache, texture_cache
+                )
                 results.update(family_results)
 
                 # Cache if we have a signature
@@ -1737,19 +2231,19 @@ class RadiomicsPipeline:
     @staticmethod
     def _cached_nonzero_bbox(
         arr: npt.NDArray[np.floating[Any]],
-        cache: dict[int, Optional[tuple[slice, slice, slice]]],
+        cache: _PassCache,
     ) -> Optional[tuple[slice, slice, slice]]:
         """Nonzero bbox of `arr`, memoised by array identity for one extraction pass."""
         key = id(arr)
         if key not in cache:
             cache[key] = compute_nonzero_bbox(arr)
-        return cache[key]
+        return cast(Optional[tuple[slice, slice, slice]], cache[key])
 
     def _masked_values(
         self,
         image: Image | npt.NDArray[Any],
         mask: Image,
-        bbox_cache: dict[int, Optional[tuple[slice, slice, slice]]],
+        bbox_cache: _PassCache,
     ) -> npt.NDArray[np.floating[Any]]:
         """ROI voxel values, equivalent to ``apply_mask(image, mask)``.
 
@@ -1764,17 +2258,29 @@ class RadiomicsPipeline:
         img_arr = image.array if isinstance(image, Image) else image
         return apply_mask(img_arr[bbox], mask.array[bbox])
 
+    def _roi_values(
+        self, image: Image, mask: Image, cache: _PassCache
+    ) -> npt.NDArray[np.floating[Any]]:
+        """`_masked_values` of an image of the state, gathered once per extraction pass
+        (for example, the histogram and the IVH read the same values)."""
+        key = (id(image.array), id(mask.array))
+        if key not in cache:
+            cache[key] = self._masked_values(image, mask, cache)
+        return cast(npt.NDArray[np.floating[Any]], cache[key])
+
     def _extract_single_family(
         self,
         state: PipelineState,
         family: str,
         params: dict[str, Any],
-        bbox_cache: Optional[dict[int, Optional[tuple[slice, slice, slice]]]] = None,
+        bbox_cache: Optional[_PassCache] = None,
+        texture_cache: Optional[dict[str, Optional[dict[str, Any]]]] = None,
     ) -> dict[str, Any]:
         """
         Extract features for a single family.
 
-        This is a refactored helper to enable per-family deduplication.
+        This is a refactored helper to enable per-family deduplication. The texture
+        families of `texture_cache` (see `_texture_cache`) share one matrix pass.
         """
         results: dict[str, Any] = {}
         if bbox_cache is None:
@@ -1793,11 +2299,12 @@ class RadiomicsPipeline:
                     state.raw_image,
                     intensity_mask=state.intensity_mask,
                     roi_bbox=self._cached_nonzero_bbox(state.morph_mask.array, bbox_cache),
+                    grid_offset=state.grid_offset,
                 )
             )
 
         elif family == "intensity":
-            masked_values = self._masked_values(state.raw_image, state.intensity_mask, bbox_cache)
+            masked_values = self._roi_values(state.raw_image, state.intensity_mask, bbox_cache)
             results.update(calculate_intensity_features(masked_values))
 
             include_spatial = bool(params.get("include_spatial_intensity", False))
@@ -1840,7 +2347,7 @@ class RadiomicsPipeline:
                     UserWarning,
                     stacklevel=2,
                 )
-            masked_values = self._masked_values(state.image, state.intensity_mask, bbox_cache)
+            masked_values = self._roi_values(state.image, state.intensity_mask, bbox_cache)
             results.update(
                 calculate_intensity_histogram_features(
                     masked_values,
@@ -1856,7 +2363,7 @@ class RadiomicsPipeline:
         elif (texture_family := _normalize_texture_family(family)) is not None:
             results.update(
                 self._compute_texture_features(
-                    state, texture_family, texture_matrix_params, bbox_cache
+                    state, texture_family, texture_matrix_params, bbox_cache, texture_cache
                 )
             )
 
@@ -1867,7 +2374,7 @@ class RadiomicsPipeline:
         state: PipelineState,
         params: dict[str, Any],
         ivh_params: dict[str, Any],
-        bbox_cache: Optional[dict[int, Optional[tuple[slice, slice, slice]]]] = None,
+        bbox_cache: Optional[_PassCache] = None,
     ) -> dict[str, Any]:
         """Compute IVH features (helper for _extract_single_family)."""
         if bbox_cache is None:
@@ -1879,7 +2386,7 @@ class RadiomicsPipeline:
         ivh_disc_min_val: Optional[float] = None
 
         if ivh_use_continuous:
-            ivh_values = self._masked_values(state.raw_image, state.intensity_mask, bbox_cache)
+            ivh_values = self._roi_values(state.raw_image, state.intensity_mask, bbox_cache)
         elif ivh_discretisation:
             ivh_disc_params = ivh_discretisation.copy()
             ivh_method = ivh_disc_params.pop("method", "FBS")
@@ -1892,7 +2399,7 @@ class RadiomicsPipeline:
                 and (ivh_method != "FBN" or ivh_disc_params.get("max_val") is not None)
             )
             if limits_given:
-                raw_values = self._masked_values(state.raw_image, state.intensity_mask, bbox_cache)
+                raw_values = self._roi_values(state.raw_image, state.intensity_mask, bbox_cache)
                 ivh_values = cast(
                     npt.NDArray[Any],
                     discretise_image(raw_values, method=ivh_method, **ivh_disc_params),
@@ -1906,7 +2413,7 @@ class RadiomicsPipeline:
                 )
                 ivh_values = self._masked_values(temp_ivh_disc, state.intensity_mask, bbox_cache)
         else:
-            ivh_values = self._masked_values(state.image, state.intensity_mask, bbox_cache)
+            ivh_values = self._roi_values(state.image, state.intensity_mask, bbox_cache)
 
         ivh_kwargs: dict[str, Any] = {}
         if ivh_disc_bin_width is not None:
@@ -1940,12 +2447,37 @@ class RadiomicsPipeline:
         state: PipelineState,
         family: str,
         texture_matrix_params: dict[str, Any],
-        bbox_cache: Optional[dict[int, Optional[tuple[slice, slice, slice]]]] = None,
+        bbox_cache: Optional[_PassCache] = None,
+        texture_cache: Optional[dict[str, Optional[dict[str, Any]]]] = None,
     ) -> dict[str, Any]:
-        """Compute texture features (helper for _extract_single_family)."""
-        results: dict[str, Any] = {}
+        """Compute texture features (helper for _extract_single_family).
+
+        The families of `texture_cache` that have no results yet are computed in the
+        same matrix pass as `family`, and their results are kept there.
+        """
         if bbox_cache is None:
             bbox_cache = {}
+        if texture_cache is None:
+            texture_cache = {}
+        wanted = _feature_name_families(family)
+        if any(texture_cache.get(name) is None for name in wanted):
+            todo = {*wanted, *(name for name, done in texture_cache.items() if done is None)}
+            texture_cache.update(self._texture_pass(state, todo, texture_matrix_params, bbox_cache))
+        results: dict[str, Any] = {}
+        for name in wanted:
+            results.update(cast(dict[str, Any], texture_cache[name]))
+        return results
+
+    def _texture_pass(
+        self,
+        state: PipelineState,
+        families: set[str],
+        texture_matrix_params: dict[str, Any],
+        bbox_cache: _PassCache,
+    ) -> dict[str, dict[str, Any]]:
+        """The features of each texture family in `families` (glcm, glrlm, ...), from
+        one matrix pass."""
+        results: dict[str, dict[str, Any]] = {}
 
         if not state.is_discretised:
             raise ValueError(
@@ -1958,7 +2490,9 @@ class RadiomicsPipeline:
 
         matrix_kwargs: dict[str, Any] = {}
         if "ngldm_alpha" in texture_matrix_params:
-            matrix_kwargs["ngldm_alpha"] = texture_matrix_params["ngldm_alpha"]
+            # Grey-level differences are whole numbers, so |d| <= alpha is |d| <= floor(alpha)
+            # (one compiled kernel for every alpha, also 1.0 from a file)
+            matrix_kwargs["ngldm_alpha"] = math.floor(texture_matrix_params["ngldm_alpha"])
 
         # Crop once to the ROI bounding box (union of intensity and morph masks, to
         # preserve GLDZM distance-map correctness) and use the cropped arrays for the
@@ -1980,17 +2514,30 @@ class RadiomicsPipeline:
             intensity_mask_c = state.intensity_mask.array[bbox]
             morph_mask_c = state.morph_mask.array[bbox]
 
-        # If a specific texture family is requested, only compute its matrix.
-        want_glcm = family in ("texture", "texture_glcm", "glcm")
-        want_glrlm = family in ("texture", "texture_glrlm", "glrlm")
-        want_glszm = family in ("texture", "texture_glszm", "glszm")
-        want_gldzm = family in ("texture", "texture_gldzm", "gldzm")
-        want_ngtdm = family in ("texture", "texture_ngtdm", "ngtdm")
-        want_ngldm = family in ("texture", "texture_ngldm", "ngldm")
+        # Only the matrices of the requested families are computed.
+        want_glcm = "glcm" in families
+        want_glrlm = "glrlm" in families
+        want_glszm = "glszm" in families
+        want_gldzm = "gldzm" in families
+        want_ngtdm = "ngtdm" in families
+        want_ngldm = "ngldm" in families
 
         # Compact matrices: the same features from smaller tables. When the two masks are
         # one array, the distance map uses the ROI of the intensity mask, which is the same.
         masks_in_sync = state.morph_mask.array is state.intensity_mask.array
+        # A one-slice image has an axis of size 1: the GLCM and the GLRLM use the in-plane
+        # directions, and the GLDZM distance map is the in-plane one.
+        planar = _planar_axes(state.grid_shape or state.image.array.shape)
+        # The GLDZM distance map depends only on the two masks. Configurations that share
+        # them (one shared resampled state) reuse the last map; weak references keep no
+        # mask alive.
+        last = self._last_distance_map
+        reuse = (
+            want_gldzm
+            and last is not None
+            and last[0]() is state.morph_mask.array
+            and last[1]() is state.intensity_mask.array
+        )
         texture_matrices = _texture_matrices(
             disc_c,
             intensity_mask_c,
@@ -2003,62 +2550,61 @@ class RadiomicsPipeline:
             calc_glszm=want_glszm,
             calc_gldzm=want_gldzm,
             compact=True,
+            distance_map=last[2] if reuse and last is not None else None,
+            planar=planar,
             **matrix_kwargs,
         )
+        if "distance_map" in texture_matrices and not reuse:
+            self._last_distance_map = (
+                weakref.ref(state.morph_mask.array),
+                weakref.ref(state.intensity_mask.array),
+                texture_matrices["distance_map"],
+            )
         # The bool ROI gives the same ROI voxel counts as intensity_mask_c, from a fast
-        # count. GLCM keeps intensity_mask_c: its grey-level range uses `mask > 0`.
+        # count.
         roi = texture_matrices["roi"]
 
         if want_glcm:
-            results.update(
-                calculate_glcm_features(
-                    disc_c,
-                    intensity_mask_c,
-                    n_bins,
-                    glcm_matrix=texture_matrices["glcm"],
-                )
+            results["glcm"] = calculate_glcm_features(
+                disc_c,
+                roi.view(np.uint8),  # the texture ROI, in one mask type and layout
+                n_bins,
+                glcm_matrix=texture_matrices["glcm"],
             )
         if want_glrlm:
-            results.update(
-                calculate_glrlm_features(
-                    disc_c,
-                    roi,
-                    n_bins,
-                    glrlm_matrix=texture_matrices["glrlm"],
-                )
+            results["glrlm"] = calculate_glrlm_features(
+                disc_c,
+                roi,
+                n_bins,
+                glrlm_matrix=texture_matrices["glrlm"],
+                n_directions=_directions(planar).size,
             )
         if want_glszm:
-            results.update(_glszm_features_from_cells(texture_matrices["glszm_cells"], roi))
+            results["glszm"] = _glszm_features_from_cells(texture_matrices["glszm_cells"], roi)
         if want_gldzm:
-            results.update(
-                calculate_gldzm_features(
-                    disc_c,
-                    roi,
-                    n_bins,
-                    gldzm_matrix=texture_matrices["gldzm"],
-                    distance_mask=morph_mask_c,
-                )
+            results["gldzm"] = calculate_gldzm_features(
+                disc_c,
+                roi,
+                n_bins,
+                gldzm_matrix=texture_matrices["gldzm"],
+                distance_mask=morph_mask_c,
             )
         if want_ngtdm:
-            results.update(
-                calculate_ngtdm_features(
-                    disc_c,
-                    intensity_mask_c,
-                    n_bins,
-                    ngtdm_matrices=(
-                        texture_matrices["ngtdm_s"],
-                        texture_matrices["ngtdm_n"],
-                    ),
-                )
+            results["ngtdm"] = calculate_ngtdm_features(
+                disc_c,
+                intensity_mask_c,
+                n_bins,
+                ngtdm_matrices=(
+                    texture_matrices["ngtdm_s"],
+                    texture_matrices["ngtdm_n"],
+                ),
             )
         if want_ngldm:
-            results.update(
-                calculate_ngldm_features(
-                    disc_c,
-                    roi,
-                    n_bins,
-                    ngldm_matrix=texture_matrices["ngldm"],
-                )
+            results["ngldm"] = calculate_ngldm_features(
+                disc_c,
+                roi,
+                n_bins,
+                ngldm_matrix=texture_matrices["ngldm"],
             )
 
         return results
@@ -2751,6 +3297,11 @@ class RadiomicsPipeline:
             if isinstance(config_data, dict):
                 source_mode = config_data.get("source_mode", "full_image")
                 sentinel_value = config_data.get("sentinel_value")
+            if source_mode not in _SOURCE_MODES:
+                raise ValueError(
+                    f"Config '{name}': source_mode must be one of {_SOURCE_MODES}, "
+                    f"not {source_mode!r}"
+                )
 
             # Convert YAML lists to tuples where needed
             converted_steps = pipeline._convert_yaml_steps(steps)
@@ -3013,6 +3564,9 @@ class RadiomicsPipeline:
         """
         Validate a configuration, issuing warnings for issues.
 
+        The checks are those of `add_config` (see `_config_problems`); here each problem
+        gives a warning, so that a configuration file with mistakes still loads.
+
         Args:
             name: Configuration name (for warning messages).
             steps: List of step dictionaries.
@@ -3020,56 +3574,7 @@ class RadiomicsPipeline:
         Returns:
             True if valid, False if issues found (warnings are issued).
         """
-        is_valid = True
-
-        if not isinstance(steps, list):
-            warnings.warn(
-                f"Config '{name}': steps must be a list",
-                UserWarning,
-                stacklevel=2,
-            )
-            return False
-
-        for i, step in enumerate(steps):
-            if not isinstance(step, dict):
-                warnings.warn(
-                    f"Config '{name}' step {i}: must be a dictionary",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                is_valid = False
-                continue
-
-            step_type = step.get("step")
-            if not step_type:
-                warnings.warn(
-                    f"Config '{name}' step {i}: missing 'step' key",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                is_valid = False
-                continue
-
-            if step_type not in cls._VALID_STEPS:
-                warnings.warn(
-                    f"Config '{name}' step {i}: unknown step type '{step_type}'",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                is_valid = False
-                continue
-
-            # Check for unknown parameters
-            params = step.get("params", {})
-            if params:
-                valid_params = cls._VALID_STEPS[step_type]
-                for param_name in params.keys():
-                    if param_name not in valid_params:
-                        warnings.warn(
-                            f"Config '{name}' step {i} ({step_type}): "
-                            f"unknown parameter '{param_name}'",
-                            UserWarning,
-                            stacklevel=2,
-                        )
-
-        return is_valid
+        problems = _config_problems(steps)
+        for problem in problems:
+            warnings.warn(f"Config '{name}' {problem}", UserWarning, stacklevel=2)
+        return not problems

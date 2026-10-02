@@ -1,0 +1,1 @@
+The warm-up now compiles every kernel version that a first run needs, also for column-order images, float64 and bool masks, filter responses (float32) and every stored NIfTI type. A first run on a small NIfTI image takes 0.01 s instead of about 12 s of compiles. Kernels that make arrays use prange as their only parallel loop, and the cold warm-up takes 27 s instead of about 48 s.

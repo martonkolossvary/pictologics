@@ -1,0 +1,1 @@
+`add_config` now keeps its own copy of the steps, so a later edit of the caller's list no longer changes a stored configuration. It also accepts the `SourceMode` enum. `run()` takes one configuration name as a string, runs a name given twice only once, and suggests the closest name for an unknown one.

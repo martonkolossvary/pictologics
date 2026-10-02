@@ -12,6 +12,7 @@ Tests cover all functionality including:
 
 import os
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 # Disable JIT warmup for tests to prevent NumPy reload warning and speed up collection
@@ -25,7 +26,8 @@ from pictologics.loaders.seg_loader import (
     _align_to_reference,
     _extract_combined_segments,
     _extract_seg_geometry,
-    _extract_single_segment,
+    _extract_segment_masks,
+    _frame_layout,
     get_segment_info,
     load_seg,
 )
@@ -42,73 +44,65 @@ def create_mock_seg_dataset(
     n_segments: int = 2,
     pixel_spacing: tuple[float, float] = (0.5, 0.5),
     slice_thickness: float = 2.5,
-) -> MagicMock:
-    """Create a mock DICOM SEG dataset for testing."""
-    mock_seg = MagicMock()
-    mock_seg.Rows = rows
-    mock_seg.Columns = cols
+) -> Any:
+    """A synthetic DICOM SEG dataset: 8-bit frames, a square of ones in each frame."""
+    import pydicom
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.sequence import Sequence
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
-    # Create pixel array with shape (frames, rows, cols)
-    # For n_segments and n_slices, total frames = n_segments * n_slices
+    seg = pydicom.Dataset()
+    seg.file_meta = FileMetaDataset()
+    seg.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    seg.SOPClassUID, seg.SOPInstanceUID = "1.2.840.10008.5.1.4.1.1.66.4", generate_uid()
+    seg.Rows, seg.Columns, seg.NumberOfFrames = rows, cols, n_frames
+    seg.SamplesPerPixel, seg.PhotometricInterpretation = 1, "MONOCHROME2"
+    seg.BitsAllocated, seg.BitsStored, seg.HighBit, seg.PixelRepresentation = 8, 8, 7, 0
     pixel_array = np.zeros((n_frames, rows, cols), dtype=np.uint8)
+    pixel_array[:, 20:40, 20:40] = 1
+    seg.PixelData = pixel_array.tobytes()
 
-    # Fill with some test data - each segment gets different values
-    for frame_idx in range(n_frames):
-        # Add some non-zero region
-        pixel_array[frame_idx, 20:40, 20:40] = 1
-
-    mock_seg.pixel_array = pixel_array
-
-    # Create SegmentSequence
-    mock_seg.SegmentSequence = []
+    segments = []
     for i in range(n_segments):
-        segment = MagicMock()
+        segment = pydicom.Dataset()
         segment.SegmentNumber = i + 1
         segment.SegmentLabel = f"Segment {i + 1}"
         segment.SegmentDescription = f"Test segment {i + 1}"
         segment.SegmentAlgorithmType = "AUTOMATIC"
-        mock_seg.SegmentSequence.append(segment)
+        segments.append(segment)
+    seg.SegmentSequence = Sequence(segments)
 
-    # Create SharedFunctionalGroupsSequence
-    shared_fg = MagicMock()
-
-    # PixelMeasuresSequence
-    pm = MagicMock()
+    shared_fg = pydicom.Dataset()
+    pm = pydicom.Dataset()
     pm.PixelSpacing = list(pixel_spacing)
     pm.SliceThickness = slice_thickness
-    shared_fg.PixelMeasuresSequence = [pm]
-
-    # PlaneOrientationSequence
-    po = MagicMock()
+    shared_fg.PixelMeasuresSequence = Sequence([pm])
+    po = pydicom.Dataset()
     po.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-    shared_fg.PlaneOrientationSequence = [po]
+    shared_fg.PlaneOrientationSequence = Sequence([po])
+    seg.SharedFunctionalGroupsSequence = Sequence([shared_fg])
 
-    mock_seg.SharedFunctionalGroupsSequence = [shared_fg]
-
-    # Create PerFrameFunctionalGroupsSequence
-    mock_seg.PerFrameFunctionalGroupsSequence = []
+    frames = []
     for frame_idx in range(n_frames):
-        frame_fg = MagicMock()
-
-        # SegmentIdentificationSequence
-        seg_id = MagicMock()
+        frame_fg = pydicom.Dataset()
+        seg_id = pydicom.Dataset()
         seg_id.ReferencedSegmentNumber = (frame_idx % n_segments) + 1
-        frame_fg.SegmentIdentificationSequence = [seg_id]
-
-        # FrameContentSequence with DimensionIndexValues
-        fc = MagicMock()
+        frame_fg.SegmentIdentificationSequence = Sequence([seg_id])
+        fc = pydicom.Dataset()
         slice_idx = frame_idx // n_segments + 1  # 1-indexed
         fc.DimensionIndexValues = [slice_idx, (frame_idx % n_segments) + 1]
-        frame_fg.FrameContentSequence = [fc]
-
-        # PlanePositionSequence
-        pp = MagicMock()
+        frame_fg.FrameContentSequence = Sequence([fc])
+        pp = pydicom.Dataset()
         pp.ImagePositionPatient = [0.0, 0.0, float(slice_idx - 1) * slice_thickness]
-        frame_fg.PlanePositionSequence = [pp]
+        frame_fg.PlanePositionSequence = Sequence([pp])
+        frames.append(frame_fg)
+    seg.PerFrameFunctionalGroupsSequence = Sequence(frames)
+    return seg
 
-        mock_seg.PerFrameFunctionalGroupsSequence.append(frame_fg)
 
-    return mock_seg
+def _frames(pixel_array: np.ndarray) -> list[tuple[int, np.ndarray]]:
+    """(frame index, frame) pairs of a (frames, rows, cols) or one (rows, cols) array."""
+    return [(0, pixel_array)] if pixel_array.ndim == 2 else list(enumerate(pixel_array))
 
 
 # ============================================================================
@@ -212,9 +206,9 @@ class TestExtractCombinedSegments:
 
         result = _extract_combined_segments(
             mock_seg,
-            mock_seg.pixel_array,
-            target_segments=[1, 2],
-            n_frames=10,
+            _frames(mock_seg.pixel_array),
+            [1, 2],
+            _frame_layout(mock_seg, 10),
         )
 
         # Result should be 3D
@@ -229,9 +223,9 @@ class TestExtractCombinedSegments:
 
         result = _extract_combined_segments(
             mock_seg,
-            mock_seg.pixel_array,
-            target_segments=[1],
-            n_frames=10,
+            _frames(mock_seg.pixel_array),
+            [1],
+            _frame_layout(mock_seg, 10),
         )
 
         # Should only have segment 1 values
@@ -245,18 +239,18 @@ class TestExtractCombinedSegments:
 
 
 class TestExtractSingleSegment:
-    """Tests for _extract_single_segment helper function."""
+    """Tests for _extract_segment_masks helper function."""
 
     def test_extract_single_segment(self) -> None:
         """Test extracting a single segment as binary mask."""
         mock_seg = create_mock_seg_dataset(n_frames=10, n_segments=2)
 
-        result = _extract_single_segment(
+        result = _extract_segment_masks(
             mock_seg,
-            mock_seg.pixel_array,
-            segment_number=1,
-            n_frames=10,
-        )
+            _frames(mock_seg.pixel_array),
+            [1],
+            _frame_layout(mock_seg, 10),
+        )[1]
 
         # Result should be 3D
         assert result.ndim == 3
@@ -284,7 +278,7 @@ class TestLoadSeg:
         dummy_file = tmp_path / "dummy.dcm"
         dummy_file.write_bytes(b"not a dicom file")
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.side_effect = Exception("Invalid SEG")
 
             with pytest.raises(ValueError, match="Failed to load DICOM SEG"):
@@ -297,7 +291,7 @@ class TestLoadSeg:
 
         mock_seg = create_mock_seg_dataset()
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = mock_seg
 
             result = load_seg(str(dummy_file), combine_segments=True)
@@ -313,7 +307,7 @@ class TestLoadSeg:
 
         mock_seg = create_mock_seg_dataset(n_segments=2)
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = mock_seg
 
             result = load_seg(str(dummy_file), combine_segments=False)
@@ -330,7 +324,7 @@ class TestLoadSeg:
         dummy_file = tmp_path / "seg.dcm"
         dummy_file.write_bytes(b"dummy")
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = create_mock_seg_dataset(n_segments=2)
             ref_combined = load_seg(str(dummy_file), combine_segments=True)
             ref_separate = load_seg(str(dummy_file), combine_segments=False)
@@ -354,7 +348,7 @@ class TestLoadSeg:
 
         mock_seg = create_mock_seg_dataset(n_segments=3)
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = mock_seg
 
             result = load_seg(
@@ -375,7 +369,7 @@ class TestLoadSeg:
 
         mock_seg = create_mock_seg_dataset(n_segments=2)
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = mock_seg
 
             with pytest.raises(ValueError, match="Segment 99 not found"):
@@ -430,7 +424,7 @@ class TestGetSegmentInfo:
 
         mock_seg = create_mock_seg_dataset(n_segments=3)
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = mock_seg
 
             info = get_segment_info(str(dummy_file))
@@ -451,7 +445,7 @@ class TestGetSegmentInfo:
         dummy_file = tmp_path / "dummy.dcm"
         dummy_file.write_bytes(b"not a dicom file")
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.side_effect = Exception("Invalid SEG")
 
             with pytest.raises(ValueError, match="Failed to load DICOM SEG"):
@@ -477,7 +471,7 @@ class TestLoadImageIntegration:
 
         with (
             patch("pictologics.loader._is_dicom_seg") as mock_is_seg,
-            patch("highdicom.seg.segread") as mock_read,
+            patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read,
         ):
             mock_is_seg.return_value = True
             mock_read.return_value = mock_seg
@@ -519,7 +513,7 @@ class TestLoadSegWithReference:
             modality="CT",
         )
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = mock_seg
 
             result = load_seg(
@@ -548,7 +542,7 @@ class TestLoadSegWithReference:
             modality="CT",
         )
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = mock_seg
 
             result = load_seg(
@@ -612,7 +606,7 @@ class TestEdgeCases:
         # Remove SegmentSequence attribute
         del mock_seg.SegmentSequence
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = mock_seg
 
             with pytest.raises(ValueError, match="not a valid DICOM SEG"):
@@ -626,7 +620,7 @@ class TestEdgeCases:
         mock_seg = MagicMock()
         del mock_seg.SegmentSequence
 
-        with patch("highdicom.seg.segread") as mock_read:
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read:
             mock_read.return_value = mock_seg
 
             with pytest.raises(ValueError, match="not a valid DICOM SEG"):
@@ -660,9 +654,9 @@ class TestEdgeCases:
 
         result = _extract_combined_segments(
             mock_seg,
-            pixel_array,
-            target_segments=[1],
-            n_frames=1,
+            _frames(pixel_array),
+            [1],
+            _frame_layout(mock_seg, 1),
         )
 
         assert result.ndim == 3
@@ -678,12 +672,12 @@ class TestEdgeCases:
 
         pixel_array = np.ones((64, 64), dtype=np.uint8)
 
-        result = _extract_single_segment(
+        result = _extract_segment_masks(
             mock_seg,
-            pixel_array,
-            segment_number=1,
-            n_frames=1,
-        )
+            _frames(pixel_array),
+            [1],
+            _frame_layout(mock_seg, 1),
+        )[1]
 
         assert result.ndim == 3
 
@@ -749,9 +743,9 @@ class TestEdgeCases:
         # frames 0,1 ok; frames 2,3,4,5 have slice_idx >= 2, should be skipped
         result = _extract_combined_segments(
             mock_seg,
-            pixel_array,
-            target_segments=[1],
-            n_frames=6,
+            _frames(pixel_array),
+            [1],
+            _frame_layout(mock_seg, 6),
         )
 
         assert result.ndim == 3
@@ -787,107 +781,56 @@ class TestEdgeCases:
 
         # n_slices = 6 // 2 = 3
         # frames 0,1,2 ok for segment 1 (indices 0,2,4); frames 3,4,5 have slice_idx >= 3
-        result = _extract_single_segment(
+        result = _extract_segment_masks(
             mock_seg,
-            pixel_array,
-            segment_number=1,
-            n_frames=6,
-        )
+            _frames(pixel_array),
+            [1],
+            _frame_layout(mock_seg, 6),
+        )[1]
 
         assert result.ndim == 3
         # Output array should have shape (3, 32, 32)
         assert result.shape[0] == 3
 
 
-def _write_ct_and_seg(
-    folder: Path,
-    labels: np.ndarray,
-    spacing_between_slices: float | None = None,
-    segmentation_type: str = "BINARY",
-) -> tuple[Path, Path]:
-    """A synthetic CT series and a highdicom SEG of `labels` ((Z, Y, X), one segment per
-    label value). highdicom orders the frames by segment, then by position, and leaves
-    out empty frames. A LABELMAP SEG has one frame per position, with the labels as
-    pixel values."""
-    import highdicom as hd
-    import pydicom
-    from pydicom.dataset import FileMetaDataset
-    from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
+# SEG and SR files made once with highdicom 0.27.0 from synthetic data (CT series, SEG and
+# their labels; a TID 1500 report), so that the tests need no highdicom
+_HIGHDICOM_FILES = Path(__file__).parent / "data" / "highdicom_seg_sr.npz"
 
-    nz, ny, nx = labels.shape
+
+def _stored_ct_and_seg(
+    folder: Path, case: str, compression: str = ""
+) -> tuple[Path, Path, np.ndarray]:
+    """A synthetic CT series, the highdicom SEG of its labels ((Z, Y, X), one segment per
+    label value) and the labels, of a stored case: "labelmap" (a LABELMAP SEG of labels 1
+    and 2 on 6 x 12 x 10 voxels: one frame per position, the labels as pixel values),
+    "binary" (two segments on 8 x 20 x 24 voxels) or "sparse" (one segment on slices 1
+    and 4 of 6 x 10 x 12, SpacingBetweenSlices 2.0). highdicom orders the frames by
+    segment, then by position, and leaves out empty frames. The "labelmap" SEG also has
+    compressed copies: `compression` "rle" (pydicom) or "jpeg2000" (lossless, Pillow)."""
     ct_dir = folder / "ct"
     ct_dir.mkdir()
-    study, series, frame_ref = generate_uid(), generate_uid(), generate_uid()
-    datasets = []
-    for k in range(nz):
-        meta = FileMetaDataset()
-        meta.MediaStorageSOPClassUID = CTImageStorage
-        meta.MediaStorageSOPInstanceUID = generate_uid()
-        meta.TransferSyntaxUID = ExplicitVRLittleEndian
-        ds = pydicom.Dataset()
-        ds.file_meta = meta
-        ds.SOPClassUID, ds.SOPInstanceUID = CTImageStorage, meta.MediaStorageSOPInstanceUID
-        ds.StudyInstanceUID, ds.SeriesInstanceUID = study, series
-        ds.FrameOfReferenceUID = frame_ref
-        ds.PatientName, ds.PatientID, ds.PatientBirthDate, ds.PatientSex = "Syn^Test", "S1", "", "O"
-        ds.StudyDate, ds.StudyTime, ds.StudyID = "20260101", "120000", "1"
-        ds.AccessionNumber, ds.ReferringPhysicianName = "", ""
-        ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "CT", 1, k + 1
-        ds.Rows, ds.Columns = ny, nx
-        ds.PixelSpacing = [0.5, 0.75]
-        ds.SliceThickness = 2.0
-        if spacing_between_slices is not None:
-            ds.SpacingBetweenSlices = spacing_between_slices
-        ds.ImagePositionPatient = [-10.0, 5.0, 3.0 + 2.0 * k]
-        ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-        ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
-        ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 1
-        ds.PixelData = np.zeros((ny, nx), dtype=np.int16).tobytes()
-        path = ct_dir / f"{k:02d}.dcm"
-        ds.save_as(path, enforce_file_format=True)
-        datasets.append(pydicom.dcmread(path))
-    code = hd.sr.CodedConcept
-    descriptions = [
-        hd.seg.SegmentDescription(
-            segment_number=int(n),
-            segment_label=f"label {n}",
-            segmented_property_category=code("91723000", "SCT", "Anatomical Structure"),
-            segmented_property_type=code("23451007", "SCT", "Adrenal gland"),
-            algorithm_type=hd.seg.SegmentAlgorithmTypeValues.MANUAL,
-        )
-        for n in np.unique(labels[labels > 0])
-    ]
-    seg = hd.seg.Segmentation(
-        source_images=datasets,
-        pixel_array=labels,
-        segmentation_type=hd.seg.SegmentationTypeValues[segmentation_type],
-        segment_descriptions=descriptions,
-        series_instance_uid=generate_uid(),
-        series_number=2,
-        sop_instance_uid=generate_uid(),
-        instance_number=1,
-        manufacturer="test",
-        manufacturer_model_name="test",
-        software_versions="1",
-        device_serial_number="1",
-    )
-    seg_path = folder / "seg.dcm"
-    seg.save_as(seg_path)
-    return ct_dir, seg_path
+    with np.load(_HIGHDICOM_FILES) as stored:
+        for key in stored.files:
+            if key.startswith(f"{case}_ct_"):
+                (ct_dir / f"{key.rsplit('_', 1)[1]}.dcm").write_bytes(stored[key].tobytes())
+        seg_path = folder / "seg.dcm"
+        key = f"{case}_seg_{compression}" if compression else f"{case}_seg"
+        seg_path.write_bytes(stored[key].tobytes())
+        labels = stored[f"{case}_labels"]
+    return ct_dir, seg_path, labels
 
 
 class TestHighdicomRoundTrip:
-    """A SEG written by highdicom loads back into the labels it was made from."""
+    """A SEG written by highdicom (stored, see _stored_ct_and_seg) loads back into the
+    labels it was made from."""
 
     def test_label_maps_give_their_label_values(self, tmp_path: Path) -> None:
         # A LABELMAP SEG (its own SOP class) reaches load_seg, and its pixel values are
         # the segment numbers. The background, segment 0, is left out by default.
         from pictologics.loader import load_image
 
-        labels = np.zeros((6, 12, 10), dtype=np.uint8)
-        labels[1:5, 2:8, 1:6] = 1
-        labels[2:6, 6:11, 4:9] = 2
-        ct_dir, seg_path = _write_ct_and_seg(tmp_path, labels, segmentation_type="LABELMAP")
+        ct_dir, seg_path, labels = _stored_ct_and_seg(tmp_path, "labelmap")
         expected = np.transpose(labels, (2, 1, 0))  # (X, Y, Z)
         ct = load_image(str(ct_dir))
 
@@ -903,13 +846,21 @@ class TestHighdicomRoundTrip:
         assert isinstance(background, dict)
         assert background[0].array.sum() > 0
 
+    @pytest.mark.parametrize("compression", ["rle", "jpeg2000"])
+    def test_compressed_frames_give_the_same_labels(self, tmp_path: Path, compression: str) -> None:
+        # The frames of a SEG may be compressed: RLE and JPEG 2000 copies of the LABELMAP
+        # SEG load into the same labels.
+        from pictologics.loader import load_image
+
+        ct_dir, seg_path, labels = _stored_ct_and_seg(tmp_path, "labelmap", compression)
+        ct = load_image(str(ct_dir))
+        combined = load_image(str(seg_path), reference_image=ct)
+        np.testing.assert_array_equal(combined.array, np.transpose(labels, (2, 1, 0)))
+
     def test_segments_keep_their_slices(self, tmp_path: Path) -> None:
         from pictologics.loader import load_image
 
-        labels = np.zeros((8, 20, 24), dtype=np.uint8)
-        labels[2:6, 5:12, 4:15] = 1
-        labels[1:4, 13:18, 16:22] = 2
-        ct_dir, seg_path = _write_ct_and_seg(tmp_path, labels)
+        ct_dir, seg_path, labels = _stored_ct_and_seg(tmp_path, "binary")
         expected = np.transpose(labels, (2, 1, 0))  # (X, Y, Z)
         ct = load_image(str(ct_dir))
 
@@ -930,10 +881,7 @@ class TestHighdicomRoundTrip:
 
     def test_slices_without_segments(self, tmp_path: Path) -> None:
         # A segment on slices 1 and 4 only: the step stays the declared slice spacing.
-        labels = np.zeros((6, 10, 12), dtype=np.uint8)
-        labels[1, 2:5, 3:6] = 1
-        labels[4, 6:9, 7:10] = 1
-        _, seg_path = _write_ct_and_seg(tmp_path, labels, spacing_between_slices=2.0)
+        _, seg_path, labels = _stored_ct_and_seg(tmp_path, "sparse")
         alone = load_seg(str(seg_path))
         assert isinstance(alone, Image)
         np.testing.assert_array_equal(alone.array, np.transpose(labels[1:5], (2, 1, 0)))
@@ -957,6 +905,67 @@ class TestHighdicomRoundTrip:
                 for k in (3, 1)
             ],
         )
-        out = _extract_single_segment(seg, np.ones((2, 4, 5), dtype=np.uint8), 1, 2)
+        frames = _frames(np.ones((2, 4, 5), dtype=np.uint8))
+        out = _extract_segment_masks(seg, frames, [1], _frame_layout(seg, 2))[1]
         assert out.shape == (3, 4, 5)
         assert out[0].all() and out[2].all() and not out[1].any()
+
+
+class TestSegFixes:
+    """Fractional thresholds, more than 255 segments, per-frame geometry."""
+
+    def test_fractional_segments_use_a_threshold(self, tmp_path: Path) -> None:
+        # A FRACTIONAL SEG: a voxel is in the segment when its value is at least the
+        # threshold fraction of MaximumFractionalValue (default 0.5), and above 0.
+        seg = create_mock_seg_dataset(n_frames=2, n_segments=1)
+        frames = np.zeros((2, 64, 64), dtype=np.uint8)
+        frames[:, 0, :3] = [25, 127, 128]  # 0.1, 0.498, 0.502 of 255
+        seg.PixelData = frames.tobytes()
+        seg.SegmentationType, seg.MaximumFractionalValue = "FRACTIONAL", 255
+        path = tmp_path / "fractional.dcm"
+        path.write_bytes(b"dummy")
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread", return_value=seg):
+            half = load_seg(str(path))
+            anything = load_seg(str(path), fractional_threshold=0.0)
+            with pytest.raises(ValueError, match="fractional_threshold must be in"):
+                load_seg(str(path), fractional_threshold=1.5)
+        assert half.array[:3, 0, 0].tolist() == [0, 0, 1]
+        assert anything.array[:3, 0, 0].tolist() == [1, 1, 1]
+
+    def test_more_than_255_segments_keep_their_numbers(self, tmp_path: Path) -> None:
+        # Segment numbers above 255 need uint16 labels (uint8 wrapped 300 to 44).
+        seg = create_mock_seg_dataset(rows=8, cols=8, n_frames=300, n_segments=300)
+        frames = np.zeros((300, 8, 8), dtype=np.uint8)
+        for k in range(300):
+            frames[k].flat[k % 64] = 1
+        seg.PixelData = frames.tobytes()
+        path = tmp_path / "many.dcm"
+        path.write_bytes(b"dummy")
+        with patch("pictologics.loaders.seg_loader.pydicom.dcmread", return_value=seg):
+            labels = load_seg(str(path))
+            few = load_seg(str(path), segment_numbers=[3, 255])
+        assert labels.array.dtype == np.uint16 and labels.array.max() == 300
+        assert few.array.dtype == np.uint8 and sorted(np.unique(few.array)) == [0, 3, 255]
+
+    def test_per_frame_orientation_and_pixel_measures(self) -> None:
+        # The standard lets PlaneOrientation and PixelMeasures sit in each frame's
+        # group: a sagittal SEG keeps its slices and spacing.
+        import pydicom
+        from pydicom.sequence import Sequence
+
+        seg = create_mock_seg_dataset(n_frames=4, n_segments=1)
+        shared = seg.SharedFunctionalGroupsSequence[0]
+        measures, orientation = shared.PixelMeasuresSequence[0], pydicom.Dataset()
+        orientation.ImageOrientationPatient = [0.0, 1.0, 0.0, 0.0, 0.0, -1.0]
+        del shared.PixelMeasuresSequence
+        del shared.PlaneOrientationSequence
+        for k, group in enumerate(seg.PerFrameFunctionalGroupsSequence):
+            group.PixelMeasuresSequence = Sequence([measures])
+            group.PlaneOrientationSequence = Sequence([orientation])
+            group.PlanePositionSequence[0].ImagePositionPatient = [-2.5 * k, 0.0, 0.0]
+        layout = _frame_layout(seg, 4)
+        assert layout.n_slices == 4 and layout.step == pytest.approx(2.5)
+        spacing, _, direction = _extract_seg_geometry(seg, layout)
+        assert spacing == (0.5, 0.5, 2.5)
+        assert direction is not None
+        np.testing.assert_array_equal(direction[:, 2], [-1.0, 0.0, 0.0])

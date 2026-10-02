@@ -1105,18 +1105,33 @@ def _extract_single_file_metadata(
         if value is not None:
             metadata[tag] = value
 
-    # Extract private tags if requested
+    # Extract private tags if requested. Binary values (a CSA header can hold 60 KB)
+    # and sequences are stored as their size: as text, their bytes take 3 times their
+    # size in every table and pool message.
     if extract_private_tags:
         for elem in dcm:
             if elem.tag.is_private:
                 try:
                     key = f"Private_{elem.tag.group:04X}_{elem.tag.element:04X}"
-                    metadata[key] = str(elem.value)
+                    metadata[key] = _private_value(elem)
                 except Exception as e:
                     logger.debug("Failed to extract private tag %s: %s", elem.tag, e)
                     continue
 
     return metadata
+
+
+# Value representations of binary data
+_BINARY_VRS = frozenset({"OB", "OW", "OF", "OD", "OL", "OV", "UN"})
+
+
+def _private_value(elem: Any) -> str:
+    """A private element as text: binary data and sequences as their size."""
+    if elem.VR in _BINARY_VRS:
+        return f"<{elem.VR}, {len(elem.value or b'')} bytes>"
+    if elem.VR == "SQ":
+        return f"<SQ, {len(elem.value)} items>"
+    return str(elem.value)
 
 
 def _get_tag_value(

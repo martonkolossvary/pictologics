@@ -289,17 +289,9 @@ def _create_display_rgba(
             rgba = np.zeros((*shape, 4), dtype=np.uint8)
             rgba[..., 3] = 255  # Fully opaque
 
-            # Background stays black
-            unique_labels = np.unique(mask_slice)
-            for label in unique_labels:
-                if label == 0:
-                    continue
-                color_idx = (int(label) - 1) % num_colors
-                color = colors[color_idx]
-                label_mask = mask_slice == label
-                rgba[..., 0][label_mask] = color[0]
-                rgba[..., 1][label_mask] = color[1]
-                rgba[..., 2][label_mask] = color[2]
+            # Background stays black; each label takes its color in one lookup
+            _, color_idx = _label_colors(mask_slice, num_colors)
+            rgba[..., :3] = _color_table(colors, np.uint8)[color_idx]
             return rgba  # type: ignore[return-value]
         else:
             # Grayscale mask
@@ -325,23 +317,35 @@ def _create_display_rgba(
     colors = _get_colormap_colors(colormap)
     num_colors = len(colors)
 
-    # Apply mask colors with blending
-    unique_labels = np.unique(mask_slice)
-    for label in unique_labels:
-        if label == 0:  # Skip background
-            continue
-        color_idx = (int(label) - 1) % num_colors
-        color = colors[color_idx]
-        label_mask = mask_slice == label
-
-        for i in range(3):
-            rgba[..., i][label_mask] = np.clip(
-                (1 - alpha) * rgba[..., i][label_mask] + alpha * color[i],
-                0,
-                255,
-            ).astype(np.uint8)
+    # Apply mask colors with blending, for all labelled pixels at once
+    labelled, color_idx = _label_colors(mask_slice, num_colors)
+    pixels = np.flatnonzero(labelled)
+    rgb = rgba.reshape(-1, 4)  # a view: one row per pixel
+    rgb[pixels, :3] = np.clip(
+        (1 - alpha) * rgb[pixels, :3]
+        + alpha * _color_table(colors, np.float64)[color_idx.ravel()[pixels]],
+        0,
+        255,
+    ).astype(np.uint8)
 
     return rgba  # type: ignore[return-value]
+
+
+def _label_colors(
+    mask_slice: npt.NDArray[Any], num_colors: int
+) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.int64]]:
+    """The labelled pixels, and per pixel the color index: (label - 1) mod the colors,
+    with the label truncated to an integer, or `num_colors` (black) for background 0."""
+    labelled = mask_slice != 0
+    index = np.where(labelled, (mask_slice.astype(np.int64) - 1) % num_colors, num_colors)
+    return labelled, index
+
+
+def _color_table(colors: list[tuple[int, int, int]], dtype: Any) -> npt.NDArray[Any]:
+    """The colors as rows of a table, with a last black row for the background."""
+    table = np.zeros((len(colors) + 1, 3), dtype=dtype)
+    table[: len(colors)] = colors
+    return table
 
 
 def _parse_slice_selection(

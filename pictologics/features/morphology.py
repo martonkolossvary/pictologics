@@ -42,7 +42,7 @@ Example:
 from __future__ import annotations
 
 import math
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import numpy as np
 from numba import jit, prange
@@ -52,7 +52,7 @@ from scipy.special import eval_legendre
 
 from ..loader import Image
 from ._mc_tables import EDGE_TABLE, TRIANGLE_COUNT, TRIANGLE_TABLE
-from ._utils import compute_nonzero_bbox
+from ._utils import PRANGE_ONLY, compute_nonzero_bbox
 
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
@@ -98,26 +98,64 @@ def _accumulate_moments_from_mask_numba(
 def _accumulate_intensity_weighted_moments_numba(
     mask: npt.NDArray[np.floating[Any]], image: npt.NDArray[np.floating[Any]]
 ) -> tuple[int, float, float, float, float]:
-    """Accumulate intensity-weighted index sums over mask != 0."""
-    count = 0
-    sum_w = 0.0
-    sum_i0_w = 0.0
-    sum_i1_w = 0.0
-    sum_i2_w = 0.0
+    """Accumulate intensity-weighted index sums over mask != 0.
 
+    Each slice has its own sums, and the slice sums add in order, so the result does
+    not depend on the number of threads."""
     d0, d1, d2 = mask.shape
+    counts = np.empty(d0, dtype=np.int64)
+    sums = np.empty((d0, 4), dtype=np.float64)
     for i in prange(d0):
+        count = 0
+        sum_w = 0.0
+        sum_i1_w = 0.0
+        sum_i2_w = 0.0
         for j in range(d1):
             for k in range(d2):
                 if mask[i, j, k] != 0:
                     w = float(image[i, j, k])
                     count += 1
                     sum_w += w
-                    sum_i0_w += float(i) * w
                     sum_i1_w += float(j) * w
                     sum_i2_w += float(k) * w
+        counts[i] = count
+        sums[i, 0] = sum_w
+        sums[i, 1] = float(i) * sum_w
+        sums[i, 2] = sum_i1_w
+        sums[i, 3] = sum_i2_w
 
+    count = 0
+    sum_w = 0.0
+    sum_i0_w = 0.0
+    sum_i1_w = 0.0
+    sum_i2_w = 0.0
+    for i in range(d0):
+        count += counts[i]
+        sum_w += sums[i, 0]
+        sum_i0_w += sums[i, 1]
+        sum_i1_w += sums[i, 2]
+        sum_i2_w += sums[i, 3]
     return count, sum_w, sum_i0_w, sum_i1_w, sum_i2_w
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _column_stats_numba(
+    points: npt.NDArray[np.float64],
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Minimum, maximum and mean of each column of an (n, 3) array in one pass. The sums
+    run row by row, as numpy reduces axis 0, so the mean is that of np.mean."""
+    lo = points[0].copy()
+    hi = points[0].copy()
+    total = np.zeros(3, dtype=np.float64)
+    for i in range(points.shape[0]):
+        for a in range(3):
+            v = points[i, a]
+            if v < lo[a]:
+                lo[a] = v
+            if v > hi[a]:
+                hi[a] = v
+            total[a] += v
+    return lo, hi, total / points.shape[0]
 
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
@@ -166,7 +204,7 @@ def _ombb_extents_numba(
     return min_rot, max_rot
 
 
-@jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
+@jit(nopython=True, parallel=PRANGE_ONLY, fastmath=True, cache=True)  # type: ignore
 def _max_pairwise_distance_numba(points: npt.NDArray[np.floating[Any]]) -> float:
     """Compute the maximum pairwise Euclidean distance."""
     n = points.shape[0]
@@ -266,12 +304,41 @@ def _mc_corners(vol: npt.NDArray[np.uint8], i: int, j: int, k: int) -> int:
     return c
 
 
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _mc_counts_numba(
+    vol: npt.NDArray[np.uint8],
+    edge_table: npt.NDArray[np.int32],
+    tri_count: npt.NDArray[np.int32],
+    n_verts: npt.NDArray[np.int64],
+    n_faces: npt.NDArray[np.int64],
+) -> None:
+    """The vertices and the face corners that each x plane of cubes of
+    `_marching_cubes_numba` makes (whole numbers, so the plane order does not matter)."""
+    nx, ny, nz = vol.shape[0] - 1, vol.shape[1] - 1, vol.shape[2] - 1
+    for i in prange(nx):
+        n_v = 0
+        n_f = 0
+        for j in range(ny):
+            c = _mc_corners(vol, i, j, 0) << 4
+            for k in range(nz):
+                c = (c >> 4) | (_mc_corners(vol, i, j, k + 1) << 4)
+                e = edge_table[c]
+                n_v += ((e >> 5) & 1) + ((e >> 6) & 1) + ((e >> 10) & 1)
+                n_f += tri_count[c]
+        n_verts[i] = n_v
+        n_faces[i] = n_f
+
+
 @jit(nopython=True, cache=True)  # type: ignore
 def _marching_cubes_numba(
     vol: npt.NDArray[np.uint8],
     edge_table: npt.NDArray[np.int32],
     tri_table: npt.NDArray[np.int8],
     tri_count: npt.NDArray[np.int32],
+    n_v: int,
+    n_f: int,
+    offset: npt.NDArray[np.float64],
+    spacing: npt.NDArray[np.float64],
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]]:
     """Marching cubes of a 0/1 volume with a zero border, at the isovalue 0.5.
 
@@ -281,20 +348,13 @@ def _marching_cubes_numba(
     the edges on the last two x planes. The zero border makes two steps simpler: no
     surface crosses an edge on the first x, y or z face, so only edges 5, 6 and 10 make new
     vertices; and each vertex is the midpoint of its 0/1 edge, which is exactly the value
-    of PyMCubes' interpolation. A first pass counts the vertices and the faces, so the
-    arrays get their final size at once.
+    of PyMCubes' interpolation. `_mc_counts_numba` counts the vertices (n_v) and the face
+    corners (n_f) first, so the arrays get their final size at once. A vertex v (padded
+    voxel units) is stored as (v - 1 + offset) * spacing, the physical position.
     """
     nx, ny, nz = vol.shape[0] - 1, vol.shape[1] - 1, vol.shape[2] - 1
-    n_v = 0
-    n_f = 0
-    for i in range(nx):
-        for j in range(ny):
-            c = _mc_corners(vol, i, j, 0) << 4
-            for k in range(nz):
-                c = (c >> 4) | (_mc_corners(vol, i, j, k + 1) << 4)
-                e = edge_table[c]
-                n_v += ((e >> 5) & 1) + ((e >> 6) & 1) + ((e >> 10) & 1)
-                n_f += tri_count[c]
+    o0, o1, o2 = offset[0], offset[1], offset[2]
+    s0, s1, s2 = spacing[0], spacing[1], spacing[2]
     verts = np.empty((n_v, 3), dtype=np.float64)
     faces = np.empty(n_f, dtype=np.int64)
     # Vertex numbers of the edges on the two latest x planes (index: i % 2, j, k).
@@ -315,23 +375,23 @@ def _marching_cubes_numba(
                 if e == 0:
                     continue
                 if e & 0x040:
-                    verts[nv, 0] = i + 0.5
-                    verts[nv, 1] = j + 1.0
-                    verts[nv, 2] = k + 1.0
+                    verts[nv, 0] = (i + 0.5 - 1.0 + o0) * s0
+                    verts[nv, 1] = (j + 1.0 - 1.0 + o1) * s1
+                    verts[nv, 2] = (k + 1.0 - 1.0 + o2) * s2
                     idx[6] = nv
                     sx[q, j + 1, k + 1] = nv
                     nv += 1
                 if e & 0x020:
-                    verts[nv, 0] = i + 1.0
-                    verts[nv, 1] = j + 0.5
-                    verts[nv, 2] = k + 1.0
+                    verts[nv, 0] = (i + 1.0 - 1.0 + o0) * s0
+                    verts[nv, 1] = (j + 0.5 - 1.0 + o1) * s1
+                    verts[nv, 2] = (k + 1.0 - 1.0 + o2) * s2
                     idx[5] = nv
                     sy[q, j + 1, k + 1] = nv
                     nv += 1
                 if e & 0x400:
-                    verts[nv, 0] = i + 1.0
-                    verts[nv, 1] = j + 1.0
-                    verts[nv, 2] = k + 0.5
+                    verts[nv, 0] = (i + 1.0 - 1.0 + o0) * s0
+                    verts[nv, 1] = (j + 1.0 - 1.0 + o1) * s1
+                    verts[nv, 2] = (k + 0.5 - 1.0 + o2) * s2
                     idx[10] = nv
                     sz[q, j + 1, k + 1] = nv
                     nv += 1
@@ -352,17 +412,74 @@ def _marching_cubes_numba(
     return verts, faces.reshape(-1, 3)
 
 
+def _mesh(
+    padded: npt.NDArray[np.uint8],
+    offset: npt.NDArray[np.float64],
+    spacing: npt.NDArray[np.float64],
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]]:
+    """The marching cubes mesh of a 0/1 volume with a zero border: a parallel count pass,
+    then `_marching_cubes_numba` (vertices as (v - 1 + offset) * spacing)."""
+    n_verts = np.empty(padded.shape[0] - 1, dtype=np.int64)
+    n_faces = np.empty(padded.shape[0] - 1, dtype=np.int64)
+    _mc_counts_numba(padded, EDGE_TABLE, TRIANGLE_COUNT, n_verts, n_faces)
+    return cast(
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]],
+        _marching_cubes_numba(
+            padded,
+            EDGE_TABLE,
+            TRIANGLE_TABLE,
+            TRIANGLE_COUNT,
+            int(n_verts.sum()),
+            int(n_faces.sum()),
+            offset,
+            spacing,
+        ),
+    )
+
+
+# Faces per partial sum of the mesh area and volume. A fixed block size, not one block
+# per thread, so the sums do not depend on the number of threads.
+_MESH_SUM_BLOCK = 4096
+
+
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _mesh_area_volume_numba(
     verts: npt.NDArray[np.floating[Any]], faces: npt.NDArray[np.floating[Any]]
 ) -> tuple[float, float]:
-    """Compute mesh surface area and absolute volume in one deterministic pass."""
+    """Compute mesh surface area and absolute volume in one pass. The faces add in
+    blocks of _MESH_SUM_BLOCK and the block sums in order, so the result is the same
+    for every number of threads."""
     n_faces = faces.shape[0]
+    n_blocks = (n_faces + _MESH_SUM_BLOCK - 1) // _MESH_SUM_BLOCK
+    block_area = np.empty(n_blocks, dtype=np.float64)
+    block_vol6 = np.empty(n_blocks, dtype=np.float64)
+    for b in prange(n_blocks):
+        block_area[b], block_vol6[b] = _mesh_block_sums(
+            verts, faces, b * _MESH_SUM_BLOCK, min(n_faces, (b + 1) * _MESH_SUM_BLOCK)
+        )
+
     area = 0.0
     vol6 = 0.0
+    for b in range(n_blocks):
+        area += block_area[b]
+        vol6 += block_vol6[b]
+    vol = vol6 / 6.0
+    if vol < 0.0:
+        vol = -vol
+    return float(area), float(vol)
 
-    # Parallel reduction for sum of area and volume
-    for f in prange(n_faces):
+
+@jit(nopython=True, fastmath=True, cache=True)  # type: ignore
+def _mesh_block_sums(
+    verts: npt.NDArray[np.floating[Any]],
+    faces: npt.NDArray[np.floating[Any]],
+    start: int,
+    stop: int,
+) -> tuple[float, float]:
+    """Surface area and six times the signed volume of the faces start to stop."""
+    area = 0.0
+    vol6 = 0.0
+    for f in range(start, stop):
         i0 = faces[f, 0]
         i1 = faces[f, 1]
         i2 = faces[f, 2]
@@ -395,11 +512,7 @@ def _mesh_area_volume_numba(
         c1y = v1z * v2x - v1x * v2z
         c1z = v1x * v2y - v1y * v2x
         vol6 += v0x * c1x + v0y * c1y + v0z * c1z
-
-    vol = vol6 / 6.0
-    if vol < 0.0:
-        vol = -vol
-    return float(area), float(vol)
+    return area, vol6
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
@@ -602,9 +715,18 @@ def _calculate_ellipsoid_surface_area(a: float, b: float, c: float) -> float:
     return float(area)
 
 
+def _uint8_roi(mask: npt.NDArray[Any], keep: bool = False) -> npt.NDArray[np.uint8]:
+    """The ROI (`mask != 0`) as a row-order uint8 array, so the kernels compile for one
+    mask type and layout. With `keep`, a uint8 mask (the common case) is used as it is."""
+    if keep and mask.dtype == np.uint8:
+        return cast(npt.NDArray[np.uint8], mask)
+    return cast(npt.NDArray[np.uint8], np.not_equal(mask, 0, order="C").view(np.uint8))
+
+
 def _get_mesh_features(
     mask: Image,
     roi_bbox: Optional[tuple[slice, slice, slice]] = None,
+    grid_offset: Optional[tuple[int, int, int]] = None,
 ) -> tuple[
     dict[str, float],
     Optional[npt.NDArray[np.floating[Any]]],
@@ -627,17 +749,17 @@ def _get_mesh_features(
     if bbox is None:
         return {}, None, None
 
-    mask_cropped = (mask.array[bbox] != 0).astype(np.uint8)
+    mask_cropped = _uint8_roi(mask.array[bbox])
     origin_offset = np.array([bbox[0].start, bbox[1].start, bbox[2].start], dtype=np.float64)
+    if grid_offset is not None:  # the mask is a region of a larger grid
+        origin_offset += np.array(grid_offset, dtype=np.float64)
 
-    mask_padded = np.pad(mask_cropped, 1)
-    verts, faces = _marching_cubes_numba(mask_padded, EDGE_TABLE, TRIANGLE_TABLE, TRIANGLE_COUNT)
+    # The vertices come in physical units: padding (-1), bbox offset, spacing
+    verts, faces = _mesh(
+        np.pad(mask_cropped, 1), origin_offset, np.asarray(mask.spacing, dtype=np.float64)
+    )
     if len(faces) == 0:  # a bbox with no ROI voxel
         return {}, None, None
-
-    # Adjust vertices: account for padding (-1) and bbox offset
-    spacing = np.asarray(mask.spacing, dtype=np.float64)
-    verts = (verts - 1.0 + origin_offset) * spacing
 
     surface_area, mesh_volume = _mesh_area_volume_numba(verts, faces)
     features["surface_area_C0JK"] = float(surface_area)
@@ -800,9 +922,8 @@ def _get_bounding_box_features(
     if len(verts) == 0:
         return features
 
-    # AABB
-    min_bound = np.min(verts, axis=0)
-    max_bound = np.max(verts, axis=0)
+    # AABB, and the vertex mean (the OMBB centre), from one pass
+    min_bound, max_bound, center = _column_stats_numba(np.asarray(verts, dtype=np.float64))
     dims = max_bound - min_bound
     vol_aabb = np.prod(dims)
     area_aabb = 2 * (dims[0] * dims[1] + dims[1] * dims[2] + dims[2] * dims[0])
@@ -814,8 +935,6 @@ def _get_bounding_box_features(
 
     # OMBB
     if evecs is not None:
-        center = np.mean(verts, axis=0)
-
         # Deterministic streaming extents in Numba (avoids allocating rotated_verts and Python loop overhead)
         min_rot, max_rot = _ombb_extents_numba(
             np.asarray(verts, dtype=np.float64),
@@ -902,7 +1021,7 @@ def _get_intensity_morphology_features(
         return features
 
     count_i, sum_w, sum_i0_w, sum_i1_w, sum_i2_w = _accumulate_intensity_weighted_moments_numba(
-        intensity_mask.array[i_bbox],
+        _uint8_roi(intensity_mask.array[i_bbox], keep=True),
         image.array[i_bbox],
     )
     if count_i > 0:
@@ -921,41 +1040,22 @@ def _get_intensity_morphology_features(
             n_m, s0_m, s1_m, s2_m, _, _, _, _, _, _ = _accumulate_moments_from_mask_numba(
                 mask.array[mask_bbox] if mask_bbox is not None else mask.array
             )
-        if n_m > 0:
-            # Moment means are in cropped index space; shift back to full-array
-            # indices before applying the geometry.
-            if mask_bbox is not None:
-                m_off0 = float(mask_bbox[0].start)
-                m_off1 = float(mask_bbox[1].start)
-                m_off2 = float(mask_bbox[2].start)
-            else:
-                m_off0 = m_off1 = m_off2 = 0.0
-            m0 = s0_m / float(n_m) + m_off0
-            m1 = s1_m / float(n_m) + m_off1
-            m2 = s2_m / float(n_m) + m_off2
-            sp_m = np.asarray(mask.spacing, dtype=np.float64)
-            org_m = np.asarray(mask.origin, dtype=np.float64)
-            com_geom0 = m0 * sp_m[0] + org_m[0]
-            com_geom1 = m1 * sp_m[1] + org_m[1]
-            com_geom2 = m2 * sp_m[2] + org_m[2]
-
-            # CoM_gl (from intensity mask; intensity-weighted)
-            if sum_w != 0.0:
-                w0 = sum_i0_w / sum_w + float(i_bbox[0].start)
-                w1 = sum_i1_w / sum_w + float(i_bbox[1].start)
-                w2 = sum_i2_w / sum_w + float(i_bbox[2].start)
-                sp_i = np.asarray(intensity_mask.spacing, dtype=np.float64)
-                org_i = np.asarray(intensity_mask.origin, dtype=np.float64)
-                com_gl0 = w0 * sp_i[0] + org_i[0]
-                com_gl1 = w1 * sp_i[1] + org_i[1]
-                com_gl2 = w2 * sp_i[2] + org_i[2]
-
-                dx0 = com_geom0 - com_gl0
-                dx1 = com_geom1 - com_gl1
-                dx2 = com_geom2 - com_gl2
-                features["center_of_mass_shift_KLMA"] = float(
-                    math.sqrt(dx0 * dx0 + dx1 * dx1 + dx2 * dx2)
+        if n_m > 0 and sum_w != 0.0:
+            # The shift between the geometric and the intensity-weighted centre, in index
+            # units per axis. The sums are over the cropped arrays, and the crop starts
+            # (whole numbers) add after the subtraction, so the shift does not depend on
+            # where the arrays start in the image; the origin cancels, so it is not used.
+            m_off = [b.start for b in mask_bbox] if mask_bbox is not None else [0, 0, 0]
+            spacing = np.asarray(mask.spacing, dtype=np.float64)
+            shift = [
+                (s_m / float(n_m) - s_w / sum_w + float(m_off[a] - i_bbox[a].start)) * spacing[a]
+                for a, (s_m, s_w) in enumerate(
+                    ((s0_m, sum_i0_w), (s1_m, sum_i1_w), (s2_m, sum_i2_w))
                 )
+            ]
+            features["center_of_mass_shift_KLMA"] = float(
+                math.sqrt(shift[0] * shift[0] + shift[1] * shift[1] + shift[2] * shift[2])
+            )
 
     return features
 
@@ -965,6 +1065,7 @@ def calculate_morphology_features(
     image: Optional[Image] = None,
     intensity_mask: Optional[Image] = None,
     roi_bbox: Optional[tuple[slice, slice, slice]] = None,
+    grid_offset: Optional[tuple[int, int, int]] = None,
 ) -> dict[str, float]:
     """
     Calculate morphological features from the ROI mask.
@@ -980,6 +1081,10 @@ def calculate_morphology_features(
         roi_bbox: Optional precomputed tight bounding box of the mask's nonzero voxels
                   (tuple of slices, as returned by an internal bbox scan). Skips
                   rescanning the full mask volume. If None, computed internally.
+        grid_offset: Optional index of the first voxel of the arrays in a larger grid,
+                  when they hold a region of it. The mesh is then made in the index frame
+                  of that grid, so the features are those of the whole grid bit for bit
+                  (the MVEE fit depends on the frame at about 1e-5).
 
     Returns:
         Dictionary of calculated features.
@@ -1019,12 +1124,12 @@ def calculate_morphology_features(
     # PCA covariance is translation-invariant, and the center-of-mass consumer
     # adds the bbox offset back. The kernel's voxel count doubles as the count
     # for the voxel-counting volume.
-    mask_moments = _accumulate_moments_from_mask_numba(mask.array[bbox])
+    mask_moments = _accumulate_moments_from_mask_numba(_uint8_roi(mask.array[bbox], keep=True))
     n_voxels = mask_moments[0]
     features["volume_voxel_counting_YEKZ"] = float(n_voxels * voxel_volume)
 
     # 2. Mesh Based Features
-    mesh_feats, verts, faces = _get_mesh_features(mask, roi_bbox=bbox)
+    mesh_feats, verts, faces = _get_mesh_features(mask, roi_bbox=bbox, grid_offset=grid_offset)
     features.update(mesh_feats)
 
     if verts is None or faces is None:

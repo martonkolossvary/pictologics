@@ -1,0 +1,1 @@
+highdicom is no longer a dependency, also not for the tests. Pictologics reads SEG and SR files with pydicom alone, and the tests read SEG and SR files that highdicom made once. pyjpegls goes with it: it has no Python 3.14 build, so pip had to compile it there. pydicom 3.0.1 is now the lowest version, because the SEG reader needs pydicom 3.

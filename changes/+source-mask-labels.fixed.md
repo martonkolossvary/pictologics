@@ -1,0 +1,1 @@
+In `roi_only` and `auto` mode, mask labels of 256 and more now keep their value. Before, the source-mask step cast the mask to uint8, so label 300 became 44, and a later `binarize_mask` for it found nothing.

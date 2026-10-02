@@ -65,6 +65,12 @@ Single DICOM files (e.g., enhanced DICOM, segmentation objects) are also support
 image = load_image("path/to/image.dcm")
 ```
 
+### Compressed DICOM Data
+
+Compressed pixel data loads like uncompressed data: RLE, JPEG Lossless, JPEG-LS (lossless and near-lossless), JPEG 2000 (lossless and lossy) and baseline JPEG. pydicom decodes it with python-gdcm and Pillow, which install with Pictologics. SEG files with compressed frames load the same way.
+
+12-bit lossy JPEG (JPEG Extended) does not load: its only decoder, pylibjpeg-libjpeg, has a GPL-3.0 license. If you install `pylibjpeg` and `pylibjpeg-libjpeg` yourself, pydicom uses them.
+
 ### DICOM Intensity Rescaling
 
 By default, `load_image()` applies **RescaleSlope** and **RescaleIntercept** transformations to DICOM data, converting stored pixel values to real-world values (e.g., Hounsfield Units for CT). For DICOM series this is applied **per slice**, so series with slice-specific rescale metadata are handled correctly. This matches the behavior of NIfTI loading, which always applies its scaling factors.

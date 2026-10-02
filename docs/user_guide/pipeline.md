@@ -492,7 +492,7 @@ print(f"Computed: {stats['computed_families']} families")
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `deduplicate` | `bool` | `True` | Enable/disable deduplication |
-| `deduplication_rules` | `str` or `DeduplicationRules` | `"1.0.0"` | Rules version for reproducibility |
+| `deduplication_rules` | `str` or `DeduplicationRules` | `"1.1.0"` | Rules version for reproducibility |
 
 !!! tip "API Reference"
     For detailed documentation of `ConfigurationAnalyzer`, `DeduplicationPlan`, `PreprocessingSignature`, and `DeduplicationRules`, see the **[Deduplication API](../api/deduplication.md)** reference.
@@ -679,7 +679,7 @@ print(f"Extracted {len(all_features)} features")
       skip that rebuild — grouping same-shape batches together avoids redundant work.
 
 !!! tip "Reproducibility"
-    Pin `deduplication_rules` explicitly (e.g. `RadiomicsPipeline(deduplication_rules="1.0.0")`) so
+    Pin `deduplication_rules` explicitly (e.g. `RadiomicsPipeline(deduplication_rules="1.1.0")`) so
     a future default-rules change can't silently alter which features get reused. Use
     `pipeline.save_configs(...)` / `RadiomicsPipeline.load_configs(...)` to export and re-import
     configurations verbatim — see [Configuration & Reproducibility](configurations.md) for the full workflow.

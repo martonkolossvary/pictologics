@@ -58,6 +58,9 @@ class DeduplicationRules:
         ivh_discretization_dependent_unless: Condition under which IVH becomes
             independent of discretization (e.g., "ivh_use_continuous=True").
         comparison_mode: How to compare preprocessing parameters ("exact_params").
+        family_options: The ``extract_features`` options that each family reads. A
+            family signature holds only these options. None (rules 1.0.0) puts every
+            option except ``families`` into every family signature.
 
     Example:
         ```python
@@ -65,7 +68,7 @@ class DeduplicationRules:
 
         rules = get_default_rules()
         print(rules.version)
-        # 1.0.0
+        # 1.1.0
         print(sorted(rules.family_dependencies["morphology"]))
         # ['binarize_mask', 'filter_outliers', 'keep_largest_component', 'resample', 'resegment']
         ```
@@ -75,24 +78,32 @@ class DeduplicationRules:
     family_dependencies: dict[str, frozenset[str]]
     ivh_discretization_dependent_unless: str
     comparison_mode: str
+    family_options: dict[str, frozenset[str]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize rules to a dictionary."""
-        return {
+        data: dict[str, Any] = {
             "version": self.version,
             "family_dependencies": {k: sorted(v) for k, v in self.family_dependencies.items()},
             "ivh_discretization_dependent_unless": self.ivh_discretization_dependent_unless,
             "comparison_mode": self.comparison_mode,
         }
+        if self.family_options is not None:
+            data["family_options"] = {k: sorted(v) for k, v in self.family_options.items()}
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DeduplicationRules":
         """Deserialize rules from a dictionary."""
+        options = data.get("family_options")
         return cls(
             version=data["version"],
             family_dependencies={k: frozenset(v) for k, v in data["family_dependencies"].items()},
             ivh_discretization_dependent_unless=data["ivh_discretization_dependent_unless"],
             comparison_mode=data["comparison_mode"],
+            family_options=None
+            if options is None
+            else {k: frozenset(v) for k, v in options.items()},
         )
 
     @classmethod
@@ -268,13 +279,43 @@ DEDUPLICATION_RULES_V1_0_0 = DeduplicationRules(
     comparison_mode="exact_params",
 )
 
+_TEXTURE_OPTIONS = frozenset({"texture_matrix_params"})
+
+# Version 1.1.0 - a family signature holds only the extraction options that the family
+# reads, so for example configurations that differ only in ivh_params share texture
+DEDUPLICATION_RULES_V1_1_0 = DeduplicationRules(
+    version="1.1.0",
+    family_dependencies=DEDUPLICATION_RULES_V1_0_0.family_dependencies,
+    ivh_discretization_dependent_unless="ivh_use_continuous=True",
+    comparison_mode="exact_params",
+    family_options={
+        "morphology": frozenset(),
+        # The intensity family also gives the spatial and local features they turn on
+        "intensity": frozenset(
+            {
+                "include_spatial_intensity",
+                "include_local_intensity",
+                "spatial_intensity_params",
+                "local_intensity_params",
+            }
+        ),
+        "spatial_intensity": frozenset({"spatial_intensity_params"}),
+        "local_intensity": frozenset({"local_intensity_params"}),
+        "histogram": frozenset(),
+        "ivh": frozenset({"ivh_params", "ivh_use_continuous", "ivh_discretisation"}),
+        "texture": _TEXTURE_OPTIONS,
+        **{family: _TEXTURE_OPTIONS for family in sorted(_TEXTURE_FAMILIES)},
+    },
+)
+
 # Registry of all rule versions - NEVER remove old versions
 RULES_REGISTRY: dict[str, DeduplicationRules] = {
     "1.0.0": DEDUPLICATION_RULES_V1_0_0,
+    "1.1.0": DEDUPLICATION_RULES_V1_1_0,
 }
 
 # Current default version
-CURRENT_RULES_VERSION = "1.0.0"
+CURRENT_RULES_VERSION = "1.1.0"
 
 
 def get_default_rules() -> DeduplicationRules:
@@ -286,7 +327,7 @@ def get_default_rules() -> DeduplicationRules:
 
         rules = get_default_rules()
         print(rules.version)
-        # 1.0.0
+        # 1.1.0
         ```
     """
     return RULES_REGISTRY[CURRENT_RULES_VERSION]
@@ -383,20 +424,24 @@ def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
         if key == "mask_values" and isinstance(value, tuple) and len(value) == 2:
             # binarize_mask reads a (lo, hi) tuple as a range but a list as label
             # values, so the two must not share a signature.
-            result[key] = {"range": list(value)}
-        elif isinstance(value, Enum):  # for example a BoundaryCondition
-            result[key] = value.name.lower()
-        elif hasattr(value, "tolist"):  # numpy array
-            result[key] = value.tolist()
-        elif isinstance(value, tuple):
-            result[key] = list(value)
-        elif isinstance(value, dict):
-            result[key] = _normalize_params(value)
-        elif isinstance(value, (list, tuple)):
-            result[key] = [_normalize_params(v) if isinstance(v, dict) else v for v in value]
+            result[key] = {"range": [_normalize_value(v) for v in value]}
         else:
-            result[key] = value
+            result[key] = _normalize_value(value)
     return result
+
+
+def _normalize_value(value: Any) -> Any:
+    """A parameter value in JSON types: numpy arrays and numbers (also inside lists and
+    tuples, for example a new_spacing of numpy integers) as Python values."""
+    if isinstance(value, Enum):  # for example a BoundaryCondition
+        return value.name.lower()
+    if hasattr(value, "tolist"):  # numpy array or number
+        return value.tolist()
+    if isinstance(value, dict):
+        return _normalize_params(value)
+    if isinstance(value, (list, tuple)):
+        return [_normalize_value(v) for v in value]
+    return value
 
 
 # =============================================================================
@@ -738,12 +783,14 @@ class ConfigurationAnalyzer:
             }
             # Extraction options (for example ivh_params, texture_matrix_params, and
             # include_spatial_intensity) change values too. Only the family list is left
-            # out, because each family is computed on its own.
-            extraction_options = {
+            # out, because each family is computed on its own; rules with an option table
+            # keep only the options that the family reads.
+            options = {
                 key: value
                 for key, value in extraction_steps[0].get("params", {}).items()
                 if key != "families"
             }
+            family_options = self.rules.family_options or {}
 
             # Determine which families this config extracts
             families_in_config = self._get_families_in_config(steps)
@@ -753,10 +800,14 @@ class ConfigurationAnalyzer:
                     # Unknown family, skip
                     continue
 
+                read = family_options.get(family)
                 relevant_steps = [
                     ("source_mode", source),
                     *extract_relevant_steps(steps, family, self.rules),
-                    ("extract_features", extraction_options),
+                    (
+                        "extract_features",
+                        options if read is None else {k: options[k] for k in read & options.keys()},
+                    ),
                 ]
 
                 # Create signature
@@ -823,6 +874,7 @@ __all__ = [
     "PreprocessingSignature",
     "ConfigurationAnalyzer",
     "DEDUPLICATION_RULES_V1_0_0",
+    "DEDUPLICATION_RULES_V1_1_0",
     "RULES_REGISTRY",
     "CURRENT_RULES_VERSION",
     "get_default_rules",

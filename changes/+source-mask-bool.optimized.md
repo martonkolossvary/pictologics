@@ -1,0 +1,1 @@
+In the `roi_only` and `auto` source modes, the pipeline keeps one boolean source mask and shares it between the steps, with no type copies. A resampled source mask with no invalid voxel no longer changes the masks. The results are the same.

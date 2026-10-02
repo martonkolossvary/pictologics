@@ -1294,7 +1294,7 @@ pipeline = RadiomicsPipeline()
 pipeline_no_dedup = RadiomicsPipeline(deduplicate=False)
 
 # Lock to a specific rules version for reproducibility
-pipeline_versioned = RadiomicsPipeline(deduplication_rules="1.0.0")
+pipeline_versioned = RadiomicsPipeline(deduplication_rules="1.1.0")
 
 # Access deduplication configuration
 print(f"Deduplication enabled: {pipeline.deduplication_enabled}")

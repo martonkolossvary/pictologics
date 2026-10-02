@@ -18,6 +18,39 @@ from pictologics.utilities.dicom_utils import (
 )
 
 
+def _image_mock() -> MagicMock:
+    """A mock DICOM image dataset: `in` finds its pixel data, as for a real image."""
+    dataset = MagicMock()
+    dataset.__contains__.return_value = True
+    return dataset
+
+
+def _write_image(path: Path, **tags: object) -> None:
+    """A minimal 2 x 2 MR image file with the given tags (synthetic, no patient data)."""
+    import numpy as np
+    import pydicom
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.uid import MRImageStorage, generate_uid
+
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = MRImageStorage
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+    ds = pydicom.Dataset()
+    ds.file_meta = meta
+    ds.SOPClassUID, ds.SOPInstanceUID = MRImageStorage, meta.MediaStorageSOPInstanceUID
+    ds.SeriesInstanceUID = "1.2.826.0.1.3680043.2.1125.7"
+    ds.Rows = ds.Columns = 2
+    ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+    ds.BitsAllocated = ds.BitsStored = 16
+    ds.HighBit, ds.PixelRepresentation = 15, 0
+    ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+    ds.PixelData = np.zeros((2, 2), np.uint16).tobytes()
+    for key, value in tags.items():
+        setattr(ds, key, value)
+    ds.save_as(path, enforce_file_format=True)
+
+
 class TestSplitDicomPhases(unittest.TestCase):
     """Tests for split_dicom_phases function."""
 
@@ -223,6 +256,92 @@ class TestSplitDicomPhases(unittest.TestCase):
         result = split_dicom_phases(meta)
         self.assertEqual(len(result), 1)
 
+    def test_distinct_positions_are_one_volume(self) -> None:
+        """A step-and-shoot CT writes a new AcquisitionNumber per table step; with no
+        repeated position the files stay one volume."""
+        meta = [
+            {
+                "file_path": Path(f"{k}.dcm"),
+                "ImagePositionPatient": (0.0, 0.0, 1.5 * k),
+                "AcquisitionNumber": k // 4 + 1,
+                "InstanceNumber": k + 1,
+            }
+            for k in range(40)
+        ]
+        self.assertEqual(split_dicom_phases(meta), [meta])
+
+    def test_drifting_trigger_times_split_by_position(self) -> None:
+        """Cine MR: 5 phases at 10 positions, the trigger time drifts 0.1 ms per slice.
+        50 trigger-time groups are not phases, so the positions split the files."""
+        from pictologics.utilities.dicom_utils import _split_tag
+
+        meta = [
+            {
+                "file_path": k,
+                "ImagePositionPatient": (0.0, 0.0, 10.0 * (k % 10)),
+                "TriggerTime": 35.0 * (k // 10) + 0.1 * (k % 10),
+                "InstanceNumber": k + 1,
+            }
+            for k in range(50)
+        ]
+        phases = split_dicom_phases(meta)
+        self.assertEqual([len(p) for p in phases], [10] * 5)
+        for i, phase in enumerate(phases):
+            self.assertEqual({m["file_path"] // 10 for m in phase}, {i})
+        self.assertEqual(_split_tag(phases), "spatial")
+
+    def test_tag_groups_need_unique_positions(self) -> None:
+        """An AcquisitionNumber that pairs the files at one position does not split
+        phases; the duplicate positions do."""
+        meta = [
+            {
+                "file_path": k,
+                "ImagePositionPatient": (0.0, 0.0, float(k // 2)),
+                "AcquisitionNumber": 1 if k < 2 else 2,
+                "InstanceNumber": k + 1,
+            }
+            for k in range(4)
+        ]
+        phases = split_dicom_phases(meta)
+        self.assertEqual([[m["file_path"] for m in p] for p in phases], [[0, 2], [1, 3]])
+
+    def test_tag_groups_split_repeated_positions(self) -> None:
+        """Two cardiac phases at the same positions split by their tag; the tag names
+        the phases."""
+        from pictologics.utilities.dicom_utils import _split_tag
+
+        meta = [
+            {
+                "file_path": k,
+                "ImagePositionPatient": (0.0, 0.0, float(k % 3)),
+                "NominalPercentageOfCardiacPhase": 40 * (k // 3),
+                "InstanceNumber": 6 - k,
+            }
+            for k in range(6)
+        ]
+        phases = split_dicom_phases(meta)
+        self.assertEqual([[m["file_path"] for m in p] for p in phases], [[0, 1, 2], [3, 4, 5]])
+        self.assertEqual(_split_tag(phases), "NominalPercentageOfCardiacPhase")
+        self.assertIsNone(_split_tag(phases[:1]))
+
+    def test_same_layout(self) -> None:
+        """Images of one series layout share their size and (within 1e-3) orientation."""
+        from pictologics.utilities.dicom_utils import _same_layout
+
+        axial = ((1.0, 0.0, 0.0, 0.0, 1.0, 0.0), 512, 512)
+        self.assertTrue(_same_layout(axial, ((1.0, 0.0, 0.0, 0.0, 1.0, 0.0005), 512, 512)))
+        self.assertFalse(_same_layout(axial, ((1.0, 0.0, 0.0, 0.0, 0.0, -1.0), 512, 512)))
+        self.assertFalse(_same_layout(axial, (axial[0], 256, 256)))
+        self.assertFalse(_same_layout(axial, (None, 512, 512)))
+        self.assertTrue(_same_layout((None, 512, 512), (None, 512, 512)))
+
+    def test_series_list_without_a_readable_file(self) -> None:
+        """The error listing still names a series whose first file cannot be read."""
+        from pictologics.utilities.dicom_utils import _series_list
+
+        listing = _series_list({"1.2.3": [{"file_path": Path("/no/such/file.dcm")}]})
+        self.assertEqual(listing, "  1.2.3: series None, None, '', 1 files")
+
     def test_position_as_list(self) -> None:
         """Handle ImagePositionPatient as list (not tuple)."""
         meta = [
@@ -292,7 +411,7 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm = MagicMock()
+        dcm = _image_mock()
         dcm.InstanceNumber = 1
         dcm.ImagePositionPatient = [0, 0, 0]
         mock_dcmread.return_value = dcm
@@ -328,12 +447,12 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm1 = MagicMock()
+        dcm1 = _image_mock()
         dcm1.InstanceNumber = 1
         dcm1.NominalPercentageOfCardiacPhase = 0
         del dcm1.ImagePositionPatient
 
-        dcm2 = MagicMock()
+        dcm2 = _image_mock()
         dcm2.InstanceNumber = 2
         dcm2.NominalPercentageOfCardiacPhase = 50
         del dcm2.ImagePositionPatient
@@ -376,12 +495,12 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm1 = MagicMock()
+        dcm1 = _image_mock()
         dcm1.InstanceNumber = 1
         dcm1.TemporalPositionIdentifier = 1
         del dcm1.ImagePositionPatient
 
-        dcm2 = MagicMock()
+        dcm2 = _image_mock()
         dcm2.InstanceNumber = 2
         dcm2.TemporalPositionIdentifier = 2
         del dcm2.ImagePositionPatient
@@ -423,12 +542,12 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm1 = MagicMock()
+        dcm1 = _image_mock()
         dcm1.InstanceNumber = 1
         dcm1.EchoNumbers = 1
         del dcm1.ImagePositionPatient
 
-        dcm2 = MagicMock()
+        dcm2 = _image_mock()
         dcm2.InstanceNumber = 2
         dcm2.EchoNumbers = 2
         del dcm2.ImagePositionPatient
@@ -470,12 +589,12 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm1 = MagicMock()
+        dcm1 = _image_mock()
         dcm1.InstanceNumber = 1
         dcm1.AcquisitionNumber = 1
         del dcm1.ImagePositionPatient
 
-        dcm2 = MagicMock()
+        dcm2 = _image_mock()
         dcm2.InstanceNumber = 2
         dcm2.AcquisitionNumber = 2
         del dcm2.ImagePositionPatient
@@ -517,12 +636,12 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm1 = MagicMock()
+        dcm1 = _image_mock()
         dcm1.InstanceNumber = 1
         dcm1.TriggerTime = 0.0
         del dcm1.ImagePositionPatient
 
-        dcm2 = MagicMock()
+        dcm2 = _image_mock()
         dcm2.InstanceNumber = 2
         dcm2.TriggerTime = 100.0
         del dcm2.ImagePositionPatient
@@ -564,11 +683,11 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm1 = MagicMock()
+        dcm1 = _image_mock()
         dcm1.InstanceNumber = 1
         dcm1.ImagePositionPatient = [0, 0, 0]
 
-        dcm2 = MagicMock()
+        dcm2 = _image_mock()
         dcm2.InstanceNumber = 2
         dcm2.ImagePositionPatient = [0, 0, 0]  # Same position = duplicate
 
@@ -587,36 +706,24 @@ class TestGetDicomPhases(unittest.TestCase):
         self.assertEqual(result[1].label, "Volume 2")
         self.assertEqual(result[0].split_tag, "spatial")
 
-    @patch("pictologics.utilities.dicom_utils.Path")
-    @patch("pictologics.utilities.dicom_utils.pydicom.misc.is_dicom")
-    @patch("pictologics.utilities.dicom_utils.pydicom.dcmread")
-    def test_recursive_search(
-        self,
-        mock_dcmread: MagicMock,
-        mock_is_dicom: MagicMock,
-        mock_Path: MagicMock,
-    ) -> None:
-        """Recursive search uses rglob instead of iterdir."""
-        file1 = MagicMock()
-        file1.is_file.return_value = True
+    def test_recursive_search(self) -> None:
+        """Recursive search uses the folder with the most DICOM files, as load_image does."""
+        from pictologics import load_image
 
-        mock_path_obj = mock_Path.return_value
-        mock_path_obj.exists.return_value = True
-        mock_path_obj.is_file.return_value = False
-        mock_path_obj.rglob.return_value = [file1]
-        mock_path_obj.iterdir.return_value = []
-
-        mock_is_dicom.return_value = True
-
-        dcm = MagicMock()
-        dcm.InstanceNumber = 1
-        dcm.ImagePositionPatient = [0, 0, 0]
-        mock_dcmread.return_value = dcm
-
-        result = get_dicom_phases("test_dir", recursive=True)
-
-        mock_path_obj.rglob.assert_called_once_with("*")
-        self.assertEqual(len(result), 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, count in (("a", 2), ("b", 3)):
+                (root / name).mkdir()
+                for k in range(count):
+                    _write_image(
+                        root / name / f"{k}.dcm",
+                        InstanceNumber=k + 1,
+                        ImagePositionPatient=[0.0, 0.0, float(k)],
+                    )
+            result = get_dicom_phases(root, recursive=True)
+            self.assertEqual([p.num_slices for p in result], [3])
+            self.assertEqual({f.parent.name for f in result[0].file_paths}, {"b"})
+            self.assertEqual(load_image(root, recursive=True).array.shape, (2, 2, 3))
 
     @patch("pictologics.utilities.dicom_utils.Path")
     @patch("pictologics.utilities.dicom_utils.pydicom.misc.is_dicom")
@@ -634,7 +741,7 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm = MagicMock()
+        dcm = _image_mock()
         dcm.InstanceNumber = 1
         dcm.ImagePositionPatient = [0, 0, 0]
         mock_dcmread.return_value = dcm
@@ -665,7 +772,7 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm = MagicMock()
+        dcm = _image_mock()
         dcm.InstanceNumber = 1
         dcm.ImagePositionPatient = [0, 0, 0]
 
@@ -721,7 +828,7 @@ class TestGetDicomPhases(unittest.TestCase):
 
         mock_is_dicom.return_value = True
 
-        dcm = MagicMock()
+        dcm = _image_mock()
         dcm.InstanceNumber = 1
         del dcm.ImagePositionPatient  # Missing
 
@@ -789,28 +896,37 @@ class TestHeaderWorkerPool(unittest.TestCase):
                     self.assertEqual(pool.submit(os.getenv, key).result(), "1")
                 self.assertEqual(os.environ.get(key), previous)
 
+    def test_a_forkserver_default_gives_a_spawn_pool(self) -> None:
+        # A forkserver would keep the environment of its first start; the pool spawns
+        # instead. Other start methods stay as they are.
+        import multiprocessing
+
+        from pictologics.utilities import dicom_utils
+
+        for method, expected in (("forkserver", "spawn"), ("spawn", "spawn"), ("fork", "fork")):
+            with (
+                patch.object(multiprocessing, "get_start_method", return_value=method),
+                patch.object(dicom_utils, "ProcessPoolExecutor") as pool,
+            ):
+                with dicom_utils.header_worker_pool(2):
+                    pass
+            self.assertEqual(pool.call_args.kwargs["mp_context"].get_start_method(), expected)
+
 
 def test_echo_numbers_split_real_files(tmp_path: Path) -> None:
-    """Two echoes of real files split by their EchoNumbers tag, even at distinct slice
-    positions, where the duplicate-position fallback finds nothing."""
-    import pydicom
-    from pydicom.dataset import FileMetaDataset
-    from pydicom.uid import MRImageStorage, generate_uid
-
-    for k, echo in enumerate((1, 2, 1, 2)):
-        meta = FileMetaDataset()
-        meta.MediaStorageSOPClassUID = MRImageStorage
-        meta.MediaStorageSOPInstanceUID = generate_uid()
-        meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
-        ds = pydicom.Dataset()
-        ds.file_meta = meta
-        ds.SOPClassUID, ds.SOPInstanceUID = MRImageStorage, meta.MediaStorageSOPInstanceUID
-        ds.InstanceNumber, ds.EchoNumbers = k + 1, echo
-        ds.ImagePositionPatient = [0.0, 0.0, float(k)]
-        ds.save_as(tmp_path / f"{k}.dcm", enforce_file_format=True)
+    """Two echoes of real files split by their EchoNumbers tag. The instance numbers
+    alternate, so the duplicate-position fallback would mix the echoes."""
+    for k, (z, echo) in enumerate(((0.0, 1), (0.0, 2), (1.0, 2), (1.0, 1))):
+        _write_image(
+            tmp_path / f"{k}.dcm", InstanceNumber=k + 1, EchoNumbers=echo,
+            ImagePositionPatient=[0.0, 0.0, z],
+        )  # fmt: skip
     phases = get_dicom_phases(str(tmp_path))
     assert [p.label for p in phases] == ["Echo 1", "Echo 2"]
-    assert [p.num_slices for p in phases] == [2, 2]
+    assert [sorted(f.name for f in p.file_paths) for p in phases] == [
+        ["0.dcm", "3.dcm"],
+        ["1.dcm", "2.dcm"],
+    ]
 
 
 if __name__ == "__main__":

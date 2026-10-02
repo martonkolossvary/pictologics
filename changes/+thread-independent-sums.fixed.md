@@ -1,0 +1,1 @@
+No feature changes with the number of threads now. Surface area, volume and the intensity-weighted shape features add in fixed blocks, and the NGTDM sums are exact integers per grey level and neighbour count. Before, 19 of 174 features changed in the last digits (up to 5e-11, relative) between machines with other core counts. NGTDM values move by at most 1.3e-14.

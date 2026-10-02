@@ -89,13 +89,14 @@ class TestIntensityFeatures(unittest.TestCase):
         self.assertEqual(features, {})
 
     def test_calculate_intensity_features_constant(self) -> None:
-        # Variance = 0 case
-        values = np.array([5, 5, 5], dtype=float)
-        features = calculate_intensity_features(values)
-        self.assertAlmostEqual(features["mean_intensity_Q4LE"], 5.0)
-        self.assertAlmostEqual(features["intensity_variance_ECT3"], 0.0)
-        self.assertTrue(np.isnan(features["intensity_skewness_KE2A"]))
-        self.assertTrue(np.isnan(features["intensity_kurtosis_IPH6"]))
+        # IBSI: skewness and kurtosis are 0 when the variance is 0. Equal values whose
+        # mean is not exact (0.1) count too, although np.var gives about 1e-34 for them.
+        for value in (5.0, 0.1):
+            features = calculate_intensity_features(np.full(3, value))
+            self.assertAlmostEqual(features["mean_intensity_Q4LE"], value)
+            self.assertAlmostEqual(features["intensity_variance_ECT3"], 0.0)
+            self.assertEqual(features["intensity_skewness_KE2A"], 0.0)
+            self.assertEqual(features["intensity_kurtosis_IPH6"], 0.0)
 
     def test_calculate_intensity_features_zero_mean(self) -> None:
         # CV and Quartile coeff denom = 0
@@ -205,8 +206,8 @@ class TestIntensityFeatures(unittest.TestCase):
         # All same values -> variance 0
         disc_vals = np.array([1, 1, 1, 1])
         features = calculate_intensity_histogram_features(disc_vals)
-        self.assertTrue(np.isnan(features["discretised_intensity_skewness_88K1"]))
-        self.assertTrue(np.isnan(features["discretised_intensity_kurtosis_C3I7"]))
+        self.assertEqual(features["discretised_intensity_skewness_88K1"], 0.0)
+        self.assertEqual(features["discretised_intensity_kurtosis_C3I7"], 0.0)
         self.assertEqual(features["intensity_histogram_coefficient_of_variation_CWYJ"], 0.0)
         self.assertTrue(np.isnan(features["maximum_histogram_gradient_12CE"]))
 
@@ -259,6 +260,34 @@ class TestIntensityFeatures(unittest.TestCase):
         vals = np.array([5, 5, 5])
         features = calculate_ivh_features(vals)
         self.assertEqual(features["area_under_the_ivh_curve_9CMM"], 0.0)
+
+    def test_ivh_counts_give_the_features_of_the_sorted_values(self) -> None:
+        # Integers take one count per value, with no sort, also from a negative minimum;
+        # integers over a range far longer than the values take the sort, as floats do.
+        # Each gives the features of the same values as floats.
+        rng = np.random.default_rng(16)
+        ints = rng.integers(-40, 60, 500)
+        settings = [
+            {},
+            {"min_val": -50.0, "max_val": 70.0},
+            {"target_range_min": 0.0, "target_range_max": 50.0},
+        ]
+        many = patch("pictologics.features.intensity._PARALLEL_COUNT_MIN", 1)
+        for kwargs in settings:
+            with many, patch.object(np, "sort", side_effect=AssertionError("sorted")):
+                counted = calculate_ivh_features(ints, **kwargs)
+            self.assertEqual(counted, calculate_ivh_features(ints.astype(np.float64), **kwargs))
+            self.assertEqual(calculate_ivh_features(ints, **kwargs), counted)  # few: the sort
+        # Other integers count as int64
+        with many:
+            short = ints.astype(np.int16)
+            self.assertEqual(
+                calculate_ivh_features(short), calculate_ivh_features(short.astype(np.float64))
+            )
+        wide = np.array([0, 10**9, 3, 10**9])
+        self.assertEqual(
+            calculate_ivh_features(wide), calculate_ivh_features(wide.astype(np.float64))
+        )
 
     def test_calculate_ivh_features_physical_target(self) -> None:
         # Target range provided + bin_width
@@ -560,10 +589,12 @@ class TestIntensityFeatures(unittest.TestCase):
                 self.assertEqual(features["global_intensity_peak_0F91"], expected[0])
                 self.assertEqual(features["local_intensity_peak_VJGA"], expected[1])
 
-        # A mask without positive voxels has no ROI, also after the crop.
+        # Every nonzero label is ROI membership, also a negative one (after the crop too);
+        # a mask of zeros has no ROI.
         roi.array = -mask
         with patch("pictologics.features.intensity._LOCAL_CROP_MIN_SIZE", 1):
-            self.assertEqual(calculate_local_intensity_features(image, roi), {})
+            features = calculate_local_intensity_features(image, roi)
+        self.assertEqual(features["global_intensity_peak_0F91"], expected[0])
         roi.array = np.zeros(data.shape)
         with patch("pictologics.features.intensity._LOCAL_CROP_MIN_SIZE", 1):
             self.assertEqual(calculate_local_intensity_features(image, roi), {})
@@ -690,6 +721,46 @@ class TestIntensityFeatures(unittest.TestCase):
         glob, loc = _calculate_local_peaks_numba(data, mask_indices, roi_means)
         self.assertEqual(glob, 8.0)  # max of means
         self.assertEqual(loc, 8.0)  # max intensity (10) occurs at 8.0 mean
+
+
+class TestFastPaths(unittest.TestCase):
+    """The radix select and the two-stage local peaks give the values of the direct
+    paths bit for bit; a NaN or an infinite intensity takes the direct path."""
+
+    def test_radix_select_order_statistics(self) -> None:
+        from pictologics.features import intensity as intensity_module
+
+        rng = np.random.default_rng(12)
+        for values in (
+            rng.normal(0.0, 100.0, 301),
+            np.round(rng.normal(0.0, 3.0, 300)),
+            rng.choice([-0.0, 0.0, 2.5, -np.inf, np.inf, 1e-300], 200),
+        ):
+            with np.errstate(invalid="ignore"):  # inf - inf in the moments
+                expected = calculate_intensity_features(values)
+                with patch.object(intensity_module, "_RADIX_SELECT_MIN", 8):
+                    # NaN features (inf - inf) count as equal
+                    np.testing.assert_equal(calculate_intensity_features(values), expected)
+        with_nan = rng.normal(0.0, 1.0, 50)
+        with_nan[7] = np.nan
+        self.assertIsNone(intensity_module._radix_select(with_nan, np.array([3, 20])))
+
+    def test_two_stage_local_peaks(self) -> None:
+        from pictologics.features import intensity as intensity_module
+        from pictologics.loader import Image
+
+        rng = np.random.default_rng(13)
+        data = rng.normal(50.0, 20.0, (12, 13, 14))
+        data[6, 6, 6] = data.max() + 1.0  # one brightest voxel
+        mask = np.zeros(data.shape, dtype=np.uint8)
+        mask[2:10, 3:11, 2:12] = 1
+        spacing = (2.0, 2.5, 3.0)
+        for array in (data, np.where(mask > 0, np.inf, data)):
+            image = Image(array, spacing, (0.0, 0.0, 0.0))
+            roi = Image(mask, spacing, (0.0, 0.0, 0.0))
+            expected = calculate_local_intensity_features(image, roi)
+            with patch.object(intensity_module, "_TWO_STAGE_MIN_WORK", 1):
+                self.assertEqual(calculate_local_intensity_features(image, roi), expected)
 
 
 if __name__ == "__main__":

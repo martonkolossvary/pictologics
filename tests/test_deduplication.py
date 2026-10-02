@@ -66,6 +66,12 @@ class TestDeduplicationRules:
         assert restored.version == rules.version
         assert restored.family_dependencies == rules.family_dependencies
 
+    def test_every_rules_version_survives_json(self):
+        # Rules 1.1.0 keep the options of each family; rules 1.0.0 have no option table.
+        for rules in RULES_REGISTRY.values():
+            assert DeduplicationRules.from_dict(json.loads(json.dumps(rules.to_dict()))) == rules
+        assert "family_options" not in DEDUPLICATION_RULES_V1_0_0.to_dict()
+
     def test_rules_json_serialization(self):
         """Rules should be JSON serializable."""
         rules = get_default_rules()
@@ -1249,6 +1255,29 @@ class TestDeduplicationKeepsResults:
             pd.testing.assert_series_equal(
                 results[True][name], separate[name], check_exact=False, rtol=1e-9
             )
+
+    def test_an_option_of_one_family_changes_only_that_family(self):
+        # With rules 1.1.0, configurations that differ only in IVH options reuse the
+        # other four families and keep the values of separate runs. Rules 1.0.0 put every
+        # option into every family, so the second configuration computes all five again.
+        image, mask = self._inputs()
+        families = ("intensity", "morphology", "histogram", "ivh", "glcm")
+        ivh_range = {"target_range_min": 2, "target_range_max": 5}
+        runs = {}
+        reused = {}
+        for rules in ("1.1.0", "1.0.0", None):
+            pipeline = RadiomicsPipeline(
+                deduplicate=rules is not None, deduplication_rules=rules, load_standard=False
+            )
+            pipeline.add_config("first", [_FBN_8, _extract(*families)])
+            pipeline.add_config("second", [_FBN_8, _extract(*families, ivh_params=ivh_range)])
+            runs[rules] = pipeline.run(image, mask, config_names=["first", "second"])
+            if rules is not None:
+                reused[rules] = pipeline.deduplication_stats["reused_families"]
+        assert reused == {"1.1.0": 4, "1.0.0": 0}
+        for name in ("first", "second"):
+            pd.testing.assert_series_equal(runs["1.1.0"][name], runs[None][name])
+            pd.testing.assert_series_equal(runs["1.0.0"][name], runs[None][name])
 
     def test_discretisation_only_difference_still_reuses_intensity_and_morphology(self):
         image, mask = self._inputs()

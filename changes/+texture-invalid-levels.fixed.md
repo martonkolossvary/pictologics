@@ -1,0 +1,1 @@
+An ROI voxel with a grey level outside [1, n_bins] (for example bin 0, the bin of a NaN voxel) now takes no part in the texture matrices. Before, NGTDM and NGLDM counted it as a neighbour with grey level 256.

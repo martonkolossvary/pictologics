@@ -1903,6 +1903,7 @@ class TestMultiSeriesSplitting:
                 series_uid=series_uid,
                 sop_uid=f"{series_uid}.1.{i}",
                 instance_number=i,
+                image_position=(0.0, 0.0, float(i)),
                 AcquisitionNumber=1,
             )
         for i in range(1, 3):
@@ -1911,6 +1912,7 @@ class TestMultiSeriesSplitting:
                 series_uid=series_uid,
                 sop_uid=f"{series_uid}.2.{i}",
                 instance_number=i,
+                image_position=(0.0, 0.0, float(i)),
                 AcquisitionNumber=2,
             )
 
@@ -2094,3 +2096,34 @@ class TestMultiSeriesSplitting:
         # One should be 0.0, one should be None (or NaN)
         # NaN check: x != x for floats
         assert any(v is None or (isinstance(v, float) and v != v) for v in vals)
+
+
+def test_private_binary_values_are_stored_as_their_size(tmp_path: Path) -> None:
+    """A binary private value (a 60 KB CSA header) and a private sequence are stored as
+    their size; text values stay as they are (synthetic file)."""
+    import pydicom
+    from pydicom.dataset import Dataset, FileMetaDataset
+    from pydicom.sequence import Sequence
+    from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
+
+    from pictologics.utilities.dicom_database import _extract_single_file_metadata
+
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = CTImageStorage
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = Dataset()
+    ds.file_meta = meta
+    ds.SOPClassUID, ds.SOPInstanceUID = CTImageStorage, meta.MediaStorageSOPInstanceUID
+    ds.PatientID, ds.StudyInstanceUID, ds.SeriesInstanceUID = "SYN", generate_uid(), generate_uid()
+    block = ds.private_block(0x0029, "SIEMENS CSA HEADER", create=True)
+    block.add_new(0x10, "OB", b"\x01" * 60000)
+    block.add_new(0x11, "LO", "short text")
+    block.add_new(0x12, "SQ", Sequence([Dataset()]))
+    path = tmp_path / "private.dcm"
+    pydicom.dcmwrite(path, ds, enforce_file_format=True)
+    metadata = _extract_single_file_metadata(path, extract_private_tags=True)
+    assert metadata is not None
+    assert metadata["Private_0029_1010"] == "<OB, 60000 bytes>"
+    assert metadata["Private_0029_1011"] == "short text"
+    assert metadata["Private_0029_1012"] == "<SQ, 1 items>"

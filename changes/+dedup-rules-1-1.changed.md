@@ -1,0 +1,1 @@
+Deduplication rules 1.1.0 are the new default. A family signature holds only the `extract_features` options that the family reads. For example, configurations that differ only in `ivh_params` now share the texture, intensity, morphology and histogram features. Rules 1.0.0 stay available and unchanged.

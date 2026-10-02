@@ -35,6 +35,7 @@ def gabor_filter(
     average_over_planes: bool = False,
     use_parallel: Union[bool, None] = None,
     source_mask: Optional[npt.NDArray[np.bool_]] = None,
+    region: Optional[Tuple[slice, slice, slice]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply 2D Gabor filter to 3D image (IBSI code: Q88H).
@@ -59,10 +60,13 @@ def gabor_filter(
         pooling: Pooling method ("average", "max", "min")
         average_over_planes: If True, average 2D responses over 3 orthogonal planes
         use_parallel: If True, process slices in parallel. If None (default),
-            auto-enables for images > ~46³ voxels.
+            auto-enables when the slices to filter hold more than ~46³ voxels.
         source_mask: Optional boolean mask where True = valid voxel.
             When provided, zeros out invalid (sentinel) voxels before
             FFT-based convolution to prevent contamination.
+        region: Optional box of the image (one slice per axis). Only the response
+            in the box is computed, and the result has the box shape. Each plane
+            still filters whole slices, so the values are those of the whole image.
 
     Returns:
         Response map (modulus of complex response)
@@ -130,17 +134,20 @@ def gabor_filter(
     if pooling not in valid_poolings:
         raise ValueError(f"Unknown pooling: {pooling}. Must be one of {valid_poolings}")
 
-    # Auto-detect parallel mode based on image size
-    if use_parallel is None:
-        use_parallel = image.size > _PARALLEL_THRESHOLD
-
     if rotation_invariant:
         if delta_theta is None:
             raise ValueError(
                 "rotation_invariant=True requires delta_theta (the orientation step in radians)"
             )
-        # Generate orientations from 0 to 2π
-        n_orientations = int(np.ceil(2 * np.pi / delta_theta))
+        # Generate orientations from 0 to 2π. A step given with few digits (0.785398 for
+        # π/4) still means a whole number of orientations, with the exact step 2π / n;
+        # ceil would add one orientation.
+        steps = 2 * np.pi / delta_theta
+        n_orientations = round(steps)
+        if n_orientations >= 1 and abs(steps - n_orientations) < 1e-3:
+            delta_theta = 2 * np.pi / n_orientations
+        else:
+            n_orientations = int(np.ceil(steps))
         thetas = [i * delta_theta for i in range(n_orientations)]
         # The Gabor response modulus is π-periodic in theta: kernel(θ+π) = conj(kernel(θ))
         # and the image is real, so |response| is identical for θ and θ+π. When the
@@ -151,22 +158,36 @@ def gabor_filter(
     else:
         thetas = [theta]
 
+    def _plane(plane_axis: int) -> npt.NDArray[np.floating[Any]]:
+        """The response of one plane; with a region, of the slices through it."""
+        part = image
+        if region is not None:
+            part = image[tuple(region[a] if a == plane_axis else slice(None) for a in range(3))]
+        # Auto-detect parallel mode based on the size of the part filtered
+        parallel = part.size > _PARALLEL_THRESHOLD if use_parallel is None else use_parallel
+        response = _apply_gabor_to_plane(
+            part,
+            sigma_mm,
+            lambda_mm,
+            gamma,
+            thetas,
+            plane_axis=plane_axis,
+            spacing_mm=spacing_mm,
+            mode=mode,
+            pooling=pooling,
+            use_parallel=parallel,
+        )
+        if region is not None:
+            response = response[
+                tuple(slice(None) if a == plane_axis else region[a] for a in range(3))
+            ]
+        return response
+
     if average_over_planes:
         # Apply to all 3 orthogonal planes and average with in-place aggregation
         result: npt.NDArray[np.floating[Any]] | None = None
         for plane_axis in range(3):
-            plane_response = _apply_gabor_to_plane(
-                image,
-                sigma_mm,
-                lambda_mm,
-                gamma,
-                thetas,
-                plane_axis,
-                spacing_mm,
-                mode,
-                pooling,
-                use_parallel,
-            )
+            plane_response = _plane(plane_axis)
             if result is None:
                 result = plane_response.astype(np.float64)
             else:
@@ -178,18 +199,7 @@ def gabor_filter(
         return (result / 3.0).astype(np.float32)  # type: ignore[union-attr]
     else:
         # Apply only to axial plane (axis 2 = k3 slices)
-        return _apply_gabor_to_plane(
-            image,
-            sigma_mm,
-            lambda_mm,
-            gamma,
-            thetas,
-            plane_axis=2,
-            spacing_mm=spacing_mm,
-            mode=mode,
-            pooling=pooling,
-            use_parallel=use_parallel,
-        )
+        return _plane(2)
 
 
 def _apply_gabor_to_plane(
@@ -333,8 +343,9 @@ def _create_gabor_kernel_2d(
     """
     Create a 2D Gabor kernel.
     """
-    # Determine kernel size (6σ truncation for complete coverage)
-    radius = int(np.ceil(6.0 * sigma))
+    # Kernel size: 6σ truncation along the long axis of the envelope, which has the
+    # scale σ / γ for γ < 1 (IBSI 2 tests 4.a.1 and 4.a.2 then match their references)
+    radius = int(np.ceil(6.0 * sigma / min(1.0, gamma)))
 
     # Create coordinate grid - row (k1/y) varies along axis 0, col (k2/x) along axis 1
     k1, k2 = np.mgrid[-radius : radius + 1, -radius : radius + 1].astype(np.float64)
@@ -370,9 +381,11 @@ def _create_gabor_kernel_2d_anisotropic(
     with a per-axis voxel radius, so the result is a rectangular kernel that
     reflects each axis's true spacing rather than assuming a single scale.
     """
-    # Per-axis radius (voxels) for 6σ truncation along each physical axis.
-    radius1 = int(np.ceil(6.0 * sigma_mm / s1))
-    radius2 = int(np.ceil(6.0 * sigma_mm / s2))
+    # Per-axis radius (voxels) for 6σ truncation along each physical axis, with the
+    # envelope scale σ / γ for γ < 1 (see _create_gabor_kernel_2d).
+    reach_mm = 6.0 * sigma_mm / min(1.0, gamma)
+    radius1 = int(np.ceil(reach_mm / s1))
+    radius2 = int(np.ceil(reach_mm / s2))
 
     # Voxel-index grid, then converted to physical (mm) coordinates per axis.
     k1, k2 = np.mgrid[-radius1 : radius1 + 1, -radius2 : radius2 + 1].astype(np.float64)

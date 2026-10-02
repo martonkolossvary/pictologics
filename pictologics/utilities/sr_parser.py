@@ -6,7 +6,8 @@ This module provides functionality for parsing DICOM Structured Reports (SR)
 and extracting measurement data into structured formats (DataFrames, CSV, JSON).
 
 Supports TID1500 (Measurement Report) and other common SR templates.
-Uses highdicom for robust SR parsing and content extraction.
+The SR files are read with pydicom; each CONTAINER of the content tree is a measurement
+group (TID 1500 Measurement Group), with its finding, finding site and tracking ID.
 """
 
 from __future__ import annotations
@@ -661,96 +662,89 @@ def _process_sr_file_worker(
 # ============================================================================
 
 
+# Concept name codes (CodeValue) of TID 1500 and its sub-templates
+_FINDING = "121071"  # Finding (DCM)
+_FINDING_SITES = ("363698007", "G-C0E3")  # Finding Site (SCT, and the old SRT code)
+_TRACKING_ID = "112039"  # Tracking Identifier (DCM)
+_TRACKING_UID = "112040"  # Tracking Unique Identifier (DCM)
+_DERIVATION = "121401"  # Derivation (DCM)
+
+
+def _concept(item: Any) -> tuple[str, str]:
+    """(CodeValue, CodeMeaning) of the concept name of an SR content item."""
+    sequence = getattr(item, "ConceptNameCodeSequence", None)
+    if not sequence:
+        return "", ""
+    code = sequence[0]
+    return str(getattr(code, "CodeValue", "")), str(getattr(code, "CodeMeaning", ""))
+
+
 def _parse_content_sequence(
     dcm: Any,
     extract_private_tags: bool = False,
 ) -> list[SRMeasurementGroup]:
     """Parse the ContentSequence of an SR document for measurements.
 
-    This function recursively traverses the SR content tree to extract
-    measurement groups and individual measurements.
+    Each CONTAINER of the content tree is a measurement group: its NUM children are its
+    measurements, and its CODE and TEXT children give its finding (type), finding site
+    and tracking ID, as in a TID 1500 Measurement Group. The concept codes decide (for
+    example 121071 Finding, 363698007 Finding Site, 112039 Tracking Identifier), and
+    concept names with "site", "type" or "tracking" serve SRs without these codes.
+    Nested containers are groups of their own, and containers without measurements
+    (such as Imaging Measurements) are left out. NUM items outside any container go
+    into a group "default".
 
     Args:
         dcm: The DICOM dataset containing ContentSequence.
         extract_private_tags: Whether to extract private tags.
 
     Returns:
-        List of SRMeasurementGroup objects.
+        List of SRMeasurementGroup objects, in document order.
     """
     groups: list[SRMeasurementGroup] = []
-
-    if not hasattr(dcm, "ContentSequence"):
-        return groups
-
-    # Track current context
-    current_group: Optional[SRMeasurementGroup] = None
-    measurements: list[SRMeasurement] = []
-
-    for item in dcm.ContentSequence:
-        value_type = str(getattr(item, "ValueType", ""))
-
-        # Extract concept name
-        concept_name = None
-        if hasattr(item, "ConceptNameCodeSequence") and item.ConceptNameCodeSequence:
-            concept_name = str(getattr(item.ConceptNameCodeSequence[0], "CodeMeaning", ""))
-
-        # Handle CONTAINER items (measurement groups)
-        if value_type == "CONTAINER":
-            # If we have a current group with measurements, save it
-            if current_group is not None and measurements:
-                current_group.measurements = measurements
-                groups.append(current_group)
-                measurements = []
-
-            # Start new group
-            current_group = SRMeasurementGroup(
-                group_id=concept_name,
-                finding_type=concept_name,
-            )
-
-            # Recursively parse nested content
-            nested_groups = _parse_content_sequence(item, extract_private_tags)
-            if nested_groups:
-                groups.extend(nested_groups)
-
-        # Handle NUM items (numeric measurements)
-        elif value_type == "NUM":
-            meas = _extract_numeric_measurement(item, concept_name)
-            if meas:
-                measurements.append(meas)
-
-        # Handle CODE items (may contain site/type info)
-        elif value_type == "CODE":
-            if current_group is not None:
-                code_value = _get_code_value(item)
-                if concept_name and "site" in concept_name.lower():
-                    current_group.finding_site = code_value
-                elif concept_name and "type" in concept_name.lower():
-                    current_group.finding_type = code_value
-
-        # Handle TEXT items
-        elif value_type == "TEXT":
-            # Could contain tracking ID or other text info
-            if current_group is not None and concept_name:
-                text_value = str(getattr(item, "TextValue", ""))
-                if "tracking" in concept_name.lower():
-                    # Apply to all measurements in current group
-                    current_group.metadata["tracking_id"] = text_value
-
-    # Don't forget the last group
-    if current_group is not None and measurements:
-        current_group.measurements = measurements
-        groups.append(current_group)
-    elif measurements:
-        # Orphan measurements - create a default group
-        groups.append(
-            SRMeasurementGroup(
-                group_id="default",
-                measurements=measurements,
-            )
-        )
-
+    root = _parse_container(dcm, "default", groups)
+    if root.measurements:
+        groups.insert(0, root)
     return groups
+
+
+def _parse_container(
+    node: Any, name: Optional[str], groups: list[SRMeasurementGroup]
+) -> SRMeasurementGroup:
+    """The measurement group of one container; nested groups go into `groups`."""
+    group = SRMeasurementGroup(group_id=name)
+    nested: list[SRMeasurementGroup] = []
+    for item in getattr(node, "ContentSequence", None) or []:
+        value_type = str(getattr(item, "ValueType", ""))
+        code, meaning = _concept(item)
+        lowered = meaning.lower()
+        if value_type == "CONTAINER":
+            child = _parse_container(item, meaning or None, nested)
+            if child.measurements:
+                nested.append(child)
+        elif value_type == "NUM":
+            measurement = _extract_numeric_measurement(item, meaning or None)
+            if measurement is not None:
+                group.measurements.append(measurement)
+        elif value_type == "CODE":
+            if code in _FINDING_SITES or (code != _FINDING and "site" in lowered):
+                group.finding_site = _get_code_value(item)
+            elif code == _FINDING or "type" in lowered:
+                group.finding_type = _get_code_value(item)
+        elif value_type == "TEXT" and (code == _TRACKING_ID or "tracking" in lowered):
+            group.metadata["tracking_id"] = str(getattr(item, "TextValue", ""))
+        elif value_type == "UIDREF" and code == _TRACKING_UID:
+            group.metadata["tracking_uid"] = str(getattr(item, "UID", ""))
+
+    tracking_id = group.metadata.get("tracking_id")
+    if tracking_id and name != "default":
+        group.group_id = tracking_id
+    for measurement in group.measurements:
+        measurement.finding_type = measurement.finding_type or group.finding_type
+        measurement.finding_site = measurement.finding_site or group.finding_site
+        measurement.tracking_id = measurement.tracking_id or tracking_id
+    groups.extend(nested)
+    return group
 
 
 def _extract_numeric_measurement(
@@ -758,6 +752,9 @@ def _extract_numeric_measurement(
     concept_name: Optional[str],
 ) -> Optional[SRMeasurement]:
     """Extract a numeric measurement from an SR content item.
+
+    Its CODE children give the derivation (121401, for example "Mean") and a finding
+    site of the measurement itself.
 
     Args:
         item: The SR content item with ValueType NUM.
@@ -787,11 +784,20 @@ def _extract_numeric_measurement(
         unit_seq = mv.MeasurementUnitsCodeSequence[0]
         unit = str(getattr(unit_seq, "CodeValue", "1"))
 
-    return SRMeasurement(
+    measurement = SRMeasurement(
         name=concept_name or "Unknown",
         value=numeric_value,
         unit=unit,
     )
+    for child in getattr(item, "ContentSequence", None) or []:
+        if str(getattr(child, "ValueType", "")) != "CODE":
+            continue
+        code, meaning = _concept(child)
+        if code == _DERIVATION or meaning.lower() == "derivation":
+            measurement.derivation = _get_code_value(child)
+        elif code in _FINDING_SITES:
+            measurement.finding_site = _get_code_value(child)
+    return measurement
 
 
 def _get_code_value(item: Any) -> Optional[str]:

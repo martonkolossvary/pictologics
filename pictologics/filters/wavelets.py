@@ -1,8 +1,7 @@
 # pictologics/filters/wavelets.py
 """Wavelet transform implementations (separable and non-separable)."""
 
-from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor
+import math
 from typing import Any, List, Optional, Tuple, Union, cast
 
 import numpy as np
@@ -16,9 +15,13 @@ from .base import (
     _TRANSFER_CACHE_BYTES,
     BoundaryCondition,
     _apply_with_boundary_padding,
+    _float32_cut,
+    _kept_rows,
+    _ordered_map,
     _prepare_masked_image,
+    _slab_pass,
     _slabs,
-    _times_transfer,
+    _times_mirrored,
     cache_by_bytes,
     ensure_float32,
     get_scipy_mode,
@@ -130,8 +133,10 @@ def wavelet_transform(
                 if flip:
                     rotated = np.flip(rotated, axis=axis)
 
-            # Apply wavelet
-            response = _apply_undecimated_wavelet_3d(rotated, lo, hi, level, decomposition, mode)
+            # Apply wavelet (one thread per rotation: the rotations run in a pool)
+            response = _apply_undecimated_wavelet_3d(
+                rotated, lo, hi, level, decomposition, mode, threads=1
+            )
 
             # Undo rotation for response
             for axis, flip in enumerate(flips):
@@ -153,23 +158,16 @@ def wavelet_transform(
             else:  # "min"
                 np.minimum(result, response, out=result)
 
+        # Pool the responses in rotation order, so the result does not depend on thread
+        # timing. At most `workers` rotations are in flight (and at most about 2 GB of
+        # float64 responses), and each response is dropped once pooled. Small images
+        # take one rotation at a time.
+        workers = 1
         if use_parallel:
-            # Pool the responses in rotation order, as the sequential path does, so the
-            # result does not depend on thread timing. At most `workers` rotations are
-            # in flight, and each response is dropped once pooled.
-            workers = min(len(rotations), get_num_threads())
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                pending: deque[Future[npt.NDArray[np.floating[Any]]]] = deque()
-                for rotation in rotations:
-                    pending.append(executor.submit(apply_rotated_wavelet, rotation))
-                    if len(pending) == workers:
-                        _pool(pending.popleft().result())
-                while pending:
-                    _pool(pending.popleft().result())
-        else:
-            # Sequential processing for small images
-            for rotation in rotations:
-                _pool(apply_rotated_wavelet(rotation))
+            workers = min(len(rotations), get_num_threads(), max(2, (2 << 30) // (8 * image.size)))
+        for response in _ordered_map(apply_rotated_wavelet, rotations, workers):
+            _pool(response)
+            del response  # freed before the next rotation starts
 
         # Finalize average pooling
         if pooling == "average" and result is not None:
@@ -186,9 +184,11 @@ def _apply_undecimated_wavelet_3d(
     level: int,
     decomposition: str,
     mode: str,
+    threads: Optional[int] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
-    Apply undecimated 3D wavelet decomposition using à trous algorithm.
+    Apply undecimated 3D wavelet decomposition using à trous algorithm. The passes run
+    in `_slab_pass` with `threads` threads.
 
     For level j, filters are upsampled by inserting 2^(j-1) - 1 zeros.
     """
@@ -208,10 +208,13 @@ def _apply_undecimated_wavelet_3d(
         # requested decomposition.
         filters = {"L": lo_j, "H": hi_j}
         for axis, char in enumerate("LLL" if j < level else decomposition):
+            weights = filters[char]
             if result is None:
-                result = convolve1d(image, filters[char], axis=axis, mode=mode)
+                result = _slab_pass(
+                    convolve1d, image, axis, None, threads, weights=weights, mode=mode
+                )
             else:
-                convolve1d(result, filters[char], axis=axis, mode=mode, output=result)
+                _slab_pass(convolve1d, result, axis, result, threads, weights=weights, mode=mode)
     return cast(npt.NDArray[np.floating[Any]], result)
 
 
@@ -246,6 +249,11 @@ def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.f
     Depends only on ``shape`` and ``level`` (never on image values or the source
     mask), so the result is cached and reused across calls with identical geometry.
     The returned array is marked read-only; callers must not mutate it.
+
+    The table mirrors on every axis (row k equals row s - 1 - k for an even size s,
+    row s - k for an odd one), so a large table keeps only its first (s + 1) // 2 rows
+    on axis 0, half of the table (see _kept_rows and _times_mirrored; a mirror on a
+    later axis would make the products slower).
     """
     # IBSI level N corresponds to j = N-1; level 1 = j=0 → max_freq = 1.0 (Nyquist).
     j = level - 1
@@ -265,14 +273,16 @@ def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.f
         grid_norm = (dim_grid - center[i]) / center[i]
         # Shift to move DC to array start (index 0), matching fftn layout
         grid_shifted = np.fft.ifftshift(grid_norm)
-        grids.append(grid_shifted)
+        kept = _kept_rows(s, (s + 1) // 2, math.prod(shape)) if i == 0 else s
+        grids.append(grid_shifted[:kept])
     mesh_vectors = np.meshgrid(*grids, indexing="ij", sparse=True)
+    half_shape = tuple(len(g) for g in grids)
 
     # A large table is built slab by slab along the first axis, with the same element-wise
     # operations (so the same values) and temporaries of one slab instead of six full
     # volumes; the values outside the band stay 0.0, as np.where(mask, g, 0.0) gives.
-    slabs = _slabs(shape)
-    table = None if len(slabs) == 1 else np.zeros(shape, dtype=np.float64)
+    slabs = _slabs(half_shape)
+    table = None if len(slabs) == 1 else np.zeros(half_shape, dtype=np.float64)
     for start, stop in slabs:
         dist_sq = np.asarray(
             sum((g[start:stop] if i == 0 else g) ** 2 for i, g in enumerate(mesh_vectors)),
@@ -371,7 +381,9 @@ def simoncelli_wavelet(
     if source_mask is not None:
         image = _prepare_masked_image(image, source_mask)
 
-    def _core(arr: npt.NDArray[np.floating[Any]]) -> npt.NDArray[np.floating[Any]]:
+    def _core(
+        arr: npt.NDArray[np.floating[Any]], crop: Optional[Tuple[slice, ...]]
+    ) -> npt.NDArray[np.floating[Any]]:
         shape = tuple(arr.shape)
         ndim = arr.ndim
 
@@ -384,9 +396,11 @@ def simoncelli_wavelet(
         # count is multithreaded and matches np.fft to float32 precision.
         axes = tuple(range(ndim))
         workers = get_num_threads()
-        spectrum = _times_transfer(scipy.fft.fftn(arr, workers=workers), g_sim)
+        # Row k of the table mirrors row s - 1 - k (even size s) or s - k (odd s)
+        offset = shape[0] - 1 + shape[0] % 2
+        spectrum = _times_mirrored(scipy.fft.fftn(arr, workers=workers), g_sim, offset, 1)
         response = scipy.fft.ifftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
 
-        return cast(npt.NDArray[np.floating[Any]], np.real(response).astype(np.float32))
+        return _float32_cut(np.real(response), crop)
 
     return _apply_with_boundary_padding(_core, image, boundary, _simoncelli_pad_width(level))

@@ -1,0 +1,1 @@
+Gabor filters with γ below 1 use a kernel radius of ceil(6σ/γ), because the envelope is σ/γ long along one axis. Before, the radius ceil(6σ) cut the kernel short. IBSI 2 tests 4.a.1 and 4.a.2 now match their reference maps to 0.000 % of the range (before, 0.27 % and 0.14 %).

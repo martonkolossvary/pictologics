@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 # Disable JIT warmup for tests
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -674,51 +675,87 @@ class TestSREdgeCases:
             doc = SRDocument.from_file(str(dummy_file), extract_private_tags=True)
             assert doc is not None
 
-    def test_parse_content_sequence_container_saves_prior_group(self) -> None:
-        """Test that encountering a new CONTAINER saves prior group (lines 409-411)."""
-        mock_dcm = MagicMock()
+    def test_parse_content_sequence_groups_hold_their_own_content(self) -> None:
+        """TID 1500: each Measurement Group container holds its tracking ID, finding,
+        finding site and measurements (with their derivation). The Imaging Measurements
+        container has no measurements of its own, so it is not a group."""
+        from types import SimpleNamespace as NS
 
-        # First container with measurements
-        container1 = MagicMock()
-        container1.RelationshipType = "CONTAINS"
-        container1.ValueType = "CONTAINER"
-        container1.ConceptNameCodeSequence = [MagicMock(CodeMeaning="Group1")]
-        container1.ContentSequence = []
+        def concept(value: str, meaning: str) -> list[NS]:
+            return [NS(CodeValue=value, CodeMeaning=meaning)]
 
-        # A NUM item that comes between containers (will be in first group)
-        num_item1 = MagicMock()
-        num_item1.RelationshipType = "CONTAINS"
-        num_item1.ValueType = "NUM"
-        num_item1.ConceptNameCodeSequence = [MagicMock(CodeMeaning="Measure1")]
-        mv1 = MagicMock()
-        mv1.NumericValue = 10.0
-        mv1.MeasurementUnitsCodeSequence = []
-        num_item1.MeasuredValueSequence = [mv1]
+        def code_item(value: str, meaning: str, answer: str) -> NS:
+            return NS(
+                ValueType="CODE",
+                ConceptNameCodeSequence=concept(value, meaning),
+                ConceptCodeSequence=[NS(CodeMeaning=answer, CodeValue="x")],
+            )
 
-        # Second container - should trigger saving of first group
-        container2 = MagicMock()
-        container2.RelationshipType = "CONTAINS"
-        container2.ValueType = "CONTAINER"
-        container2.ConceptNameCodeSequence = [MagicMock(CodeMeaning="Group2")]
-        container2.ContentSequence = []
+        def num(name: str, value: float, derivation: str | None = None) -> NS:
+            # An image reference (no concept name) and, for the volume, a site of its own
+            children = [NS(ValueType="IMAGE")]
+            if derivation:
+                children.append(code_item("121401", "Derivation", derivation))
+            else:
+                children.append(code_item("363698007", "Finding Site", "Lobe"))
+            return NS(
+                ValueType="NUM",
+                ConceptNameCodeSequence=concept("", name),
+                MeasuredValueSequence=[
+                    NS(NumericValue=value, MeasurementUnitsCodeSequence=[NS(CodeValue="mm3")])
+                ],
+                ContentSequence=children,
+            )
 
-        # Measurement for second group
-        num_item2 = MagicMock()
-        num_item2.RelationshipType = "CONTAINS"
-        num_item2.ValueType = "NUM"
-        num_item2.ConceptNameCodeSequence = [MagicMock(CodeMeaning="Measure2")]
-        mv2 = MagicMock()
-        mv2.NumericValue = 20.0
-        mv2.MeasurementUnitsCodeSequence = []
-        num_item2.MeasuredValueSequence = [mv2]
+        def group(tracking: str, site: str, value: float) -> NS:
+            return NS(
+                ValueType="CONTAINER",
+                ConceptNameCodeSequence=concept("125007", "Measurement Group"),
+                ContentSequence=[
+                    NS(
+                        ValueType="TEXT",
+                        ConceptNameCodeSequence=concept("112039", "Tracking Identifier"),
+                        TextValue=tracking,
+                    ),
+                    NS(
+                        ValueType="UIDREF",
+                        ConceptNameCodeSequence=concept("112040", "Tracking Unique Identifier"),
+                        UID="1.2." + tracking[-1],
+                    ),
+                    code_item("121071", "Finding", "Lesion"),
+                    code_item("363698007", "Finding Site", site),
+                    NS(ValueType="IMAGE"),
+                    num("Volume", value),
+                    num("Mean", value + 30, "Mean"),
+                ],
+            )
 
-        # Order: container1, num_item1, container2,  num_item2
-        mock_dcm.ContentSequence = [container1, num_item1, container2, num_item2]
-
-        result = _parse_content_sequence(mock_dcm)
-
-        # Should have at least 2 groups (one saved when container2 encountered, one at end)
-        assert len(result) >= 2
+        report = NS(
+            ContentSequence=[
+                NS(
+                    ValueType="CONTAINER",
+                    ConceptNameCodeSequence=concept("126010", "Imaging Measurements"),
+                    ContentSequence=[
+                        group("Lesion1", "Liver", 10.0),
+                        group("Lesion2", "Lung", 11.0),
+                    ],
+                )
+            ]
+        )
+        groups = _parse_content_sequence(report)
+        assert [
+            (g.group_id, g.finding_type, g.finding_site, g.metadata["tracking_uid"]) for g in groups
+        ] == [
+            ("Lesion1", "Lesion", "Liver", "1.2.1"),
+            ("Lesion2", "Lesion", "Lung", "1.2.2"),
+        ]
+        assert [
+            (m.name, m.value, m.unit, m.derivation, m.tracking_id, m.finding_site)
+            for m in groups[1].measurements
+        ] == [
+            ("Volume", 11.0, "mm3", None, "Lesion2", "Lobe"),
+            ("Mean", 41.0, "mm3", "Mean", "Lesion2", "Lung"),
+        ]
 
     def test_parse_content_sequence_finding_type_code(self) -> None:
         """Test parsing CODE with 'type' in concept name (lines 436-437)."""
@@ -1130,3 +1167,21 @@ class TestProcessSRFileWorker:
                 assert result["document"] is None
                 assert result["log"]["status"] == "error"
                 assert "Parse error" in result["log"]["error_message"]
+
+
+def test_tid1500_report_written_by_highdicom(tmp_path: Path) -> None:
+    """A real TID 1500 report (written once with highdicom 0.27.0 from synthetic data and
+    stored in tests/data/highdicom_seg_sr.npz): two lesions keep their tracking IDs,
+    finding, finding sites and derivations."""
+    path = tmp_path / "tid1500.dcm"
+    with np.load(Path(__file__).parent / "data" / "highdicom_seg_sr.npz") as stored:
+        path.write_bytes(stored["tid1500_sr"].tobytes())
+
+    doc = SRDocument.from_file(path)
+    table = doc.get_measurements_df()
+    assert table["group_id"].tolist() == ["Lesion1", "Lesion1", "Lesion2", "Lesion2"]
+    assert table["finding_type"].tolist() == ["Lesion"] * 4
+    assert table["finding_site"].tolist() == ["Liver", "Liver", "Lung", "Lung"]
+    assert table["tracking_id"].tolist() == ["Lesion1", "Lesion1", "Lesion2", "Lesion2"]
+    assert table["derivation"].tolist() == [None, "Mean", None, "Mean"]
+    assert table["value"].tolist() == [10.0, 40.0, 11.0, 41.0]

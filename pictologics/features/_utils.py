@@ -10,14 +10,33 @@ Note: The underscore prefix (_utils) indicates this is a private module.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Optional
 
 import numpy as np
 from numba import jit, prange
+from numba.core.cpu_options import ParallelOptions
 from numpy import typing as npt
 
+# Parallel options of the kernels that make arrays: prange is the only parallel loop. With
+# numba's default, every np.zeros, np.full or np.max in a parallel kernel is a parallel
+# region of its own, which starts the threads once more for a few small arrays. (A
+# ParallelOptions object: numba empties a plain dict at the first compile.)
+PRANGE_ONLY = ParallelOptions(
+    {
+        "comprehension": False,
+        "reduction": False,
+        "inplace_binop": False,
+        "setitem": False,
+        "numpy": False,
+        "stencil": False,
+        "fusion": False,
+        "prange": True,
+    }
+)
 
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
 def _bbox_scan_numba(
     mask: npt.NDArray[Any],
 ) -> tuple[
@@ -78,7 +97,7 @@ def _bbox_scan_numba(
     return z_any, y_min, y_max, x_min, x_max
 
 
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
 def _roi_min_max_numba(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[Any],
@@ -87,7 +106,8 @@ def _roi_min_max_numba(
     npt.NDArray[np.float64],
     npt.NDArray[np.float64],
 ]:
-    """Per-slice min/max of `data` over `mask > 0` voxels in a single fused pass."""
+    """Per-slice min/max of the finite `data` values of the `mask != 0` voxels, in a
+    single fused pass."""
     depth, height, width = data.shape
     found = np.zeros(depth, dtype=np.uint8)
     mins = np.full(depth, np.inf, dtype=np.float64)
@@ -99,9 +119,11 @@ def _roi_min_max_numba(
         hit = False
         for y in range(height):
             for x in range(width):
-                if mask[z, y, x] > 0:
-                    hit = True
+                if mask[z, y, x] != 0:
                     v = data[z, y, x]
+                    if not math.isfinite(v):  # NaN or infinite: no ROI intensity
+                        continue
+                    hit = True
                     if v < lo:
                         lo = v
                     if v > hi:
@@ -136,9 +158,11 @@ def _roi_min_max_serial_numba(
         hit = False
         for y in range(height):
             for x in range(width):
-                if mask[z, y, x] > 0:
-                    hit = True
+                if mask[z, y, x] != 0:
                     v = data[z, y, x]
+                    if not math.isfinite(v):  # NaN or infinite: no ROI intensity
+                        continue
+                    hit = True
                     if v < lo:
                         lo = v
                     if v > hi:
@@ -155,17 +179,18 @@ def roi_min_max(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[Any],
 ) -> Optional[tuple[float, float]]:
-    """Min and max of `data` over ROI voxels (`mask > 0`).
+    """Min and max of the finite `data` values of the ROI voxels (`mask != 0`, as
+    everywhere in the package). NaN and infinite values are no ROI intensities.
 
-    Equivalent to `(data[mask > 0].min(), data[mask > 0].max())` but in a single
-    fused pass, without the boolean-mask and gathered-copy temporaries.
+    Equivalent to the min and max of `v[np.isfinite(v)]` with `v = data[mask != 0]`, but
+    in a single fused pass, without the boolean-mask and gathered-copy temporaries.
 
     Args:
         data: 3D array of values.
-        mask: 3D array where values > 0 indicate ROI membership. Same shape as data.
+        mask: 3D array where nonzero values indicate ROI membership. Same shape as data.
 
     Returns:
-        (min, max) over the ROI, or None if the mask has no positive voxels.
+        (min, max) over the ROI, or None if no ROI voxel has a finite value.
     """
     if data.ndim != 3 or data.shape != mask.shape:
         raise ValueError(

@@ -15,6 +15,7 @@ Key Functions:
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,8 @@ def format_results(
                feature_key is the full feature key with its IBSI code (for example
                mean_intensity_Q4LE), as in describe_features().
         meta: Optional dictionary of metadata to prepend to the result (e.g., subject ID).
-        output_type: Format of the returned object: "dict", "pandas", or "json".
+        output_type: Format of the returned object: "dict", "pandas", or "json". JSON
+            writes NaN and infinite values as null, so that every JSON reader accepts it.
         config_col: Name of the column holding the configuration name (only used if fmt="long").
 
     Returns:
@@ -103,7 +105,7 @@ def format_results(
         elif output_type == "pandas":
             return pd.DataFrame([formatted_data])
         elif output_type == "json":
-            return json.dumps(formatted_data)
+            return _json_text(formatted_data)
         else:
             raise ValueError(f"Unknown output_type: {output_type}")
 
@@ -111,60 +113,40 @@ def format_results(
         if output_type not in ("dict", "pandas", "json"):
             raise ValueError(f"Unknown output_type: {output_type}")
 
-        # Long format: Rows of [meta_cols..., config, feature_key, value]
-        rows = []
+        # Long format: Rows of [meta_cols..., config, feature_key, value], built as
+        # columns (a meta key with a standard name holds the standard value)
+        meta_keys = list(meta.keys())
+        standard_cols = [config_col, "feature_key", "value"]
+        cols_order = meta_keys + [c for c in standard_cols if c not in meta_keys]
+        names: list[Any] = []
+        keys: list[Any] = []
+        values: list[Any] = []
         for config_name, series in results.items():
-            for feature_key, value in series.items():
-                row = meta.copy()
-                row[config_col] = config_name
-                row["feature_key"] = feature_key
-                row["value"] = value
-                rows.append(row)
+            names.extend([config_name] * len(series))
+            keys.extend(series.index)
+            values.extend(series.tolist())
+        standard = {config_col: names, "feature_key": keys, "value": values}
+        table = {
+            col: standard[col] if col in standard else [meta[col]] * len(values)
+            for col in cols_order
+        }
 
-        if not rows:
+        if not values:
             # Handle empty results case
             # For pure python output, empty list is fine.
             # For pandas, we need a dataframe with columns.
-            if output_type != "pandas":
-                if output_type == "dict":
-                    return []
-                elif output_type == "json":
-                    return "[]"
-
-            df = pd.DataFrame(columns=list(meta.keys()) + [config_col, "feature_key", "value"])
-            return df  # Columns are already in order
-
-        # Reorder keys/columns
-        # Determine strict order
-        meta_keys = list(meta.keys())
-        standard_cols = [config_col, "feature_key", "value"]
-        # Ensure we don't duplicate keys
-        cols_order = meta_keys + [c for c in standard_cols if c not in meta_keys]
-
-        # If output is dict/json, reorder the dictionaries directly
-        if output_type in ("dict", "json"):
-            # Ensure each row has keys in the desired order
-            ordered_rows = []
-            for r in rows:
-                new_r = {k: r.get(k) for k in cols_order if k in r}
-
-                ordered_rows.append(new_r)
-
             if output_type == "dict":
-                return ordered_rows
-            else:  # json
-                return json.dumps(ordered_rows)
+                return []
+            elif output_type == "json":
+                return "[]"
+            return pd.DataFrame(columns=cols_order)  # Columns are already in order
 
-        # Output type is 'pandas'
-        df = pd.DataFrame(rows)
-        # Verify which columns actually exist in the dataframe
-        existing_cols = list(df.columns)
-        final_order = [c for c in cols_order if c in existing_cols] + [
-            c for c in existing_cols if c not in cols_order
+        if output_type == "pandas":
+            return pd.DataFrame(table)
+        rows = [
+            dict(zip(cols_order, row, strict=True)) for row in zip(*table.values(), strict=True)
         ]
-        df = df.reindex(columns=final_order)
-
-        return df
+        return rows if output_type == "dict" else _json_text(rows)
 
     else:
         raise ValueError(f"Unknown format: {fmt}. Use 'wide' or 'long'.")
@@ -190,14 +172,17 @@ def save_results(
               - Dict or List[Dict]
               - DataFrame or List[DataFrame]
               - JSON string or List[JSON strings]
-        path: Output file path.
-        file_format: "csv" or "json". If None, inferred from file extension.
+        path: Output file path. A missing folder is created.
+        file_format: "csv", "tsv" or "json". If None, inferred from the file extension
+            (.csv, .tsv, .json; no extension means CSV). JSON writes NaN and infinite
+            values as null.
 
     Raises:
-        ValueError: If an explicit `file_format` is not "csv" or "json", or
-            if `data` cannot be normalized to a DataFrame (e.g. an invalid
-            JSON string, mixed types within a list, or an unsupported data
-            type).
+        ValueError: If the file extension is another one (for example .parquet, which
+            would otherwise get CSV text), if an explicit `file_format` is not
+            "csv", "tsv" or "json", or if `data` cannot be normalized to a DataFrame
+            (e.g. an invalid JSON string, mixed types within a list, or an
+            unsupported data type).
 
     Example:
         Save formatted results to JSON:
@@ -210,12 +195,14 @@ def save_results(
     """
     path = Path(path)
     if file_format is None:
-        if path.suffix.lower() == ".csv":
-            file_format = "csv"
-        elif path.suffix.lower() == ".json":
-            file_format = "json"
-        else:
-            file_format = "csv"
+        suffix = path.suffix.lower()
+        file_format = {".csv": "csv", ".json": "json", ".tsv": "tsv", "": "csv"}.get(suffix)
+        if file_format is None:
+            raise ValueError(
+                f"Unknown file type '{suffix}': save results as .csv, .tsv or .json, "
+                "or pass file_format."
+            )
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     # If format is JSON and data is already a dict or list of dicts, bypass pandas
     # to avoid overhead and potential C-extension conflicts in coverage/threading.
@@ -224,14 +211,9 @@ def save_results(
         is_dict = isinstance(data, dict)
         is_list_of_dicts = isinstance(data, list) and (not data or isinstance(data[0], dict))
 
-        if is_dict:
+        if is_dict or is_list_of_dicts:
             with open(path, "w") as f:
-                json.dump([data], f, indent=2)
-            return
-
-        if is_list_of_dicts:
-            with open(path, "w") as f:
-                json.dump(data, f, indent=2)
+                f.write(_json_text([data] if is_dict else data, indent=2))
             return
 
     # Normalize input to a single DataFrame
@@ -244,12 +226,34 @@ def save_results(
     # Export
     if file_format == "csv":
         final_df.to_csv(path, index=False)
+    elif file_format == "tsv":
+        final_df.to_csv(path, index=False, sep="\t")
     elif file_format == "json":
         # Use standard json library to avoid potential pandas C-extension issues during coverage
         with open(path, "w") as f:
-            json.dump(final_df.to_dict(orient="records"), f, indent=2)
+            f.write(_json_text(final_df.to_dict(orient="records"), indent=2))
     else:
         raise ValueError(f"Unsupported export format: {file_format}")
+
+
+def _json_safe(value: Any) -> Any:
+    """`value` with NaN and infinite floats as None (JSON null), also inside lists and dicts."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _json_text(data: Any, indent: int | None = None) -> str:
+    """Strict JSON (no NaN token, which most JSON readers reject): non-finite values
+    become null. Data without them takes one pass (the common case)."""
+    try:
+        return json.dumps(data, indent=indent, allow_nan=False)
+    except ValueError:  # a NaN or infinite value
+        return json.dumps(_json_safe(data), indent=indent, allow_nan=False)
 
 
 def _normalize_to_dataframe(

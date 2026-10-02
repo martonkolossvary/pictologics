@@ -421,6 +421,20 @@ def test_resegment_mask_logic(mock_image: Image, mock_mask: Image) -> None:
         resegment_mask(mock_image, shifted_mask)
 
 
+def test_resegment_removes_nan_voxels() -> None:
+    # A NaN intensity is in no range: its voxel leaves the mask on the numpy path and in
+    # the kernel, also with one bound or none.
+    arr = _f64((4, 4, 4))
+    arr[1, 1, 1] = np.nan
+    img = Image(arr, (1, 1, 1), (0, 0, 0))
+    mask = Image(np.ones((4, 4, 4), dtype=np.uint8), (1, 1, 1), (0, 0, 0))
+    for limit in (8, 1 << 30):
+        with patch("pictologics.preprocessing._RESEGMENT_KERNEL_MIN_SIZE", limit):
+            for bounds in ((None, None), (0.0, None), (None, 100.0)):
+                out = resegment_mask(img, mask, *bounds).array
+                assert out[1, 1, 1] == 0 and out.sum() == 63
+
+
 # --- filter_outliers Tests ---
 
 
@@ -653,12 +667,17 @@ def test_discretise_fbn_kernel_clamps() -> None:
 
 
 def test_discretise_fbs_kernel_clamps() -> None:
+    # NaN and +inf map to bin 0 (no cast of infinity to an integer), -inf to bin 1, on
+    # both paths. The default minimum is the smallest finite ROI value.
     arr = _f64((4, 4, 4))
-    arr[0, 0, 0] = np.nan
+    arr[0, 0, :3] = (np.nan, np.inf, -np.inf)
     img = Image(arr, (1, 1, 1), (0, 0, 0))
-    with patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8):
-        out = discretise_image(img, method="FBS", bin_width=5.0, min_val=20.0, max_val=40.0)
-    assert out.array[0, 0, 0] == 0
+    for limit in (8, 1 << 30):
+        with patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", limit):
+            out = discretise_image(img, method="FBS", bin_width=5.0, min_val=20.0, max_val=40.0)
+            assert out.array[0, 0, :3].tolist() == [0, 0, 1]
+            out = discretise_image(img, method="FBS", bin_width=5.0, roi_mask=np.ones((4, 4, 4)))
+            assert out.array[0, 0, 3] == 1 and out.array[3, 3, 3] == 13  # (63 - 3) / 5 + 1
 
 
 def test_discretise_kernel_keeps_array_order() -> None:
@@ -686,6 +705,29 @@ def test_discretise_kernel_keeps_array_order() -> None:
         discretise_image(dicom_layout, "FBS", bin_width=10.0)
 
 
+def test_discretise_cutoffs_kernel_matches_digitize() -> None:
+    # The cutoff kernel gives the bins of digitize (+1, NaN to 0) for increasing,
+    # decreasing, repeated and no cutoffs, in row and column order. Cutoffs that go up
+    # and down keep the error of digitize.
+    rng = np.random.default_rng(6)
+    arr = rng.normal(0.0, 50.0, (5, 6, 7))
+    arr[1, 2, 3] = np.nan
+    arr[0, 0, :3] = (-20.0, 0.0, 20.0)  # values on the cutoffs
+    for cutoffs in ([-20.0, 0.0, 20.0], [20.0, 0.0, -20.0], [0.0, 0.0, 20.0], []):
+        expected = np.digitize(arr, cutoffs) + 1
+        expected[np.isnan(arr)] = 0
+        for layout in (arr, np.asfortranarray(arr)):
+            with patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8):
+                out = discretise_image(layout, "FIXED_CUTOFFS", cutoffs=cutoffs)
+            assert out.dtype == np.int32
+            assert_array_equal(out, expected)
+    with (
+        patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8),
+        pytest.raises(ValueError, match="monotonically"),
+    ):
+        discretise_image(arr, "FIXED_CUTOFFS", cutoffs=[0.0, 20.0, 10.0])
+
+
 def test_discretise_roi_search_only_for_missing_bounds() -> None:
     # Default bounds come from the ROI values: one fused pass for a float64 or uint8
     # row-order mask, a gather for other masks. An all-NaN or empty ROI falls back to the
@@ -708,7 +750,7 @@ def test_discretise_roi_search_only_for_missing_bounds() -> None:
         assert_array_equal(discretise_image(data, "FBN", roi_mask=m, n_bins=8), ref)
 
     class NoSearch(np.ndarray):
-        def __gt__(self, other: object) -> np.ndarray:
+        def __ne__(self, other: object) -> np.ndarray:  # type: ignore[override]
             raise AssertionError("the ROI search ran")
 
     no_gather = (mask > 0).view(NoSearch)  # a bool mask takes the gather
@@ -974,3 +1016,92 @@ def test_resample_mask_threshold_every_type() -> None:
                     if how == "linear" and thr == 0.5:  # the old uint8 result
                         old = resample(labels.astype(np.uint8), how, None)
                         assert_array_equal(rounded, (old >= 0.5).astype(np.uint8))
+
+
+def test_resample_region_matches_the_whole_grid() -> None:
+    # A region of the new grid has the values of the whole grid bit for bit: with the
+    # kernels (linear, nearest, uint8 masks with a threshold, a source mask, rounding) and
+    # with the cut of the whole grid (cubic). Its origin is the region's first voxel.
+    from pictologics.loader import _direction_matrix
+
+    rng = np.random.default_rng(21)
+    arr = rng.normal(0.0, 100.0, (9, 11, 13))
+    img = Image(arr, (1.3, 0.9, 2.1), (5.0, -3.0, 1.0))
+    mask = Image((rng.random(arr.shape) < 0.4).astype(np.uint8), img.spacing, img.origin)
+    source = rng.random(arr.shape) < 0.9
+    spacing = (0.7, 0.8, 1.1)
+    depth, height, width = resample_image(img, spacing).array.shape
+    region = (slice(2, depth - 1), slice(0, 5), slice(3, width))
+    cases = [
+        (img, {"interpolation": "linear"}),
+        (img, {"interpolation": "nearest"}),
+        (img, {"interpolation": "cubic"}),
+        (img, {"interpolation": "linear", "round_intensities": True}),
+        (img, {"interpolation": "linear", "source_mask": source}),
+        (mask, {"interpolation": "linear", "mask_threshold": 0.5}),
+        (mask, {"interpolation": "nearest"}),
+    ]
+    for image, kw in cases:
+        whole = resample_image(image, spacing, **kw)
+        part = resample_image(image, spacing, region=region, **kw)
+        assert part.array.dtype == whole.array.dtype
+        assert np.array_equal(
+            np.ascontiguousarray(part.array).view(np.uint8),
+            np.ascontiguousarray(whole.array[region]).view(np.uint8),
+        )
+        if "source_mask" in kw:
+            assert np.array_equal(part.source_mask, whole.source_mask[region])
+        step = np.array([r.start for r in region]) * np.array(spacing)
+        expected = np.array(whole.origin) + _direction_matrix(whole.direction) @ step
+        assert np.allclose(part.origin, expected)
+
+
+def test_roi_region_holds_every_resampled_roi_voxel() -> None:
+    # The region from the input ROI box holds every nonzero voxel of the resampled mask
+    # (nearest, and linear with a threshold), for random grids; a margin grows it.
+    from pictologics.features._utils import compute_nonzero_bbox
+    from pictologics.preprocessing import _roi_region
+
+    rng = np.random.default_rng(4)
+    for _ in range(40):
+        shape = tuple(int(n) for n in rng.integers(4, 14, 3))
+        spacing = tuple(float(s) for s in rng.uniform(0.5, 2.5, 3))
+        new_spacing = tuple(float(s) for s in rng.uniform(0.4, 2.5, 3))
+        m = np.zeros(shape, dtype=np.uint8)
+        lo = [int(rng.integers(0, n)) for n in shape]
+        hi = [int(rng.integers(a + 1, n + 1)) for a, n in zip(lo, shape, strict=True)]
+        m[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]] = 1
+        box = compute_nonzero_bbox(m)
+        region = _roi_region(box, shape, spacing, new_spacing, (0, 0, 0))
+        for interpolation, threshold in (("nearest", None), ("linear", 0.5)):
+            out = resample_image(
+                Image(m, spacing, (0.0, 0.0, 0.0)),
+                new_spacing,
+                interpolation=interpolation,
+                mask_threshold=threshold,
+            ).array
+            outside = np.ones(out.shape, dtype=bool)
+            outside[region] = False
+            assert not out[outside].any()
+        grown = _roi_region(box, shape, spacing, new_spacing, (2, 2, 2))
+        assert all(
+            g.start == max(r.start - 2, 0) and g.stop <= r.stop + 2
+            for g, r in zip(grown, region, strict=True)
+        )
+
+
+def test_all_finite() -> None:
+    # One parallel pass for large contiguous float64 arrays (row or column order), numpy
+    # for small or other arrays; a NaN or an infinite value anywhere makes it False.
+    from pictologics.preprocessing import _all_finite
+
+    arr = np.arange(60, dtype=np.float64).reshape(3, 4, 5)
+    for minimum in (0, 1 << 19):  # the parallel pass, then numpy for a small array
+        with patch("pictologics.preprocessing._FINITE_PARALLEL_MIN", minimum):
+            for layout in (arr, np.asfortranarray(arr), arr[:, ::2], arr.astype(np.float32)):
+                assert _all_finite(layout)
+            for bad in (np.nan, np.inf, -np.inf):
+                broken = arr.copy()
+                broken[2, 3, 4] = bad
+                assert not _all_finite(broken)
+                assert not _all_finite(broken.astype(np.float32))

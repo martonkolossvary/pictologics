@@ -225,7 +225,7 @@ configs:
             - texture
 deduplication:
   enabled: true
-  rules_version: "1.0.0"
+  rules_version: "1.1.0"
 ```
 
 ### JSON Format Specification
@@ -257,7 +257,7 @@ deduplication:
   },
   "deduplication": {
     "enabled": true,
-    "rules_version": "1.0.0"
+    "rules_version": "1.1.0"
   }
 }
 ```
@@ -691,7 +691,7 @@ configs:
     # ... similar structure with bin_width: 50.0
 deduplication:
   enabled: true
-  rules_version: "1.0.0"
+  rules_version: "1.1.0"
 ```
 
 ### Step 4: Load and Apply Configuration (Site B)

@@ -1,0 +1,1 @@
+A FRACTIONAL DICOM SEG now counts a voxel as inside a segment when its value is at least half of the maximum fractional value. The new `fractional_threshold` argument of `load_seg` sets this fraction. Before, every value above 0 counted as inside.

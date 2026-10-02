@@ -1,0 +1,1 @@
+Laws filters without rotation invariance in the `roi_only` and `auto` source modes now give the right response. The normalized convolution divides by the fraction of the kernel weight on valid voxels. Before, it divided by the weight itself, so the responses were 0.15 to 0.23 times the right value.

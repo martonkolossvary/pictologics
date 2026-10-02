@@ -1,7 +1,7 @@
 # pictologics/filters/riesz.py
 """Riesz transform implementation (IBSI code: AYRS)."""
 
-from math import factorial, sqrt
+from math import factorial, prod, sqrt
 from typing import Any, Optional, Tuple, Union, cast
 
 import numpy as np
@@ -13,9 +13,11 @@ from .base import (
     _TRANSFER_CACHE_BYTES,
     BoundaryCondition,
     _apply_with_boundary_padding,
+    _float32_cut,
+    _kept_rows,
     _prepare_masked_image,
     _slabs,
-    _times_transfer,
+    _times_mirrored,
     cache_by_bytes,
     ensure_float32,
     resolve_boundary,
@@ -43,6 +45,11 @@ def _riesz_transfer(
     mask), so it is cached and reused across calls with identical geometry —
     including the many order tuples from ``get_riesz_orders`` that share one image
     shape. The returned array is marked read-only; callers must not mutate it.
+
+    On axis 0 (when it is not the rfft axis), row k of the table equals row s - k
+    times (-1)**order[0] (the frequency changes its sign), so a large table keeps only
+    its first s // 2 + 1 rows there, about half of the table (see _kept_rows and
+    _times_mirrored).
     """
     ndim = len(shape)
     L = sum(order)
@@ -52,6 +59,9 @@ def _riesz_transfer(
     for i, s in enumerate(shape):
         if i == ndim - 1:
             freqs.append(np.fft.rfftfreq(s) * 2 * np.pi)
+        elif i == 0:
+            cells = prod(shape[:-1]) * (shape[-1] // 2 + 1)
+            freqs.append((np.fft.fftfreq(s) * 2 * np.pi)[: _kept_rows(s, s // 2 + 1, cells)])
         else:
             freqs.append(np.fft.fftfreq(s) * 2 * np.pi)
 
@@ -149,35 +159,43 @@ def riesz_transform(
     if source_mask is not None:
         image = _prepare_masked_image(image, source_mask)
 
-    L = sum(order)  # Total order
+    order = _riesz_order(order)
+    return _apply_with_boundary_padding(
+        _riesz_response, image, boundary, _RIESZ_BASE_PAD, order=order
+    )
 
-    if L == 0:
+
+def _riesz_order(order: Tuple[int, ...]) -> Tuple[int, ...]:
+    """`order` as a tuple, so that a list-typed order (e.g. from a YAML/JSON pipeline
+    config) stays hashable for the transfer-function cache key."""
+    if sum(order) == 0:  # the total order
         raise ValueError("At least one order component must be > 0")
+    return tuple(order)
 
-    # Coerce order to a tuple first so a list-typed order (e.g. from a YAML/JSON
-    # pipeline config) stays hashable for the transfer-function cache key.
-    order = tuple(order)
 
-    def _core(arr: npt.NDArray[np.floating[Any]]) -> npt.NDArray[np.floating[Any]]:
-        shape = tuple(arr.shape)
-        ndim = arr.ndim
+def _riesz_response(
+    arr: npt.NDArray[np.floating[Any]],
+    crop: Optional[Tuple[slice, ...]],
+    order: Tuple[int, ...],
+) -> npt.NDArray[np.floating[Any]]:
+    """The (periodic) Riesz transform of `arr` as float32, cut to `crop` (None: the
+    whole array)."""
+    shape = tuple(arr.shape)
 
-        # Transfer function depends only on (shape, order) — never on image values
-        # or the source mask — so it is built once and cached (see _riesz_transfer).
-        transfer = _riesz_transfer(shape, order)
+    # Transfer function depends only on (shape, order) — never on image values
+    # or the source mask — so it is built once and cached (see _riesz_transfer).
+    transfer = _riesz_transfer(shape, order)
 
-        # Apply in frequency domain using Real FFT. scipy.fft (multithreaded, with
-        # numba's thread count) is several times faster than the single-threaded np.fft
-        # and matches it to float32 precision.
-        axes = tuple(range(ndim))
-        workers = get_num_threads()
-        # The spectrum has shape (N1, N2, N3//2 + 1), the shape of the transfer.
-        spectrum = _times_transfer(scipy.fft.rfftn(arr, workers=workers), transfer)
-        response = scipy.fft.irfftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
-
-        return cast(npt.NDArray[np.floating[Any]], response.astype(np.float32))
-
-    return _apply_with_boundary_padding(_core, image, boundary, _RIESZ_BASE_PAD)
+    # Apply in frequency domain using Real FFT. scipy.fft (multithreaded, with
+    # numba's thread count) is several times faster than the single-threaded np.fft
+    # and matches it to float32 precision.
+    axes = tuple(range(arr.ndim))
+    workers = get_num_threads()
+    # The spectrum has shape (N1, N2, N3//2 + 1), the shape of the transfer.
+    sign = (-1) ** order[0]
+    spectrum = _times_mirrored(scipy.fft.rfftn(arr, workers=workers), transfer, shape[0], sign)
+    response = scipy.fft.irfftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
+    return _float32_cut(response, crop)
 
 
 def _riesz_log_pad_width(
@@ -268,8 +286,11 @@ def riesz_log(
     from .log import laplacian_of_gaussian
 
     boundary = resolve_boundary(boundary)
+    order = _riesz_order(order)
 
-    def _core(arr: npt.NDArray[np.floating[Any]]) -> npt.NDArray[np.floating[Any]]:
+    def _core(
+        arr: npt.NDArray[np.floating[Any]], crop: Optional[Tuple[slice, ...]]
+    ) -> npt.NDArray[np.floating[Any]]:
         # `_core` runs on `image` unchanged when boundary is PERIODIC (the default,
         # no padding), and on a *padded* array otherwise. `source_mask` always has
         # `image`'s original, unpadded shape, so it can only be forwarded to the
@@ -302,12 +323,13 @@ def riesz_log(
         if isinstance(log_response, tuple):
             log_response = log_response[0]
 
-        # Then apply Riesz transform. We pass the mask again (PERIODIC case only)
-        # to enforce zeroing of invalid regions (though LoG normalized convolution
-        # might have filled them, Riesz is global). The Riesz stage keeps its own
-        # PERIODIC default: the outer pad-filter-crop below already accounts for
-        # the boundary once for the whole chain.
-        return riesz_transform(log_response, order=order, source_mask=mask)
+        # Then apply Riesz transform. The mask zeroes the invalid regions again
+        # (PERIODIC case only; though LoG normalized convolution might have filled
+        # them, Riesz is global). The Riesz stage is periodic: the outer
+        # pad-filter-crop below already accounts for the boundary once for the chain.
+        if mask is not None:
+            log_response = _prepare_masked_image(log_response, mask)
+        return _riesz_response(log_response, crop, order)
 
     pad_width = _riesz_log_pad_width(sigma_mm, spacing_mm, truncate)
     result = _apply_with_boundary_padding(_core, image, boundary, pad_width)
@@ -377,21 +399,25 @@ def riesz_simoncelli(
     from .wavelets import _simoncelli_pad_width, simoncelli_wavelet
 
     boundary = resolve_boundary(boundary)
+    order = _riesz_order(order)
 
     # Preprocess once: float32 conversion + source mask zeroing
     image = ensure_float32(image)
     if source_mask is not None:
         image = _prepare_masked_image(image, source_mask)
 
-    def _core(arr: npt.NDArray[np.floating[Any]]) -> npt.NDArray[np.floating[Any]]:
+    def _core(
+        arr: npt.NDArray[np.floating[Any]], crop: Optional[Tuple[slice, ...]]
+    ) -> npt.NDArray[np.floating[Any]]:
         # Apply Simoncelli wavelet (already preprocessed, skip redundant work)
         sim_response = simoncelli_wavelet(arr, level=level)
 
         # Re-apply source_mask (PERIODIC case only, see docstring): Simoncelli's
         # global FFT spreads energy back into the invalid regions, and the Riesz
         # transform is likewise global, so re-zero before it (mirrors riesz_log).
-        mask = source_mask if boundary is BoundaryCondition.PERIODIC else None
-        return riesz_transform(sim_response, order=order, source_mask=mask)
+        if source_mask is not None and boundary is BoundaryCondition.PERIODIC:
+            sim_response = _prepare_masked_image(sim_response, source_mask)
+        return _riesz_response(sim_response, crop, order)
 
     pad_width = _simoncelli_pad_width(level) + _RIESZ_BASE_PAD
     result = _apply_with_boundary_padding(_core, image, boundary, pad_width)

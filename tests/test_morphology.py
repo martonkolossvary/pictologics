@@ -255,18 +255,15 @@ class TestMorphologyFeatures(unittest.TestCase):
     def test_marching_cubes_matches_pymcubes(self):
         # The kernel gives the PyMCubes 0.1.6 mesh: the same vertices and faces, in the same
         # order. The file holds 32 masks and their PyMCubes meshes, made once with PyMCubes.
-        from pictologics.features._mc_tables import EDGE_TABLE, TRIANGLE_COUNT, TRIANGLE_TABLE
-        from pictologics.features.morphology import _marching_cubes_numba
+        from pictologics.features.morphology import _mesh
 
         path = os.path.join(os.path.dirname(__file__), "data", "marching_cubes_pymcubes.npz")
         with np.load(path) as ref:
             count = sum(key.startswith("mask_") for key in ref.files)
             self.assertEqual(count, 32)
             for i in range(count):
-                padded = np.pad(ref[f"mask_{i}"], 1)
-                verts, faces = _marching_cubes_numba(
-                    padded, EDGE_TABLE, TRIANGLE_TABLE, TRIANGLE_COUNT
-                )
+                # offset 1 and spacing 1: the vertices in padded voxel units, as PyMCubes
+                verts, faces = _mesh(np.pad(ref[f"mask_{i}"], 1), np.ones(3), np.ones(3))
                 np.testing.assert_array_equal(verts, ref[f"verts_{i}"])
                 np.testing.assert_array_equal(faces, ref[f"faces_{i}"])
 

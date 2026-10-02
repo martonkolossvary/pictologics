@@ -141,6 +141,7 @@ The `RULES_REGISTRY` provides versioned deduplication rules for reproducibility:
 | Version | Description |
 | :--- | :--- |
 | `"1.0.0"` | Initial rules defining feature family dependencies |
+| `"1.1.0"` | A family signature holds only the `extract_features` options that the family reads (the default) |
 
 ### Helper Functions
 
@@ -152,15 +153,17 @@ The `RULES_REGISTRY` provides versioned deduplication rules for reproducibility:
 
 ## Feature Family Dependencies
 
-A signature holds the `source_mode` and `sentinel_value`, every preprocessing step before `extract_features` (with its parameters, in order), and the `extract_features` options other than `families`. The rules decide only which families can ignore a `discretise` step at the end of the preprocessing: a family whose rules do not list `discretise` leaves that step out.
+A signature holds the `source_mode` and `sentinel_value`, every preprocessing step before `extract_features` (with its parameters, in order), and the `extract_features` options that the family reads (rules 1.0.0: all options other than `families`). The rules also decide which families can ignore a `discretise` step at the end of the preprocessing: a family whose rules do not list `discretise` leaves that step out.
 
-| Feature Family | Rules list `discretise` |
-| :--- | :--- |
-| `morphology` | No |
-| `intensity`, `spatial_intensity`, `local_intensity` | No |
-| `histogram` | Yes |
-| `ivh` | Yes, unless `ivh_use_continuous=True` is set at the top level of the `extract_features` params |
-| `texture` (all subfamilies) | Yes |
+| Feature Family | Rules list `discretise` | Options in the signature (1.1.0) |
+| :--- | :--- | :--- |
+| `morphology` | No | None |
+| `intensity` | No | `include_spatial_intensity`, `include_local_intensity`, `spatial_intensity_params`, `local_intensity_params` |
+| `spatial_intensity` | No | `spatial_intensity_params` |
+| `local_intensity` | No | `local_intensity_params` |
+| `histogram` | Yes | None |
+| `ivh` | Yes, unless `ivh_use_continuous=True` is set at the top level of the `extract_features` params | `ivh_params`, `ivh_use_continuous`, `ivh_discretisation` |
+| `texture` (all subfamilies) | Yes | `texture_matrix_params` |
 
 !!! warning "Filters Affect Intensity and Morphology Features"
     When using image filters (LoG, Gabor, Wavelets, Laws, etc.), intensity features are computed
@@ -179,7 +182,7 @@ The `RadiomicsPipeline` class integrates deduplication through these parameters:
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `deduplicate` | `bool` | `True` | Enable/disable deduplication |
-| `deduplication_rules` | `str`, `DeduplicationRules`, or `None` | `None` | Rules version for reproducibility (`None` resolves to the current default rules, `"1.0.0"`) |
+| `deduplication_rules` | `str`, `DeduplicationRules`, or `None` | `None` | Rules version for reproducibility (`None` resolves to the current default rules, `"1.1.0"`) |
 
 These settings are preserved during serialization (`to_dict()`, `save_configs()`, etc.) and restored during deserialization.
 

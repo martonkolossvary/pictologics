@@ -5,11 +5,11 @@ from typing import Any, Optional, Union, overload
 
 import numpy as np
 from numpy import typing as npt
-from scipy.ndimage import uniform_filter
 
 from .base import (
     BoundaryCondition,
     _normalized_uniform_filter,
+    _uniform_filter,
     ensure_float32,
     get_scipy_mode,
 )
@@ -104,4 +104,4 @@ def mean_filter(
         # Cast to float32 for consistency with the masked path and the other filters
         # (uniform_filter accumulates in the input dtype, so a float64 image keeps
         # its precision through the running sum before the final downcast).
-        return uniform_filter(image, size=support, mode=mode).astype(np.float32)  # type: ignore[no-any-return]
+        return _uniform_filter(image, support, mode).astype(np.float32)

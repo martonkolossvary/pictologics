@@ -2,18 +2,20 @@
 """Laws kernels filter implementation (IBSI code: JTXT)."""
 
 import math
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union, cast, overload
 
 import numpy as np
 from numba import get_num_threads
 from numpy import typing as npt
-from scipy.ndimage import convolve1d, uniform_filter
 
 from .base import (
+    _SLAB_MIN_SIZE,
     BoundaryCondition,
+    _convolve_axes,
     _normalized_separable_convolve_3d,
+    _ordered_map,
     _prepare_masked_image,
+    _uniform_filter,
     ensure_float32,
     get_scipy_mode,
 )
@@ -44,6 +46,11 @@ LAWS_KERNELS = _LAWS_KERNELS
 # costs more than they save.
 _PARALLEL_THRESHOLD = 20_000
 
+# Rotation-invariant bases computed at a time, each with its share of the threads.
+# Measured at 1.1M-7.1M voxels on 14 threads: 3 at a time (4 threads each) is as fast as
+# or faster than 6 at a time, with 40-45 % less memory; 2 at a time is up to 7 % slower.
+_BASES_IN_FLIGHT = 3
+
 
 def _separable_convolve_3d(
     image: npt.NDArray[np.floating[Any]],
@@ -51,9 +58,11 @@ def _separable_convolve_3d(
     g2: npt.NDArray[np.floating[Any]],
     g3: npt.NDArray[np.floating[Any]],
     mode: str = "constant",
+    threads: Optional[int] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
-    Apply separable 3D convolution using three 1D kernels.
+    Apply separable 3D convolution using three 1D kernels, each pass in `threads`
+    threads (default: numba's thread count).
 
     This is ~8x faster than full 3D convolution for 5x5x5 kernels:
     - Full 3D: 125 operations per voxel
@@ -70,9 +79,7 @@ def _separable_convolve_3d(
     # Apply 1D convolutions sequentially along each axis. The first pass makes the
     # output array; the others write into it (convolve1d copies each line before it
     # writes that line, so the values are those of passes that make new arrays).
-    result = convolve1d(image, g1, axis=0, mode=mode)
-    convolve1d(result, g2, axis=1, mode=mode, output=result)
-    convolve1d(result, g3, axis=2, mode=mode, output=result)
+    result = _convolve_axes(image, (g1, g2, g3), mode, threads)
     return cast(npt.NDArray[np.floating[Any]], result.astype(image.dtype, copy=False))
 
 
@@ -334,16 +341,25 @@ def laws_filter(
             # A (key, sign) step that comes again leaves a max or a min unchanged.
             steps = list(dict.fromkeys(steps))
 
+        # The bases run in a pool (at most _BASES_IN_FLIGHT and about 2 GB of them at a
+        # time), and each one has its share of the threads for its passes.
+        threads = get_num_threads() if use_parallel else 1
+        # A small image has no slab threads in its passes, so all its bases run at once
+        in_flight = _BASES_IN_FLIGHT if image.size >= _SLAB_MIN_SIZE else threads
+        workers = max(1, min(len(base_perms), in_flight, threads, (2 << 30) // (4 * image.size)))
+
         def _base(perm: Tuple[int, int, int]) -> npt.NDArray[np.floating[Any]]:
             return _separable_convolve_3d(
-                image, kernel_arrays[perm[0]], kernel_arrays[perm[1]], kernel_arrays[perm[2]], mode
+                image,
+                kernel_arrays[perm[0]],
+                kernel_arrays[perm[1]],
+                kernel_arrays[perm[2]],
+                mode,
+                threads=threads // workers,
             )
 
-        if use_parallel:
-            with ThreadPoolExecutor(max_workers=get_num_threads()) as executor:
-                result = _pool_rotations(executor.map(_base, base_perms.values()), steps, pooling)
-        else:
-            result = _pool_rotations(map(_base, base_perms.values()), steps, pooling)
+        bases = _ordered_map(_base, base_perms.values(), workers)
+        result = _pool_rotations(bases, steps, pooling)
 
         # Finalize average pooling
         if pooling == "average" and result is not None:
@@ -370,7 +386,7 @@ def laws_filter(
         np.abs(result, out=result)
         result = result.astype(np.float64, copy=False)
         energy_support = 2 * energy_distance + 1
-        uniform_filter(result, size=energy_support, mode=mode, output=result)
+        _uniform_filter(result, energy_support, mode, output=result)
         result = result.astype(np.float32)
 
     if result is None:  # pragma: no cover

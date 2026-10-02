@@ -1,0 +1,1 @@
+The shape features count the marching cubes cells in parallel, write the vertices in physical units at once, and get the bounding box and the centre of the vertices from one pass. The values are the same.

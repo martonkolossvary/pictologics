@@ -1,5 +1,10 @@
 """Tests for pictologics.filters module."""
 
+import os
+import signal
+import time
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
@@ -20,6 +25,7 @@ from pictologics.filters import (
 )
 from pictologics.filters.base import (
     _apply_with_boundary_padding,
+    _float32_cut,
     _normalized_convolve1d,
     _normalized_gaussian_laplace,
     _normalized_separable_convolve_3d,
@@ -158,30 +164,31 @@ class TestApplyWithBoundaryPadding:
         image = np.arange(8, dtype=np.float32).reshape(2, 2, 2)
         calls = []
 
-        def func(arr, add=0.0):
-            calls.append(arr)
+        def func(arr, crop, add=0.0):
+            calls.append((arr, crop))
             return arr + add
 
         result = _apply_with_boundary_padding(func, image, BoundaryCondition.PERIODIC, 5, add=3.0)
-        assert calls[0] is image
+        assert calls[0][0] is image and calls[0][1] is None
         assert_array_equal(result, image + 3.0)
 
     def test_non_periodic_crops_back_to_original_shape(self):
         image = np.ones((4, 4, 4), dtype=np.float32)
 
-        def func(arr):
+        def func(arr, crop):
             assert arr.shape == (8, 8, 8)  # 4 + 2*2 padding
-            return arr
+            return _float32_cut(arr, crop)
 
         result = _apply_with_boundary_padding(func, image, BoundaryCondition.ZERO, 2)
         assert_array_equal(result, image)
+        assert result.flags.c_contiguous and result.base is None  # the padding is not kept
 
     def test_pad_width_as_tuple(self):
         image = np.ones((4, 6, 8), dtype=np.float32)
 
-        def func(arr):
+        def func(arr, crop):
             assert arr.shape == (6, 8, 10)
-            return arr
+            return _float32_cut(arr, crop)
 
         result = _apply_with_boundary_padding(func, image, BoundaryCondition.NEAREST, (1, 1, 1))
         assert result.shape == image.shape
@@ -189,11 +196,11 @@ class TestApplyWithBoundaryPadding:
     def test_pad_width_capped_to_axis_length(self):
         image = np.ones((3, 3, 3), dtype=np.float32)
 
-        def func(arr):
+        def func(arr, crop):
             # Requested pad of 100 is capped to the axis length (3), so the
             # padded shape is 3 + 2*3 = 9 per axis, not 3 + 2*100.
             assert arr.shape == (9, 9, 9)
-            return arr
+            return _float32_cut(arr, crop)
 
         result = _apply_with_boundary_padding(func, image, BoundaryCondition.MIRROR, 100)
         assert result.shape == image.shape
@@ -202,9 +209,9 @@ class TestApplyWithBoundaryPadding:
         image = np.array([[[1.0, 2.0, 3.0, 4.0]]], dtype=np.float32)  # shape (1, 1, 4)
         captured = {}
 
-        def func(arr):
+        def func(arr, crop):
             captured["arr"] = arr.copy()
-            return arr
+            return _float32_cut(arr, crop)
 
         result = _apply_with_boundary_padding(func, image, BoundaryCondition.ZERO, (0, 0, 2))
         assert_array_equal(
@@ -216,9 +223,9 @@ class TestApplyWithBoundaryPadding:
         image = np.array([[[1.0, 2.0, 3.0, 4.0]]], dtype=np.float32)
         captured = {}
 
-        def func(arr):
+        def func(arr, crop):
             captured["arr"] = arr.copy()
-            return arr
+            return _float32_cut(arr, crop)
 
         _apply_with_boundary_padding(func, image, BoundaryCondition.NEAREST, (0, 0, 2))
         assert_array_equal(
@@ -229,14 +236,26 @@ class TestApplyWithBoundaryPadding:
         image = np.array([[[1.0, 2.0, 3.0, 4.0]]], dtype=np.float32)
         captured = {}
 
-        def func(arr):
+        def func(arr, crop):
             captured["arr"] = arr.copy()
-            return arr
+            return _float32_cut(arr, crop)
 
         _apply_with_boundary_padding(func, image, BoundaryCondition.MIRROR, (0, 0, 2))
         assert_array_equal(
             captured["arr"][0, 0], np.array([2, 1, 1, 2, 3, 4, 4, 3], dtype=np.float32)
         )
+
+
+def test_float32_cut_copies_large_arrays_on_slabs() -> None:
+    """A large cut copies on slabs in threads, with the values of one numpy cast."""
+    from pictologics.filters import base
+
+    response = np.random.default_rng(30).normal(size=(9, 10, 11))
+    crop = (slice(1, 8), slice(2, 9), slice(1, 10))
+    with patch.object(base, "_PARALLEL_COPY_MIN", 1), patch.object(base, "_SLAB_MIN_SIZE", 1):
+        got = base._float32_cut(response, crop)
+    assert_array_equal(got, response[crop].astype(np.float32))
+    assert got.flags.c_contiguous and got.base is None
 
 
 class TestBaseInternalHelpers:
@@ -279,14 +298,95 @@ class TestBaseInternalHelpers:
         assert valid_out.shape == shape
         assert not np.isnan(result).any()
 
+    def test_threaded_passes_match_scipy(self):
+        # The slab passes in threads give scipy's values bit for bit, also in place, and a
+        # zero sigma copies the image, as scipy does.
+        from scipy.ndimage import convolve1d, gaussian_laplace, uniform_filter
+
+        from pictologics.filters import base
+
+        rng = np.random.default_rng(8)
+        image = rng.normal(0.0, 10.0, (9, 10, 11)).astype(np.float32)
+        kernels = (
+            np.array([1.0, 2.0, 1.0]),
+            np.array([-1.0, 0.0, 1.0]),
+            np.array([1.0, -2.0, 1.0]),
+        )
+        expected_conv = convolve1d(image, kernels[0], axis=0, mode="mirror")
+        convolve1d(expected_conv, kernels[1], axis=1, mode="mirror", output=expected_conv)
+        convolve1d(expected_conv, kernels[2], axis=2, mode="mirror", output=expected_conv)
+        with patch.object(base, "_SLAB_MIN_SIZE", 1):
+            pairs = [
+                (
+                    base._gaussian_laplace(image, (1.5, 1.0, 2.0), "mirror", 4.0),
+                    gaussian_laplace(image, sigma=(1.5, 1.0, 2.0), mode="mirror", truncate=4.0),
+                ),
+                (
+                    base._uniform_filter(image, 5, "nearest"),
+                    uniform_filter(image, size=5, mode="nearest"),
+                ),
+                (base._convolve_axes(image, kernels, "mirror"), expected_conv),
+                (base._gaussian_filter(image, 0.0, "mirror"), image),
+            ]
+            in_place = image.copy()
+            base._uniform_filter(in_place, 3, "reflect", output=in_place)
+            pairs.append((in_place, uniform_filter(image, size=3, mode="reflect")))
+            line = image[:, 0, 0]  # one axis: no other axis to cut into slabs
+            pairs.append((base._uniform_filter(line, 3, "reflect"), uniform_filter(line, 3)))
+        for got, expected in pairs:
+            np.testing.assert_array_equal(got, expected)
+            assert got.dtype == expected.dtype
+
+    def test_ordered_map_keeps_the_item_order(self):
+        # Later items end first in the pool, but the results come in item order; one
+        # worker maps in this thread.
+        from pictologics.filters import base
+
+        def slow_square(k: int) -> int:
+            time.sleep(0.005 * (4 - k))
+            return k * k
+
+        assert list(base._ordered_map(slow_square, range(5), 3)) == [0, 1, 4, 9, 16]
+        assert list(base._ordered_map(slow_square, [2, 3], 1)) == [4, 9]
+
+    @pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork")
+    @pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
+    def test_slab_pool_is_new_after_fork(self):
+        # A forked process drops the slab pool of its parent, whose threads it does not
+        # have, so its threaded passes make a new pool instead of waiting forever.
+        from pictologics.filters import base
+
+        image = np.random.default_rng(3).normal(size=(8, 9, 10)).astype(np.float32)
+        with patch.object(base, "_SLAB_MIN_SIZE", 1):
+            expected = base._uniform_filter(image, 3, "reflect")
+            assert base._SLAB_POOL
+            pid = os.fork()
+            if pid == 0:  # pragma: no cover  (coverage does not follow the child)
+                code = 1
+                try:
+                    if not base._SLAB_POOL:
+                        same = np.array_equal(base._uniform_filter(image, 3, "reflect"), expected)
+                        code = 0 if same else 2
+                finally:
+                    os._exit(code)
+        deadline = time.monotonic() + 60
+        while (done := os.waitpid(pid, os.WNOHANG))[0] == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if done[0] == 0:  # pragma: no cover  (only when the child waits forever)
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            pytest.fail("the forked process waited for the threads of its parent")
+        assert os.waitstatus_to_exitcode(done[1]) == 0
+
     def test_normalized_convolve1d(self):
-        # data window [10,0,30]·[0.5,1,0.5]=20, weight window [1,0,1]·[0.5,1,0.5]=1 -> 20.
+        # data window [10,0,30]·[0.5,1,0.5]=20; the valid weight [1,0,1]·[0.5,1,0.5]=1 is
+        # half of the full weight 2, so the estimate of the plain response is 40.
         image = np.array([10.0, 20.0, 30.0], dtype=np.float32)
         mask = np.array([True, False, True], dtype=bool)
         kernel = np.array([0.5, 1.0, 0.5], dtype=np.float32)
 
         result, _ = _normalized_convolve1d(image, mask, kernel, axis=0, mode="constant")
-        assert np.isclose(result[1], 20.0)
+        assert np.isclose(result[1], 40.0)
 
     def test_normalized_separable_convolve_3d(self):
         shape = (5, 5, 5)
@@ -568,6 +668,24 @@ class TestGaborFilter:
                 pooling="invalid",
             )
 
+    def test_rounded_delta_theta_gives_the_whole_number_of_angles(self, small_3d_image):
+        # 0.785398 (pi/4 in 6 digits) means 8 orientations, as pi/4 does; ceil gave 9. A
+        # step that does not divide 2 pi keeps ceil: 1.0 gives 7 orientations.
+        from pictologics.filters import gabor as gabor_module
+
+        def thetas(step: float) -> list[float]:
+            with patch.object(
+                gabor_module, "_apply_gabor_to_plane", wraps=gabor_module._apply_gabor_to_plane
+            ) as plane:
+                gabor_filter(
+                    small_3d_image, sigma_mm=2.0, lambda_mm=2.0, rotation_invariant=True,
+                    delta_theta=step,
+                )  # fmt: skip
+            return list(plane.call_args.args[4])
+
+        assert thetas(0.785398) == thetas(np.pi / 4) == [k * np.pi / 4 for k in range(4)]
+        assert thetas(1.0) == [float(k) for k in range(7)]
+
     def test_rotation_invariant_requires_delta_theta(self, small_3d_image):
         with pytest.raises(ValueError, match="requires delta_theta"):
             gabor_filter(
@@ -616,17 +734,18 @@ class TestGaborFilter:
 
     def test_anisotropic_kernel_matches_closed_form_physical_grid(self):
         """`_create_gabor_kernel_2d_anisotropic` must build a rectangular kernel
-        with an independent 6*sigma_mm/s_i radius per axis, evaluated on a
-        physical (mm) coordinate grid. Recompute the expected kernel from the
-        Gabor formula directly (not by calling the function under test) to
-        catch implementation bugs rather than just echoing them back."""
+        with an independent 6*sigma_mm/(gamma*s_i) radius per axis (gamma < 1 makes
+        the envelope longer), evaluated on a physical (mm) coordinate grid.
+        Recompute the expected kernel from the Gabor formula directly (not by
+        calling the function under test) to catch implementation bugs rather than
+        just echoing them back."""
         sigma_mm, lambda_mm, gamma, theta = 5.0, 2.0, 0.5, np.pi / 6
         s1, s2 = 1.0, 3.0
 
         kernel = _create_gabor_kernel_2d_anisotropic(sigma_mm, lambda_mm, gamma, theta, s1, s2)
 
-        radius1 = int(np.ceil(6.0 * sigma_mm / s1))
-        radius2 = int(np.ceil(6.0 * sigma_mm / s2))
+        radius1 = int(np.ceil(6.0 * sigma_mm / gamma / s1))
+        radius2 = int(np.ceil(6.0 * sigma_mm / gamma / s2))
         assert kernel.shape == (2 * radius1 + 1, 2 * radius2 + 1)
         # Per-axis radii differ because s1 != s2, so the kernel is rectangular,
         # unlike the old single-scalar approach, which would reuse s1 for both
@@ -648,6 +767,12 @@ class TestGaborFilter:
             1j * 2 * np.pi * p1_rot / lambda_mm
         )
         np.testing.assert_allclose(kernel, expected.astype(np.complex64), rtol=1e-6)
+
+    def test_kernel_radius_covers_the_long_envelope_axis(self):
+        # The envelope has the scale sigma / gamma for gamma < 1, so the radius is
+        # ceil(6 sigma / gamma); gamma >= 1 keeps ceil(6 sigma).
+        assert _create_gabor_kernel_2d(5.0, 4.0, 0.5, 0.0).shape == (121, 121)
+        assert _create_gabor_kernel_2d(5.0, 4.0, 2.5, 0.0).shape == (61, 61)
 
     def test_anisotropic_in_plane_scaling_replaces_old_single_scalar_behaviour(
         self, small_3d_image
@@ -1066,6 +1191,21 @@ class TestFilterSourceMask:
         assert res.shape == small_3d_image.shape
         assert valid.shape == small_3d_image.shape
 
+    def test_laws_source_mask_keeps_the_plain_response(self):
+        # Where every voxel under the kernel is valid (2 voxels from the image edge and
+        # from the invalid slice), the source-mask path gives the plain Laws response
+        # (before, 0.15 to 0.23 times it).
+        rng = np.random.default_rng(3)
+        image = rng.normal(100.0, 20.0, (12, 12, 12)).astype(np.float32)
+        plain = laws_filter(image, "L5E5S5")
+        inner = (slice(3, -2), slice(2, -2), slice(2, -2))
+        valid = np.ones(image.shape, dtype=bool)
+        for invalid in (None, 0):
+            if invalid is not None:
+                valid[invalid] = False
+            res, _ = laws_filter(image, "L5E5S5", source_mask=valid)
+            np.testing.assert_allclose(res[inner], plain[inner], rtol=1e-5, atol=1e-3)
+
     def test_gabor(self, small_3d_image, source_mask_3d):
         res = gabor_filter(small_3d_image, sigma_mm=1.0, lambda_mm=2.0, source_mask=source_mask_3d)
         assert res.shape == small_3d_image.shape
@@ -1198,97 +1338,116 @@ def test_wavelet_passes_in_place_give_the_new_array_result() -> None:
     assert_array_equal(image, before)
 
 
-def test_fft_filters_multiply_in_place_only_when_the_type_holds() -> None:
-    """A complex128 spectrum takes the product in place; a complex64 one gets a new
-    complex128 array, as the product with a float64 transfer always was."""
-    from pictologics.filters.base import _times_transfer
+def _simoncelli_whole(shape: tuple[int, ...], level: int) -> np.ndarray:
+    """The whole Simoncelli table, in one volume."""
+    max_freq = 1.0 / (2 ** (level - 1))
+    center = (np.array(shape) - 1.0) / 2.0
+    grids = [np.fft.ifftshift((np.arange(s) - center[i]) / center[i]) for i, s in enumerate(shape)]
+    dist = np.sqrt(np.asarray(sum(g**2 for g in np.meshgrid(*grids, indexing="ij", sparse=True))))
+    val = 2.0 * dist / max_freq
+    with np.errstate(all="ignore"):
+        g_sim = np.cos(np.pi / 2.0 * np.log2(np.where(val > 0, val, 1.0)))
+    return np.where((dist >= max_freq / 4.0) & (dist <= max_freq), g_sim, 0.0)
 
-    transfer = np.array([0.5, 2.0])
-    spectrum = np.array([1 + 1j, 2 - 1j])
-    assert _times_transfer(spectrum, transfer) is spectrum
-    assert_array_equal(spectrum, [0.5 + 0.5j, 4 - 2j])
-    single = np.array([1 + 1j, 2 - 1j], dtype=np.complex64)
-    product = _times_transfer(single, transfer)
+
+def _riesz_whole(shape: tuple[int, ...], order: tuple[int, ...]) -> np.ndarray:
+    """The whole Riesz table (rfftn layout), in one volume."""
+    from math import factorial, sqrt
+
+    freqs = [np.fft.fftfreq(s) * 2 * np.pi for s in shape[:-1]] + [
+        np.fft.rfftfreq(shape[-1]) * 2 * np.pi
+    ]
+    nu = np.meshgrid(*freqs, indexing="ij", sparse=True)
+    nu_norm = np.sqrt(np.asarray(sum(n**2 for n in nu), dtype=np.float64))
+    numerator = np.ones(nu_norm.shape)
+    for i, o in enumerate(order):
+        if o > 0:
+            numerator *= nu[i] ** o
+    L = sum(order)
+    norm = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
+    t = np.exp(-1j * np.pi * L / 2) * norm * numerator / (np.where(nu_norm > 0, nu_norm, 1.0) ** L)
+    return np.where(nu_norm > 0, t, 0)
+
+
+def test_fft_filters_multiply_in_place_only_when_the_type_holds() -> None:
+    """The mirrored product writes into a complex128 spectrum; a complex64 one gets a new
+    complex128 array, as the product with a float64 table always was. A row past the
+    kept rows reads its mirrored row, with its sign."""
+    from pictologics.filters.base import _times_mirrored
+
+    half = np.array([[0.5, 1.0], [2.0, 3.0]])  # rows 0 and 1 of a table of 3 rows
+    full = np.array([[0.5, 1.0], [2.0, 3.0], [-2.0, -3.0]])  # row 2 = -row (3 - 2)
+    spectrum = np.arange(6).reshape(3, 2) * (1 + 1j)
+    expected = spectrum * full
+    assert _times_mirrored(spectrum, half, 3, -1) is spectrum
+    assert_array_equal(spectrum, expected)
+    single = (np.arange(6).reshape(3, 2) * (1 - 1j)).astype(np.complex64)
+    product = _times_mirrored(single, half, 3, -1)
     assert product.dtype == np.complex128 and product is not single
-    assert_array_equal(product, single.astype(np.complex128) * transfer)
+    assert_array_equal(product, single.astype(np.complex128) * full)
 
 
 def test_fft_filters_match_the_out_of_place_product() -> None:
-    """Simoncelli and Riesz give the values of the out-of-place product, bit for bit,
-    for float64 and float32 images."""
+    """Simoncelli and Riesz give the values of the out-of-place product with the whole
+    table, bit for bit, for even and odd sizes and float64 and float32 images, also with
+    the product in parts on threads."""
     import scipy.fft
 
+    from pictologics.filters import base
     from pictologics.filters.riesz import _riesz_transfer
     from pictologics.filters.wavelets import _simoncelli_transfer
 
     rng = np.random.default_rng(4)
-    for dtype in (np.float64, np.float32):
-        image = rng.normal(size=(12, 11, 10)).astype(dtype)
-        g = _simoncelli_transfer(image.shape, 2)
-        spectrum = scipy.fft.fftn(image, workers=-1) * g
-        expected = np.real(scipy.fft.ifftn(spectrum, s=image.shape, workers=-1)).astype(np.float32)
-        assert_array_equal(simoncelli_wavelet(image, level=2), expected)
-        t = _riesz_transfer(image.shape, (1, 1, 0))
-        spectrum = scipy.fft.rfftn(image, workers=-1) * t
-        expected = scipy.fft.irfftn(spectrum, s=image.shape, workers=-1).astype(np.float32)
-        assert_array_equal(riesz_transform(image, order=(1, 1, 0)), expected)
+    for shape in ((12, 11, 10), (9, 8, 7)):
+        for dtype in (np.float64, np.float32):
+            image = rng.normal(size=shape).astype(dtype)
+            spectrum = scipy.fft.fftn(image, workers=-1) * _simoncelli_whole(shape, 2)
+            simoncelli = np.real(scipy.fft.ifftn(spectrum, s=shape, workers=-1)).astype(np.float32)
+            spectrum = scipy.fft.rfftn(image, workers=-1) * _riesz_whole(shape, (1, 1, 0))
+            riesz = scipy.fft.irfftn(spectrum, s=shape, workers=-1).astype(np.float32)
+            settings = (
+                (base._SLAB_MIN_SIZE, base._PRODUCT_PART, base._HALF_TABLE_MIN),
+                (1, 1, 0),  # half tables, with the product in parts on threads
+                (base._SLAB_MIN_SIZE, base._PRODUCT_PART, 0),  # half tables in one thread
+            )
+            for slab_min, part, half_min in settings:
+                with (
+                    patch.object(base, "_SLAB_MIN_SIZE", slab_min),
+                    patch.object(base, "_PRODUCT_PART", part),
+                    patch.object(base, "_HALF_TABLE_MIN", half_min),
+                ):
+                    _simoncelli_transfer.cache_clear()  # the tables of this setting
+                    _riesz_transfer.cache_clear()
+                    assert_array_equal(simoncelli_wavelet(image, level=2), simoncelli)
+                    assert_array_equal(riesz_transform(image, order=(1, 1, 0)), riesz)
 
 
 def test_transfer_functions_built_in_slabs_match_one_volume() -> None:
-    """The slab-by-slab transfer functions equal the whole-volume formulas, bit for bit."""
-    from math import factorial, sqrt
-    from unittest.mock import patch
-
+    """The slab-by-slab transfer tables equal the kept rows of the whole-volume tables,
+    bit for bit (a small table keeps all its rows)."""
     from pictologics.filters import base, riesz, wavelets
-
-    def simoncelli_whole(shape: tuple[int, ...], level: int) -> np.ndarray:
-        max_freq = 1.0 / (2 ** (level - 1))
-        center = (np.array(shape) - 1.0) / 2.0
-        grids = [
-            np.fft.ifftshift((np.arange(s) - center[i]) / center[i]) for i, s in enumerate(shape)
-        ]
-        dist = np.sqrt(
-            np.asarray(sum(g**2 for g in np.meshgrid(*grids, indexing="ij", sparse=True)))
-        )
-        val = 2.0 * dist / max_freq
-        with np.errstate(all="ignore"):
-            g_sim = np.cos(np.pi / 2.0 * np.log2(np.where(val > 0, val, 1.0)))
-        return np.where((dist >= max_freq / 4.0) & (dist <= max_freq), g_sim, 0.0)
-
-    def riesz_whole(shape: tuple[int, ...], order: tuple[int, ...]) -> np.ndarray:
-        freqs = [np.fft.fftfreq(s) * 2 * np.pi for s in shape[:-1]] + [
-            np.fft.rfftfreq(shape[-1]) * 2 * np.pi
-        ]
-        nu = np.meshgrid(*freqs, indexing="ij", sparse=True)
-        nu_norm = np.sqrt(np.asarray(sum(n**2 for n in nu), dtype=np.float64))
-        numerator = np.ones(nu_norm.shape)
-        for i, o in enumerate(order):
-            if o > 0:
-                numerator *= nu[i] ** o
-        L = sum(order)
-        norm = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
-        t = (
-            np.exp(-1j * np.pi * L / 2)
-            * norm
-            * numerator
-            / (np.where(nu_norm > 0, nu_norm, 1.0) ** L)
-        )
-        return np.where(nu_norm > 0, t, 0)
 
     def small_slabs(shape: tuple[int, ...]) -> list[tuple[int, int]]:
         return base._slabs(shape, elements=40, minimum=0)
 
     assert base._slabs((5, 3, 2), elements=6, minimum=0) == [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)]
     assert base._slabs((5, 3, 2)) == [(0, 5)]  # a small table is one slab
-    with patch.object(wavelets, "_slabs", small_slabs), patch.object(riesz, "_slabs", small_slabs):
+    assert wavelets._simoncelli_transfer.__wrapped__((9, 8, 7), 1).shape == (9, 8, 7)
+    with (
+        patch.object(wavelets, "_slabs", small_slabs),
+        patch.object(riesz, "_slabs", small_slabs),
+        patch.object(base, "_HALF_TABLE_MIN", 0),
+    ):
         for shape in ((9, 8, 7), (6, 10, 5)):
+            kept = slice((shape[0] + 1) // 2)
             for level in (1, 2):
                 built = wavelets._simoncelli_transfer.__wrapped__(shape, level)
-                assert_array_equal(built, simoncelli_whole(shape, level))
+                assert_array_equal(built, _simoncelli_whole(shape, level)[kept])
                 assert not built.flags.writeable
+            kept = slice(shape[0] // 2 + 1)
             for order in ((1, 0, 0), (0, 1, 1), (0, 0, 2)):
                 built = riesz._riesz_transfer.__wrapped__(shape, order)
-                assert_array_equal(built, riesz_whole(shape, order))
+                assert_array_equal(built, _riesz_whole(shape, order)[kept])
                 assert not built.flags.writeable
 
 
@@ -1362,7 +1521,7 @@ def test_filter_threads_follow_the_numba_thread_count() -> None:
 
     import scipy.fft
 
-    from pictologics.filters import gabor, laws, riesz, wavelets
+    from pictologics.filters import base, gabor, laws, riesz, wavelets
 
     image = np.random.default_rng(7).normal(size=(12, 11, 10)).astype(np.float32)
     fft_runs = {
@@ -1392,12 +1551,11 @@ def test_filter_threads_follow_the_numba_thread_count() -> None:
             stack.enter_context(
                 patch.object(module, "ThreadPoolExecutor", wraps=ThreadPoolExecutor)
             )
-            for module in (wavelets, laws, gabor)
+            for module in (base, gabor)  # base: the rotation pools of wavelets and Laws
         ]
         for name, run in pool_runs.items():
             assert_array_equal(run(), expected[name])
     assert [[c.kwargs["max_workers"] for c in pool.call_args_list] for pool in pools] == [
-        [2],
-        [2],
+        [2, 2],
         [2],
     ]
