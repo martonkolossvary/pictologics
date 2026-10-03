@@ -18,6 +18,7 @@ from .loader import (
     create_full_mask,
     load_and_merge_images,
     load_image,
+    save_image,
 )
 from .loaders import load_rtstruct, load_seg
 from .pipeline import RadiomicsPipeline, SourceMode
@@ -31,6 +32,7 @@ warmup_jit()
 __all__ = [
     # Core
     "load_image",
+    "save_image",
     "load_seg",
     "load_rtstruct",
     "Image",

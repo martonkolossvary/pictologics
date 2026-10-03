@@ -821,6 +821,32 @@ def _stored_ct_and_seg(
     return ct_dir, seg_path, labels
 
 
+def test_seg_masks_keep_and_check_the_frame_of_reference(tmp_path: Path) -> None:
+    # A CT series and its SEG share one FrameOfReferenceUID, and the masks keep it. A SEG
+    # of another frame of reference warns when it loads onto the CT.
+    import warnings
+
+    import pydicom
+
+    from pictologics.loader import load_image
+
+    ct_dir, seg_path, _ = _stored_ct_and_seg(tmp_path, "binary")
+    ct = load_image(str(ct_dir))
+    assert ct.frame_of_reference_uid
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        combined = load_seg(str(seg_path), reference_image=ct)
+        separate = load_seg(str(seg_path), combine_segments=False)
+    assert isinstance(combined, Image) and isinstance(separate, dict)
+    for mask in (combined, *separate.values()):
+        assert mask.frame_of_reference_uid == ct.frame_of_reference_uid
+    other = pydicom.dcmread(seg_path)
+    other.FrameOfReferenceUID = "1.2.3.4"
+    other.save_as(tmp_path / "other.dcm")
+    with pytest.warns(UserWarning, match="refers to the frame of reference 1.2.3.4"):
+        load_seg(str(tmp_path / "other.dcm"), reference_image=ct)
+
+
 class TestHighdicomRoundTrip:
     """A SEG written by highdicom (stored, see _stored_ct_and_seg) loads back into the
     labels it was made from."""

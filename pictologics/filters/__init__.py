@@ -7,6 +7,7 @@ following the IBSI 2 reference manual specifications.
 
 Filters:
     - Mean filter (S60F)
+    - Gaussian filter (8BC3)
     - Laplacian of Gaussian (L6PA)
     - Laws kernels (JTXT)
     - Gabor filter (Q88H)
@@ -32,6 +33,7 @@ from .capabilities import (
     get_filter_capabilities,
 )
 from .gabor import gabor_filter
+from .gaussian import gaussian_filter
 from .laws import LAWS_KERNELS, laws_filter
 from .log import laplacian_of_gaussian
 from .mean import mean_filter
@@ -44,6 +46,7 @@ __all__ = [
     "FilterResult",
     # Filters
     "mean_filter",
+    "gaussian_filter",
     "laplacian_of_gaussian",
     "laws_filter",
     "LAWS_KERNELS",

@@ -11,10 +11,12 @@ from numpy import typing as npt
 from .base import (
     _SLAB_MIN_SIZE,
     BoundaryCondition,
+    _constant_padded,
     _convolve_axes,
     _float32_cut,
     _normalized_separable_convolve_3d,
     _ordered_map,
+    _padding_value_problem,
     _prepare_masked_image,
     _slab_ufunc,
     _uniform_filter,
@@ -180,6 +182,7 @@ def laws_filter(
     energy_distance: int = ...,
     use_parallel: Union[bool, None] = ...,
     source_mask: None = ...,
+    padding_value: float = ...,
 ) -> npt.NDArray[np.floating[Any]]: ...
 
 
@@ -194,6 +197,7 @@ def laws_filter(
     energy_distance: int = ...,
     use_parallel: Union[bool, None] = ...,
     source_mask: npt.NDArray[np.bool_] = ...,
+    padding_value: float = ...,
 ) -> Tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]: ...
 
 
@@ -207,6 +211,7 @@ def laws_filter(
     energy_distance: int = 7,
     use_parallel: Union[bool, None] = None,
     source_mask: Optional[npt.NDArray[np.bool_]] = None,
+    padding_value: float = 0.0,
 ) -> Union[
     npt.NDArray[np.floating[Any]],
     Tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]],
@@ -234,6 +239,8 @@ def laws_filter(
             to exclude invalid (sentinel) voxels. In rotation-invariant mode,
             invalid voxels are zero-filled as a first-order approximation (the
             rotated kernels preclude normalized convolution).
+        padding_value: The constant of constant value padding (Z3VE), with the ZERO
+            (constant) boundary. Default 0.
 
     Returns:
         If source_mask is None: Response map (or energy image if compute_energy=True)
@@ -303,6 +310,22 @@ def laws_filter(
         raise ValueError(
             f"Unknown Laws kernel {exc.args[0]!r}; valid kernels are: {valid}"
         ) from exc
+    problem = _padding_value_problem(boundary, padding_value)
+    if problem:
+        raise ValueError(problem)
+    if padding_value:
+        # The convolution reads the constant; the energy step then pads the response
+        # with 0 by the boundary, as with a padding value of 0
+        padded = _constant_padded(
+            laws_filter, image, source_mask, padding_value, max(g1.size, g2.size, g3.size) // 2,
+            kernels=kernels, boundary=boundary, rotation_invariant=rotation_invariant,
+            pooling=pooling, use_parallel=use_parallel,
+        )  # fmt: skip
+        if not compute_energy:
+            return padded
+        response, valid_part = padded if isinstance(padded, tuple) else (padded, None)
+        energy = _laws_energy(response, energy_distance, mode)
+        return energy if valid_part is None else (energy, valid_part)
 
     # Auto-detect parallel mode based on image size
     if use_parallel is None:
@@ -387,15 +410,7 @@ def laws_filter(
         if result is None:  # pragma: no cover
             raise RuntimeError("Result should not be None")
 
-        # Energy = mean of absolute values over δ neighborhood, i.e. uniform_filter
-        # on |result|. Accumulate in float64: scipy's running moving-sum otherwise
-        # drifts in float32 over long axes. Cast the result back to float32. result is
-        # always a new array of this function, so the steps write into it.
-        np.abs(result, out=result)
-        result = result.astype(np.float64, copy=False)
-        energy_support = 2 * energy_distance + 1
-        _uniform_filter(result, energy_support, mode, output=result)
-        result = result.astype(np.float32)
+        result = _laws_energy(result, energy_distance, mode)
 
     if result is None:  # pragma: no cover
         raise RuntimeError("Result should not be None")
@@ -407,6 +422,21 @@ def laws_filter(
     if source_mask is not None and valid_mask is not None:
         return result, valid_mask
     return result  # type: ignore[no-any-return]
+
+
+def _laws_energy(
+    result: npt.NDArray[np.floating[Any]], energy_distance: int, mode: str
+) -> npt.NDArray[np.float32]:
+    """The texture energy (PQSD) of the response `result`, a new array of laws_filter that
+    the steps write into."""
+    # Energy = mean of absolute values over δ neighborhood, i.e. uniform_filter on
+    # |result|. Accumulate in float64: scipy's running moving-sum otherwise drifts in
+    # float32 over long axes. Cast the result back to float32.
+    np.abs(result, out=result)
+    result = result.astype(np.float64, copy=False)
+    energy_support = 2 * energy_distance + 1
+    _uniform_filter(result, energy_support, mode, output=result)
+    return result.astype(np.float32)
 
 
 def _parse_kernel_string(kernels: str) -> List[str]:

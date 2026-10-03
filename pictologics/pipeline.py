@@ -83,6 +83,7 @@ from .features.texture import (
 from .filters import (
     BoundaryCondition,
     gabor_filter,
+    gaussian_filter,
     laplacian_of_gaussian,
     laws_filter,
     mean_filter,
@@ -478,7 +479,7 @@ def _filter_reach(
     an order that starts at the line start, so their reach is negative: they read from
     the image start (see _filter_crop). None for the FFT filters and Gabor (which takes
     the region itself)."""
-    if filter_type == "log":
+    if filter_type in ("log", "gaussian"):
         spacing_mm = np.broadcast_to(np.asarray(params["spacing_mm"], dtype=float), (3,))
         truncate = params.get("truncate", 4.0)
         r = [int(truncate * params["sigma_mm"] / s + 0.5) + 1 for s in spacing_mm]
@@ -651,10 +652,15 @@ _OPTION_GROUPS = (
     "ivh_discretisation",
 )
 _DISCRETISE_METHODS = ("FBN", "FBS", "FIXED_CUTOFFS")
+# The options of texture_matrix_params (IBSI 1 texture parameters)
+_TEXTURE_DISTANCES = ("glcm_distance", "ngtdm_distance", "ngldm_distance")
+_TEXTURE_OPTIONS = ("ngldm_alpha", *_TEXTURE_DISTANCES)
+_GABOR_RESPONSES = ("modulus", "angle", "real", "imaginary")
 _RIESZ_FUNCTIONS = {"base": riesz_transform, "log": riesz_log, "simoncelli": riesz_simoncelli}
 _FILTER_FUNCTIONS: dict[str, Any] = {
     "mean": mean_filter,
     "log": laplacian_of_gaussian,
+    "gaussian": gaussian_filter,
     "laws": laws_filter,
     "gabor": gabor_filter,
     "wavelet": wavelet_transform,
@@ -741,11 +747,38 @@ def _step_problems(
             problem = _wavelet_problem(params.get("level", 1), params.get("decomposition", "LHL"))
         elif filter_type == "simoncelli":
             problem = _wavelet_problem(params.get("level", 1))
+        elif filter_type == "gabor" and params.get("response", "modulus") not in _GABOR_RESPONSES:
+            response = params["response"]
+            problem = f"unknown gabor response '{response}'{_hint(response, _GABOR_RESPONSES)}"
         problems.extend([problem] if problem else [])
+        padding = params.get("padding_value", 0)
+        if isinstance(padding, bool) or not isinstance(padding, (int, float)):
+            problems.append(f"padding_value must be a number, not {padding!r}")
+        elif padding and str(params.get("boundary", "")).lower() not in ("zero", "constant"):
+            problems.append(
+                f"padding_value {padding!r} needs boundary 'constant' (or 'zero'), not "
+                f"{params.get('boundary', 'the default')!r}"
+            )
     elif name == "extract_features":
         for key in _OPTION_GROUPS:
             if params.get(key) is not None and not isinstance(params[key], dict):
                 problems.append(f"{key} must be a dict, not {params[key]!r}")
+        texture = params.get("texture_matrix_params")
+        for key, value in texture.items() if isinstance(texture, dict) else ():
+            if key not in _TEXTURE_OPTIONS:
+                problems.append(
+                    f"texture_matrix_params: unknown option '{key}'{_hint(key, _TEXTURE_OPTIONS)}"
+                )
+            elif key == "ngldm_alpha" and not (
+                isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+            ):
+                problems.append(
+                    f"texture_matrix_params: ngldm_alpha must be 0 or more, not {value!r}"
+                )
+            elif key != "ngldm_alpha" and not (_whole_number(value) and value >= 1):
+                problems.append(
+                    f"texture_matrix_params: {key} must be a whole number of 1 or more, not {value!r}"
+                )
         ivh = params.get("ivh_discretisation")
         if (
             isinstance(ivh, dict)
@@ -2504,7 +2537,7 @@ class RadiomicsPipeline:
                 filter_params["source_mask"] = state.source_mask.array
 
             img_arr = state.image.array
-            if filter_type == "log":
+            if filter_type in ("log", "gaussian"):
                 filter_params.setdefault("spacing_mm", state.image.spacing)
 
             # When no later step reads the image outside the ROI, a filter whose values
@@ -2557,6 +2590,9 @@ class RadiomicsPipeline:
             elif filter_type == "log":
                 filter_params["boundary"] = boundary
                 result = laplacian_of_gaussian(img_arr, **filter_params)
+            elif filter_type == "gaussian":
+                filter_params["boundary"] = boundary
+                result = gaussian_filter(img_arr, **filter_params)
             elif filter_type == "laws":
                 filter_params["boundary"] = boundary
                 # 'kernel' param maps to first positional arg
@@ -2596,7 +2632,7 @@ class RadiomicsPipeline:
             else:
                 raise ValueError(
                     f"Unknown filter type: {filter_type}. "
-                    "Supported: mean, log, laws, gabor, wavelet, simoncelli, riesz"
+                    "Supported: mean, gaussian, log, laws, gabor, wavelet, simoncelli, riesz"
                 )
 
             filtered_array: npt.NDArray[np.floating[Any]] = (
@@ -3125,6 +3161,9 @@ class RadiomicsPipeline:
             # Grey-level differences are whole numbers, so |d| <= alpha is |d| <= floor(alpha)
             # (one compiled kernel for every alpha, also 1.0 from a file)
             matrix_kwargs["ngldm_alpha"] = math.floor(texture_matrix_params["ngldm_alpha"])
+        for key in _TEXTURE_DISTANCES:
+            if key in texture_matrix_params:
+                matrix_kwargs[key] = int(texture_matrix_params[key])
 
         # Crop once to the ROI bounding box (union of intensity and morph masks, to
         # preserve GLDZM distance-map correctness) and use the cropped arrays for the

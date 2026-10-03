@@ -8,8 +8,10 @@ from numpy import typing as npt
 
 from .base import (
     BoundaryCondition,
+    _constant_padded,
     _gaussian_laplace,
     _normalized_gaussian_laplace,
+    _padding_value_problem,
     ensure_float32,
     get_scipy_mode,
 )
@@ -23,6 +25,7 @@ def laplacian_of_gaussian(
     truncate: float = ...,
     boundary: Union[BoundaryCondition, str] = ...,
     source_mask: None = ...,
+    padding_value: float = ...,
 ) -> npt.NDArray[np.floating[Any]]: ...
 
 
@@ -34,6 +37,7 @@ def laplacian_of_gaussian(
     truncate: float = ...,
     boundary: Union[BoundaryCondition, str] = ...,
     source_mask: npt.NDArray[np.bool_] = ...,
+    padding_value: float = ...,
 ) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]: ...
 
 
@@ -44,6 +48,7 @@ def laplacian_of_gaussian(
     truncate: float = 4.0,
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.ZERO,
     source_mask: Optional[npt.NDArray[np.bool_]] = None,
+    padding_value: float = 0.0,
 ) -> Union[
     npt.NDArray[np.floating[Any]],
     tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]],
@@ -62,6 +67,8 @@ def laplacian_of_gaussian(
         source_mask: Optional boolean mask where True = valid voxel.
             When provided, uses normalized convolution to exclude invalid
             (sentinel) voxels from computation.
+        padding_value: The constant of constant value padding (Z3VE), with the ZERO
+            (constant) boundary. Default 0.
 
     Returns:
         If source_mask is None: Response map with same dimensions as input
@@ -111,6 +118,15 @@ def laplacian_of_gaussian(
     if isinstance(boundary, str):
         boundary = BoundaryCondition[boundary.upper()]
 
+    problem = _padding_value_problem(boundary, padding_value)
+    if problem:
+        raise ValueError(problem)
+    if padding_value:
+        reach = tuple(int(truncate * s + 0.5) for s in sigma_voxels)
+        return _constant_padded(
+            laplacian_of_gaussian, image, source_mask, padding_value, reach,
+            sigma_mm=sigma_mm, spacing_mm=spacing_mm, truncate=truncate, boundary=boundary,
+        )  # fmt: skip
     mode = get_scipy_mode(boundary)
 
     if source_mask is not None:

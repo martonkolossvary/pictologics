@@ -5,6 +5,7 @@
       members:
         - Image
         - load_image
+        - save_image
         - load_and_merge_images
         - create_full_mask
 

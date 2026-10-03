@@ -10,6 +10,7 @@ from pictologics.filters import (
     FILTER_CAPABILITIES,
     FilterCapability,
     gabor_filter,
+    gaussian_filter,
     get_filter_capabilities,
     laplacian_of_gaussian,
     laws_filter,
@@ -26,6 +27,7 @@ from pictologics.filters import (
 # registry), so this link is asserted explicitly by the tests below instead.
 _FILTER_CALLABLES = {
     "mean": mean_filter,
+    "gaussian": gaussian_filter,
     "log": laplacian_of_gaussian,
     "laws": laws_filter,
     "gabor": gabor_filter,

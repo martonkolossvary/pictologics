@@ -220,23 +220,25 @@ Applies an IBSI 2 image filter. See the **[Image Filtering](image_filtering.md)*
 
 | Parameter | Type | Default | Description |
 |:----------|:-----|:--------|:------------|
-| `type` | `str` | *(required)* | `"mean"`, `"log"`, `"laws"`, `"gabor"`, `"wavelet"`, `"simoncelli"`, `"riesz"` |
+| `type` | `str` | *(required)* | `"mean"`, `"gaussian"`, `"log"`, `"laws"`, `"gabor"`, `"wavelet"`, `"simoncelli"`, `"riesz"` |
 | `boundary` | `str` | `"mirror"` | Boundary condition |
+| `padding_value` | `float` | `0` | The constant of the `"constant"` (or `"zero"`) boundary (IBSI 2 Z3VE) |
 
 **Filter-specific parameters:**
 
 | Filter | Required Params | Optional Params |
 |:-------|:----------------|:----------------|
 | `mean` | `support` | `boundary` |
+| `gaussian` | `sigma_mm` | `truncate`, `boundary` |
 | `log` | `sigma_mm` | `truncate`, `boundary` |
 | `laws` | `kernel` | `rotation_invariant`, `pooling`, `compute_energy`, `energy_distance`, `boundary` |
-| `gabor` | `sigma_mm`, `lambda_mm`, `gamma` | `rotation_invariant`, `delta_theta`, `pooling`, `boundary` |
+| `gabor` | `sigma_mm`, `lambda_mm`, `gamma` | `rotation_invariant`, `delta_theta`, `pooling`, `response`, `boundary` |
 | `wavelet` | `wavelet`, `level`, `decomposition` | `rotation_invariant`, `pooling`, `boundary` |
 | `simoncelli` | `level` | — |
 | `riesz` | `order` | `variant`, `sigma_mm`, `level` |
 
 !!! note "Automatic Spacing Injection"
-    For filters requiring physical spacing (`log`, `gabor`), the pipeline uses the image's voxel spacing automatically.
+    For filters requiring physical spacing (`gaussian`, `log`, `gabor`), the pipeline uses the image's voxel spacing automatically.
 
 ### 9. `extract_features`
 
@@ -250,7 +252,7 @@ Calculates radiomic features from the current state.
 | `ivh_params` | `dict` | `None` | Parameters for IVH: `bin_width`, `min_val`, `max_val`, etc. |
 | `ivh_discretisation` | `dict` | `None` | Temporary discretisation for IVH only |
 | `ivh_use_continuous` | `bool` | `False` | Use raw values for IVH |
-| `texture_matrix_params` | `dict` | `None` | E.g., `{"ngldm_alpha": 1}` |
+| `texture_matrix_params` | `dict` | `None` | Texture options (IBSI 1): `ngldm_alpha` (NGLDM coarseness, default 0), `glcm_distance` (the GLCM pair distance along each of the 13 directions), `ngtdm_distance` and `ngldm_distance` (the Chebyshev distance of the neighbourhood). The distances are whole numbers of 1 or more (default 1). E.g., `{"glcm_distance": 2, "ngldm_alpha": 1}` |
 
 **Available feature families:**
 

@@ -19,7 +19,7 @@ import numpy as np
 import pydicom
 from numpy import typing as npt
 
-from pictologics.loader import _RTSTRUCT_SOP_CLASS, Image, _direction_matrix
+from pictologics.loader import _RTSTRUCT_SOP_CLASS, Image, _direction_matrix, _warn_if_other_frame
 
 # The contour types that bound an area (CLOSEDPLANAR_XOR names the even-odd rule)
 _CLOSED_TYPES = ("CLOSED_PLANAR", "CLOSEDPLANAR_XOR")
@@ -77,7 +77,8 @@ def load_rtstruct(
         masks = load_rtstruct("rtstruct.dcm", ct, roi_names=["GTV", "PTV"], combine_rois=False)
         ```
     """
-    rois = _rois(_read_rtstruct(path))
+    dataset = _read_rtstruct(path)
+    rois = _rois(dataset)
     counts = Counter(name for name, _ in rois.values())
     if roi_names is None:
         chosen = [number for number, (_, contours) in rois.items() if contours]
@@ -105,6 +106,14 @@ def load_rtstruct(
                 f"ROI names {repeated} repeat in '{path}': use combine_rois=True (labels "
                 "by ROI Number)."
             )
+    frames = {
+        int(item.ROINumber): str(item.ReferencedFrameOfReferenceUID)
+        for item in getattr(dataset, "StructureSetROISequence", [])
+        if getattr(item, "ReferencedFrameOfReferenceUID", "")
+    }
+    for uid in sorted({frames[n] for n in chosen if n in frames}):
+        names = ", ".join(repr(rois[n][0]) for n in chosen if frames.get(n) == uid)
+        _warn_if_other_frame(uid, reference_image, f"The RTSTRUCT ROI {names}")
     masks = {
         number: _filled(rois[number], reference_image, subvoxel_tolerance, subvoxel_warning_threshold)
         for number in chosen
@@ -124,6 +133,7 @@ def load_rtstruct(
             origin=reference_image.origin,
             direction=reference_image.direction,
             modality="RTSTRUCT",
+            frame_of_reference_uid=reference_image.frame_of_reference_uid,
         )
 
     if not combine_rois:

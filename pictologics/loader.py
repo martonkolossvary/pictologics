@@ -64,6 +64,7 @@ import nibabel as nib
 import numpy as np
 import pydicom
 from nibabel.arrayproxy import ArrayProxy
+from nibabel.nifti1 import Nifti1Image
 from numba import jit, prange
 from numpy import typing as npt
 from numpy.typing import DTypeLike
@@ -117,7 +118,26 @@ def _reoriented(image: Image, reference: Image) -> Image:
         direction=direction,
         modality=image.modality,
         source_mask=None if image.source_mask is None else turned(image.source_mask),
+        frame_of_reference_uid=image.frame_of_reference_uid,
     )
+
+
+def _frame_uid(dataset: Any) -> Optional[str]:
+    """The FrameOfReferenceUID of a DICOM dataset, or None."""
+    uid = getattr(dataset, "FrameOfReferenceUID", None)
+    return str(uid) if uid else None
+
+
+def _warn_if_other_frame(uid: Optional[str], reference: Image, what: str) -> None:
+    """Warn when `what` refers to another DICOM frame of reference than `reference` (when
+    both UIDs are known)."""
+    if uid and reference.frame_of_reference_uid and uid != reference.frame_of_reference_uid:
+        warnings.warn(
+            f"{what} refers to the frame of reference {uid}, but the reference image has "
+            f"{reference.frame_of_reference_uid}: it can belong to another scan.",
+            UserWarning,
+            stacklevel=3,
+        )
 
 
 def _validate_geometry(
@@ -310,6 +330,9 @@ class Image:
             When set, preprocessing operations like resampling and filtering will exclude
             invalid voxels from interpolation/convolution to prevent sentinel value contamination.
             If None, all voxels are assumed to contain valid data (traditional behavior).
+        frame_of_reference_uid (Optional[str]): The DICOM FrameOfReferenceUID of the scan
+            (DICOM images, SEG and RTSTRUCT masks); None for other formats. A mask that
+            loads onto a reference image with another UID gives a warning.
 
     Example:
         ```python
@@ -331,6 +354,7 @@ class Image:
     direction: Optional[npt.NDArray[np.floating[Any]]] = None
     modality: str = "Unknown"
     source_mask: Optional[npt.NDArray[np.bool_]] = None
+    frame_of_reference_uid: Optional[str] = None
 
     @property
     def has_source_mask(self) -> bool:
@@ -390,6 +414,7 @@ class Image:
             direction=(self.direction if self.direction is None else self.direction.copy()),
             modality=self.modality,
             source_mask=mask_arr,
+            frame_of_reference_uid=self.frame_of_reference_uid,
         )
 
 
@@ -435,6 +460,7 @@ def create_full_mask(reference_image: Image, dtype: DTypeLike = np.uint8) -> Ima
         origin=reference_image.origin,
         direction=reference_image.direction,
         modality="mask",
+        frame_of_reference_uid=reference_image.frame_of_reference_uid,
     )
 
 
@@ -502,6 +528,7 @@ def _position_in_reference(
         origin=reference.origin,
         direction=reference.direction,
         modality=image.modality,
+        frame_of_reference_uid=reference.frame_of_reference_uid,
     )
 
 
@@ -523,6 +550,8 @@ def _placement(
     with `min_overlap_fraction=0`, after a warning). The checks are those of
     `_position_in_reference`.
     """
+    _warn_if_other_frame(image.frame_of_reference_uid, reference, "The image")
+
     # 0. Validate parameters
     if not 0.0 <= min_overlap_fraction <= 1.0:
         raise ValueError(f"min_overlap_fraction must be in [0.0, 1.0], got {min_overlap_fraction}.")
@@ -1015,9 +1044,49 @@ def load_image(
                 min_overlap_fraction,
             )
         else:
+            _warn_if_other_frame(loaded_image.frame_of_reference_uid, reference_image, "The image")
             _validate_geometry(loaded_image, reference_image, "loaded image", "reference image")
 
     return loaded_image
+
+
+def save_image(image: Image, path: str | Path) -> None:
+    """Save an image, a mask or a response map as a NIfTI file (.nii or .nii.gz).
+
+    The geometry goes back to the RAS+ affine of NIfTI (the X and Y rows change sign),
+    so ``load_image`` reads the same array and geometry. NIfTI keeps the geometry in
+    float32. A bool array is saved as uint8; other arrays keep their type (float64
+    images, float32 response maps, uint8 masks).
+
+    Args:
+        image: The Image to save.
+        path: The file path, ending with .nii or .nii.gz.
+
+    Raises:
+        ValueError: If the path does not end with .nii or .nii.gz.
+
+    Example:
+        ```python
+        from pictologics import load_image, load_rtstruct, save_image
+
+        ct = load_image("ct_scan/")
+        masks = load_rtstruct("rtstruct.dcm", ct, roi_names=["GTV"], combine_rois=False)
+        save_image(masks["GTV"], "gtv.nii.gz")
+        ```
+    """
+    path = str(path)
+    if not path.lower().endswith((".nii", ".nii.gz")):
+        raise ValueError(f"save_image writes NIfTI files (.nii, .nii.gz), not '{path}'.")
+    affine = np.eye(4)
+    affine[:3, :3] = _direction_matrix(image.direction) * np.asarray(image.spacing, dtype=float)
+    affine[:3, 3] = image.origin
+    affine[:2] *= -1.0  # LPS+ to RAS+: the X and Y rows change sign
+    array = image.array.view(np.uint8) if image.array.dtype == np.bool_ else image.array
+    nifti = Nifti1Image(array, affine)  # type: ignore[no-untyped-call]
+    nifti.set_qform(affine, code=1)  # type: ignore[no-untyped-call]  # scanner coordinates, as ITK writes
+    nifti.set_sform(affine, code=1)  # type: ignore[no-untyped-call]
+    nifti.header.set_xyzt_units("mm")  # type: ignore[no-untyped-call]
+    nifti.to_filename(path)
 
 
 def load_and_merge_images(
@@ -1735,6 +1804,7 @@ def _load_dicom_series(
         origin=origin,
         direction=direction,
         modality=getattr(ref, "Modality", "DICOM"),
+        frame_of_reference_uid=_frame_uid(ref),
     )
 
 
@@ -2064,4 +2134,5 @@ def _load_dicom_file(path: str, apply_rescale: bool = True, dataset_index: int =
         origin=origin,
         direction=direction,
         modality=getattr(dcm, "Modality", "DICOM"),
+        frame_of_reference_uid=_frame_uid(dcm),
     )

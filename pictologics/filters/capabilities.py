@@ -146,6 +146,21 @@ FILTER_CAPABILITIES: dict[str, FilterCapability] = {
         structure_tensor_steering=False,
         anisotropic_spacing="supported",
     ),
+    # gaussian.py: gaussian_filter(image, sigma_mm, spacing_mm, truncate, boundary,
+    # source_mask, padding_value). Separable 3D Gaussian smoothing (8BC3); spacing_mm
+    # per axis as for "log".
+    "gaussian": FilterCapability(
+        input_dimensionality=(3,),
+        kernel_dimensionality=3,
+        slice_plane_execution=False,
+        orthogonal_plane_averaging=False,
+        rotation_pooling=(),
+        supported_boundaries=_ALL_BOUNDARIES,
+        effective_boundary="as_specified",
+        supported_riesz_orders=None,
+        structure_tensor_steering=False,
+        anisotropic_spacing="supported",
+    ),
     # laws.py: laws_filter(image, kernels, boundary, rotation_invariant, pooling,
     # compute_energy, energy_distance, use_parallel, source_mask). `kernels` must
     # parse into exactly 3 codes combined via separable 1D convolution into a 3D

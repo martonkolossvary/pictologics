@@ -18,6 +18,7 @@ Applying filters is a key step in advanced radiomics. The process generally invo
 | Filter | Code (IBSI) | Description |
 |:-------|:------------|:------------|
 | [**Mean**](#mean-filter) | S60F | Averages intensities in a local neighborhood. |
+| [**Gaussian**](#gaussian-filter) | 8BC3 | Smooths the image at a physical scale. |
 | [**Laplacian of Gaussian**](#laplacian-of-gaussian-log) | L6PA | Detects edges and blobs at specific scales. |
 | [**Laws Texture Energy**](#laws-texture-energy) | JTXT | Measures texture energy using 1D kernels. |
 | [**Gabor**](#gabor-filter) | Q88H | Detects frequency content at specific orientations. |
@@ -54,6 +55,38 @@ The Mean filter replaces each voxel's intensity with the average intensity of it
     from pictologics.filters import mean_filter
     
     response = mean_filter(image_array, support=3, boundary="mirror")
+    ```
+
+## Gaussian Filter
+
+The Gaussian filter smooths the image with a Gaussian kernel of scale σ (in mm). It is a low-pass filter: it keeps the coarse structure and removes fine detail and noise.
+
+### Parameters
+
+| Parameter | Type | Description |
+|:----------|:-----|:------------|
+| `sigma_mm` | `float` | Scale of the Gaussian in physical units (mm). |
+| `truncate` | `float` | Cutoff for the Gaussian kernel in standard deviations. Default: `4.0`. |
+| `spacing_mm` | `tuple` | Voxel spacing of the image (handled automatically by Pipeline). |
+
+### Usage
+
+=== "Pipeline"
+
+    ```python
+    {"step": "filter", "params": {
+        "type": "gaussian",
+        "sigma_mm": 2.0,
+        "truncate": 4.0
+    }}
+    ```
+
+=== "Direct API"
+
+    ```python
+    from pictologics.filters import gaussian_filter
+
+    response = gaussian_filter(image_array, sigma_mm=2.0, spacing_mm=(0.8, 0.8, 2.0))
     ```
 
 ## Laplacian of Gaussian (LoG)
@@ -148,6 +181,7 @@ Gabor filters are sinusoidal waves modulated by a Gaussian envelope. They are ex
 | `rotation_invariant` | `bool` | If `True`, aggregates responses over multiple orientations. |
 | `delta_theta` | `float` | Orientation step in radians. **Required** when `rotation_invariant=True` (raises `ValueError` otherwise). |
 | `average_over_planes` | `bool` | If `True`, averages the response over the three orthogonal planes. Default: `False` (axial plane only). |
+| `response` | `str` | The part of the complex response: `"modulus"` (default), `"angle"` (in radians), `"real"` or `"imaginary"` (IBSI 2 5P3T). Rotation-invariant pooling pools this part over all orientations. |
 | `spacing_mm` | `float` or `tuple` | Voxel spacing. The 2D kernel is scaled using the **true in-plane spacing of each plane**, so anisotropic voxels are handled correctly (this matters mainly when `average_over_planes=True`, where two of the three planes contain the through-plane axis). |
 
 ### Usage
@@ -337,6 +371,23 @@ An unsupported boundary value raises `ValueError` rather than silently falling b
     steadily with it, so this is a genuine accuracy-versus-speed trade rather than
     avoidable overhead. Leave the boundary periodic unless you specifically need
     another one.
+
+## Constant Value Padding
+
+The `"zero"` boundary (also named `"constant"`) pads the image with a constant value (IBSI 2 Z3VE). The constant is 0 by default. Give another constant with `padding_value`, for example `-1000` to pad a CT image with air instead of water:
+
+```python
+{"step": "filter", "params": {
+    "type": "log",
+    "sigma_mm": 2.0,
+    "boundary": "constant",
+    "padding_value": -1000.0
+}}
+```
+
+- Every filter takes `padding_value`. A value other than 0 needs the `"constant"` (or `"zero"`) boundary; with another boundary the filter raises `ValueError`.
+- A spatial filter (mean, Gaussian, LoG, Laws, wavelets, Gabor) gives the response of the image padded with the constant as far as the filter reads. A Laws energy step then pads the response with 0, as for a padding value of 0.
+- An FFT filter (Simoncelli, Riesz) pads by its pad width, as for the other boundaries (see above).
 
 ## Source Masking for Sentinel Values
 

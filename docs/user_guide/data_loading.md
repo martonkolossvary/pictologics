@@ -15,6 +15,7 @@ from pictologics import Image
 # - origin: tuple[float, float, float] (world coordinates of first voxel)
 # - direction: Optional[numpy.ndarray] (3x3 direction cosine matrix)
 # - modality: str (e.g., "CT", "MR", "Unknown")
+# - frame_of_reference_uid: Optional[str] (the DICOM FrameOfReferenceUID, or None)
 ```
 
 !!! note
@@ -589,10 +590,26 @@ combined = load_and_merge_images(
 | Sub-voxel drift > `subvoxel_tolerance` | `ValueError` raised |
 | Overlap fraction < `min_overlap_fraction` | `ValueError` raised to prevent wrong-patient mask loading |
 | Mask outside reference bounds (`min_overlap_fraction=0.0`) | `UserWarning` emitted, empty volume returned |
+| Mask of another DICOM frame of reference | `UserWarning` emitted: a DICOM image, a SEG and an RTSTRUCT keep their `FrameOfReferenceUID`, and a mask with another UID can belong to another scan |
 | Partial overlap | Valid region is positioned, rest is clipped |
 
 !!! tip
     **Label Order**: When using `relabel_masks=True`, labels are assigned based on the order of files in `image_paths`. Use `sorted()` for consistent ordering, or specify the exact order you want.
+
+## Saving Images
+
+`save_image()` writes an image, a mask or a response map as a NIfTI file (`.nii` or `.nii.gz`). The geometry goes back to the RAS+ affine of NIfTI, so `load_image()` reads the same array and geometry, and other tools (3D Slicer, ITK) read the same grid:
+
+```python
+from pictologics import load_image, load_rtstruct, save_image
+
+ct = load_image("path/to/ct_folder/")
+masks = load_rtstruct("path/to/rtstruct.dcm", ct, roi_names=["GTV"], combine_rois=False)
+save_image(masks["GTV"], "gtv.nii.gz")  # an RTSTRUCT ROI as a NIfTI mask
+```
+
+- A bool mask is saved as uint8. Other arrays keep their type (float64 images, float32 response maps, uint8 masks).
+- NIfTI keeps the geometry in float32 (about 1e-5 mm).
 
 ## Creating a Full Mask
 
@@ -621,6 +638,7 @@ full_mask = create_full_mask(image)
 | `load_seg()` | Detailed DICOM SEG loading with segment selection and alignment |
 | `load_rtstruct()` | DICOM RTSTRUCT contours filled onto a reference image, as one label image or masks by ROI name |
 | `get_segment_info()` | Inspect available segments in a DICOM SEG, RTSTRUCT or `.seg.nrrd` file |
+| `save_image()` | Save an image, mask or response map as NIfTI |
 | `load_and_merge_images()` | Combine multiple images/masks with various strategies |
 | `create_full_mask()` | Create an all-ones mask matching image geometry |
 | `get_dicom_phases()` | Discover available phases in multi-phase DICOM |

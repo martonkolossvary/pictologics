@@ -27,8 +27,13 @@ def _world(slice_index: int, points: list[tuple[float, float]], reference: Image
     return np.asarray(reference.origin) + (index * reference.spacing) @ np.asarray(reference.direction).T  # fmt: skip
 
 
-def _write(path: Path, rois: list[tuple[int, str, list[tuple[str, np.ndarray]]]]) -> Path:
-    """An RTSTRUCT file: (ROI number, name, [(contour type, points)]) for each ROI."""
+def _write(
+    path: Path,
+    rois: list[tuple[int, str, list[tuple[str, np.ndarray]]]],
+    frames: dict[int, str] | None = None,
+) -> Path:
+    """An RTSTRUCT file: (ROI number, name, [(contour type, points)]) for each ROI, and
+    the ReferencedFrameOfReferenceUID of the ROI numbers in `frames`."""
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.481.3"
     meta.MediaStorageSOPInstanceUID = generate_uid()
@@ -45,6 +50,8 @@ def _write(path: Path, rois: list[tuple[int, str, list[tuple[str, np.ndarray]]]]
     for number, name, contours in rois:
         roi = Dataset()
         roi.ROINumber, roi.ROIName = number, name
+        if frames and number in frames:
+            roi.ReferencedFrameOfReferenceUID = frames[number]
         ds.StructureSetROISequence.append(roi)
         item = Dataset()
         item.ReferencedROINumber = number
@@ -228,3 +235,26 @@ def test_rtstruct_mask_in_the_pipeline(tmp_path: Path) -> None:
     from_file = pipeline.run(image, path, config_names=["first_order"])
     expected = pipeline.run(image, mask, config_names=["first_order"])
     assert from_file["first_order"].equals(expected["first_order"])
+
+
+def test_rtstruct_frame_of_reference(tmp_path: Path) -> None:
+    # ROIs of the frame of the image load quietly, and the masks carry its UID; ROIs of
+    # another frame warn (named once for their frame); an image without a UID is not
+    # checked.
+    from dataclasses import replace
+
+    reference = replace(REFERENCE, frame_of_reference_uid="1.2.3")
+    contours = [("CLOSED_PLANAR", _world(2, SQUARE))]
+    path = _write(
+        tmp_path / "rs.dcm",
+        [(1, "GTV", contours), (2, "PTV", contours), (3, "lung", contours)],
+        frames={1: "1.2.3", 2: "9.9", 3: "9.9"},
+    )
+    with pytest.warns(UserWarning, match="ROI 'PTV', 'lung' refers to the frame of reference 9.9"):
+        masks = load_rtstruct(path, reference, combine_rois=False)
+    assert isinstance(masks, dict)
+    assert all(mask.frame_of_reference_uid == "1.2.3" for mask in masks.values())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        load_rtstruct(path, reference, roi_names=["GTV"])
+        load_rtstruct(path, REFERENCE, combine_rois=False)

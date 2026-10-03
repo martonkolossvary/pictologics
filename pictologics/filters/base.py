@@ -36,10 +36,11 @@ class BoundaryCondition(Enum):
         ```
     """
 
-    ZERO = "constant"  # Zero padding (Z3VE)
+    ZERO = "constant"  # Constant value padding (Z3VE): 0, or a filter's padding_value
     NEAREST = "nearest"  # Nearest value padding (SIJG)
     PERIODIC = "wrap"  # Periodic/wrap padding (Z7YO)
     MIRROR = "reflect"  # Mirror/symmetric padding (ZDTV)
+    CONSTANT = "constant"  # Another name of ZERO
 
 
 @dataclass
@@ -267,11 +268,54 @@ _NUMPY_PAD_MODE_MAP = {
 }
 
 
+def _padding_value_problem(boundary: BoundaryCondition, padding_value: float) -> Optional[str]:
+    """Why a padding value does not fit the boundary (a value other than 0 needs constant
+    value padding), or None."""
+    if padding_value and boundary is not BoundaryCondition.ZERO:
+        return (
+            f"padding_value {padding_value!r} needs the constant (zero) boundary, not "
+            f"'{boundary.name.lower()}'"
+        )
+    return None
+
+
+# A filter response, or (response, output valid mask) with a source mask
+_FilterOutput = Union[
+    npt.NDArray[np.floating[Any]], Tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]
+]
+
+
+def _constant_padded(
+    func: Callable[..., Any],
+    image: npt.NDArray[np.floating[Any]],
+    source_mask: Optional[npt.NDArray[np.bool_]],
+    value: float,
+    reach: Union[int, Tuple[int, ...]],
+    **kwargs: Any,
+) -> _FilterOutput:
+    """The response of the filter `func` to `image` padded with the constant `value`
+    (IBSI 2 constant value padding, Z3VE): the image is padded by `reach` voxels on each
+    side of every axis (valid voxels in a source mask), filtered, and cut back. The filter
+    reads at most `reach` voxels on each side, so its own boundary does not reach the
+    image. A (response, valid mask) result is cut in both parts."""
+    widths = (reach,) * image.ndim if isinstance(reach, int) else tuple(reach)
+    pads = [(w, w) for w in widths]
+    padded = np.pad(image, pads, mode="constant", constant_values=value)
+    if source_mask is not None:
+        kwargs["source_mask"] = np.pad(source_mask, pads, mode="constant", constant_values=True)
+    result = func(padded, **kwargs)
+    cut = tuple(slice(w, w + s) for w, s in zip(widths, image.shape, strict=True))
+    if isinstance(result, tuple):
+        return np.ascontiguousarray(result[0][cut]), np.ascontiguousarray(result[1][cut])
+    return cast(npt.NDArray[np.floating[Any]], np.ascontiguousarray(result[cut]))
+
+
 def _apply_with_boundary_padding(
     func: Callable[..., npt.NDArray[np.floating[Any]]],
     image: npt.NDArray[np.floating[Any]],
     boundary: BoundaryCondition,
     pad_width: Union[int, Tuple[int, ...]],
+    padding_value: float = 0.0,
     **kwargs: Any,
 ) -> npt.NDArray[np.floating[Any]]:
     """
@@ -298,6 +342,7 @@ def _apply_with_boundary_padding(
             (same width for every axis) or a tuple with one width per axis of
             `image`. Each axis's width is capped at that axis's own length, so
             padding never blows up the array by more than 3x even for small inputs.
+        padding_value: The constant of the ZERO (constant value) boundary.
         **kwargs: Additional keyword arguments forwarded to `func`.
 
     Returns:
@@ -310,7 +355,8 @@ def _apply_with_boundary_padding(
     widths = (pad_width,) * image.ndim if isinstance(pad_width, int) else tuple(pad_width)
     widths = tuple(min(w, s) for w, s in zip(widths, image.shape, strict=True))
 
-    padded = np.pad(image, [(w, w) for w in widths], mode=pad_mode)  # type: ignore[call-overload]
+    extra = {"constant_values": padding_value} if boundary is BoundaryCondition.ZERO else {}
+    padded = np.pad(image, [(w, w) for w in widths], mode=pad_mode, **extra)  # type: ignore[call-overload]
     crop = tuple(slice(w, w + s) for w, s in zip(widths, image.shape, strict=True))
     return func(padded, crop, **kwargs)
 
@@ -602,6 +648,22 @@ def _normalized_gaussian_laplace(
     weight_sum = source_mask.astype(np.float64)
     _gaussian_filter(weight_sum, sigma, mode, truncate, output=weight_sum)
     return _normalize(log_response, weight_sum, weight_threshold)
+
+
+def _normalized_gaussian(
+    image: npt.NDArray[np.floating[Any]],
+    source_mask: npt.NDArray[np.bool_],
+    sigma: Union[float, Tuple[float, ...]],
+    mode: str = "constant",
+    truncate: float = 4.0,
+    weight_threshold: float = 0.01,
+) -> Tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]:
+    """Gaussian smoothing by normalized convolution: G * (f m) / G * m, where the weight
+    G * m reaches `weight_threshold` (the output valid mask), else 0."""
+    smoothed = _gaussian_filter(_zero_filled(image, source_mask), sigma, mode, truncate)
+    weight_sum = source_mask.astype(np.float64)
+    _gaussian_filter(weight_sum, sigma, mode, truncate, output=weight_sum)
+    return _normalize(smoothed, weight_sum, weight_threshold)
 
 
 def _normalized_convolve1d(

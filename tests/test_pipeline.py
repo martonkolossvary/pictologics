@@ -5127,7 +5127,7 @@ def test_add_config_lists_every_problem_with_a_hint() -> None:
         {"step": "discretise", "params": {"method": "FBN", "n_bins": 32.5}},
         {"step": "discretise", "params": {"method": "FBS"}},
         {"step": "discretise", "params": {"method": "FIXED_CUTOFFS"}},
-        {"step": "filter", "params": {"type": "gaussian"}},
+        {"step": "filter", "params": {"type": "gausian"}},
         {"step": "filter", "params": {"type": "log", "sigma": 2.0}},
         {"step": "filter", "params": {"type": "riesz", "variant": "logg"}},
         {"step": "filter", "params": {"type": "laws", "kernel": "L5E5E5", "kernels": "x"}},
@@ -5155,7 +5155,7 @@ def test_add_config_lists_every_problem_with_a_hint() -> None:
         "step 6 (discretise): FBS needs a bin_width above 0, not None",
         "step 6 (discretise): FBS needs a start that is the same for every image: set min_val",
         "step 7 (discretise): FIXED_CUTOFFS needs cutoffs",
-        "step 8 (filter): unknown filter type 'gaussian'",
+        "step 8 (filter): unknown filter type 'gausian' (did you mean 'gaussian'?)",
         "step 9 (filter): unknown parameter 'sigma' (did you mean 'sigma_mm'?)",
         "step 10 (filter): unknown riesz variant 'logg' (did you mean 'log'?)",
         "step 11 (filter): unknown parameter 'kernels' (did you mean 'kernel'?)",
@@ -5748,3 +5748,86 @@ def test_physical_memory_on_posix_and_windows(monkeypatch: pytest.MonkeyPatch) -
         assert kernel32.GlobalMemoryStatusEx.call_args.args[0]._obj.length == 64
     finally:
         _physical_memory.cache_clear()
+
+
+def test_texture_distances_in_the_pipeline() -> None:
+    # texture_matrix_params gives the GLCM, NGTDM and NGLDM distances to the texture
+    # features; bad options are config problems.
+    import re
+
+    from pictologics.features.texture import calculate_all_texture_features
+    from pictologics.preprocessing import discretise_image
+
+    rng = np.random.default_rng(9)
+    image = Image(rng.normal(40.0, 20.0, (14, 12, 10)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    mask = Image(np.ones((14, 12, 10), dtype=np.uint8), image.spacing, image.origin)
+    options = {"glcm_distance": 2, "ngtdm_distance": 3, "ngldm_distance": 2.0, "ngldm_alpha": 1}
+    pipeline = RadiomicsPipeline()
+    pipeline.add_config("far", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["texture"], "texture_matrix_params": options}},
+    ])  # fmt: skip
+    result = pipeline.run(image, mask, config_names=["far"])["far"]
+    disc = discretise_image(image, method="FBN", n_bins=8, roi_mask=mask)
+    assert isinstance(disc, Image)
+    expected = calculate_all_texture_features(
+        disc.array,
+        mask.array,
+        8,
+        ngldm_alpha=1,
+        glcm_distance=2,
+        ngtdm_distance=3,
+        ngldm_distance=2,
+    )
+    for key in ("contrast_ACUI", "coarseness_QCDE", "low_dependence_emphasis_SODN"):
+        assert np.isclose(result[key], expected[key], rtol=1e-12), key
+    bad = {
+        "unknown option 'glcm_distnce' (did you mean 'glcm_distance'?)": {"glcm_distnce": 2},
+        "glcm_distance must be a whole number of 1 or more, not 0": {"glcm_distance": 0},
+        "ngtdm_distance must be a whole number of 1 or more, not 1.5": {"ngtdm_distance": 1.5},
+        "ngldm_alpha must be 0 or more, not -1": {"ngldm_alpha": -1},
+    }
+    for message, params in bad.items():
+        with pytest.raises(ValueError, match=re.escape(message)):
+            pipeline.add_config("bad", [
+                {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+                {"step": "extract_features", "params": {"families": ["texture"], "texture_matrix_params": params}},
+            ])  # fmt: skip
+
+
+def test_gaussian_filter_and_padding_value_in_the_pipeline() -> None:
+    # A gaussian filter step (with the spacing of the image) and a padding value with the
+    # constant boundary give the values of the filters; bad options are config problems.
+    import re
+
+    from pictologics.filters import gaussian_filter, mean_filter
+
+    rng = np.random.default_rng(13)
+    image = Image(rng.normal(40.0, 20.0, (16, 14, 12)), (0.8, 1.0, 2.0), (0.0, 0.0, 0.0))
+    mask = Image(np.ones((16, 14, 12), dtype=np.uint8), image.spacing, image.origin)
+    pipeline = RadiomicsPipeline()
+    steps = {
+        "gaussian": {"type": "gaussian", "sigma_mm": 2.0},
+        "padded": {"type": "mean", "support": 3, "boundary": "constant", "padding_value": -1000.0},
+    }
+    for name, params in steps.items():
+        pipeline.add_config(name, [
+            {"step": "filter", "params": params},
+            {"step": "extract_features", "params": {"families": ["intensity"]}},
+        ])  # fmt: skip
+    results = pipeline.run(image, mask, config_names=list(steps))
+    expected = {
+        "gaussian": gaussian_filter(image.array, 2.0, image.spacing, boundary="mirror"),
+        "padded": mean_filter(image.array, 3, "constant", padding_value=-1000.0),
+    }
+    for name, response in expected.items():
+        mean = response.astype(np.float64).mean()
+        assert np.isclose(results[name]["mean_intensity_Q4LE"], mean, rtol=1e-9), name
+    bad = {
+        "padding_value 5 needs boundary 'constant' (or 'zero'), not 'the default'": {"type": "mean", "padding_value": 5},
+        "padding_value must be a number, not 'x'": {"type": "mean", "boundary": "constant", "padding_value": "x"},
+        "unknown gabor response 'phase'": {"type": "gabor", "sigma_mm": 1.0, "lambda_mm": 2.0, "response": "phase"},
+    }  # fmt: skip
+    for message, params in bad.items():
+        with pytest.raises(ValueError, match=re.escape(message)):
+            pipeline.add_config("bad", [{"step": "filter", "params": params}])

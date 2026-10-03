@@ -20,6 +20,7 @@ response = laplacian_of_gaussian(image.array, sigma_mm=1.5, spacing_mm=image.spa
 | Filter | Function | Use Case |
 |:-------|:---------|:---------|
 | Mean | `mean_filter` | Local averaging |
+| Gaussian | `gaussian_filter` | Smoothing at a physical scale |
 | LoG | `laplacian_of_gaussian` | Edge/blob detection |
 | Laws | `laws_filter` | Texture energy |
 | Gabor | `gabor_filter` | Directional patterns |
@@ -60,6 +61,8 @@ periodic on the padded domain.
 ## Filter Functions
 
 ::: pictologics.filters.mean_filter
+
+::: pictologics.filters.gaussian_filter
 
 ::: pictologics.filters.laplacian_of_gaussian
 

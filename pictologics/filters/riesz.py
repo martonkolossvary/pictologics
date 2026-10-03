@@ -15,6 +15,7 @@ from .base import (
     _apply_with_boundary_padding,
     _float32_cut,
     _kept_rows,
+    _padding_value_problem,
     _prepare_masked_image,
     _slabs,
     _times_mirrored,
@@ -73,23 +74,24 @@ def _riesz_transfer(
     # operations (so the same values) and temporaries of one slab instead of four full
     # volumes.
     out_shape = np.broadcast_shapes(*(n.shape for n in nu_vectors))
-    slabs = _slabs(out_shape)
-    table = None if len(slabs) == 1 else np.empty(out_shape, dtype=np.complex128)
-    for start, stop in slabs:
+    table = np.empty(out_shape, dtype=np.complex128)
+    for start, stop in _slabs(out_shape):
         nu = [n[start:stop] if i == 0 else n for i, n in enumerate(nu_vectors)]
-        transfer = _riesz_values(nu, order, L)
-        if table is not None:
-            table[start:stop] = transfer
-    transfer = transfer if table is None else table
-    transfer.flags.writeable = False  # cached array must not be mutated by callers
-    return cast(npt.NDArray[np.complexfloating[Any, Any]], transfer)
+        _riesz_values(nu, order, L, out=table[start:stop])
+    table[(0,) * table.ndim] = 0  # the DC value is +0
+    table.flags.writeable = False  # cached array must not be mutated by callers
+    return cast(npt.NDArray[np.complexfloating[Any, Any]], table)
 
 
 def _riesz_values(
-    nu: list[npt.NDArray[np.float64]], order: Tuple[int, ...], L: int
+    nu: list[npt.NDArray[np.float64]],
+    order: Tuple[int, ...],
+    L: int,
+    out: Optional[npt.NDArray[np.complex128]] = None,
 ) -> npt.NDArray[np.complex128]:
     """The Riesz transfer values (IBSI 2 Eq. 34) at the broadcast frequency vectors `nu`
-    of each axis (radians), for the total order L; 0 at DC."""
+    of each axis (radians), for the total order L, written into `out` when given. At DC
+    the numerator is 0 (L >= 1), so the value is a zero there (of either sign)."""
     norm_factor = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
     phase = np.exp(-1j * np.pi * L / 2)
     nu_sq_norm = np.asarray(sum(n**2 for n in nu), dtype=np.float64)
@@ -99,8 +101,9 @@ def _riesz_values(
     for i, ord_val in enumerate(order):
         if ord_val > 0:
             numerator *= nu[i] ** ord_val
-    transfer = phase * norm_factor * numerator / (nu_norm_safe**L)
-    return cast(npt.NDArray[np.complex128], np.where(nu_norm > 0, transfer, 0))
+    # (phase * norm) * numerator / |nu|^L, in `out` (or one new array): no complex temporary
+    values = np.multiply(phase * norm_factor, numerator, out=out)
+    return cast(npt.NDArray[np.complex128], np.divide(values, nu_norm_safe**L, out=values))
 
 
 def riesz_transform(
@@ -108,6 +111,7 @@ def riesz_transform(
     order: Tuple[int, ...],
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.PERIODIC,
     source_mask: Optional[npt.NDArray[np.bool_]] = None,
+    padding_value: float = 0.0,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Riesz transform (IBSI code: AYRS).
@@ -127,6 +131,8 @@ def riesz_transform(
         source_mask: Optional boolean mask where True = valid voxel.
             When provided, zeros out invalid (sentinel) voxels before
             FFT-based transform to prevent contamination.
+        padding_value: The constant of constant value padding (Z3VE), with the ZERO
+            (constant) boundary. Default 0.
 
     Returns:
         Riesz-transformed image (real part)
@@ -157,6 +163,9 @@ def riesz_transform(
         - All-pass: doesn't amplify high frequencies like regular derivatives
     """
     boundary = resolve_boundary(boundary)
+    problem = _padding_value_problem(boundary, padding_value)
+    if problem:
+        raise ValueError(problem)
 
     # Convert to float32
     image = ensure_float32(image)
@@ -167,7 +176,7 @@ def riesz_transform(
 
     order = _riesz_order(order, image.ndim)
     return _apply_with_boundary_padding(
-        _riesz_response, image, boundary, _RIESZ_BASE_PAD, order=order
+        _riesz_response, image, boundary, _RIESZ_BASE_PAD, padding_value, order=order
     )
 
 
@@ -253,6 +262,7 @@ def riesz_log(
     truncate: float = 4.0,
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.PERIODIC,
     source_mask: Optional[npt.NDArray[np.bool_]] = None,
+    padding_value: float = 0.0,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Riesz transform to LoG-filtered image.
@@ -281,6 +291,8 @@ def riesz_log(
             only applied when no padding occurs (the default `PERIODIC` case);
             for any other boundary, the mask is instead applied once to the final,
             already-cropped response.
+        padding_value: The constant of constant value padding (Z3VE), with the ZERO
+            (constant) boundary. Default 0.
 
     Returns:
         Riesz-transformed LoG response
@@ -311,6 +323,9 @@ def riesz_log(
     from .log import laplacian_of_gaussian
 
     boundary = resolve_boundary(boundary)
+    problem = _padding_value_problem(boundary, padding_value)
+    if problem:
+        raise ValueError(problem)
     order = _riesz_order(order, image.ndim)
 
     def _core(
@@ -357,7 +372,7 @@ def riesz_log(
         return _riesz_response(log_response, crop, order)
 
     pad_width = _riesz_log_pad_width(sigma_mm, spacing_mm, truncate)
-    result = _apply_with_boundary_padding(_core, image, boundary, pad_width)
+    result = _apply_with_boundary_padding(_core, image, boundary, pad_width, padding_value)
 
     if source_mask is not None and boundary is not BoundaryCondition.PERIODIC:
         result = _prepare_masked_image(result, source_mask)
@@ -371,6 +386,7 @@ def riesz_simoncelli(
     order: Tuple[int, ...] = (1, 0, 0),
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.PERIODIC,
     source_mask: Optional[npt.NDArray[np.bool_]] = None,
+    padding_value: float = 0.0,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Riesz transform to Simoncelli wavelet-filtered image.
@@ -395,6 +411,8 @@ def riesz_simoncelli(
             only applied when no padding occurs (the default `PERIODIC` case);
             for any other boundary, the mask is instead applied once to the final,
             already-cropped response.
+        padding_value: The constant of constant value padding (Z3VE), with the ZERO
+            (constant) boundary. Default 0.
 
     Returns:
         Riesz-transformed Simoncelli response
@@ -424,6 +442,9 @@ def riesz_simoncelli(
     from .wavelets import _simoncelli_pad_width, _simoncelli_transfer, simoncelli_wavelet
 
     boundary = resolve_boundary(boundary)
+    problem = _padding_value_problem(boundary, padding_value)
+    if problem:
+        raise ValueError(problem)
     order = _riesz_order(order, image.ndim)
 
     # Preprocess once: float32 conversion + source mask zeroing
@@ -445,7 +466,7 @@ def riesz_simoncelli(
         return _riesz_response(arr, crop, order, _simoncelli_transfer(tuple(arr.shape), level))
 
     pad_width = _simoncelli_pad_width(level) + _RIESZ_BASE_PAD
-    result = _apply_with_boundary_padding(_core, image, boundary, pad_width)
+    result = _apply_with_boundary_padding(_core, image, boundary, pad_width, padding_value)
 
     if source_mask is not None and boundary is not BoundaryCondition.PERIODIC:
         result = _prepare_masked_image(result, source_mask)

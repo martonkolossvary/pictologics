@@ -14,6 +14,7 @@ from pictologics.filters import (
     BoundaryCondition,
     FilterResult,
     gabor_filter,
+    gaussian_filter,
     laplacian_of_gaussian,
     laws_filter,
     mean_filter,
@@ -1769,3 +1770,119 @@ def test_gabor_region_cuts_each_slice_to_the_region() -> None:
         whole = gabor_filter(image, **kwargs)[region]
         assert part.shape == whole.shape and part.dtype == np.float32
         np.testing.assert_allclose(part, whole, rtol=0, atol=1e-6 * np.abs(whole).max())
+
+
+def test_gaussian_filter_is_the_scipy_gaussian() -> None:
+    """The Gaussian filter (8BC3) smooths with the sigma of each axis in voxels, as
+    scipy.ndimage.gaussian_filter does, for each boundary; with a source mask, it is the
+    normalized convolution G * (f m) / G * m where the weight reaches 0.01."""
+    from scipy.ndimage import gaussian_filter as scipy_gaussian
+
+    rng = np.random.default_rng(10)
+    image = rng.normal(40.0, 20.0, (20, 18, 12))
+    spacing = (0.8, 1.0, 2.0)
+    sigma = tuple(2.0 / s for s in spacing)
+    for boundary, mode in (("zero", "constant"), ("nearest", "nearest"), ("mirror", "reflect"), ("periodic", "wrap")):  # fmt: skip
+        response = gaussian_filter(image, 2.0, spacing, truncate=3.0, boundary=boundary)
+        assert response.dtype == np.float32
+        expected = scipy_gaussian(image, sigma, mode=mode, truncate=3.0)
+        np.testing.assert_allclose(response, expected, rtol=1e-6, atol=1e-4)
+    mask = rng.random(image.shape) > 0.2
+    response, valid = gaussian_filter(image, 2.0, spacing, source_mask=mask)
+    weight = scipy_gaussian(mask.astype(np.float64), sigma, mode="constant")
+    expected = scipy_gaussian(np.where(mask, image, 0.0), sigma, mode="constant") / weight
+    assert_array_equal(valid, weight >= 0.01)
+    np.testing.assert_allclose(response[valid], expected[valid], rtol=1e-5)
+
+
+def test_gabor_response_parts() -> None:
+    """The modulus, real, imaginary and angle maps are those parts of the complex
+    response. Rotation-invariant pooling pools the part over all orientations: the real
+    part keeps the pi symmetry of the modulus, the imaginary part and the angle do not."""
+    from scipy.signal import fftconvolve
+
+    sigma, wavelength, gamma, theta = 2.0, 4.0, 1.0, 0.3
+    kernel = _create_gabor_kernel_2d(sigma, wavelength, gamma, theta)
+    pad = kernel.shape[0] // 2
+    image = np.random.default_rng(11).normal(size=(30, 28, 3))
+    expected = np.empty(image.shape, dtype=np.complex128)
+    for k in range(3):
+        full = fftconvolve(np.pad(image[:, :, k], pad), kernel)  # the zero boundary
+        expected[:, :, k] = full[2 * pad : 2 * pad + 30, 2 * pad : 2 * pad + 28]
+    scale = np.abs(expected).max()
+    for part, reference in (("modulus", np.abs), ("real", np.real), ("imaginary", np.imag)):
+        got = gabor_filter(image, sigma, wavelength, gamma, theta, boundary="zero", response=part)
+        np.testing.assert_allclose(got, reference(expected), rtol=0, atol=2e-6 * scale)
+    angle = gabor_filter(image, sigma, wavelength, gamma, theta, boundary="zero", response="angle")
+    away = np.abs(expected) > 1e-3 * scale  # the angle of a value near 0 is noise
+    np.testing.assert_allclose(angle[away], np.angle(expected)[away], rtol=0, atol=1e-3)
+    thetas = [i * np.pi / 4 for i in range(8)]
+    for part, pooling in (("real", "max"), ("imaginary", "max"), ("angle", "min")):
+        pooled = gabor_filter(
+            image, sigma, wavelength, gamma, rotation_invariant=True, delta_theta=np.pi / 4,
+            pooling=pooling, response=part,
+        )  # fmt: skip
+        each = [gabor_filter(image, sigma, wavelength, gamma, t, response=part) for t in thetas]
+        reduce = np.max if pooling == "max" else np.min
+        np.testing.assert_allclose(pooled, reduce(each, axis=0), rtol=0, atol=1e-5)
+    with pytest.raises(ValueError, match="Unknown response: phase"):
+        gabor_filter(image, sigma, wavelength, response="phase")
+
+
+def test_padding_value_is_constant_value_padding() -> None:
+    """A padding value C (Z3VE) gives the response of the image padded with C (far enough
+    for a spatial filter; by the pad width of an FFT filter), cut back, for every filter,
+    also with a source mask. The value 0 is the zero boundary; a value with another
+    boundary raises. The Laws energy then pads the response with 0, as for C = 0."""
+    from scipy.ndimage import uniform_filter
+
+    from pictologics.filters.base import resolve_boundary
+
+    assert resolve_boundary("constant") is BoundaryCondition.ZERO
+    rng = np.random.default_rng(12)
+    image = rng.normal(40.0, 20.0, (16, 14, 12)).astype(np.float32)
+    value, margin = -50.0, 24  # the margin is more than the reach of each spatial filter
+    spatial = {
+        "mean": lambda img, **kw: mean_filter(img, support=5, **kw),
+        "gaussian": lambda img, **kw: gaussian_filter(img, 1.5, **kw),
+        "log": lambda img, **kw: laplacian_of_gaussian(img, 1.5, **kw),
+        "laws": lambda img, **kw: laws_filter(img, "E5L5S5", **kw),
+        "laws_ri": lambda img, **kw: laws_filter(img, "E3L3S3", rotation_invariant=True, **kw),
+        "wavelet": lambda img, **kw: wavelet_transform(
+            img, "db2", level=2, decomposition="HLH", **kw
+        ),
+        "gabor": lambda img, **kw: gabor_filter(img, 1.5, 3.0, **kw),
+    }
+    fft = {  # (filter, the pad width of its boundary padding, for every axis)
+        "simoncelli": (lambda img, **kw: simoncelli_wavelet(img, level=1, **kw), 8),
+        "riesz": (lambda img, **kw: riesz_transform(img, order=(1, 0, 0), **kw), 16),
+        "riesz_log": (lambda img, **kw: riesz_log(img, 1.0, order=(0, 1, 0), **kw), 20),
+        "riesz_simoncelli": (lambda img, **kw: riesz_simoncelli(img, 1, order=(0, 0, 1), **kw), 24),
+    }
+    cases = [(name, call, (margin,) * 3, "zero") for name, call in spatial.items()]
+    # An FFT filter pads each axis by its width, at most the length of the axis
+    cases += [
+        (name, call, tuple(min(width, n) for n in image.shape), "periodic")
+        for name, (call, width) in fft.items()
+    ]
+    for name, call, widths, outer in cases:
+        cut = tuple(slice(w, w + n) for w, n in zip(widths, image.shape, strict=True))
+        padded = np.pad(image, [(w, w) for w in widths], constant_values=value)
+        expected = call(padded, boundary=outer)[cut]
+        got = call(image, boundary="constant", padding_value=value)
+        np.testing.assert_allclose(
+            got, expected, rtol=0, atol=1e-5 * np.abs(expected).max(), err_msg=name
+        )
+        assert_array_equal(
+            call(image, boundary="zero", padding_value=0.0), call(image, boundary="zero")
+        )
+        with pytest.raises(ValueError, match="needs the constant"):
+            call(image, boundary="mirror", padding_value=value)
+    mask = rng.random(image.shape) > 0.1
+    response, valid = mean_filter(image, 3, "constant", source_mask=mask, padding_value=value)
+    assert response.shape == valid.shape == image.shape
+    energy = laws_filter(image, "E5L5S5", "constant", compute_energy=True, energy_distance=2, padding_value=value)  # fmt: skip
+    plain = laws_filter(image, "E5L5S5", "constant", padding_value=value)
+    np.testing.assert_allclose(energy, uniform_filter(np.abs(plain.astype(np.float64)), 5, mode="constant"), rtol=1e-5)  # fmt: skip
+    energy, valid = laws_filter(image, "E5L5S5", "constant", compute_energy=True, source_mask=mask, padding_value=value)  # fmt: skip
+    assert energy.shape == valid.shape == image.shape

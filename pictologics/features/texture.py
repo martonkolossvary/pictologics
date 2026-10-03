@@ -377,6 +377,23 @@ def _directions(planar: tuple[bool, bool, bool]) -> npt.NDArray[np.int64]:
     return np.flatnonzero(~steps_out.any(axis=1)).astype(np.int64)
 
 
+@lru_cache(maxsize=None)
+def _neighbour_offsets(distance: int) -> npt.NDArray[np.int32]:
+    """The (dz, dy, dx) steps to the voxels at Chebyshev distance 1 to `distance` (the
+    NGTDM and NGLDM neighbourhood), in the order of OFFSETS_26 (its 26 steps for 1).
+    Cached and read-only."""
+    steps = np.arange(-distance, distance + 1)
+    grid = np.stack(np.meshgrid(steps, steps, steps, indexing="ij"), axis=-1).reshape(-1, 3)
+    offsets = grid[np.any(grid != 0, axis=1)].astype(np.int32)
+    offsets.flags.writeable = False
+    return offsets
+
+
+def _neighbourhood_size(distance: int) -> int:
+    """The voxels of a neighbourhood with its center: (2 distance + 1)^3 (27 for 1)."""
+    return (2 * distance + 1) ** 3
+
+
 def _flat_offsets(shape: tuple[int, ...], offsets: npt.NDArray[Any]) -> npt.NDArray[np.int64]:
     """The (dz, dy, dx) offsets as steps in the flat index of an array of `shape`."""
     steps = offsets.astype(np.int64) @ np.array([shape[1] * shape[2], shape[2], 1])
@@ -388,11 +405,13 @@ def _local_tables_numba(
     vol: npt.NDArray[np.uint16],
     counts: npt.NDArray[np.int64],
     blocks: npt.NDArray[np.int64],
+    pad: int,
     calc_glcm: bool,
     calc_glrlm: bool,
     calc_ngtdm: bool,
     calc_ngldm: bool,
-    off26: npt.NDArray[np.int64],
+    neighbours: npt.NDArray[np.int64],
+    pair_off: npt.NDArray[np.int64],
     dir_off: npt.NDArray[np.int64],
     dir_table: npt.NDArray[np.int64],
     ngldm_alpha: int,
@@ -402,19 +421,22 @@ def _local_tables_numba(
     ngtdm_n: npt.NDArray[np.int64],
     ngldm: npt.NDArray[np.uint32],
 ) -> None:
-    """Add the GLCM, GLRLM, NGTDM and NGLDM counts of the padded volume `vol` to the
-    tables of the thread that does the work (first axis of each table).
+    """Add the GLCM, GLRLM, NGTDM and NGLDM counts of the volume `vol` (padded by `pad`
+    zero voxels on each side) to the tables of the thread that does the work (first axis
+    of each table).
 
-    The slice blocks `blocks` run in parallel. Direction d steps `dir_off[d]` in the
-    flat index and adds to table `dir_table[d]` of the GLCM and the GLRLM. The NGTDM
+    The slice blocks `blocks` run in parallel. Direction d adds to table `dir_table[d]`
+    of the GLCM and the GLRLM: the GLCM pairs step `pair_off[d]` in the flat index (the
+    GLCM distance), the GLRLM runs step `dir_off[d]`. The NGTDM and the NGLDM read the
+    voxels at the flat steps `neighbours`. The NGTDM
     keeps whole numbers: for a voxel of level g whose n valid neighbours have the level
     sum S, it adds |g n - S| (n times |g - S / n|) to ngtdm_d[tid, g - 1, n]. Integer sums
     do not depend on the order of the voxels, so the NGTDM does not depend on the number
     of threads. The tables are made and summed outside, so the kernel has no other
     parallel region.
     """
-    height = vol.shape[1] - 2
-    width = vol.shape[2] - 2
+    height = vol.shape[1] - 2 * pad
+    width = vol.shape[2] - 2 * pad
     s0 = vol.shape[1] * vol.shape[2]
     s1 = vol.shape[2]
     flat = vol.ravel()
@@ -424,7 +446,7 @@ def _local_tables_numba(
             if counts[z, 0] == 0:
                 continue
             for y in range(height):
-                base = (z + 1) * s0 + (y + 1) * s1 + 1
+                base = (z + pad) * s0 + (y + pad) * s1 + pad
                 for x in range(width):
                     v = base + x
                     g = np.int64(flat[v])
@@ -435,8 +457,8 @@ def _local_tables_numba(
                         n_sum = np.int64(0)
                         n_count = np.int64(0)
                         dependence = np.int64(1)
-                        for k in range(26):
-                            nv = np.int64(flat[v + off26[k]])
+                        for k in range(neighbours.shape[0]):
+                            nv = np.int64(flat[v + neighbours[k]])
                             m = np.int64(nv != 0)
                             n_sum += nv
                             n_count += m
@@ -451,7 +473,7 @@ def _local_tables_numba(
                             od = dir_off[d]
                             t = dir_table[d]
                             if calc_glcm:
-                                nv = np.int64(flat[v + od])
+                                nv = np.int64(flat[v + pair_off[d]])
                                 if nv != 0:
                                     glcm[tid, t, i, nv - 1] += 1
                             # A run starts where the previous voxel has another level
@@ -561,18 +583,29 @@ def _local_matrices(
     ngldm_alpha: int,
     merge_directions: bool,
     planar: tuple[bool, bool, bool] = (False, False, False),
+    glcm_distance: int = 1,
+    ngtdm_distance: int = 1,
+    ngldm_distance: int = 1,
 ) -> tuple[
     npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any]
 ]:
     """GLCM (n_dirs, n_bins, n_bins), GLRLM (n_dirs, n_bins, longest run + 1), NGTDM s and n
-    (n_bins,) and NGLDM (n_bins, 27) of the padded volume. With `merge_directions`, the
-    GLCM and the GLRLM hold one table, the sum over the 13 directions (the features use
-    only that sum). A matrix that is not asked for is a zero placeholder. The directions
-    along an axis of size 1 in the image (`planar`) stay empty (see _directions)."""
+    (n_bins,) and NGLDM (n_bins, neighbourhood size) of the volume padded by one voxel.
+    With `merge_directions`, the GLCM and the GLRLM hold one table, the sum over the 13
+    directions (the features use only that sum). A matrix that is not asked for is a zero
+    placeholder. The directions along an axis of size 1 in the image (`planar`) stay
+    empty (see _directions). The GLCM pairs voxels at `glcm_distance` along each
+    direction, and the NGTDM and the NGLDM use the voxels up to their Chebyshev distance
+    (IBSI 1); a distance above 1 pads the volume to it."""
+    pad = max(
+        glcm_distance, ngtdm_distance if calc_ngtdm else 1, ngldm_distance if calc_ngldm else 1
+    )
+    if pad > 1:
+        vol = np.pad(vol, pad - 1)
     n_threads = numba.get_num_threads()
     n_tables = 1 if merge_directions else 13
     used = _directions(planar)
-    longest = max(vol.shape) - 2
+    longest = max(vol.shape) - 2 * pad
     # Many grey levels: the thread tables hold only the levels that occur
     cells = (n_bins if calc_glcm else 0) + (longest + 1 if calc_glrlm else 0)
     levels = _table_levels(vol, n_bins, 4 * n_threads * n_tables * n_bins * cells)
@@ -581,12 +614,13 @@ def _local_matrices(
     glrlm_t = (
         _thread_tables((n_threads, n_tables, rows, longest + 1)) if calc_glrlm else _NO_TABLE_4D
     )
-    ngtdm_d = np.zeros((n_threads if calc_ngtdm else 1, n_bins, 27), dtype=np.int64)
+    ngtdm_size = _neighbourhood_size(ngtdm_distance)
+    ngtdm_d = np.zeros((n_threads if calc_ngtdm else 1, n_bins, ngtdm_size), dtype=np.int64)
     ngtdm_n = np.zeros((n_threads if calc_ngtdm else 1, n_bins), dtype=np.int64)
-    ngldm_t = np.zeros((n_threads if calc_ngldm else 1, n_bins, 27), dtype=np.uint32)
-    args = (
-        _flat_offsets(vol.shape, OFFSETS_26),
-        _flat_offsets(vol.shape, DIRECTIONS_13[used]),
+    ngldm_size = _neighbourhood_size(ngldm_distance)
+    ngldm_t = np.zeros((n_threads if calc_ngldm else 1, n_bins, ngldm_size), dtype=np.uint32)
+    steps = _flat_offsets(vol.shape, DIRECTIONS_13[used])
+    tables = (
         np.zeros(used.size, dtype=np.int64) if merge_directions else used,
         ngldm_alpha,
         glcm_t,
@@ -596,18 +630,40 @@ def _local_matrices(
         ngldm_t,
     )
     blocks = _z_blocks(counts[:, 0], 4 * n_threads)
-    if levels is None:
+    pairs = steps if glcm_distance == 1 else steps * glcm_distance
+
+    def run(volume: npt.NDArray[np.uint16], families: tuple[bool, ...], distance: int) -> None:
+        """One kernel pass for the (GLCM, GLRLM, NGTDM, NGLDM) `families`, with the
+        neighbourhood of `distance`."""
+        neighbours = _flat_offsets(vol.shape, _neighbour_offsets(distance))
         _local_tables_numba(
-            vol, counts, blocks, calc_glcm, calc_glrlm, calc_ngtdm, calc_ngldm, *args
+            volume,
+            counts,
+            blocks,
+            pad,
+            *families,
+            neighbours,
+            pairs,
+            steps,
+            *tables,
         )
+
+    # The NGTDM and the NGLDM in one pass, or one each for two distances
+    passes = [(calc_ngtdm, calc_ngldm, ngtdm_distance if calc_ngtdm else ngldm_distance)]
+    if calc_ngtdm and calc_ngldm and ngtdm_distance != ngldm_distance:
+        passes = [(True, False, ngtdm_distance), (False, True, ngldm_distance)]
+    if levels is None:
+        ngtdm, ngldm, distance = passes.pop(0)
+        run(vol, (calc_glcm, calc_glrlm, ngtdm, ngldm), distance)
     else:
         # The GLCM and the GLRLM count the volume of the occurring levels (1..rows); the
         # NGTDM and the NGLDM read the grey levels themselves
         lut = np.zeros(n_bins + 1, dtype=np.uint16)
         lut[levels + 1] = np.arange(1, rows + 1)
-        _local_tables_numba(lut[vol], counts, blocks, calc_glcm, calc_glrlm, False, False, *args)
-        if calc_ngtdm or calc_ngldm:
-            _local_tables_numba(vol, counts, blocks, False, False, calc_ngtdm, calc_ngldm, *args)
+        run(lut[vol], (calc_glcm, calc_glrlm, False, False), 1)
+    for ngtdm, ngldm, distance in passes:
+        if ngtdm or ngldm:
+            run(vol, (False, False, ngtdm, ngldm), distance)
     glcm = _thread_sum(glcm_t) if calc_glcm else np.zeros((13, n_bins, n_bins), dtype=np.uint64)
     glrlm = _thread_sum(glrlm_t) if calc_glrlm else np.zeros((13, n_bins, 1), dtype=np.uint64)
     if levels is not None:  # back to a row and a column for each of the n_bins levels
@@ -620,7 +676,7 @@ def _local_matrices(
             glrlm_all[:, levels, :] = glrlm
             glrlm = glrlm_all
     # s_i is the sum over the neighbour counts n of (sum of |g n - S|) / n, in a fixed order
-    ngtdm_s = (ngtdm_d.sum(axis=0)[:, 1:] / np.arange(1, 27)).sum(axis=1)
+    ngtdm_s = (ngtdm_d.sum(axis=0)[:, 1:] / np.arange(1, ngtdm_size)).sum(axis=1)
     return (
         glcm,
         glrlm,
@@ -642,6 +698,9 @@ def calculate_all_texture_matrices(
     calc_ngldm: bool = True,
     calc_glszm: bool = True,
     calc_gldzm: bool = True,
+    glcm_distance: int = 1,
+    ngtdm_distance: int = 1,
+    ngldm_distance: int = 1,
 ) -> dict[str, Any]:
     """
     Calculate all texture matrices (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM) in an optimized single pass.
@@ -670,6 +729,11 @@ def calculate_all_texture_matrices(
         calc_glszm (bool): Whether to compute the GLSZM. Default True.
         calc_gldzm (bool): Whether to compute the GLDZM (skipping it also skips the
             distance transform). Default True.
+        glcm_distance (int): The distance δ between the two voxels of a GLCM pair along
+            each of the 13 directions (IBSI 1). Default 1.
+        ngtdm_distance (int): The Chebyshev distance δ of the NGTDM neighbourhood. Default 1
+            (the 26 neighbours).
+        ngldm_distance (int): The Chebyshev distance δ of the NGLDM neighbourhood. Default 1.
             Disabled matrices are returned as zero-filled placeholders of minimal shape.
 
     Returns:
@@ -712,6 +776,9 @@ def calculate_all_texture_matrices(
         calc_glszm,
         calc_gldzm,
         compact=False,
+        glcm_distance=glcm_distance,
+        ngtdm_distance=ngtdm_distance,
+        ngldm_distance=ngldm_distance,
     )
 
 
@@ -730,6 +797,9 @@ def _texture_matrices(
     compact: bool = False,
     distance_map: Optional[npt.NDArray[Any]] = None,
     planar: Optional[tuple[bool, bool, bool]] = None,
+    glcm_distance: int = 1,
+    ngtdm_distance: int = 1,
+    ngldm_distance: int = 1,
 ) -> dict[str, Any]:
     """Body of `calculate_all_texture_matrices`, with a private `compact` mode.
 
@@ -773,7 +843,7 @@ def _texture_matrices(
             "glrlm": np.zeros((13, n_bins, 1), dtype=np.uint64),
             "ngtdm_s": np.zeros((n_bins,), dtype=np.float64),
             "ngtdm_n": np.zeros((n_bins,), dtype=np.float64),
-            "ngldm": np.zeros((n_bins, 27), dtype=np.uint64),
+            "ngldm": np.zeros((n_bins, _neighbourhood_size(ngldm_distance)), dtype=np.uint64),
             glszm_key: np.zeros((3, 0) if compact else (n_bins, 1), dtype=np.uint32),
             "gldzm": np.zeros((n_bins, 1), dtype=np.uint32),
             **extra,
@@ -800,6 +870,9 @@ def _texture_matrices(
             ngldm_alpha,
             merge_directions=compact,
             planar=planar,
+            glcm_distance=glcm_distance,
+            ngtdm_distance=ngtdm_distance,
+            ngldm_distance=ngldm_distance,
         )
         matrices.update(glcm=glcm, glrlm=glrlm, ngtdm_s=ngtdm_s, ngtdm_n=ngtdm_n, ngldm=ngldm)
     elif not compact:
@@ -808,7 +881,7 @@ def _texture_matrices(
             glrlm=np.zeros((13, n_bins, 1), dtype=np.uint64),
             ngtdm_s=np.zeros((n_bins,), dtype=np.float64),
             ngtdm_n=np.zeros((n_bins,), dtype=np.float64),
-            ngldm=np.zeros((n_bins, 27), dtype=np.uint64),
+            ngldm=np.zeros((n_bins, _neighbourhood_size(ngldm_distance)), dtype=np.uint64),
         )
 
     # 2. Zone Features (GLSZM, GLDZM). The zone kernel uses up `vol`, so it comes last.
@@ -848,10 +921,12 @@ def _one_matrix(
     distance_mask: Optional[npt.NDArray[Any]] = None,
     ngldm_alpha: int = 0,
     planar: tuple[bool, bool, bool] = (False, False, False),
+    distance: int = 1,
 ) -> dict[str, Any]:
     """The compact `_texture_matrices` of one family ('glcm', 'glrlm', 'ngtdm', 'ngldm',
     'glszm' or 'gldzm') for the standalone feature functions, which crop first (and give
-    the axes of size 1 of the image as `planar`)."""
+    the axes of size 1 of the image as `planar`). `distance` is the GLCM, NGTDM or NGLDM
+    distance of the family."""
     return _texture_matrices(
         data,
         mask,
@@ -859,6 +934,9 @@ def _one_matrix(
         distance_mask=distance_mask,
         ngldm_alpha=ngldm_alpha,
         planar=planar,
+        glcm_distance=distance,
+        ngtdm_distance=distance,
+        ngldm_distance=distance,
         calc_glcm=family == "glcm",
         calc_glrlm=family == "glrlm",
         calc_ngtdm=family == "ngtdm",
@@ -896,6 +974,7 @@ def calculate_glcm_features(
     mask: npt.NDArray[np.floating[Any]],
     n_bins: int,
     glcm_matrix: Optional[npt.NDArray[np.floating[Any]]] = None,
+    glcm_distance: int = 1,
 ) -> dict[str, float]:
     r"""
         Calculate Grey Level Co-occurrence Matrix (GLCM) features.
@@ -945,6 +1024,8 @@ def calculate_glcm_features(
             glcm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLCM matrix. If provided, `data` and `mask`
                 are ignored for matrix calculation, but `data` is still used for `Ng` estimation if needed.
                 If None, the matrix is calculated from scratch.
+            glcm_distance (int): The distance δ between the two voxels of a pair along each
+                of the 13 directions (IBSI 1), for a matrix calculated from scratch. Default 1.
 
         Returns:
             dict[str, float]: A dictionary of calculated GLCM features, keyed by their name and IBSI code.
@@ -965,7 +1046,7 @@ def calculate_glcm_features(
         # Ng_eff scan below run on the cropped arrays instead of the full volume.
         planar = _planar_axes(data.shape)
         data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
-        matrices = _one_matrix(data, mask, n_bins, "glcm", planar=planar)
+        matrices = _one_matrix(data, mask, n_bins, "glcm", planar=planar, distance=glcm_distance)
         glcm, mask = matrices["glcm"], matrices["roi"].view(np.uint8)
     else:
         glcm = glcm_matrix
@@ -1932,6 +2013,7 @@ def calculate_ngtdm_features(
     ngtdm_matrices: Optional[
         tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]
     ] = None,
+    ngtdm_distance: int = 1,
 ) -> dict[str, float]:
     """
     Calculate Neighbourhood Grey Tone Difference Matrix (NGTDM) features.
@@ -1945,6 +2027,8 @@ def calculate_ngtdm_features(
         n_bins (int): The number of grey levels.
         ngtdm_matrices (Optional[tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]]): Pre-calculated NGTDM matrices
             (sum of absolute differences `s`, and count `n`).
+        ngtdm_distance (int): The Chebyshev distance δ of the neighbourhood, for matrices
+            calculated from scratch. Default 1 (the 26 neighbours).
 
     Returns:
         dict[str, float]: A dictionary of calculated NGTDM features.
@@ -1953,7 +2037,7 @@ def calculate_ngtdm_features(
     if ngtdm_matrices is None:
         # Standalone path: crop to the ROI bbox so the kernel runs on the cropped arrays.
         data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
-        matrices = _one_matrix(data, mask, n_bins, "ngtdm")
+        matrices = _one_matrix(data, mask, n_bins, "ngtdm", distance=ngtdm_distance)
         s, n = matrices["ngtdm_s"], matrices["ngtdm_n"]
     else:
         s, n = ngtdm_matrices
@@ -2048,6 +2132,7 @@ def calculate_ngldm_features(
     n_bins: int,
     ngldm_matrix: Optional[npt.NDArray[np.floating[Any]]] = None,
     ngldm_alpha: int = 0,
+    ngldm_distance: int = 1,
 ) -> dict[str, float]:
     """
     Calculate Neighbourhood Grey Level Dependence Matrix (NGLDM) features.
@@ -2062,6 +2147,8 @@ def calculate_ngldm_features(
         ngldm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated NGLDM matrix.
         ngldm_alpha (int): The coarseness parameter α. Two grey levels are considered dependent
             if their absolute difference is ≤ α. Default is 0 (exact match, IBSI standard).
+        ngldm_distance (int): The Chebyshev distance δ of the neighbourhood, for a matrix
+            calculated from scratch. Default 1.
 
     Returns:
         dict[str, float]: A dictionary of calculated NGLDM features.
@@ -2071,7 +2158,9 @@ def calculate_ngldm_features(
         # Standalone path: crop to the ROI bbox and rebind, so the kernel and the
         # dependence-count-percentage voxel count below run on the cropped arrays.
         data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
-        matrices = _one_matrix(data, mask, n_bins, "ngldm", ngldm_alpha=ngldm_alpha)
+        matrices = _one_matrix(
+            data, mask, n_bins, "ngldm", ngldm_alpha=ngldm_alpha, distance=ngldm_distance
+        )
         ngldm, mask = matrices["ngldm"], matrices["roi"]
     else:
         ngldm = ngldm_matrix
@@ -2156,6 +2245,9 @@ def calculate_all_texture_features(
     n_bins: int,
     distance_mask_array: Optional[npt.NDArray[np.floating[Any]]] = None,
     ngldm_alpha: int = 0,
+    glcm_distance: int = 1,
+    ngtdm_distance: int = 1,
+    ngldm_distance: int = 1,
 ) -> dict[str, float]:
     """
     Calculate all texture features (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM).
@@ -2171,6 +2263,10 @@ def calculate_all_texture_features(
                              If None, mask_array is used.
         ngldm_alpha: The coarseness parameter α for NGLDM. Two grey levels are considered
             dependent if their absolute difference is ≤ α. Default is 0 (IBSI standard).
+        glcm_distance: The distance δ between the two voxels of a GLCM pair along each of
+            the 13 directions (IBSI 1). Default 1.
+        ngtdm_distance: The Chebyshev distance δ of the NGTDM neighbourhood. Default 1.
+        ngldm_distance: The Chebyshev distance δ of the NGLDM neighbourhood. Default 1.
 
     Returns:
         Dictionary of all texture features.
@@ -2209,6 +2305,9 @@ def calculate_all_texture_features(
         ngldm_alpha=ngldm_alpha,
         compact=True,
         planar=planar,
+        glcm_distance=glcm_distance,
+        ngtdm_distance=ngtdm_distance,
+        ngldm_distance=ngldm_distance,
     )
     # The bool ROI gives the same ROI voxel counts as mask_c, from a fast count.
     roi = texture_matrices["roi"]

@@ -2541,8 +2541,9 @@ def test_reoriented_turns_the_axes_to_the_reference() -> None:
     values = np.arange(24.0).reshape(4, 3, 2)
     stored = np.transpose(values, (2, 0, 1))[:, ::-1, :]  # (z, x flipped, y)
     direction = np.eye(3)[:, [2, 0, 1]] * [1.0, -1.0, 1.0]
-    image = Image(stored, (3.0, 1.0, 2.0), (8.0, 6.0, 7.0), direction, source_mask=stored > 5)
+    image = Image(stored, (3.0, 1.0, 2.0), (8.0, 6.0, 7.0), direction, source_mask=stored > 5, frame_of_reference_uid="1.2")  # fmt: skip
     turned = _reoriented(image, reference)
+    assert turned.frame_of_reference_uid == "1.2"
     assert_array_equal(turned.array, values)
     assert turned.array.flags.c_contiguous
     assert turned.spacing == (1.0, 2.0, 3.0) and turned.origin == (5.0, 6.0, 7.0)
@@ -2623,6 +2624,71 @@ def test_dicom_image_with_nifti_masks_in_other_voxel_orders(tmp_path: "os.PathLi
     from_file = pipeline.run(folder, Path(tmp_path) / "rows.nii.gz", config_names=["first_order"])
     expected = pipeline.run(image, in_memory, config_names=["first_order"])
     assert from_file["first_order"].equals(expected["first_order"])
+
+
+def test_save_image_writes_nifti_that_loads_back(tmp_path: "os.PathLike[str]") -> None:
+    # The array, its type (bool as uint8) and the LPS+ geometry (here oblique) come back;
+    # the affine of the file is RAS+. Other extensions raise.
+    from pathlib import Path
+
+    import nibabel as nib
+
+    from pictologics import save_image
+
+    c, s = np.cos(0.4), np.sin(0.4)
+    direction = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+    arrays = (
+        np.random.default_rng(0).normal(size=(5, 4, 3)),
+        np.arange(60, dtype=np.float32).reshape(5, 4, 3),
+        np.arange(60).reshape(5, 4, 3) % 3 == 0,
+    )
+    path = Path(tmp_path) / "image.nii.gz"
+    for array in arrays:
+        image = Image(array, (0.7, 1.3, 2.5), (-12.5, 33.0, 7.25), direction)
+        save_image(image, path)
+        back = load_image(path)
+        np.testing.assert_array_equal(back.array, array.astype(np.float64))
+        np.testing.assert_allclose(back.spacing, image.spacing, atol=1e-6)
+        np.testing.assert_allclose(back.origin, image.origin, atol=1e-5)
+        np.testing.assert_allclose(back.direction, direction, atol=1e-6)
+        stored = nib.load(path)  # type: ignore[attr-defined]
+        assert stored.get_data_dtype() == (np.uint8 if array.dtype == np.bool_ else array.dtype)
+        np.testing.assert_allclose(stored.affine[:3, 3], (12.5, -33.0, 7.25), atol=1e-5)
+    with pytest.raises(ValueError, match="save_image writes NIfTI files"):
+        save_image(image, Path(tmp_path) / "image.nrrd")
+
+
+def test_frame_of_reference_of_dicom_images(tmp_path: "os.PathLike[str]") -> None:
+    # DICOM series and files keep their FrameOfReferenceUID, and so do the images made
+    # from them. A mask of another frame warns when it loads onto the image (also with
+    # the same shape); without a UID on either side, nothing is checked.
+    import warnings
+    from pathlib import Path
+
+    from pictologics.loader import _position_in_reference
+
+    folder = Path(tmp_path) / "ct"
+    folder.mkdir()
+    for k in range(3):
+        _write_slice(folder / f"{k}.dcm", number=k + 1, position=(0.0, 0.0, 1.5 * k), FrameOfReferenceUID="1.2.3")  # fmt: skip
+    image = load_image(folder)
+    one_slice = load_image(folder / "0.dcm")
+    assert image.frame_of_reference_uid == one_slice.frame_of_reference_uid == "1.2.3"
+    assert create_full_mask(image).frame_of_reference_uid == "1.2.3"
+    assert image.with_source_mask(np.ones(image.array.shape)).frame_of_reference_uid == "1.2.3"
+    other = Image(np.ones((2, 2, 1)), image.spacing, image.origin, image.direction, frame_of_reference_uid="9.9")  # fmt: skip
+    with pytest.warns(
+        UserWarning, match="frame of reference 9.9, but the reference image has 1.2.3"
+    ):
+        moved = _position_in_reference(other, image)
+    assert moved.frame_of_reference_uid == "1.2.3"  # now on the grid of the image
+    other_file = Path(tmp_path) / "other.dcm"
+    _write_slice(other_file, series="1.2.9", position=(0.0, 0.0, 0.0), FrameOfReferenceUID="9.9")
+    with pytest.warns(UserWarning, match="frame of reference 9.9"):
+        load_image(other_file, reference_image=one_slice)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _position_in_reference(Image(np.ones((2, 2, 1)), image.spacing, image.origin), image)
 
 
 def test_dicom_folder_with_two_series_needs_a_series_uid(tmp_path: "os.PathLike[str]") -> None:

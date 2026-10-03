@@ -65,29 +65,20 @@ def _warmup_texture() -> None:
     n_bins = 5
     mask: npt.NDArray[Any] = np.ones(shape, dtype=np.uint8)
 
-    # Bounding-box scan is specialized by mask dtype AND memory layout; cropped masks
-    # (mask[bbox]) are non-contiguous views, so compile both the C-contiguous and the
-    # strided ('A') signature for each common dtype.
+    # Bounding-box scan is specialized by mask dtype AND memory layout. The package passes
+    # row-order (C) arrays (the ROI sub-grid is a copy), so only C order is compiled; a
+    # strided view from a direct call compiles at its first use (1.7 s less cold warm-up
+    # with the min/max scans below).
     for bbox_dtype in (np.float64, np.uint8, np.bool_):
-        bbox_mask = mask.astype(bbox_dtype)
-        _utils._bbox_scan_numba(bbox_mask)
-        _utils._bbox_scan_numba(bbox_mask[1:, 1:, 1:])
+        _utils._bbox_scan_numba(mask.astype(bbox_dtype))
 
-    # ROI min/max scan (GLCM Ng_eff): the pipeline passes the bbox-cropped discretised
-    # image (int32 strided view) with a uint8 strided mask; float64 data covers direct
-    # API use. Compile both layouts for each combination.
+    # ROI min/max scan (GLCM Ng_eff, resegment and discretise ranges): the discretised
+    # image (int32) or float64 data with a uint8 mask; float64 masks cover direct API use.
     data_f64 = np.ones(shape, dtype=np.float64)
-    for mm_dtype in (np.float64, np.uint8):
-        mm_mask = mask.astype(mm_dtype)
-        _utils._roi_min_max_numba(data_f64, mm_mask)
-        _utils._roi_min_max_numba(data_f64[1:, 1:, 1:], mm_mask[1:, 1:, 1:])
-        _utils._roi_min_max_serial_numba(data_f64, mm_mask)
-        _utils._roi_min_max_serial_numba(data_f64[1:, 1:, 1:], mm_mask[1:, 1:, 1:])
     data_i32 = np.ones(shape, dtype=np.int32)
-    _utils._roi_min_max_numba(data_i32, mask)
-    _utils._roi_min_max_numba(data_i32[1:, 1:, 1:], mask[1:, 1:, 1:])
-    _utils._roi_min_max_serial_numba(data_i32, mask)
-    _utils._roi_min_max_serial_numba(data_i32[1:, 1:, 1:], mask[1:, 1:, 1:])
+    for mm_data, mm_mask in ((data_f64, mask.astype(np.float64)), (data_f64, mask), (data_i32, mask)):  # fmt: skip
+        _utils._roi_min_max_numba(mm_data, mm_mask)
+        _utils._roi_min_max_serial_numba(mm_data, mm_mask)
     # GLCM Ng_eff: the binned box crop with the row-order texture ROI (a uint8 view)
     roi_u8 = np.ascontiguousarray(mask[1:, 1:, 1:])
     _utils._roi_min_max_numba(data_i32[1:, 1:, 1:], roi_u8)

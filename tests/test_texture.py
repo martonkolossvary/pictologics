@@ -726,3 +726,81 @@ def test_texture_features_skip_the_empty_levels(monkeypatch: Any) -> None:
         assert six.keys() == sixteen.keys()
         for key in six:
             np.testing.assert_allclose(sixteen[key], six[key], rtol=1e-12, err_msg=key)
+
+
+def _texture_by_loops(
+    levels: np.ndarray,
+    roi: np.ndarray,
+    n_bins: int,
+    glcm_distance: int,
+    ngtdm_distance: int,
+    ngldm_distance: int,
+    alpha: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """GLCM (the 13 directions summed), NGTDM s and n, and NGLDM by loops over the voxels
+    (IBSI 1): GLCM pairs at glcm_distance along each direction, neighbourhoods of the
+    voxels up to their Chebyshev distance."""
+    import itertools
+
+    shape = levels.shape
+    directions = [d for d in itertools.product((-1, 0, 1), repeat=3) if d > (0, 0, 0)]
+    glcm = np.zeros((n_bins, n_bins))
+    s, n = np.zeros(n_bins), np.zeros(n_bins)
+    ngldm = np.zeros((n_bins, (2 * ngldm_distance + 1) ** 3))
+
+    def level(q: tuple[int, ...]) -> int:
+        inside = all(0 <= c < m for c, m in zip(q, shape, strict=True))
+        return int(levels[q]) if inside and roi[q] else 0
+
+    def neighbours(p: tuple[int, ...], distance: int) -> list[int]:
+        steps = itertools.product(range(-distance, distance + 1), repeat=3)
+        found = (level(tuple(c + o for c, o in zip(p, d, strict=True))) for d in steps if any(d))
+        return [g for g in found if g]
+
+    for p in itertools.product(*(range(m) for m in shape)):
+        g = level(p)
+        if not g:
+            continue
+        for d in directions:
+            other = level(tuple(c + glcm_distance * o for c, o in zip(p, d, strict=True)))
+            if other:
+                glcm[g - 1, other - 1] += 1
+        near = neighbours(p, ngtdm_distance)
+        if near:
+            s[g - 1] += abs(g - sum(near) / len(near))
+            n[g - 1] += 1
+        dependence = 1 + sum(abs(h - g) <= alpha for h in neighbours(p, ngldm_distance))
+        ngldm[g - 1, dependence - 1] += 1
+    return glcm, s, n, ngldm
+
+
+def test_texture_distances_match_loops_over_the_voxels() -> None:
+    # GLCM, NGTDM and NGLDM distances above 1 (IBSI 1) give the matrices of plain loops
+    # over the voxels: one distance for all, two NGTDM and NGLDM distances (two kernel
+    # passes), and the compact tables of the occurring grey levels.
+    rng = np.random.default_rng(8)
+    levels = rng.integers(1, 6, (7, 6, 5)).astype(np.float64)
+    roi = (rng.random(levels.shape) > 0.25).astype(np.uint8)
+    for distances, alpha in (((2, 2, 2), 0), ((3, 1, 2), 1), ((1, 2, 1), 0)):
+        glcm, s, n, ngldm = _texture_by_loops(levels, roi, 8, *distances, alpha)
+        for compact_bytes in (texture_module._COMPACT_TABLE_BYTES, 0):
+            with patch.object(texture_module, "_COMPACT_TABLE_BYTES", compact_bytes):
+                matrices = texture_module.calculate_all_texture_matrices(
+                    levels, roi, 8, ngldm_alpha=alpha, calc_glszm=False, calc_gldzm=False,
+                    glcm_distance=distances[0], ngtdm_distance=distances[1], ngldm_distance=distances[2],
+                )  # fmt: skip
+            np.testing.assert_array_equal(matrices["glcm"].sum(axis=0), glcm)
+            np.testing.assert_allclose(matrices["ngtdm_s"], s, rtol=1e-12)
+            np.testing.assert_array_equal(matrices["ngtdm_n"], n)
+            np.testing.assert_array_equal(matrices["ngldm"], ngldm)
+    # The feature functions take the distances too
+    features = texture_module.calculate_all_texture_features(levels, roi, 8, glcm_distance=2, ngtdm_distance=2, ngldm_distance=3)  # fmt: skip
+    alone = {
+        **texture_module.calculate_glcm_features(levels, roi, 8, glcm_distance=2),
+        **texture_module.calculate_ngtdm_features(levels, roi, 8, ngtdm_distance=2),
+        **texture_module.calculate_ngldm_features(levels, roi, 8, ngldm_distance=3),
+    }
+    for key, value in alone.items():
+        assert np.isclose(features[key], value, rtol=1e-12, equal_nan=True), key
+    empty = texture_module.calculate_all_texture_matrices(levels, roi * 0, 8, ngldm_distance=2)
+    assert empty["ngldm"].shape == (8, 125)

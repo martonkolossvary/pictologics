@@ -127,7 +127,7 @@ def load_seg(
     """
     from pydicom.pixels.utils import iter_pixels
 
-    from pictologics.loader import Image, _row_order
+    from pictologics.loader import Image, _frame_uid, _row_order
 
     if not 0.0 <= fractional_threshold <= 1.0:
         raise ValueError(f"fractional_threshold must be in [0, 1], not {fractional_threshold}.")
@@ -179,6 +179,7 @@ def load_seg(
             origin=origin,
             direction=direction,
             modality="SEG",
+            frame_of_reference_uid=_frame_uid(seg),
         )
 
         # Align to reference if provided
@@ -206,6 +207,7 @@ def load_seg(
                 origin=origin,
                 direction=direction,
                 modality="SEG",
+                frame_of_reference_uid=_frame_uid(seg),
             )
 
             # Align to reference if provided

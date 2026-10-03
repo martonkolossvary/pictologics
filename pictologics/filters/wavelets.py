@@ -14,8 +14,10 @@ from .base import (
     _TRANSFER_CACHE_BYTES,
     BoundaryCondition,
     _apply_with_boundary_padding,
+    _constant_padded,
     _float32_cut,
     _ordered_map,
+    _padding_value_problem,
     _prepare_masked_image,
     _slab_pass,
     _slabs,
@@ -42,6 +44,7 @@ def wavelet_transform(
     pooling: str = "average",
     use_parallel: Union[bool, None] = None,
     source_mask: Optional[npt.NDArray[np.bool_]] = None,
+    padding_value: float = 0.0,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply 3D separable wavelet transform (undecimated/stationary).
@@ -67,6 +70,8 @@ def wavelet_transform(
         source_mask: Optional boolean mask where True = valid voxel.
             When provided, zeros out invalid (sentinel) voxels before
             wavelet decomposition to prevent contamination.
+        padding_value: The constant of constant value padding (Z3VE), with the ZERO
+            (constant) boundary. Default 0.
 
     Returns:
         Response map for the specified decomposition
@@ -99,6 +104,20 @@ def wavelet_transform(
         raise ValueError(problem)
     level = int(level)
     decomposition = decomposition.upper()
+    boundary = resolve_boundary(boundary)
+    problem = _padding_value_problem(boundary, padding_value)
+    if problem:
+        raise ValueError(problem)
+    if padding_value:
+        # The a trous passes of all levels read this far on each side
+        n = pywt.Wavelet(wavelet).dec_len
+        reach = sum((n - 1) * 2 ** (j - 1) + 1 for j in range(1, level + 1))
+        padded = _constant_padded(
+            wavelet_transform, image, source_mask, padding_value, reach, wavelet=wavelet,
+            level=level, decomposition=decomposition, boundary=boundary,
+            rotation_invariant=rotation_invariant, pooling=pooling, use_parallel=use_parallel,
+        )  # fmt: skip
+        return cast(npt.NDArray[np.floating[Any]], padded)
 
     # Convert to float32
     image = ensure_float32(image)
@@ -107,9 +126,6 @@ def wavelet_transform(
     if source_mask is not None:
         image = _prepare_masked_image(image, source_mask)
 
-    # Handle boundary
-    if isinstance(boundary, str):
-        boundary = BoundaryCondition[boundary.upper()]
     mode = get_scipy_mode(boundary)
 
     # Get wavelet filters
@@ -294,23 +310,41 @@ def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.f
     # NOTE: This grid differs from np.fft.fftfreq by a factor of (N-1)/N.
     # The IBSI 2 reference values were validated with this specific grid, so
     # it must be preserved exactly. The grid is not symmetric for an even N.
-    grids, negatives = [], []
+    grids = []
     for i, s in enumerate(shape):
         center = (s - 1.0) / 2.0
         # Normalize to [-1, 1] relative to center, then shift DC to index 0 (fftn layout)
         grid = np.fft.ifftshift((np.arange(s) - center) / center)
-        index = np.arange(s // 2 + 1 if i == len(shape) - 1 else s)
-        grids.append(grid[index])
-        negatives.append(grid[-index])  # the frequency -k: index s - k (and 0 for 0)
-    vectors = [np.meshgrid(*v, indexing="ij", sparse=True) for v in (grids, negatives)]
+        grids.append(grid[: s // 2 + 1 if i == len(shape) - 1 else s])
+    vectors = np.meshgrid(*grids, indexing="ij", sparse=True)
     table_shape = tuple(len(g) for g in grids)
 
     # A large table is built slab by slab along the first axis, with temporaries of one
-    # slab instead of several full volumes.
+    # slab instead of several full volumes: first the band g, then the even part in
+    # place, from the last slab down. The centered grid is symmetric, so g(-k) is g at
+    # k - 1 on an even axis (at 0 for 0) and at k on an odd one: on axis 0 a slab reads
+    # only rows that are not changed yet, and on the other axes g(-k) is g shifted by
+    # one. The values are those of a second evaluation of g at -k, bit for bit.
+    slabs = _slabs(table_shape)
     table = np.empty(table_shape, dtype=np.float64)
-    for start, stop in _slabs(table_shape):
-        g_sim, g_neg = (_simoncelli_values(v, start, stop, max_freq) for v in vectors)
-        np.multiply(g_sim + g_neg, 0.5, out=table[start:stop])
+    for start, stop in slabs:
+        table[start:stop] = _simoncelli_values(vectors, start, stop, max_freq)
+    even = [s % 2 == 0 for s in shape]
+    for start, stop in reversed(slabs):
+        if not even[0]:
+            negative = table[start:stop].copy()
+        elif start == 0:
+            negative = np.concatenate((table[:1], table[: stop - 1]))
+        else:
+            negative = table[start - 1 : stop - 1].copy()
+        for axis in range(1, len(shape)):
+            if even[axis]:
+                target, source = [slice(None)] * len(shape), [slice(None)] * len(shape)
+                target[axis], source[axis] = slice(1, None), slice(0, -1)
+                negative[tuple(target)] = negative[tuple(source)]
+        part = table[start:stop]
+        part += negative
+        part *= 0.5
     table.flags.writeable = False  # cached array must not be mutated by callers
     return table
 
@@ -355,6 +389,7 @@ def simoncelli_wavelet(
     level: int = 1,
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.PERIODIC,
     source_mask: Optional[npt.NDArray[np.bool_]] = None,
+    padding_value: float = 0.0,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply Simoncelli non-separable wavelet (IBSI code: PRT7).
@@ -375,6 +410,8 @@ def simoncelli_wavelet(
             `image`. Any other condition is approximated via pad-filter-crop (see
             `_apply_with_boundary_padding` and `_simoncelli_pad_width`).
         source_mask: Optional boolean mask where True = valid voxel
+        padding_value: The constant of constant value padding (Z3VE), with the ZERO
+            (constant) boundary. Default 0.
 
     Returns:
         Band-pass response map (B map) for the specified level
@@ -402,6 +439,9 @@ def simoncelli_wavelet(
         raise ValueError(problem)
     level = int(level)
     boundary = resolve_boundary(boundary)
+    problem = _padding_value_problem(boundary, padding_value)
+    if problem:
+        raise ValueError(problem)
 
     # Convert to float32
     image = ensure_float32(image)
@@ -430,4 +470,6 @@ def simoncelli_wavelet(
 
         return _float32_cut(response, crop)
 
-    return _apply_with_boundary_padding(_core, image, boundary, _simoncelli_pad_width(level))
+    return _apply_with_boundary_padding(
+        _core, image, boundary, _simoncelli_pad_width(level), padding_value
+    )

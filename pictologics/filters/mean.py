@@ -8,7 +8,9 @@ from numpy import typing as npt
 
 from .base import (
     BoundaryCondition,
+    _constant_padded,
     _normalized_uniform_filter,
+    _padding_value_problem,
     _uniform_filter,
     ensure_float32,
     get_scipy_mode,
@@ -21,6 +23,7 @@ def mean_filter(
     support: int = ...,
     boundary: Union[BoundaryCondition, str] = ...,
     source_mask: None = ...,
+    padding_value: float = ...,
 ) -> npt.NDArray[np.floating[Any]]: ...
 
 
@@ -30,6 +33,7 @@ def mean_filter(
     support: int = ...,
     boundary: Union[BoundaryCondition, str] = ...,
     source_mask: npt.NDArray[np.bool_] = ...,
+    padding_value: float = ...,
 ) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]: ...
 
 
@@ -38,6 +42,7 @@ def mean_filter(
     support: int = 15,
     boundary: Union[BoundaryCondition, str] = BoundaryCondition.ZERO,
     source_mask: Optional[npt.NDArray[np.bool_]] = None,
+    padding_value: float = 0.0,
 ) -> Union[
     npt.NDArray[np.floating[Any]],
     tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]],
@@ -55,6 +60,8 @@ def mean_filter(
         source_mask: Optional boolean mask where True = valid voxel.
             When provided, uses normalized convolution to exclude invalid
             (sentinel) voxels from mean computation.
+        padding_value: The constant of constant value padding (Z3VE), with the ZERO
+            (constant) boundary. Default 0.
 
     Returns:
         If source_mask is None: Response map with same dimensions as input
@@ -95,6 +102,13 @@ def mean_filter(
     if isinstance(boundary, str):
         boundary = BoundaryCondition[boundary.upper()]
 
+    problem = _padding_value_problem(boundary, padding_value)
+    if problem:
+        raise ValueError(problem)
+    if padding_value:
+        return _constant_padded(
+            mean_filter, image, source_mask, padding_value, support // 2, support=support, boundary=boundary
+        )  # fmt: skip
     mode = get_scipy_mode(boundary)
 
     if source_mask is not None:
