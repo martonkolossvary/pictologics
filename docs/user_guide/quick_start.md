@@ -153,6 +153,7 @@ Steps execute **in the order you define them**, so you have full control over th
 | `resample` | Standardize voxel spacing across patients | Almost always — ensures features are comparable |
 | `resegment` | Restrict ROI to an intensity range (e.g., [-100, 400] HU) | When you need to exclude outliers or sentinel values |
 | `keep_largest_component` | Remove small disconnected mask fragments | When your mask has noise or satellite lesions |
+| `grow_mask` | Grow or shrink the mask, or keep a ring at its edge (in mm) | For the tissue around a lesion or a vessel, or to drop the edge voxels |
 | `binarize_mask` | Select specific labels from a multi-label mask | When your mask encodes multiple structures |
 | `discretise` | Bin intensities for texture features (FBN or FBS) | **Required** before `extract_features` with texture |
 | `filter` | Apply IBSI 2 image filters (LoG, Gabor, Wavelets, etc.) | For filtered radiomics / response map analysis |

@@ -16,6 +16,8 @@ Preprocessing utilities for image manipulation and sentinel value handling.
 
 ::: pictologics.preprocessing.resegment_mask
 
+::: pictologics.preprocessing.grow_mask
+
 ## Outlier Filtering
 
 ::: pictologics.preprocessing.filter_outliers

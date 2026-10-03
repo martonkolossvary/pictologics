@@ -99,6 +99,9 @@ from .filters.wavelets import _wavelet_problem
 from .loader import Image, _validate_geometry, create_full_mask, load_image
 from .preprocessing import (
     _all_finite,
+    _grow_problem,
+    _nearest_roi_map,
+    _nearest_roi_part,
     _output_grid,
     _region_origin,
     _roi_region,
@@ -106,6 +109,7 @@ from .preprocessing import (
     detect_sentinel_value,
     discretise_image,
     filter_outliers,
+    grow_mask,
     keep_largest_component,
     resample_image,
     resegment_mask,
@@ -207,6 +211,7 @@ _PREPROCESSING_STEPS = (
     "filter_outliers",
     "round_intensities",
     "keep_largest_component",
+    "grow_mask",
     "binarize_mask",
     "discretise",
     "filter",
@@ -217,6 +222,7 @@ _PREPROCESSING_PARAM_COLUMNS = {
     "filter_outliers": "filter_outliers_params",
     "round_intensities": "round_intensities_params",
     "keep_largest_component": "keep_largest_component_params",
+    "grow_mask": "grow_mask_params",
     "binarize_mask": "binarize_mask_params",
     "discretise": "discretise_params",
     "filter": "filter_params",
@@ -438,17 +444,38 @@ def _check_grid_memory(shape: list[int], new_spacing: Any) -> None:
 
 
 def _roi_reach(later_steps: list[dict[str, Any]]) -> Optional[float]:
-    """How far (mm) outside the ROI box the later steps read: the radius of the local
-    intensity sphere when a later step computes the local peaks, else 0. None when a later
-    step reads the whole image (see _needs_full_grid); a filter, a resample or a
-    discretise step then keeps the whole grid."""
+    """How far (mm) outside the ROI box the later steps read: the growth of the later
+    grow_mask steps, and the radius of the local intensity sphere around the ROI (as grown
+    up to that step) when a later step computes the local peaks. None when a later step
+    reads the whole image (see _needs_full_grid); a filter, a resample or a discretise
+    step then keeps the whole grid."""
     if _needs_full_grid(later_steps):
         return None
-    local = any(
-        step["step"] == "extract_features" and _reads_local_peak(step.get("params") or {})
-        for step in later_steps
+    reach = grown = 0.0
+    for step in later_steps:
+        grown += _grow_reach([step])
+        if step["step"] == "extract_features" and _reads_local_peak(step.get("params") or {}):
+            reach = max(reach, grown + _LOCAL_PEAK_RADIUS_MM)
+    return max(reach, grown)
+
+
+def _grow_reach(steps: list[dict[str, Any]]) -> float:
+    """How far (mm) the grow_mask steps of `steps` grow the ROI at most. A step with a bad
+    to_mm adds nothing: it stops its configuration when it runs."""
+    total = 0.0
+    for step in steps:
+        to_mm = (step.get("params") or {}).get("to_mm") if step["step"] == "grow_mask" else None
+        if to_mm is not None and _grow_problem(to_mm) is None:
+            total += max(float(to_mm), 0.0)
+    return total
+
+
+def _splits_rois(steps: list[dict[str, Any]]) -> bool:
+    """Whether a grow_mask step of `steps` gives each added voxel to its nearest ROI."""
+    return any(
+        step["step"] == "grow_mask" and (step.get("params") or {}).get("nearest_roi") is True
+        for step in steps
     )
-    return _LOCAL_PEAK_RADIUS_MM if local else 0.0
 
 
 def _reads_local_peak(params: dict[str, Any]) -> bool:
@@ -736,6 +763,14 @@ def _step_problems(
         else:
             problem = _spacing_problem(params["new_spacing"])
             problems.extend([problem] if problem else [])
+    elif name == "grow_mask":
+        if "to_mm" not in params:
+            problems.append("missing parameter 'to_mm'")
+        else:
+            problem = _grow_problem(params["to_mm"], params.get("from_mm"))
+            problems.extend([problem] if problem else [])
+        if not isinstance(params.get("nearest_roi", False), bool):
+            problems.append(f"nearest_roi must be True or False, not {params['nearest_roi']!r}")
     elif name == "discretise":
         method = params.get("method", "FBN")
         if method not in _DISCRETISE_METHODS:
@@ -976,6 +1011,9 @@ class PipelineState:
     # The lower bound of the resegment ranges of the intensity mask (None after a filter,
     # whose values have other units): an FBS step without min_val starts its bins there.
     resegment_min: Optional[float] = None
+    # In run_rois, for the grow_mask steps with nearest_roi: the nearest ROI of each voxel
+    # (see _nearest_roi_map) and the label of this ROI.
+    roi_nearest: Optional[tuple[Image, int]] = None
 
 
 class EmptyROIMaskError(ValueError):
@@ -1452,10 +1490,12 @@ class RadiomicsPipeline:
         target_configs: list[str],
         mask_settings: tuple[float, float, float],
         nonfinite: Optional[bool] = None,
+        roi_nearest: Optional[tuple[Image, int]] = None,
     ) -> dict[str, pd.Series]:
         """The part of `run()` after the loading: `target_configs` run (see
         `_target_configs`), and the log records the requested `config_names`. `nonfinite`
-        (whether the image has NaN or infinite values) is found when it is None."""
+        (whether the image has NaN or infinite values) is found when it is None.
+        `roi_nearest`: see PipelineState.roi_nearest."""
         mask_subvoxel_tolerance, mask_subvoxel_warning_threshold, mask_min_overlap_fraction = (
             mask_settings
         )
@@ -1678,6 +1718,7 @@ class RadiomicsPipeline:
                 source_mask=source_mask,
                 sentinel_detected=sentinel_detected,
                 sentinel_value=detected_sentinel_value,
+                roi_nearest=roi_nearest,
             )
 
             snapshot = self._config_snapshot(config_name)
@@ -1870,7 +1911,9 @@ class RadiomicsPipeline:
         and the label of its ROI elsewhere. Each ROI gets the results of `run()` with a
         mask of that label alone. `run_rois` loads the image once, checks it for NaN
         values once, and makes each mask only inside the box of its label, so many ROIs
-        take much less time than one `run()` for each of them.
+        take much less time than one `run()` for each of them. A `grow_mask` step with
+        `nearest_roi` gives each added voxel to the ROI of the map with the nearest voxel,
+        so the rings of touching ROIs do not overlap.
 
         Args:
             image: Path to the image, or an Image.
@@ -1937,6 +1980,13 @@ class RadiomicsPipeline:
         # after (a run keeps no array of its masks)
         buffer: npt.NDArray[Any] = np.zeros(values.shape, dtype=np.uint8)
         mask = replace(label_map, array=buffer)
+        # A grow_mask step with nearest_roi gives each added voxel to its nearest ROI
+        splits = [self._configs[name] for name in names if _splits_rois(self._configs[name])]
+        nearest = (
+            _nearest_roi_map(replace(label_map, array=whole), max(map(_grow_reach, splits)))
+            if splits
+            else None
+        )
         all_results: dict[str, dict[str, pd.Series]] = {}
         for name, label in chosen.items():
             box = boxes[int(label) - 1] if label <= len(boxes) else None
@@ -1954,6 +2004,7 @@ class RadiomicsPipeline:
                 names,
                 mask_settings,
                 nonfinite,
+                None if nearest is None else (nearest, int(label)),
             )
             for entry in self._log[start:]:
                 entry["roi"] = name
@@ -2430,6 +2481,29 @@ class RadiomicsPipeline:
                 state.intensity_mask = keep_largest_component(state.intensity_mask)
 
             self._ensure_nonempty_roi(state, context="keep_largest_component")
+
+        elif step_name == "grow_mask":
+            apply_to = _get_apply_to(params, "grow_mask")
+            nearest = state.roi_nearest if params.get("nearest_roi", False) else None
+            valid = None if state.source_mask is None else state.source_mask.array
+
+            def _grow(mask: Image) -> Image:
+                grown = grow_mask(mask, params["to_mm"], params.get("from_mm"))
+                if nearest is not None:
+                    grown = _nearest_roi_part(grown, mask, *nearest)
+                # A grown voxel must hold image data, as after a resample
+                return grown if valid is None or valid.all() else _intersect_mask(grown, valid)
+
+            # Masks that are one array are grown once and stay one array.
+            masks_in_sync = state.morph_mask.array is state.intensity_mask.array
+            if apply_to in ("morph", "both"):
+                state.morph_mask = _grow(state.morph_mask)
+            if apply_to == "both" and masks_in_sync:
+                state.intensity_mask = state.morph_mask
+            elif apply_to in ("intensity", "both"):
+                state.intensity_mask = _grow(state.intensity_mask)
+
+            self._ensure_nonempty_roi(state, context="grow_mask")
 
         elif step_name == "binarize_mask":
             apply_to = _get_apply_to(params, "binarize_mask")
@@ -3440,6 +3514,9 @@ class RadiomicsPipeline:
             "keeps_largest_component": False,
             "keep_largest_component_apply_to": None,
             "keep_largest_component_params": None,
+            "is_mask_grown": False,
+            "grow_mask_apply_to": None,
+            "grow_mask_params": None,
             "is_mask_binarized": False,
             "binarize_mask_apply_to": None,
             "binarize_mask_params": None,
@@ -3511,6 +3588,13 @@ class RadiomicsPipeline:
             meta["keeps_largest_component"] = True
             meta["keep_largest_component_apply_to"] = RadiomicsPipeline._catalog_value(
                 [record["params"].get("apply_to", "both") for record in largest_component_records]
+            )
+
+        grow_records = records_by_step["grow_mask"]
+        if grow_records:
+            meta["is_mask_grown"] = True
+            meta["grow_mask_apply_to"] = RadiomicsPipeline._catalog_value(
+                [record["params"].get("apply_to", "both") for record in grow_records]
             )
 
         binarize_records = records_by_step["binarize_mask"]
@@ -3755,6 +3839,9 @@ class RadiomicsPipeline:
             "keeps_largest_component",
             "keep_largest_component_apply_to",
             "keep_largest_component_params",
+            "is_mask_grown",
+            "grow_mask_apply_to",
+            "grow_mask_params",
             "is_mask_binarized",
             "binarize_mask_apply_to",
             "binarize_mask_params",
@@ -4245,6 +4332,7 @@ class RadiomicsPipeline:
         "filter_outliers": {"sigma", "apply_to"},
         "binarize_mask": {"threshold", "mask_values", "apply_to"},
         "keep_largest_component": {"apply_to"},
+        "grow_mask": {"to_mm", "from_mm", "nearest_roi", "apply_to"},
         "round_intensities": set(),
         "discretise": {
             "method",

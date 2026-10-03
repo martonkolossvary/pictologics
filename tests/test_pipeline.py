@@ -3968,6 +3968,9 @@ _DESCRIBE_COLUMNS = [
     "keeps_largest_component",
     "keep_largest_component_apply_to",
     "keep_largest_component_params",
+    "is_mask_grown",
+    "grow_mask_apply_to",
+    "grow_mask_params",
     "is_mask_binarized",
     "binarize_mask_apply_to",
     "binarize_mask_params",
@@ -5864,3 +5867,155 @@ def test_gaussian_filter_and_padding_value_in_the_pipeline() -> None:
     for message, params in bad.items():
         with pytest.raises(ValueError, match=re.escape(message)):
             pipeline.add_config("bad", [{"step": "filter", "params": params}])
+
+
+def _grow_case() -> tuple[Image, Image]:
+    """A random image and a box mask (0.8 mm voxels)."""
+    rng = np.random.default_rng(5)
+    image = Image(rng.normal(0.0, 10.0, (20, 20, 20)), (0.8, 0.8, 0.8), (0.0, 0.0, 0.0))
+    mask = np.zeros((20, 20, 20), dtype=np.uint8)
+    mask[8:12, 7:13, 8:11] = 1
+    return image, Image(mask, image.spacing, image.origin)
+
+
+def test_grow_mask_step_gives_the_mask_of_grow_mask() -> None:
+    # The step gives the features of the grow_mask mask; with apply_to "intensity" the
+    # morphology keeps the mask; after a resample, the region that the later steps read
+    # holds the ring, as the whole grid does.
+    from pictologics import pipeline as pipeline_module
+    from pictologics.preprocessing import grow_mask
+
+    image, mask = _grow_case()
+    ring = {"step": "grow_mask", "params": {"from_mm": 0, "to_mm": 2}}
+    intensity = {"step": "extract_features", "params": {"families": ["intensity"]}}
+    shape = {"step": "extract_features", "params": {"families": ["morphology"]}}
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("ring", [ring, intensity, shape])
+    pipeline.add_config("core", [{"step": "grow_mask", "params": {"to_mm": -0.8}}, intensity])
+    pipeline.add_config("intensity_ring", [
+        {"step": "grow_mask", "params": {"from_mm": 0, "to_mm": 2, "apply_to": "intensity"}},
+        intensity,
+        shape,
+    ])  # fmt: skip
+    pipeline.add_config("intensity", [intensity, shape])
+    results = pipeline.run(image, mask, config_names=["ring", "core", "intensity_ring"])
+    plain = {
+        name: pipeline.run(image, grow_mask(mask, *distances), config_names=["intensity"])
+        for name, distances in (("ring", (2, 0)), ("core", (-0.8,)), ("mask", (0,)))
+    }
+    assert results["ring"].equals(plain["ring"]["intensity"])
+    core = plain["core"]["intensity"]
+    assert results["core"].equals(core[[name for name in core.index if name in results["core"]]])
+    volume = "volume_voxel_counting_YEKZ"
+    assert results["intensity_ring"][volume] == plain["mask"]["intensity"][volume]
+    assert (
+        results["intensity_ring"]["mean_intensity_Q4LE"] == results["ring"]["mean_intensity_Q4LE"]
+    )
+    resampled = RadiomicsPipeline(load_standard=False)
+    resampled.add_config("c", [
+        {"step": "resample", "params": {"new_spacing": (0.7, 0.7, 0.7)}},
+        ring,
+        {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
+    ])  # fmt: skip
+    boxed = resampled.run(image, mask, config_names=["c"])["c"]
+    with patch.object(pipeline_module, "_roi_reach", return_value=None):
+        whole = resampled.run(image, mask, config_names=["c"])["c"]
+    assert boxed.equals(whole)
+
+
+def test_roi_reach_adds_the_growth_of_later_grow_steps() -> None:
+    from pictologics.pipeline import _LOCAL_PEAK_RADIUS_MM, _roi_reach
+
+    def grow(to_mm: Any) -> dict[str, Any]:
+        return {"step": "grow_mask", "params": {"to_mm": to_mm}}
+
+    local = {"step": "extract_features", "params": {"families": ["local_intensity"]}}
+    plain = {"step": "extract_features", "params": {"families": ["intensity"]}}
+    assert _roi_reach([grow(2.0), plain, grow(1.5), plain]) == 3.5
+    assert _roi_reach([grow(2.0), local, grow(1.0)]) == 2.0 + _LOCAL_PEAK_RADIUS_MM
+    assert _roi_reach([grow(-1.0), grow("x"), {"step": "grow_mask"}, plain]) == 0.0
+    assert _roi_reach([local]) == _LOCAL_PEAK_RADIUS_MM
+
+
+def test_grow_mask_step_problems_and_image_data() -> None:
+    # add_config checks the distances and nearest_roi; grown voxels without image data
+    # (a sentinel value) leave the mask, as after a resample.
+    from pictologics.preprocessing import grow_mask
+
+    for params, message in (
+        ({}, "missing parameter 'to_mm'"),
+        ({"to_mm": "2"}, "to_mm must be a finite number (mm), not '2'"),
+        ({"to_mm": 1.0, "from_mm": 1.0}, "from_mm (1.0) must be below to_mm (1.0)"),
+        ({"to_mm": 1.0, "nearest_roi": "yes"}, "nearest_roi must be True or False, not 'yes'"),
+        ({"to_mm": 1.0, "distance_mm": 1.0}, "unknown parameter 'distance_mm'"),
+    ):
+        problems = _steps_problems([{"step": "grow_mask", "params": params}])
+        assert len(problems) == 1 and problems[0].startswith(f"step 0 (grow_mask): {message}")
+    image, mask = _grow_case()
+    values = image.array.copy()
+    values[:, :, :9] = -2048.0  # no image data next to the mask
+    image = Image(values, image.spacing, image.origin)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    steps = [
+        {"step": "grow_mask", "params": {"from_mm": 0, "to_mm": 2}},
+        {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
+    ]
+    pipeline.add_config("sentinel", steps, source_mode="auto", sentinel_value=-2048.0)
+    pipeline.add_config("all", steps)
+    results = pipeline.run(image, mask, config_names=["sentinel", "all"])
+    ring = grow_mask(mask, 2, 0).array != 0
+    voxel = float(np.prod(image.spacing))
+    volume = "volume_voxel_counting_YEKZ"
+    assert results["all"][volume] == pytest.approx(ring.sum() * voxel)
+    assert results["sentinel"][volume] == pytest.approx((ring & (values != -2048.0)).sum() * voxel)
+
+
+def test_run_rois_gives_each_grown_voxel_to_its_nearest_roi() -> None:
+    # With nearest_roi, the rings of two touching ROIs share out the ring of both: no
+    # voxel in two rings, none in an ROI. Without it, the rings overlap. run() has one ROI,
+    # so nearest_roi changes nothing there. After a resample, the rings stay apart.
+    rng = np.random.default_rng(6)
+    image = Image(rng.normal(0.0, 1.0, (30, 30, 30)), (0.5, 0.5, 0.5), (0.0, 0.0, 0.0))
+    labels = np.zeros((30, 30, 30), dtype=np.uint8)
+    labels[10:20, 10:15, 10:20] = 1
+    labels[10:20, 15:20, 10:20] = 2
+    label_map = Image(labels, image.spacing, image.origin)
+    both = Image((labels != 0).astype(np.uint8), image.spacing, image.origin)
+    volume = "volume_voxel_counting_YEKZ"
+    extract = {"step": "extract_features", "params": {"families": ["morphology"]}}
+    pipeline = RadiomicsPipeline(load_standard=False)
+    for name, nearest in (("shared", True), ("own", False)):
+        grow = {"step": "grow_mask", "params": {"from_mm": 0, "to_mm": 2, "nearest_roi": nearest}}
+        pipeline.add_config(name, [grow, extract])
+        pipeline.add_config(f"{name}_resampled", [
+            {"step": "resample", "params": {"new_spacing": (0.7, 0.7, 0.7)}},
+            grow,
+            extract,
+        ])  # fmt: skip
+    names = ["shared", "own", "shared_resampled", "own_resampled"]
+    rois = pipeline.run_rois(image, label_map, config_names=names)
+    whole = pipeline.run(image, both, config_names=names)
+    for name in names:
+        assert whole[name].equals(whole[name.replace("shared", "own")])
+    total = {name: rois["1"][name][volume] + rois["2"][name][volume] for name in names}
+    assert total["shared"] == whole["shared"][volume]
+    assert total["own"] > 1.3 * whole["own"][volume]
+    assert 0.9 * whole["shared_resampled"][volume] < total["shared_resampled"]
+    assert total["shared_resampled"] <= whole["shared_resampled"][volume]
+    assert pipeline.run_rois(image, label_map, config_names=["own"])["1"]["own"].equals(
+        rois["1"]["own"]
+    )
+
+
+def test_describe_features_records_grow_steps() -> None:
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [
+        {"step": "grow_mask", "params": {"from_mm": 0, "to_mm": 3, "apply_to": "intensity"}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}},
+    ])  # fmt: skip
+    row = pipeline.describe_features().iloc[0]
+    assert row["is_mask_grown"]
+    assert row["grow_mask_apply_to"] == "intensity"
+    assert json.loads(row["grow_mask_params"]) == [
+        {"params": {"apply_to": "intensity", "from_mm": 0, "to_mm": 3}, "step_index": 1}
+    ]

@@ -547,7 +547,7 @@ def get_segment_info(path: str | Path) -> list[dict[str, str | int]]:
         - segment_id: str
         - label_value: int (the value of the segment in its layer)
         - layer: int (the volume that ``load_image(path, dataset_index=layer)`` gives,
-          when overlapping segments need more than one layer)
+            when overlapping segments need more than one layer)
 
     Raises:
         ValueError: If the file is not a valid DICOM SEG or RTSTRUCT object, or a NRRD

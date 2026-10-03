@@ -182,13 +182,45 @@ Restricts the mask to the largest connected component.
 |:----------|:-----|:--------|:------------|
 | `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
 
-### 5. `round_intensities`
+### 5. `grow_mask`
+
+Grows or shrinks the mask by a distance in mm, or keeps a ring at its edge: for example the fat around a vessel, or the tissue around a lesion. The distances use the spacing of each axis, so the mask changes by the same amount in every direction, straight out from its surface. Put the step after `resample` and before `resegment`: a `resegment` step then keeps one tissue of the ring, for example fat from -190 to -30 HU.
+
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `to_mm` | `float` | *(required)* | Grow the mask by this distance (mm). A negative distance shrinks it |
+| `from_mm` | `float` | `None` | Leave out the mask grown (or shrunk, when negative) by this distance, which leaves a ring. Must be below `to_mm` |
+| `nearest_roi` | `bool` | `False` | In `run_rois`: give each added voxel to its nearest ROI of the label map |
+| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
+
+```python
+fat_ring = [
+    {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5)}},
+    {"step": "grow_mask", "params": {"from_mm": 0, "to_mm": 3}},  # the 3 mm around the mask
+    {"step": "resegment", "params": {"range_min": -190, "range_max": -30}},  # fat
+    {"step": "extract_features", "params": {"families": ["intensity"]}},
+]
+```
+
+| `to_mm` | `from_mm` | Result |
+|:--------|:----------|:-------|
+| `3` | | The mask grown by 3 mm |
+| `-1` | | The mask without its outer 1 mm |
+| `3` | `0` | The ring of 3 mm around the mask |
+| `5` | `2` | The ring from 2 to 5 mm around the mask |
+| `0` | `-1` | The outer 1 mm of the mask |
+
+Outside the mask, the distance of a voxel is the distance from its center to the nearest center of a mask voxel. Inside the mask, it is the distance to the nearest center of a voxel outside the mask. The voxels past the image edge count as outside, so a shrink also removes the mask voxels at the image edge. The mask changes by whole voxels: a grow by 1 mm on 0.4 mm voxels adds 2 voxels along an axis. A grown voxel without image data (see `source_mode`) leaves the mask. The same change is the function `pictologics.preprocessing.grow_mask`.
+
+With `nearest_roi`, `run_rois` gives each added voxel to the ROI of the label map with the nearest voxel. The rings of touching ROIs (for example the AHA segments of the myocardium, or the segments of a vessel) then share the space between them, and no ring covers another ROI. Where two vessel segments meet, the border between their rings is square to the vessel; at the free ends of the vessel, the ring goes around the end. `run()` has one ROI, so `nearest_roi` changes nothing there.
+
+### 6. `round_intensities`
 
 Rounds image intensities to the nearest integer. Useful before discretisation if values are close to integers.
 
 *No parameters.*
 
-### 6. `binarize_mask`
+### 7. `binarize_mask`
 
 Creates a binary mask from a multi-label mask. Without this step, all nonzero
 labels are treated as one combined ROI. Use `mask_values` to select specific
@@ -200,7 +232,7 @@ segments before feature extraction.
 | `mask_values` | `int`, `list`, or `tuple` | `None` | Specific label(s) to select. Tuple `(min, max)` selects an inclusive range; in a YAML or JSON file, write the range as `{range: [min, max]}`, because a plain list selects only the listed labels |
 | `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
 
-### 7. `discretise`
+### 8. `discretise`
 
 Discretises image intensities into bins. **Required** before texture feature extraction.
 
@@ -214,7 +246,7 @@ Discretises image intensities into bins. **Required** before texture feature ext
 
 FBS bins start at the same value in every image, so that a grey level has the same intensity range in every image (IBSI). An FBS step without `min_val` starts at the largest lower bound of the `resegment` steps that change the intensity mask (`apply_to` `"both"` or `"intensity"`). A `filter` step after them cancels this start, because the filter response has other units. Without `min_val` and without such a `resegment` step, `add_config` raises an error. The log entry of the step records the start that it used (`min_val_effective`). An FBS `ivh_discretisation` follows the same rule.
 
-### 8. `filter`
+### 9. `filter`
 
 Applies an IBSI 2 image filter. See the **[Image Filtering](image_filtering.md)** guide for detailed documentation.
 
@@ -240,7 +272,7 @@ Applies an IBSI 2 image filter. See the **[Image Filtering](image_filtering.md)*
 !!! note "Automatic Spacing Injection"
     For filters requiring physical spacing (`gaussian`, `log`, `gabor`), the pipeline uses the image's voxel spacing automatically.
 
-### 9. `extract_features`
+### 10. `extract_features`
 
 Calculates radiomic features from the current state.
 
@@ -353,7 +385,7 @@ rows = [format_results(series, meta={"subject_id": "p001", "roi": roi}) for roi,
 save_results(rows, "p001_rois.csv")
 ```
 
-Each ROI gets the results of `run()` with a mask of its label alone, bit for bit. `run_rois` loads the image once, checks it for NaN values once, and makes each mask only inside the box of its label. On a CT of 512 × 512 × 200 voxels with 100 labels, one `run()` for each label took 1.81 s with a 1 mm texture configuration and 1.21 s with intensity features alone; `run_rois` took 0.92 s and 0.29 s. The log entries of an ROI hold its name in `roi`. A label map cannot hold overlapping ROIs: for segments that overlap, load each segment as its own mask (`load_seg(..., combine_segments=False)`) and call `run()` for each.
+Each ROI gets the results of `run()` with a mask of its label alone, bit for bit. `run_rois` loads the image once, checks it for NaN values once, and makes each mask only inside the box of its label. On a CT of 512 × 512 × 200 voxels with 100 labels, one `run()` for each label took 1.81 s with a 1 mm texture configuration and 1.21 s with intensity features alone; `run_rois` took 0.92 s and 0.29 s. The log entries of an ROI hold its name in `roi`. A [`grow_mask`](#5-grow_mask) step with `nearest_roi` gives each added voxel to its nearest ROI, so the rings of touching ROIs do not overlap. A label map cannot hold overlapping ROIs: for segments that overlap, load each segment as its own mask (`load_seg(..., combine_segments=False)`) and call `run()` for each.
 
 ### Result Guarantees
 
@@ -475,6 +507,7 @@ catalog.head()
 | `is_outlier_filtered` / `filter_outliers_apply_to` / `filter_outliers_params` | Outlier filtering details and effective mask target |
 | `is_intensity_rounded` / `round_intensities_params` | Intensity rounding details |
 | `keeps_largest_component` / `keep_largest_component_apply_to` / `keep_largest_component_params` | Largest-component mask processing details and effective mask target |
+| `is_mask_grown` / `grow_mask_apply_to` / `grow_mask_params` | Mask growing details and effective mask target |
 | `is_mask_binarized` / `binarize_mask_apply_to` / `binarize_mask_params` | Mask binarization details and effective mask target |
 | `is_filtered` / `filter_type` / `filter_params` | Response-map filter details |
 

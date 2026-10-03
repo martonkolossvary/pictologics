@@ -244,7 +244,7 @@ feature it records the preprocessing steps that occurred before the
 `extract_features` step, including repeated-step parameters as compact JSON
 arrays. It also records which runtime mask(s) each feature row uses and the
 effective `apply_to` target for mask-changing steps such as `resegment`,
-`filter_outliers`, `keep_largest_component`, and `binarize_mask`.
+`filter_outliers`, `keep_largest_component`, `grow_mask`, and `binarize_mask`.
 
 ### YAML Format Specification
 

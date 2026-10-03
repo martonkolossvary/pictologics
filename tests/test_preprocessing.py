@@ -25,6 +25,7 @@ from pictologics.preprocessing import (
     discretise_image,
     extract_roi,
     filter_outliers,
+    grow_mask,
     keep_largest_component,
     resample_image,
     resegment_mask,
@@ -1105,3 +1106,119 @@ def test_all_finite() -> None:
                 broken[2, 3, 4] = bad
                 assert not _all_finite(broken)
                 assert not _all_finite(broken.astype(np.float32))
+
+
+def _grown_by_definition(
+    inside: np.ndarray, spacing: tuple[float, float, float], x: float
+) -> np.ndarray:
+    """The mask `inside` grown by x mm (shrunk by -x mm), voxel by voxel: the distance from
+    each voxel center to the nearest center in (out of) the mask, with one layer of voxels
+    outside the mask past each image edge."""
+    padded = np.pad(inside, 1)
+    centers = np.indices(padded.shape).reshape(3, -1).T * np.asarray(spacing)
+    targets = centers[padded.ravel() == (x > 0)]
+    nearest = np.sqrt(((centers[:, None, :] - targets[None]) ** 2).sum(axis=2)).min(axis=1)
+    nearest = nearest.reshape(padded.shape)[1:-1, 1:-1, 1:-1]
+    if x > 0:
+        return inside | (nearest <= x + 1e-6)
+    return inside & (nearest > -x + 1e-6) if x < 0 else inside
+
+
+def test_grow_mask_matches_the_distance_definition() -> None:
+    # Grow, shrink and rings of a random mask on voxels of three sizes, against the
+    # distances voxel by voxel (also at the image edge, where outside voxels follow).
+    rng = np.random.default_rng(3)
+    inside = rng.random((6, 7, 8)) < 0.35
+    inside[0, 3, 3] = inside[5, 6, 7] = True  # mask voxels at the edge
+    spacing = (0.5, 0.7, 0.9)
+    mask = Image(inside.astype(np.uint8) * 3, spacing, (1.0, 2.0, 3.0))
+    for to_mm, from_mm in (
+        (1.2, None), (0.5, None), (2.0, 0.6), (0.0, -0.8), (-0.4, None), (-0.6, -1.5),
+        (1.0, -0.7), (0.0, None),
+    ):  # fmt: skip
+        expected = _grown_by_definition(inside, spacing, to_mm)
+        if from_mm is not None:
+            expected &= ~_grown_by_definition(inside, spacing, from_mm)
+        grown = grow_mask(mask, to_mm, from_mm)
+        assert grown.array.dtype == np.uint8
+        assert_array_equal(grown.array, expected)
+        assert (grown.spacing, grown.origin) == (mask.spacing, mask.origin)
+
+
+def test_grow_mask_counts_whole_steps_at_the_limit() -> None:
+    # 3 steps of 0.4 mm are 1.2 mm (1.2000000000000002 in floating point): a grow by
+    # 1.2 mm adds 3 voxels along the 0.4 mm axes and 1 along the 0.8 mm axis.
+    array = np.zeros((9, 9, 9), dtype=np.uint8)
+    array[4, 4, 4] = 1
+    grown = grow_mask(Image(array, (0.4, 0.4, 0.8), (0.0, 0.0, 0.0)), 1.2).array
+    assert np.flatnonzero(grown[:, 4, 4]).tolist() == [1, 2, 3, 4, 5, 6, 7]
+    assert np.flatnonzero(grown[4, 4, :]).tolist() == [3, 4, 5]
+    # and a shrink by 0.4 mm removes the voxels next to the outside
+    cube = np.ones((5, 5, 5), dtype=np.uint8)
+    core = grow_mask(Image(cube, (0.4, 0.4, 0.4), (0.0, 0.0, 0.0)), -0.4).array
+    assert core.sum() == 27 and core[1:4, 1:4, 1:4].all()
+
+
+def test_grow_mask_of_an_empty_mask_and_bad_distances() -> None:
+    empty = Image(np.zeros((4, 4, 4), dtype=np.uint8), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    assert not grow_mask(empty, 2.0).array.any()
+    for to_mm, from_mm, message in (
+        ("3", None, "to_mm must be a finite number"),
+        (True, None, "to_mm must be a finite number"),
+        (np.inf, None, "to_mm must be a finite number"),
+        (2.0, np.nan, "from_mm must be a finite number"),
+        (2.0, 2.0, r"from_mm \(2.0\) must be below to_mm \(2.0\)"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            grow_mask(empty, to_mm, from_mm)
+    assert grow_mask(empty, np.int64(1), np.float32(0.5)).array.dtype == np.uint8
+
+
+def test_nearest_roi_map_and_part() -> None:
+    # Each voxel near the ROIs gets the label of its nearest ROI voxel; the added voxels
+    # of a mask on another grid (other spacing, origin and axis directions) keep the
+    # label of the map voxel nearest to their centers.
+    from pictologics.preprocessing import _nearest_roi_map, _nearest_roi_part
+
+    assert _nearest_roi_map(Image(np.zeros((3, 3, 3)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), 1) is None
+    labels = np.zeros((16, 16, 16), dtype=np.int64)
+    labels[6:9, 5:8, 6:10] = 1
+    labels[6:9, 8:11, 6:10] = 2
+    direction = np.array([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    label_map = Image(labels, (0.5, 0.5, 0.5), (4.0, -1.0, 2.0), direction=direction)
+    nearest = _nearest_roi_map(label_map, 1.0)
+    assert nearest is not None and nearest.array.shape == (11, 14, 12)  # 1 mm and 2 voxels more
+
+    def world(image: Image, index: np.ndarray) -> np.ndarray:
+        axes = np.asarray(image.direction, dtype=float).reshape(3, 3) * np.asarray(image.spacing)
+        return np.asarray(image.origin) + index @ axes.T
+
+    roi = np.argwhere(labels != 0)
+    map_index = np.argwhere(np.ones(nearest.array.shape, dtype=bool))
+    gaps = np.linalg.norm(world(nearest, map_index)[:, None] - world(label_map, roi)[None], axis=2)
+    closest = labels[tuple(roi[gaps.argmin(axis=1)].T)]
+    assert_array_equal(nearest.array.ravel(), closest)
+    # A grid of 0.7 mm in other axis directions: ROI 1 grown by 1.5 mm
+    grid = Image(
+        np.zeros((12, 12, 12), np.uint8), (0.7, 0.7, 0.7), (0.5, -6.5, 2.0), direction=np.eye(3)
+    )
+    centers = world(grid, np.argwhere(np.ones((12, 12, 12), dtype=bool)))
+    to_roi1 = np.linalg.norm(
+        centers[:, None] - world(label_map, np.argwhere(labels == 1))[None], axis=2
+    )
+    mask = Image(
+        (to_roi1.min(axis=1) < 0.5).reshape(12, 12, 12).astype(np.uint8),
+        grid.spacing,
+        grid.origin,
+        direction=grid.direction,
+    )
+    grown = grow_mask(mask, 1.5)
+    added = np.argwhere((grown.array != 0) & (mask.array == 0))
+    map_centers = world(nearest, map_index)
+    owner = nearest.array.ravel()[
+        np.linalg.norm(world(grid, added)[:, None] - map_centers[None], axis=2).argmin(axis=1)
+    ]
+    assert 0 < (owner == 1).sum() < len(added)  # both ROIs own some of the added voxels
+    kept = _nearest_roi_part(grow_mask(mask, 1.5), mask, nearest, 1).array
+    assert_array_equal(kept[tuple(added.T)], (owner == 1).astype(np.uint8))
+    assert (kept[mask.array != 0] == 1).all()

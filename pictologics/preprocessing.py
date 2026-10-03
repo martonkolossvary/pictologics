@@ -23,7 +23,7 @@ from typing import Any, Literal, Optional, cast
 import numpy as np
 from numba import jit, prange
 from numpy import typing as npt
-from scipy.ndimage import affine_transform, generate_binary_structure, label
+from scipy.ndimage import affine_transform, distance_transform_edt, generate_binary_structure, label
 
 from .features._utils import PRANGE_ONLY, compute_nonzero_bbox, roi_min_max
 from .loader import Image, _direction_matrix, _validate_geometry
@@ -1710,3 +1710,147 @@ def keep_largest_component(mask: Image) -> Image:
         direction=mask.direction,
         modality=mask.modality,
     )
+
+
+# A distance within this much (mm) of a grow_mask limit counts as at the limit: 3 steps of
+# 0.4 mm are 1.2000000000000002 mm in floating point.
+_GROW_TOLERANCE_MM = 1e-6
+
+
+def _grow_problem(to_mm: Any, from_mm: Any = None) -> Optional[str]:
+    """Why grow_mask cannot take these distances, or None when it can."""
+    for name, value in (("to_mm", to_mm), ("from_mm", from_mm)):
+        if (name == "to_mm" or value is not None) and not (
+            isinstance(value, (int, float, np.integer, np.floating))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        ):
+            return f"{name} must be a finite number (mm), not {value!r}"
+    if from_mm is not None and from_mm >= to_mm:
+        return f"from_mm ({from_mm}) must be below to_mm ({to_mm})"
+    return None
+
+
+def grow_mask(mask: Image, to_mm: float, from_mm: Optional[float] = None) -> Image:
+    """
+    Grow or shrink a mask by a distance in mm, or keep a ring at its edge.
+
+    Outside the mask, the distance of a voxel is the distance from its center to the
+    nearest center of a mask voxel. Inside the mask, it is the distance to the nearest
+    center of a voxel outside the mask (the voxels past the image edge count as outside).
+    The distances are in mm, with the spacing of each axis, so the mask changes by the
+    same amount in every direction, straight out from its surface.
+
+    A positive `to_mm` adds the voxels up to `to_mm` from the mask. A negative `to_mm`
+    removes the mask voxels up to -`to_mm` from the outside. With `from_mm`, the result
+    leaves out the mask grown (or shrunk) by `from_mm`, which leaves a ring. On a grid, the
+    mask changes by whole voxels: a grow by 1 mm on 0.4 mm voxels adds 2 voxels along an
+    axis.
+
+    Args:
+        mask: A 3D mask. Every voxel that is not 0 is in the mask.
+        to_mm: The distance (mm) to grow the mask by. A negative distance shrinks it.
+        from_mm: None, or a distance (mm) below `to_mm`: the result leaves out the mask
+            grown (or shrunk, when negative) by this distance.
+
+    Returns:
+        The new mask (uint8: 1 in the mask, 0 outside), with the geometry of `mask`.
+
+    Raises:
+        ValueError: If a distance is not a finite number, or `from_mm` is not below
+            `to_mm`.
+
+    Example:
+        ```python
+        from pictologics.preprocessing import grow_mask
+
+        ring = grow_mask(mask, to_mm=3, from_mm=0)  # the 3 mm around the mask
+        core = grow_mask(mask, to_mm=-1)  # the mask without its outer 1 mm
+        rim = grow_mask(mask, to_mm=0, from_mm=-1)  # the outer 1 mm of the mask
+        ```
+    """
+    problem = _grow_problem(to_mm, from_mm)
+    if problem:
+        raise ValueError(problem)
+    array = mask.array
+    new_array: npt.NDArray[Any] = np.zeros(array.shape, dtype=np.uint8)
+    bbox = compute_nonzero_bbox(array)
+    if bbox is not None:
+        spacing = tuple(float(s) for s in mask.spacing)
+        reach = max(float(to_mm), 0.0) + _GROW_TOLERANCE_MM
+        box = tuple(
+            slice(max(b.start - int(reach // s), 0), min(b.stop + int(reach // s), n))
+            for b, s, n in zip(bbox, spacing, array.shape, strict=True)
+        )
+        # One voxel more on each side, outside the mask (also past the image edge)
+        inside = np.pad(array[box] != 0, 1)
+        distances: dict[bool, npt.NDArray[np.float64]] = {}
+
+        def grown(x: float) -> npt.NDArray[np.bool_]:
+            """The voxels of the mask grown by x mm (shrunk by -x mm when x < 0)."""
+            if x == 0:
+                return inside
+            outside = x > 0
+            if outside not in distances:  # to the nearest voxel in (out of) the mask
+                distances[outside] = distance_transform_edt(
+                    ~inside if outside else inside, sampling=spacing
+                )
+            if outside:
+                return distances[outside] <= x + _GROW_TOLERANCE_MM
+            return distances[outside] > _GROW_TOLERANCE_MM - x
+
+        result = grown(float(to_mm))
+        if from_mm is not None:
+            result = result & ~grown(float(from_mm))
+        new_array[box] = result[1:-1, 1:-1, 1:-1]
+    return Image(
+        array=new_array,
+        spacing=mask.spacing,
+        origin=mask.origin,
+        direction=mask.direction,
+        modality=mask.modality,
+    )
+
+
+def _nearest_roi_map(labels: Image, reach_mm: float) -> Optional[Image]:
+    """The label of the nearest ROI voxel of each voxel up to `reach_mm` (and 2 voxels)
+    from the box of the ROIs of the label map `labels` (0: background). Each voxel has one
+    nearest voxel (the feature transform of scipy), so the voxels of the map have one ROI
+    each. None for a map without ROIs."""
+    box = compute_nonzero_bbox(labels.array)
+    if box is None:
+        return None
+    margins = [math.ceil(reach_mm / s) + 2 for s in labels.spacing]
+    region = cast(
+        tuple[slice, slice, slice],
+        tuple(
+            slice(max(b.start - m, 0), min(b.stop + m, n))
+            for b, m, n in zip(box, margins, labels.array.shape, strict=True)
+        ),
+    )
+    part = labels.array[region]
+    nearest = distance_transform_edt(
+        part == 0, sampling=labels.spacing, return_distances=False, return_indices=True
+    )
+    return Image(
+        array=part[tuple(nearest)],
+        spacing=labels.spacing,
+        origin=_region_origin(labels.origin, labels.direction, labels.spacing, region),
+        direction=labels.direction,
+        modality=labels.modality,
+    )
+
+
+def _nearest_roi_part(grown: Image, mask: Image, nearest: Image, label: int) -> Image:
+    """`grown` (a mask grown from `mask`, on its grid) without the added voxels whose
+    nearest ROI in the map `nearest` (see _nearest_roi_map; the map voxel nearest to each
+    voxel center) is not `label`. Changes the array of `grown`."""
+    added = np.argwhere((grown.array != 0) & (mask.array == 0))
+    to_world = _direction_matrix(grown.direction) * np.asarray(grown.spacing)
+    to_map = np.linalg.inv(_direction_matrix(nearest.direction) * np.asarray(nearest.spacing))
+    shift = np.asarray(grown.origin) - np.asarray(nearest.origin)
+    where = np.rint((added @ to_world.T + shift) @ to_map.T).astype(np.intp)
+    np.clip(where, 0, np.array(nearest.array.shape) - 1, out=where)
+    other = added[nearest.array[tuple(where.T)] != label]
+    grown.array[tuple(other.T)] = 0
+    return grown
