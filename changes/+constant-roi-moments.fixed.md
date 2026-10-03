@@ -1,1 +1,0 @@
-A constant ROI now gives skewness and kurtosis 0, as IBSI defines, for the intensity and the intensity histogram features. Before, they were NaN. Equal values whose mean is not exact (for example 0.1) also give 0.

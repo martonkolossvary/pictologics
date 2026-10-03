@@ -1,1 +1,0 @@
-JSON output now writes NaN and infinite values as null. Before, it wrote the token NaN, which strict JSON readers reject. `save_results` now raises an error for an unknown file extension (a .parquet file got CSV text before), writes tab-separated files for .tsv, and makes a missing output folder.

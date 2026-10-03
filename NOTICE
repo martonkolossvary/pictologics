@@ -14,7 +14,7 @@ This product uses the following third-party libraries:
 - Numba (BSD 2-Clause) - https://numba.pydata.org/
 - NiBabel (MIT) - https://nipy.org/nibabel/
 - PyDICOM (MIT) - https://pydicom.github.io/
-- highdicom (MIT) - https://github.com/ImagingDataCommons/highdicom
+- python-gdcm (Apache-2.0; it contains GDCM, BSD 3-Clause) - https://github.com/tfmoraes/python-gdcm
 - pandas (BSD 3-Clause) - https://pandas.pydata.org/
 - tqdm (MIT/MPL 2.0) - https://tqdm.github.io/
 - Matplotlib (PSF-based) - https://matplotlib.org/

@@ -1,1 +1,0 @@
-`load_image` now also takes the DICOM files of one series: a list of file paths, or a `DicomPhaseInfo` from `get_dicom_phases`. It then reads only these files. Loading all 20 phases of a 1,000-file cardiac series takes 0.56 s this way, instead of 4.4 s with `dataset_index`, which reads all files for each phase.

@@ -49,9 +49,11 @@ The core calculations are parallelized and optimized for memory usage.
 
 Usage:
 ------
-The main entry point is `calculate_all_texture_matrices`, which computes all raw matrices.
-Then, specific feature calculation functions (e.g., `calculate_glcm_features`) can be called
-using these matrices.
+`calculate_all_texture_features` computes the matrices once and gives the features of all six
+families, or of the families in `families`. `calculate_all_texture_matrices` gives the raw
+matrices, and the family functions (e.g., `calculate_glcm_features`) take them. All take the
+IBSI 1 distances `glcm_distance`, `ngtdm_distance` and `ngldm_distance` (default 1) and the
+NGLDM coarseness `ngldm_alpha` (default 0).
 
 Example:
         Calculate texture features:
@@ -982,69 +984,71 @@ def calculate_glcm_features(
     glcm_distance: int = 1,
 ) -> dict[str, float]:
     r"""
-        Calculate Grey Level Co-occurrence Matrix (GLCM) features.
+    Calculate Grey Level Co-occurrence Matrix (GLCM) features.
 
-        The GLCM describes the second-order statistical distribution of grey levels in the ROI.
-        It counts how often pairs of grey levels occur at a specific distance and direction.
-        This implementation computes features based on the 3D merged GLCM (averaged over all 13 directions),
-        making the features rotationally invariant.
+    The GLCM describes the second-order statistical distribution of grey levels in the ROI.
+    It counts how often pairs of grey levels occur at a specific distance and direction.
+    This implementation computes features based on the 3D merged GLCM (averaged over all 13 directions),
+    making the features rotationally invariant.
 
-        **IBSI Reference**: Section 3.6 (Grey Level Co-occurrence Based Features).
+    **IBSI Reference**: Section 3.6 (Grey Level Co-occurrence Based Features).
 
-        **Mathematical Definition**:
-        Let $P(i,j)$ be the co-occurrence matrix, where $i$ and $j$ are grey levels.
-        The matrix is normalized such that $\sum_{i,j} P(i,j) = 1$.
+    **Mathematical Definition**:
+    Let $P(i,j)$ be the co-occurrence matrix, where $i$ and $j$ are grey levels.
+    The matrix is normalized such that $\sum_{i,j} P(i,j) = 1$.
 
-        **Calculated Features**:
-        *   Joint Maximum (GYBY)
-        *   Joint Average (60VM)
-        *   Joint Variance (UR99)
-        *   Joint Entropy (TU9B)
-        *   Difference Average (TF7R)
-        *   Difference Variance (D3YU)
-        *   Difference Entropy (NTRS)
-        *   Sum Average (ZGXS)
-        *   Sum Variance (OEEB)
-        *   Sum Entropy (P6QZ)
-        *   Angular Second Moment (8ZQL)
-        *   Contrast (ACUI)
-        *   Dissimilarity (8S9J)
-        *   Inverse Difference (IB1Z)
-        *   Normalised Inverse Difference (NDRX)
-        *   Inverse Difference Moment (WF0Z)
-        *   Normalised Inverse Difference Moment (1QCO)
-        *   Inverse Variance (E8JP)
-        *   Correlation (NI2N)
-        *   Autocorrelation (QWB0)
-        *   Cluster Tendency (DG8W)
-        *   Cluster Shade (7NFM)
-        *   Cluster Prominence (AE86)
-        *   Information Correlation 1 (R8DG)
-        *   Information Correlation 2 (JN9H)
+    **Calculated Features**:
+    *   Joint Maximum (GYBY)
+    *   Joint Average (60VM)
+    *   Joint Variance (UR99)
+    *   Joint Entropy (TU9B)
+    *   Difference Average (TF7R)
+    *   Difference Variance (D3YU)
+    *   Difference Entropy (NTRS)
+    *   Sum Average (ZGXS)
+    *   Sum Variance (OEEB)
+    *   Sum Entropy (P6QZ)
+    *   Angular Second Moment (8ZQL)
+    *   Contrast (ACUI)
+    *   Dissimilarity (8S9J)
+    *   Inverse Difference (IB1Z)
+    *   Normalised Inverse Difference (NDRX)
+    *   Inverse Difference Moment (WF0Z)
+    *   Normalised Inverse Difference Moment (1QCO)
+    *   Inverse Variance (E8JP)
+    *   Correlation (NI2N)
+    *   Autocorrelation (QWB0)
+    *   Cluster Tendency (DG8W)
+    *   Cluster Shade (7NFM)
+    *   Cluster Prominence (AE86)
+    *   Information Correlation 1 (R8DG)
+    *   Information Correlation 2 (JN9H)
 
-        Args:
-            data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
-            mask (npt.NDArray[np.floating[Any]]): The 3D mask array defining the ROI. Nonzero values indicate ROI membership.
-            n_bins (int): The number of grey levels.
-            glcm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLCM matrix. If provided, `data` and `mask`
-                are ignored for matrix calculation, but `data` is still used for `Ng` estimation if needed.
-                If None, the matrix is calculated from scratch.
-            glcm_distance (int): The distance δ between the two voxels of a pair along each
-                of the 13 directions (IBSI 1), for a matrix calculated from scratch. Default 1.
+    Args:
+        data (npt.NDArray[np.floating[Any]]): The 3D image array containing discretised grey levels.
+        mask (npt.NDArray[np.floating[Any]]): The 3D mask array defining the ROI. Nonzero values indicate ROI membership.
+        n_bins (int): The number of grey levels.
+        glcm_matrix (Optional[npt.NDArray[np.floating[Any]]]): Pre-calculated GLCM matrix. If provided, `data` and `mask`
+            are ignored for matrix calculation, but `data` is still used for `Ng` estimation if needed.
+            If None, the matrix is calculated from scratch.
+        glcm_distance (int): The distance δ between the two voxels of a pair along each
+            of the 13 directions (IBSI 1), for a matrix calculated from scratch. Default 1.
 
-        Returns:
-            dict[str, float]: A dictionary of calculated GLCM features, keyed by their name and IBSI code.
-                Example keys: 'joint_maximum_GYBY', 'contrast_ACUI', 'correlation_NI2N'.
+    Returns:
+        dict[str, float]: A dictionary of calculated GLCM features, keyed by their name and IBSI code.
+            Example keys: 'joint_maximum_GYBY', 'contrast_ACUI', 'correlation_NI2N'.
 
-        Example:
-            ```python
-            import numpy as np
-    from numpy import typing as npt
-            # ... assuming data and mask defined ...
-            features = calculate_glcm_features(data, mask, n_bins=32)
-            print(features['contrast_ACUI'])
-            ```
-            12.5
+    Example:
+        ```python
+        import numpy as np
+        from pictologics.features.texture import calculate_glcm_features
+
+        rng = np.random.default_rng(0)
+        data = rng.integers(1, 33, (20, 20, 20)).astype(np.float64)
+        mask = np.ones((20, 20, 20), dtype=np.uint8)
+        features = calculate_glcm_features(data, mask, n_bins=32)
+        print(round(features["contrast_ACUI"], 1))
+        ```
     """
     if glcm_matrix is None:
         # Standalone path: crop to the ROI bbox and rebind, so the kernel and the

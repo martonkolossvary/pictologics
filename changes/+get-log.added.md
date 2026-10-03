@@ -1,1 +1,0 @@
-`RadiomicsPipeline.get_log()` returns a copy of the processing log, with one entry for each configuration run. Each entry now also holds the run time of its configuration (`elapsed_seconds`). Before, the log was only in the private `_log` list, which the documentation and SlicerPictologics read.

@@ -100,41 +100,41 @@ assert max_diff <= tolerance  # IBSI 2 Phase 1 pass criterion
 
 | Test | Filter | Phantom | Error % | Time | Memory | Status |
 |------|--------|---------|---------|------|--------|--------|
-| 1.a.1 | Mean | checkerboard | 0.00% | 4ms | 2.1MB | ✅ PASS |
-| 1.a.2 | Mean | checkerboard | 0.00% | 2ms | 2.0MB | ✅ PASS |
-| 1.a.3 | Mean | checkerboard | 0.00% | 2ms | 2.0MB | ✅ PASS |
+| 1.a.1 | Mean | checkerboard | 0.00% | 5ms | 2.1MB | ✅ PASS |
+| 1.a.2 | Mean | checkerboard | 0.00% | 3ms | 2.0MB | ✅ PASS |
+| 1.a.3 | Mean | checkerboard | 0.00% | 3ms | 2.0MB | ✅ PASS |
 | 1.a.4 | Mean | checkerboard | 0.00% | 2ms | 2.0MB | ✅ PASS |
 | 1.b.1 | Mean (2D) | impulse_response | - | - | - | ⏭ SKIP |
-| 2.a | LoG | impulse_response | 0.00% | 9ms | 2.0MB | ✅ PASS |
-| 2.b | LoG | checkerboard | 0.03% | 9ms | 2.0MB | ✅ PASS |
+| 2.a | LoG | impulse_response | 0.00% | 10ms | 2.0MB | ✅ PASS |
+| 2.b | LoG | checkerboard | 0.03% | 8ms | 2.0MB | ✅ PASS |
 | 2.c | LoG (2D) | checkerboard | - | - | - | ⏭ SKIP |
 | 3.a.1 | Laws | impulse_response | 0.00% | 2ms | 2.0MB | ✅ PASS |
 | 3.a.2 | Laws | impulse_response | 0.00% | 6ms | 4.1MB | ✅ PASS |
-| 3.a.3 | Laws | impulse_response | 0.00% | 8ms | 4.1MB | ✅ PASS |
+| 3.a.3 | Laws | impulse_response | 0.00% | 7ms | 4.1MB | ✅ PASS |
 | 3.b.1 | Laws | checkerboard | 0.00% | 2ms | 2.0MB | ✅ PASS |
 | 3.b.2 | Laws | checkerboard | 0.00% | 6ms | 4.1MB | ✅ PASS |
 | 3.b.3 | Laws | checkerboard | 0.00% | 7ms | 4.1MB | ✅ PASS |
 | 3.c.1 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
 | 3.c.2 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
 | 3.c.3 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
-| 4.a.1 | Gabor | impulse_response | 0.00% | 16ms | 12.3MB | ✅ PASS |
-| 4.a.2 | Gabor | impulse_response | 0.00% | 94ms | 17.5MB | ✅ PASS |
-| 4.b.1 | Gabor | sphere | 0.01% | 17ms | 11.0MB | ✅ PASS |
-| 4.b.2 | Gabor | sphere | 0.09% | 152ms | 19.4MB | ✅ PASS |
+| 4.a.1 | Gabor | impulse_response | 0.00% | 15ms | 11.8MB | ✅ PASS |
+| 4.a.2 | Gabor | impulse_response | 0.00% | 90ms | 17.3MB | ✅ PASS |
+| 4.b.1 | Gabor | sphere | 0.01% | 17ms | 11.9MB | ✅ PASS |
+| 4.b.2 | Gabor | sphere | 0.09% | 147ms | 19.4MB | ✅ PASS |
 | 5.a.1 | Daubechies 2 | impulse_response | 0.00% | 2ms | 2.0MB | ✅ PASS |
-| 5.a.2 | Daubechies 2 | impulse_response | 0.00% | 12ms | 16.2MB | ✅ PASS |
+| 5.a.2 | Daubechies 2 | impulse_response | 0.00% | 11ms | 16.2MB | ✅ PASS |
 | 6.a.1 | Coiflet 1 | sphere | 0.00% | 2ms | 2.0MB | ✅ PASS |
 | 6.a.2 | Coiflet 1 | sphere | 0.00% | 12ms | 16.1MB | ✅ PASS |
 | 7.a.1 | Haar | checkerboard | 0.00% | 17ms | 16.2MB | ✅ PASS |
-| 7.a.2 | Haar | checkerboard | 0.00% | 18ms | 16.2MB | ✅ PASS |
+| 7.a.2 | Haar | checkerboard | 0.00% | 17ms | 16.1MB | ✅ PASS |
 | 8.a.1 | Simoncelli | checkerboard | 0.38% | 3ms | 6.1MB | ✅ PASS |
 | 8.a.2 | Simoncelli | checkerboard | 0.00% | 2ms | 6.1MB | ✅ PASS |
-| 8.a.3 | Simoncelli | checkerboard | 0.00% | 3ms | 6.1MB | ✅ PASS |
-| 9.a | Riesz-LoG | impulse_response | 0.05% | 21ms | 49.4MB | ✅ PASS |
-| 9.b.1 | Riesz-LoG | sphere | 0.32% | 20ms | 49.4MB | ✅ PASS |
+| 8.a.3 | Simoncelli | checkerboard | 0.00% | 2ms | 6.1MB | ✅ PASS |
+| 9.a | Riesz-LoG | impulse_response | 0.05% | 21ms | 44.0MB | ✅ PASS |
+| 9.b.1 | Riesz-LoG | sphere | 0.32% | 19ms | 44.0MB | ✅ PASS |
 | 9.b.2 | Riesz-LoG (aligned) | sphere | - | - | - | ❗ REF. |
 | 10.a | Riesz-Simoncelli | impulse_response | - | - | - | ❗ REF. |
-| 10.b.1 | Riesz-Simoncelli | pattern_1 | 0.21% | 11ms | 49.7MB | ✅ PASS |
+| 10.b.1 | Riesz-Simoncelli | pattern_1 | 0.21% | 10ms | 43.7MB | ✅ PASS |
 | 10.b.2 | Riesz-Simoncelli (aligned) | pattern_1 | - | - | - | ❗ REF. |
 
 ### Tolerance Criteria

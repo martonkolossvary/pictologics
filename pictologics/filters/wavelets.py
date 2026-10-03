@@ -77,8 +77,10 @@ def wavelet_transform(
         Response map for the specified decomposition
 
     Raises:
-        ValueError: If `rotation_invariant=True` and `pooling` is not "max",
-            "average", or "min".
+        ValueError: If `level` is not a whole number of 1 or more, `decomposition` is not
+            three letters of L or H, `boundary` is unknown, `padding_value` is not 0 with a
+            boundary other than the constant one, or `rotation_invariant=True` and
+            `pooling` is not "max", "average", or "min".
 
     Example:
         Apply Daubechies 2 wavelet transform at level 1, returning LHL coefficients:
@@ -417,8 +419,9 @@ def simoncelli_wavelet(
         Band-pass response map (B map) for the specified level
 
     Raises:
-        ValueError: If `boundary` is a string that is not a valid
-            `BoundaryCondition` member name.
+        ValueError: If `level` is not a whole number of 1 or more, `boundary` is not a
+            valid `BoundaryCondition` member name, or `padding_value` is not 0 with a
+            boundary other than the constant one.
 
     Example:
         Apply first-level Simoncelli wavelet (highest frequency band):

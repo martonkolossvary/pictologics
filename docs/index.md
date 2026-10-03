@@ -13,37 +13,58 @@
 
 ![Pictologics Icon](assets/logo.png){ align=right width=200 }
 
-**Pictologics** is a pure python, IBSI 1 and 2 compliant library for radiomic feature extraction from medical images.
+**Pictologics** is a Python library for radiomic feature extraction from medical images. It follows IBSI 1 (the features) and IBSI 2 (the filters), and it checks its results against the IBSI reference values.
 
-See also the [NOTICE](NOTICE.md) file for attribution and third-party library information.
+See the [NOTICE](NOTICE.md) file for the attribution and the third-party libraries.
 
 ## Why Pictologics?
 
-*   **🚀 High Performance**: Uses `numba` for Just In Time (JIT) compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](benchmarks.md) page for details).
-*   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantoms, and clinical datasets:
-    *   **IBSI 1**: Feature extraction ([compliance report](ibsi1_compliance.md))
-    *   **IBSI 2**: Image filters ([Phase 1 filter compliance](ibsi2_compliance.md) | [Phase 2 filtered features](ibsi2_phase2_compliance.md) | [Phase 3 reproducibility](ibsi2_phase3_compliance.md))
-*   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, NRRD, MetaImage, DICOM, DICOM-SEG, DICOM-RTSTRUCT, DICOM-SR).
-*   **✨ User-Friendly**: Pure Python implementation with a simple installation process and user-friendly pipeline module supporting easy feature extraction and analysis, ensuring a smooth experience from setup to analysis.
-*   **🛡️ Predictable Results**: Every pipeline run returns a complete, fixed set of feature columns — even when individual features or entire configurations fail (values are `NaN`). Batch processing never produces missing columns or ragged rows.
-*   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
+*   **🚀 Fast**: Numba compiles the computations for your computer, and they run on all cores. The [Benchmarks](benchmarks.md) page gives the time of each part.
+*   **✅ IBSI compliant**: checked against the IBSI phantoms and data sets:
+    *   **IBSI 1** (features): 675 feature values pass; 21 more have a reference value without a tolerance ([report](ibsi1_compliance.md)).
+    *   **IBSI 2 Phase 1** (filters): 28 of 28 compared tests pass ([report](ibsi2_compliance.md)).
+    *   **IBSI 2 Phase 2** (filtered features): 9 of 9 tests pass ([report](ibsi2_phase2_compliance.md)).
+    *   **IBSI 2 Phase 3** (reproducibility): 153 scans, compared with 9 teams ([report](ibsi2_phase3_compliance.md)).
+*   **🔧 Versatile**: reads NIfTI, NRRD, MetaImage and DICOM images, DICOM SEG, DICOM RTSTRUCT and 3D Slicer segmentations, and DICOM SR reports.
+*   **✨ Easy to use**: pip installs it. One pipeline runs the preprocessing and the features, for one image or for a whole study.
+*   **🛡️ Predictable results**: each configuration gives all its feature columns, also when a step fails (the values are then `NaN`). A study table never has missing columns.
+*   **🛠️ Maintained**: Pictologics is developed to give robust radiomic features that describe the morphology of diseases on radiological images.
 
+## What Is New in 0.6.0
+
+- **Studies**: `run_batch` runs many cases, in more than one process, with one result file for each case. A stopped batch goes on where it stopped. `run_rois` runs each ROI of a label map with one image load.
+- **Masks**: `grow_mask` grows or shrinks a mask by a distance in mm, or keeps a ring, for example the fat around a vessel.
+- **MR and PET**: the `normalise` step normalises MR intensities, and `load_image(..., suv="bw")` gives PET images in SUV.
+- **Files**: new readers for NRRD, MetaImage, 3D Slicer `.seg.nrrd` and DICOM RTSTRUCT, and `save_image` writes NIfTI files.
+- **Filters and features**: the Gaussian filter, constant padding for all filters, the parts of the Gabor response, and the IBSI texture distances.
+- **Templates**: 60 configurations for cardiac CT (`lv` and `coronary`).
+- **Reproducibility**: each log entry records the `config_hash` of its configuration and the versions of the run.
+- **Breaking changes**: NIfTI geometry in the LPS+ frame, a fixed FBS start in every image, and the long-format column `feature_key`. See the [Changelog](CHANGELOG.md).
 
 ## Key Features
 
-*   **Loaders**: Support for NIfTI, NRRD, MetaImage and DICOM images, segmentations (DICOM-SEG, DICOM-RTSTRUCT, 3D Slicer `.seg.nrrd`), and report (DICOM-SR) formats.
-*   **Preprocessing**: Resampling, resegmentation, outlier filtering, mask growing and rings in mm, MR intensity normalisation, PET SUV, discretisation and others.
-*   **Features**:
-    *   **Morphology**: Volume, Surface Area, Compactness, etc.
-    *   **Intensity**: Mean, Median, Skewness, Kurtosis, etc.
-    *   **Texture**: GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM.
-*   **Filters**: IBSI 2-compliant convolutional filters including Mean, LoG, Laws, Gabor, Wavelets, Simoncelli and others.
-*   **Intelligent Deduplication**: Automatically avoids redundant computation when multiple configurations share preprocessing but differ only in discretization. Feature families like morphology and intensity are computed once and reused.
-*   **Configuration Management**: Export/import pipeline configurations in YAML/JSON. Share reproducible workflows, version control settings, and ensure consistent multi-site processing.
-*   **Utilities**: Built-in DICOM database parsing, organization and viewing tools.
+*   **Loaders**: NIfTI, NRRD, MetaImage and DICOM images (also compressed and multiframe DICOM, cardiac phases and PET in SUV), DICOM SEG, DICOM RTSTRUCT and 3D Slicer `.seg.nrrd` masks, and DICOM SR reports.
+*   **Preprocessing**: resampling, resegmentation, outlier filtering, the largest component, mask growing and rings in mm, label selection, MR normalisation and discretisation (FBN, FBS and fixed cutoffs).
+*   **Features**: the IBSI 1 families: morphology, intensity statistics, intensity histogram, intensity-volume histogram (IVH), local and spatial intensity, and the texture matrices GLCM, GLRLM, GLSZM, GLDZM, NGTDM and NGLDM.
+*   **Filters**: the IBSI 2 filters: mean, Gaussian, Laplacian of Gaussian, Laws, Gabor, separable wavelets, Simoncelli and Riesz.
+*   **Pipeline**: named configurations of steps, many ROIs (`run_rois`), many cases in parallel (`run_batch`), templates, and shared work between configurations.
+*   **Reproducibility**: configurations as YAML or JSON files, a feature catalog (`describe_features`), and a processing log with the configuration hash and the versions.
+*   **Utilities**: a DICOM database of patients, studies and series, slice viewers for quality checks, and DICOM SR measurement tables.
+
+## A First Example
+
+```python
+from pictologics import RadiomicsPipeline, format_results, save_results
+
+pipeline = RadiomicsPipeline()
+results = pipeline.run("ct.nii.gz", "lesion.nii.gz", subject_id="p001", config_names=["standard_fbs_16"])
+save_results([format_results(results, meta={"subject_id": "p001"})], "features.csv")
+```
 
 ## Getting Started
 
-1.  **Install**: Follow the [Installation](user_guide/installation.md) guide.
-2.  **Learn**: Check the [Pipeline & Preprocessing](user_guide/pipeline.md) guide.
-3.  **Reference**: Explore the [API Documentation](api/pipeline.md).
+1.  **Install**: see [Installation](user_guide/installation.md).
+2.  **Run a first example**: see the [Quick Start](user_guide/quick_start.md).
+3.  **Learn the pipeline**: see [The Pipeline](user_guide/pipeline.md) and [Pipeline Steps](user_guide/pipeline_steps.md).
+4.  **Find a script for your task**: see the [Cookbook](user_guide/cookbook.md) and the tutorials.
+5.  **Look up a function**: see the [API Reference](api/pipeline.md).

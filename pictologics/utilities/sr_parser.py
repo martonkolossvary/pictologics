@@ -299,12 +299,13 @@ class SRDocument:
         """Export measurements to CSV file.
 
         Args:
-            path: Output path for the CSV file.
+            path: Output path for the CSV file. A missing folder is made.
 
         Returns:
             Path to the created CSV file.
         """
         path_obj = Path(path)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
         df = self.get_measurements_df()
         df.to_csv(path_obj, index=False)
         return path_obj
@@ -316,7 +317,7 @@ class SRDocument:
         measurements, and metadata.
 
         Args:
-            path: Output path for the JSON file.
+            path: Output path for the JSON file. A missing folder is made.
 
         Returns:
             Path to the created JSON file.
@@ -360,6 +361,7 @@ class SRDocument:
                 group_data["measurements"].append(meas_data)
             data["measurement_groups"].append(group_data)
 
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
         with open(path_obj, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -570,12 +572,13 @@ class SRBatch:
         """Export combined measurements to a single CSV file.
 
         Args:
-            path: Output path for the combined CSV.
+            path: Output path for the combined CSV. A missing folder is made.
 
         Returns:
             Path to the created CSV file.
         """
         path_obj = Path(path)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
         df = self.get_combined_measurements_df()
         df.to_csv(path_obj, index=False)
         return path_obj
@@ -587,12 +590,13 @@ class SRBatch:
         output paths, and any error messages.
 
         Args:
-            path: Output path for the log CSV.
+            path: Output path for the log CSV. A missing folder is made.
 
         Returns:
             Path to the created CSV file.
         """
         path_obj = Path(path)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
         df = pd.DataFrame(self.processing_log)
         df.to_csv(path_obj, index=False)
         return path_obj

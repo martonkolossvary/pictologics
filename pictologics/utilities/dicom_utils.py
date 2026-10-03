@@ -92,14 +92,16 @@ def split_dicom_phases(
         from pictologics.utilities.dicom_utils import split_dicom_phases
         from pathlib import Path
 
-        # Assume metadata list already collected
+        # The metadata of the files: two phases at the same two slice positions
         metadata = [
-            {'file_path': Path('slice1.dcm'), 'CardiacPhase': 0},
-            {'file_path': Path('slice2.dcm'), 'CardiacPhase': 10},
-            # ... more files
+            {"file_path": Path(f"{phase}_{z}.dcm"), "NominalPercentageOfCardiacPhase": phase,
+             "ImagePositionPatient": (0.0, 0.0, float(z)), "InstanceNumber": z}
+            for phase in (0, 10)
+            for z in (0, 1)
         ]
         phases = split_dicom_phases(metadata)
         print(f"Found {len(phases)} phases")
+        # Found 2 phases
         ```
     """
     return _split_phases(file_metadata)[0]

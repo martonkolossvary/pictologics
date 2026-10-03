@@ -1,6 +1,6 @@
 # Preprocessing API
 
-Preprocessing utilities for image manipulation and sentinel value handling.
+The functions of the preprocessing steps, for use outside the pipeline. The pipeline steps call them (see [Pipeline Steps](../user_guide/pipeline_steps.md)).
 
 ## Image Resampling
 
@@ -16,11 +16,17 @@ Preprocessing utilities for image manipulation and sentinel value handling.
 
 ::: pictologics.preprocessing.resegment_mask
 
+::: pictologics.preprocessing.keep_largest_component
+
 ::: pictologics.preprocessing.grow_mask
 
-## Intensity Normalisation
+::: pictologics.preprocessing.extract_roi
+
+## Intensities
 
 ::: pictologics.preprocessing.normalise_image
+
+::: pictologics.preprocessing.round_intensities
 
 ## Outlier Filtering
 

@@ -37,8 +37,10 @@ Window/Level Normalization
 For medical imaging (CT, MR), window/level controls are essential for proper visualization.
 When `window_center` and `window_width` are specified:
 
-- **window_center** (Level): The center value of the display window (default: 200 HU for soft tissue)
-- **window_width** (Width): The range of values displayed (default: 600 HU)
+- **window_center** (Level): The center value of the display window (for example 40 HU for soft tissue)
+- **window_width** (Width): The range of values displayed (for example 400 HU)
+
+Without them, all slices share one gray scale: the minimum and maximum of the volume.
 
 Values outside [center - width/2, center + width/2] are clipped to black/white.
 
@@ -135,10 +137,6 @@ COLORMAPS: dict[str, list[tuple[int, int, int]]] = {
         (177, 89, 40),
     ],
 }
-
-# Default window/level values (suitable for soft tissue CT)
-DEFAULT_WINDOW_CENTER = 200.0
-DEFAULT_WINDOW_WIDTH = 600.0
 
 
 def _apply_window_level(

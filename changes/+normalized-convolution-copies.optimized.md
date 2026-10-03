@@ -1,1 +1,0 @@
-The source-mask forms of the mean, LoG and Laws filters make no extra copies. On 7.1 million voxels, the peak memory drops from 294 MB to 142 MB (mean) and from 296 MB to 163 MB (LoG). The values are the same.

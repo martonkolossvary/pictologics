@@ -1568,8 +1568,8 @@ def _filter_outliers_numba(
 
 def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
     """
-    Exclude outliers from the mask based on mean +/- sigma * std.
-    IBSI 3.6.
+    Exclude outliers from the mask based on mean +/- sigma * std: the intensity outlier
+    filtering of IBSI 1 re-segmentation.
 
     Args:
         image: Image object.
@@ -1913,8 +1913,8 @@ def normalise_image(
         The normalised image (float64), with the geometry of `image`.
 
     Raises:
-        ValueError: If an option is not valid, the region holds no voxel, or its values
-            do not spread (a scale of 0).
+        ValueError: If an option is not valid, the mask is not on the grid of the image,
+            the region holds no voxel, or its values do not spread (a scale of 0).
 
     Example:
         ```python
@@ -1930,6 +1930,8 @@ def normalise_image(
     )
     if problem:
         raise ValueError(problem)
+    if mask is not None:
+        _validate_geometry(mask, image, "mask", "image")
     select = None if mask is None else mask.array != 0
     return _normalised(image, method, select, percentiles, range_min, range_max)[0]
 

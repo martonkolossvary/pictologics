@@ -14,29 +14,43 @@
 [![Ruff](https://img.shields.io/badge/ruff-0%20issues-261230.svg)](https://github.com/astral-sh/ruff)
 [![Mypy](https://img.shields.io/badge/mypy-0%20errors-blue.svg)](https://mypy-lang.org/)
 
-**Pictologics** is a high-performance, IBSI-compliant Python library for radiomic feature extraction from medical images (NIfTI, NRRD, MetaImage, DICOM).
+**Pictologics** is a Python library for radiomic feature extraction from medical images. It follows IBSI 1 (the features) and IBSI 2 (the filters), and it checks its results against the IBSI reference values.
 
-Documentation (User Guide, API, Benchmarks): https://martonkolossvary.github.io/pictologics/
+Documentation (user guide, tutorials, API, benchmarks): https://martonkolossvary.github.io/pictologics/
 
 ## Why Pictologics?
 
-*   **🚀 High Performance**: Uses `numba` for Just In Time (JIT) compilation, achieving significant speedups over other libraries (speedups between 15-300x compared to pyradiomics, see [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page for details).
-*   **✅ IBSI Compliant**: Implements standard algorithms verified against the IBSI digital and CT phantoms, and clinical datasets:
-    *   **IBSI 1**: Feature extraction ([compliance report](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/))
-    *   **IBSI 2**: Image filters ([Phase 1](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/)), filtered features ([Phase 2](https://martonkolossvary.github.io/pictologics/ibsi2_phase2_compliance/)), reproducibility ([Phase 3](https://martonkolossvary.github.io/pictologics/ibsi2_phase3_compliance/))
-*   **🔧 Versatile**: Provides utilities for DICOM parsing and common scientific image processing tasks. Natively supports common image formats (NIfTI, NRRD, MetaImage, DICOM, DICOM-SEG, DICOM-RTSTRUCT, DICOM-SR).
-*   **✨ User-Friendly**: Pure Python implementation with a simple installation process and user-friendly pipeline module supporting easy feature extraction and analysis, ensuring a smooth experience from setup to analysis.
-*   **🛠️ Actively Maintained**: Continuously maintained and developed with the intention to provide robust latent radiomic features that can reliably describe morphological characteristics of diseases on radiological images.
+*   **🚀 Fast**: Numba compiles the computations for your computer, and they run on all cores. The [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page gives the time of each part.
+*   **✅ IBSI compliant**: checked against the IBSI phantoms and data sets:
+    *   **IBSI 1** (features): 675 feature values pass; 21 more have a reference value without a tolerance ([report](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/)).
+    *   **IBSI 2 Phase 1** (filters): 28 of 28 compared tests pass ([report](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/)).
+    *   **IBSI 2 Phase 2** (filtered features): 9 of 9 tests pass ([report](https://martonkolossvary.github.io/pictologics/ibsi2_phase2_compliance/)).
+    *   **IBSI 2 Phase 3** (reproducibility): 153 scans, compared with 9 teams ([report](https://martonkolossvary.github.io/pictologics/ibsi2_phase3_compliance/)).
+*   **🔧 Versatile**: reads NIfTI, NRRD, MetaImage and DICOM images, DICOM SEG, DICOM RTSTRUCT and 3D Slicer segmentations, and DICOM SR reports.
+*   **✨ Easy to use**: pip installs it. One pipeline runs the preprocessing and the features, for one image or for a whole study.
+*   **🛡️ Predictable results**: each configuration gives all its feature columns, also when a step fails (the values are then `NaN`). A study table never has missing columns.
+*   **🛠️ Maintained**: Pictologics is developed to give robust radiomic features that describe the morphology of diseases on radiological images.
+
+## What Is New in 0.6.0
+
+- **Studies**: `run_batch` runs many cases, in more than one process, with one result file for each case. A stopped batch goes on where it stopped. `run_rois` runs each ROI of a label map with one image load.
+- **Masks**: `grow_mask` grows or shrinks a mask by a distance in mm, or keeps a ring, for example the fat around a vessel.
+- **MR and PET**: the `normalise` step normalises MR intensities, and `load_image(..., suv="bw")` gives PET images in SUV.
+- **Files**: new readers for NRRD, MetaImage, 3D Slicer `.seg.nrrd` and DICOM RTSTRUCT, and `save_image` writes NIfTI files.
+- **Filters and features**: the Gaussian filter, constant padding for all filters, the parts of the Gabor response, and the IBSI texture distances.
+- **Templates**: 60 configurations for cardiac CT (`lv` and `coronary`).
+- **Reproducibility**: each log entry records the `config_hash` of its configuration and the versions of the run.
+- **Breaking changes**: NIfTI geometry in the LPS+ frame, a fixed FBS start in every image, and the long-format column `feature_key`. See the [Changelog](https://martonkolossvary.github.io/pictologics/CHANGELOG/).
 
 ## Installation
 
-Pictologics requires Python 3.12+.
+Pictologics needs Python 3.12, 3.13 or 3.14.
 
 ```bash
 pip install pictologics
 ```
 
-Or install from source:
+From the source code:
 
 ```bash
 git clone https://github.com/martonkolossvary/pictologics.git
@@ -49,87 +63,38 @@ pip install .
 ```python
 from pictologics import RadiomicsPipeline, format_results, save_results
 
-# 1. Initialize the pipeline
+# 1. A pipeline with the six standard configurations
 pipeline = RadiomicsPipeline()
 
-# 2. Run the "all_standard" configurations
+# 2. Run the configurations on an image and its mask
 results = pipeline.run(
-    image="path/to/image.nii.gz",
+    image="path/to/ct.nii.gz",
     mask="path/to/mask.nii.gz",
     subject_id="Subject_001",
-    config_names=["all_standard"]
+    config_names=["all_standard"],  # the FBS configurations start at -1000 HU, for CT
 )
 
-# 3. Inject subject ID or other metadata directly into the row
-row = format_results(
-    results, 
-    fmt="wide", 
-    meta={"subject_id": "Subject_001", "group": "control"}
-)
+# 3. One table row, with your own columns first
+row = format_results(results, fmt="wide", meta={"subject_id": "Subject_001", "group": "control"})
 
-# 4. Save to CSV
+# 4. Save the row to a CSV file
 save_results([row], "results.csv")
 ```
 
+For MR or PET images, use the FBN configurations (`config_names=["standard_fbn_32"]`) or your own. See the [Quick Start](https://martonkolossvary.github.io/pictologics/user_guide/quick_start/) and the [Cookbook](https://martonkolossvary.github.io/pictologics/user_guide/cookbook/).
 
 ## Performance Benchmarks
 
-### Benchmark Configuration
+| Task | Size | Time (median) |
+|:--|:--|--:|
+| run(): one standard configuration (standard_fbn_32) | CT of 512 × 512 × 200 | 28.3 ms |
+| run(): the 6 standard configurations | CT of 512 × 512 × 200 | 81.6 ms |
+| Texture (all 6 families) | 2,311,384 ROI voxels | 50.8 ms |
+| Morphology | 2,311,384 ROI voxels | 18.8 ms |
+| LoG (sigma 2 mm) | 256³ voxels | 177.7 ms |
+| Gabor (axial, rotation invariant) | 256³ voxels | 108.3 ms |
 
-Comparisons between **Pictologics** and **PyRadiomics** (single-thread parity). 
-
-> [!TIP]
-> Detailed performance tables and extra feature (IVH, local intensity, GLDZM, etc.) measurements available in the [Benchmarks Documentation](https://martonkolossvary.github.io/pictologics/benchmarks/).
-
-**Test Data Generation:**
-
-- **Texture**: 3D correlated noise generated using Gaussian smoothing.
-- **Mask**: Blob-like structures generated via thresholded smooth noise with random holes.
-- **Voxel Distribution**: Mean=486.04, Std=90.24, Min=0.00, Max=1000.00.
-
-### HARDWARE USED FOR CALCULATIONS
-
-- **Hardware**: Apple M4 Pro, 14 cores, 48 GB
-- **OS**: macOS 26.5.2 (arm64)
-- **Python**: 3.12.10
-- **Core deps**: pictologics 0.5.1, numpy 2.2.6, scipy 1.17.0, numba 0.62.1, pandas 2.3.3, matplotlib 3.10.7
-- **BLAS/LAPACK**: Apple Accelerate (from `numpy.show_config()`)
-
-Note: the benchmark script explicitly calls `warmup_jit()` before timing to avoid including Numba compilation overhead in the measured runtimes. Timing and memory measurement are separated — `tracemalloc` is NOT active during timing to avoid biasing the comparison (its per-allocation hooks penalise pure-Python code more than JIT/C code). All calculations are repeated 5 times and the **mean** runtime is reported; peak memory is measured once separately.
-
-### Intensity
-
-| Execution Time (Log-Log) | Speedup |
-|:---:|:---:|
-| [![Intensity time](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/intensity_execution_time_log.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/intensity_execution_time_log.png) | [![Intensity speedup](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/intensity_speedup_factor.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/intensity_speedup_factor.png) |
-
-
-
-### Morphology
-
-| Execution Time (Log-Log) | Speedup |
-|:---:|:---:|
-| [![Morphology time](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/morphology_execution_time_log.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/morphology_execution_time_log.png) | [![Morphology speedup](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/morphology_speedup_factor.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/morphology_speedup_factor.png) |
-
-
-
-### Texture
-
-| Execution Time (Log-Log) | Speedup |
-|:---:|:---:|
-| [![Texture time](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/texture_execution_time_log.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/texture_execution_time_log.png) | [![Texture speedup](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/texture_speedup_factor.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/texture_speedup_factor.png) |
-
-
-
-### Filters
-
-| Execution Time (Log-Log) | Speedup |
-|:---:|:---:|
-| [![Filters time](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/filters_execution_time_log.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/filters_execution_time_log.png) | [![Filters speedup](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/filters_speedup_factor.png)](https://raw.githubusercontent.com/martonkolossvary/pictologics/main/docs/assets/benchmarks/filters_speedup_factor.png) |
-
-
-
-
+The median of 5 runs on one computer, after a warm-up run. See the [benchmark page](https://martonkolossvary.github.io/pictologics/benchmarks/) for all results, plots and the computer.
 
 
 ## Quality & Compliance

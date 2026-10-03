@@ -1,1 +1,0 @@
-The JIT warm-up no longer compiles nine strided forms of the ROI box scan and the ROI min/max scans. The package passes row-order arrays to them, so it does not use these forms. A cold first warm-up is 1.7 s shorter.

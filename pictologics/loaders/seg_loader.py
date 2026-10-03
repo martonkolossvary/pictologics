@@ -41,7 +41,7 @@ def load_seg(
     the standard pictologics Image format. The resulting Image has the
     same structure as images returned by load_image():
 
-    - array: npt.NDArray[np.floating[Any]] with shape (X, Y, Z)
+    - array: uint8 (uint16 above 255 labels) with shape (X, Y, Z)
     - spacing: tuple[float, float, float] in mm
     - origin: tuple[float, float, float] in mm
     - direction: Optional[npt.NDArray[np.floating[Any]]] - 3x3 direction cosines
@@ -71,8 +71,8 @@ def load_seg(
               - You want to select specific segments for different analyses
 
         reference_image: Optional reference Image for geometry alignment.
-            When provided, the output mask will be resampled/repositioned
-            to match the reference geometry.
+            When provided, the output mask is placed on the grid of the reference
+            (repositioned, not resampled: a mask of another spacing raises an error).
         transpose_axes: Optional axis transposition to apply before reference
             alignment.
         subvoxel_tolerance: Maximum permitted fractional-voxel offset during

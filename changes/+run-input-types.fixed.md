@@ -1,1 +1,0 @@
-`run()` now converts an in-memory image of another type (for example int16 or float32) to float64, as the loaders do. Before, such an image resampled in its own type: rounded, on one core, and with other feature values. A numpy array instead of an `Image` now raises a clear TypeError.

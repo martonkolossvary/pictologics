@@ -1,1 +1,0 @@
-NGLDM with an `ngldm_alpha` of 1 or more now also counts the neighbours with a lower grey level. Before, an unsigned subtraction counted only the neighbours up to alpha levels above the centre voxel. The default `ngldm_alpha` of 0 (IBSI) is not affected.

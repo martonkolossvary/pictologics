@@ -1,371 +1,178 @@
 # Utilities
 
-Pictologics provides a set of powerful utilities to help with data wrangling and organization, particularly for handling complex DICOM datasets.
+Pictologics has tools to sort DICOM data, to look at images and masks, and to read DICOM structured reports. They are in `pictologics.utilities`.
 
-## DICOM Database Parser
+## DICOM Database
 
-The `DicomDatabase` class allows you to easily parse, organize, and query DICOM folders. It automatically structures your data into a Patient -> Study -> Series -> Instance hierarchy and extracts relevant metadata.
-
-### Basic Usage
-
-To parse a directory of DICOM files:
+`DicomDatabase` reads DICOM folders and sorts them into patients, studies, series and instances, with their metadata.
 
 ```python
 from pictologics.utilities import DicomDatabase
 
-# 1. Parse a folder (recursive by default)
-db = DicomDatabase.from_folders(
-    paths=["path/to/dicom/folder"], 
-    num_workers=4  # Use parallel processing for speed
-)
-
-# 2. Get a summary DataFrame of all series
-df_series = db.get_series_df()
-print(df_series.head())
-
-# 3. Get detailed DataFrame of all instances
-df_instances = db.get_instances_df()
+db = DicomDatabase.from_folders(paths=["dicom_archive/"], num_workers=4)  # recursive by default
+series = db.get_series_df()       # one row for each series
+instances = db.get_instances_df()  # one row for each file
+print(series.head())
 ```
 
-### Parallel Processing and Progress Bar
+- **Workers**: each worker process imports Pictologics before it reads a file, so workers pay off only for large scans. `from_folders()` starts at most one worker per 1,000 DICOM files (`FILES_PER_WORKER`); a folder of a few series is read in the calling process, which is faster. `show_progress=False` turns the progress bar off.
+- **Private tags**: `extract_private_tags=True` (default) keeps the vendor tags. A binary private value (for example a 60 KB CSA header) or a private sequence is stored as its size, such as `<OB, 60000 bytes>`.
+- **Skipped files**: DICOMDIR files are not patient data, so they are skipped.
+- **Completeness**: the series table tells whether a series is complete (`IsComplete`), whether its slices have gaps (`HasGaps`), and its slice spacing (`SpacingMM`).
+- **Scouts**: the database lists every image, also a scout that `load_image()` leaves out of a series.
 
-For large DICOM datasets, parsing can take significant time. `DicomDatabase.from_folders()` supports **parallel processing** to speed up the scan and displays a **progress bar** showing progress and estimated time remaining.
+### Phases
 
-Each worker process imports Pictologics before it reads a file, so workers pay off only for large scans. `from_folders()` starts at most one worker per 1,000 DICOM files (`FILES_PER_WORKER`); a folder of a few series is read in the calling process, which is faster.
+`split_multiseries=True` (default) splits a series with more than one phase (for example the phases of a cardiac CT) into one logical series for each phase, as `load_image()` and `get_dicom_phases()` do. The rules are on the [Data Loading](data_loading.md#phases-of-a-dicom-series) page.
 
 ```python
-# Parallel processing with all available cores
-db = DicomDatabase.from_folders(
-    paths=["large_dataset/"],
-    num_workers=8,          # Use 8 parallel workers
-    show_progress=True      # Show progress bar (default: True)
-)
-
-# Disable progress bar for silent operation
-db = DicomDatabase.from_folders(
-    paths=["data/"],
-    show_progress=False
-)
+db = DicomDatabase.from_folders(["cardiac_data/"])
+series = db.get_series_df()  # "1.2.3.4.5" becomes "1.2.3.4.5.1", "1.2.3.4.5.2", ... for the phases
 ```
 
-The progress bar shows:
-- Number of files processed
-- Percentage complete
-- Elapsed time and estimated time remaining
-
-### Memory-Efficient Exports
-
-By default, DataFrame exports exclude the large `InstanceSOPUIDs` and `InstanceFilePaths` columns to reduce memory usage. To include them:
+### Export
 
 ```python
-# Default: smaller DataFrames without instance lists
-df_compact = db.get_series_df()
-
-# Include full instance lists if needed
-df_full = db.get_series_df(include_instance_lists=True)
-```
-
-This applies to `get_patients_df()`, `get_studies_df()`, and `get_series_df()`.
-
-### Multi-Phase Series Splitting
-
-Medical images often contain multiple phases (e.g., dynamic contrast-enhanced MRI, multiphase CT, cardiac phases) within a single "series" (sharing the same `SeriesInstanceUID`). `DicomDatabase` automatically detects and splits these into separate logical series for easier analysis.
-
-By default, `split_multiseries=True`.
-
-```python
-# Automatically splits series based on (in priority order):
-# - Cardiac Phase
-# - Temporal Position
-# - Trigger Time
-# - Acquisition Number
-# - Echo Number
-# - Duplicate Spatial Positions (fallback)
-
-db = DicomDatabase.from_folders(["path/to/multiphase/data"])
-
-# The resulting DataFrames will show split series with unique identifiers
-# e.g., "1.2.3.4.5" -> "1.2.3.4.5" (if single phase)
-# e.g., "1.2.3.4.5" -> "1.2.3.4.5.1", "1.2.3.4.5.2" (if multi-phase)
-series_df = db.get_series_df()
-```
-
-### Exporting Data
-
-You can export the structured data to standard formats:
-
-```python
-# Export all levels to CSV (default: without instance lists for smaller files)
-db.export_csv("output", levels=["patients", "studies", "series", "instances"])
-
-# Export with full instance UIDs and file paths
-db.export_csv("output", include_instance_lists=True)
-
-# Export hierarchical JSON (includes file paths by default)
-db.export_json("dataset.json")
-
-# Export JSON without file paths for smaller files
+db.export_csv("output")  # output_patients.csv, output_studies.csv, output_series.csv, output_instances.csv
+db.export_csv("output", include_instance_lists=True)  # with the UIDs and paths of the instances
+db.export_json("dataset.json")                         # the hierarchy, with the file paths
 db.export_json("dataset.json", include_instance_lists=False)
 ```
 
-### Accessing the Hierarchy Directly
+The tables leave out the long `InstanceSOPUIDs` and `InstanceFilePaths` columns by default; `include_instance_lists=True` adds them. This applies to `get_patients_df()`, `get_studies_df()` and `get_series_df()`.
 
-You can also traverse the object hierarchy directly if you need fine-grained control:
+### The Hierarchy
 
 ```python
 for patient in db.patients:
     print(f"Patient: {patient.patient_id}")
     for study in patient.studies:
         print(f"  Study: {study.study_date}")
-        for series in study.series:
-            print(f"    Series: {series.modality} ({len(series.instances)} images)")
-            
-            # Access instances
-            # series.instances is a list of DicomInstance objects
+        for one in study.series:
+            print(f"    Series: {one.modality} ({len(one.instances)} images)")
 ```
 
-## Visualization
+## Image Viewers
 
-Pictologics provides flexible utilities for visualizing medical images and segmentation masks. The visualization functions support three display modes:
+`visualize_slices()` shows the slices in a window, and `save_slices()` saves them as files. Both show an image, a mask, or a mask on an image:
 
-| Mode | `image` | `mask` | Description |
-|------|---------|--------|-------------|
-| **Overlay** | ✓ | ✓ | Mask overlaid on grayscale image |
-| **Image Only** | ✓ | ✗ | Grayscale image (with optional window/level) |
-| **Mask Only** | ✗ | ✓ | Colormap or grayscale mask display |
+| Mode | `image` | `mask` | Display |
+|:--|:--|:--|:--|
+| Overlay | yes | yes | The mask in colour on the gray image |
+| Image | yes | no | The gray image |
+| Mask | no | yes | The mask in colour |
 
-In overlay mode, `alpha` sets how much of each mask color is mixed into the gray image: 0 shows the image only, 1 the mask color only, and 0.25 (the default) keeps the image visible through the mask. The mixed colors are stored in the red, green and blue channels, so the saved files are fully opaque.
-
-### Interactive Viewer
-
-Scroll through slices interactively:
+In overlay mode, `alpha` sets how much of the mask colour mixes into the gray image: 0 shows the image only, 1 the mask colour only, and 0.25 (default) keeps the image visible.
 
 ```python
 from pictologics import load_image
-from pictologics.utilities import visualize_slices
+from pictologics.utilities import save_slices, visualize_slices
 
-img = load_image("scan.nii.gz")
-mask = load_image("segmentation.nii.gz")
+image = load_image("scan.nii.gz")
+mask = load_image("segmentation.nii.gz", reference_image=image)
 
-# Overlay mode (image + mask)
-visualize_slices(image=img, mask=mask, alpha=0.4, colormap="tab20")
-
-# Image only mode
-visualize_slices(image=img)
-
-# Mask only mode (with colormap)
-visualize_slices(mask=mask)
+visualize_slices(image=image, mask=mask, alpha=0.4, colormap="tab20")  # scroll through the slices
+save_slices("qc/", image=image, mask=mask, slice_selection="10%")      # 10 % of the slices
+save_slices("qc/", image=image, slice_selection="every_10")            # every 10th slice
+save_slices("qc/", image=image, slice_selection=[0, 50, 100])          # these slices
+save_slices("qc/", image=image, mask=mask, format="tiff", dpi=300)     # png (default), jpeg or tiff
 ```
 
-### Save Slices to Files
+- **Gray scale**: without `window_center` and `window_width`, all slices share one gray scale: the minimum and the maximum of the volume (without NaN values). For CT, give a window: soft tissue 40 / 400, bone 400 / 1800, lung -600 / 1500.
+- **Colormaps**: `tab20` (default, 20 colours), `tab10`, `Set1`, `Set2`, `Paired`.
+- **Slices**: a single slice index outside the image raises a `ValueError`; in a list, indices outside the image are skipped.
+- **Files**: `save_slices` writes up to 8 slices at a time, in threads, as RGB files (the overlay is mixed into the colours). PNG files use compression level 3, 2.5 times faster than the default level 6.
 
-Export selected slices as images:
+### Quality Images of Many Cases
+
+`save_slices` already uses threads, so a plain loop is often fast enough:
 
 ```python
+from pathlib import Path
+
+from pictologics import load_image
 from pictologics.utilities import save_slices
 
-# Save overlay slices
-save_slices("output/", image=img, mask=mask, slice_selection="10%")
-
-# Save every 10th slice
-save_slices("output/", image=img, mask=mask, slice_selection="every_10")
-
-# Save specific slices
-save_slices("output/", image=img, slice_selection=[0, 50, 100])
+cases = [
+    ("patient_001/ct/", "patient_001/seg.dcm"),
+    ("patient_002/ct/", "patient_002/seg.dcm"),
+]
+for image_path, mask_path in cases:
+    image = load_image(image_path)
+    mask = load_image(mask_path, reference_image=image)  # the mask on the grid of the image
+    save_slices(Path("qc") / Path(image_path).parent.name, image=image, mask=mask,
+                slice_selection="10%", window_center=40, window_width=400)
 ```
 
-A single slice index outside the image raises a `ValueError`, as does an `initial_slice` outside the image in `visualize_slices`; in a list of indices, the indices outside the image are skipped.
-
-`save_slices` writes up to 8 slices at a time, in threads. The files are RGB: the mask overlay is mixed into the colors, so they need no transparency layer. PNG files use compression level 3, which is 2.5x faster than the default level 6.
-
-### Window/Level Normalization
-
-For CT and MR images, use window/level controls for proper contrast:
-
-Without `window_center` and `window_width`, all slices share one gray scale: the minimum and maximum of the whole volume (NaN values left out), so a tissue keeps its gray level from slice to slice.
-
-```python
-# Soft tissue window preset
-visualize_slices(image=img, window_center=40, window_width=400)
-
-# Bone window
-visualize_slices(image=img, window_center=400, window_width=1800)
-
-# Lung window
-visualize_slices(image=img, window_center=-600, window_width=1500)
-```
-
-### Colormap Options
-
-| Colormap | Labels | Description |
-|----------|--------|-------------|
-| `tab10` | 10 | Distinct categorical colors |
-| `tab20` | 20 | Default, 20 distinct colors |
-| `Set1` | 9 | Bold qualitative colors |
-| `Set2` | 8 | Pastel qualitative colors |
-| `Paired` | 12 | Paired colors |
-
-### Output Formats
-
-Supported formats: `png` (default), `jpeg`, `tiff`
-
-```python
-save_slices("output/", image=img, mask=mask, format="tiff", dpi=300)
-```
-
-### Parallel Batch Processing
-
-For processing multiple images efficiently, use `concurrent.futures`:
+For many large cases, process pools help. Keep the guard: the workers start a new Python process, which imports your script again.
 
 ```python
 from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
-from pictologics import load_image
-from pictologics.utilities import save_slices
 
-def process_case(args):
-    """Process a single image/mask pair."""
-    image_path, mask_path, output_dir = args
-    
-    # Load images
-    img = load_image(image_path, recursive=True)
-    mask = load_image(mask_path, recursive=True)
-    
-    # Save slices
-    return save_slices(
-        output_dir,
-        image=img,
-        mask=mask,
-        slice_selection="10%",
-        window_center=40,
-        window_width=400
-    )
 
-# Prepare list of (image, mask, output) tuples
-cases = [
-    ("patient_001/ct/", "patient_001/seg.dcm", "output/patient_001/"),
-    ("patient_002/ct/", "patient_002/seg.dcm", "output/patient_002/"),
-    ("patient_003/ct/", "patient_003/seg.dcm", "output/patient_003/"),
-]
+def one_case(case):
+    image_path, mask_path, output_dir = case
+    image = load_image(image_path)
+    mask = load_image(mask_path, reference_image=image)
+    return save_slices(output_dir, image=image, mask=mask, slice_selection="10%")
 
-# Process in parallel
-with ProcessPoolExecutor(max_workers=4) as executor:
-    results = list(executor.map(process_case, cases))
-    
-print(f"Processed {len(results)} cases")
+
+if __name__ == "__main__":
+    jobs = [(image, mask, f"qc/case_{k}") for k, (image, mask) in enumerate(cases)]
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(one_case, jobs))
 ```
 
-!!! note "Performance Notes"
-    - Use `ProcessPoolExecutor` (not `ThreadPoolExecutor`) to avoid Python's GIL
-    - Set `max_workers` to the number of CPU cores (4-8 is typically optimal)
-    - Each worker loads one image at a time, so memory usage scales with `max_workers`
+Each worker holds one case at a time, so the memory need grows with `max_workers`.
 
 ## DICOM Structured Reports (SR)
 
-Parse DICOM Structured Reports to extract measurements and tabular data.
-
-### Loading and Parsing SR
+`SRDocument` reads the measurements of a DICOM structured report (for example TID 1500 measurement reports).
 
 ```python
 from pictologics.utilities import SRDocument
 
 sr = SRDocument.from_file("measurements.dcm")
-print(f"Template: {sr.template_id}")
-print(f"Groups: {len(sr.measurement_groups)}")
-```
+print(sr.template_id, len(sr.measurement_groups))
 
-### Extracting Measurements
-
-```python
-# Get as DataFrame
-df = sr.get_measurements_df()
-print(df[["measurement_name", "value", "unit"]])
-
-# Export to files
+table = sr.get_measurements_df()
+print(table[["measurement_name", "value", "unit", "finding_type", "finding_site", "tracking_id"]])
 sr.export_csv("measurements.csv")
 sr.export_json("measurements.json")
 ```
 
-### Batch SR Processing
+- Each measurement group is one TID 1500 container: its `group_id` is the tracking ID of the container, and the group holds its finding type, finding site and derivation.
+- The measurement table has one row for each measurement, with the columns `group_id`, `finding_type`, `finding_site`, `derivation` and `tracking_id`.
 
-For processing multiple SR files from folders, use `SRDocument.from_folders()`:
+### Many Reports
 
 ```python
-from pictologics.utilities import SRDocument
-
-# Process all SR files in a folder (recursive by default)
 batch = SRDocument.from_folders(
-    paths=["dicom_data/"],
-    num_workers=4,  # Parallel processing
-    output_dir="sr_exports/",  # Auto-export each SR
+    paths=["dicom_data/"],      # recursive by default
+    num_workers=4,
+    output_dir="sr_exports/",   # writes <SOPInstanceUID>.csv and .json for each report
     export_csv=True,
     export_json=True,
 )
-
-# Access results
-print(f"Processed {len(batch.documents)} SR files")
-
-# Get combined measurements from all SRs
-df = batch.get_combined_measurements_df()
-print(df.head())
-
-# Export combined data
+print(f"Read {len(batch.documents)} reports")
+combined = batch.get_combined_measurements_df()  # with group_finding_type and group_finding_site
 batch.export_combined_csv("sr_exports/all_measurements.csv")
 batch.export_log("sr_exports/processing_log.csv")
 ```
 
-### Parallel Processing and Progress Bar
+- `from_folders()` writes only the file of each report. `export_combined_csv()` and `export_log()` write the combined table and the log.
+- Each worker imports Pictologics before it reads a file (about 1 s), so workers pay off only for large batches. `from_folders()` reads SR files of less than 2.5 MB in total (`SR_POOL_BYTES`) in the calling process. To find the SR files, it reads each file only up to its SOP Class UID.
 
-For large collections of SR files, `SRDocument.from_folders()` supports **parallel processing** for faster parsing and displays a **progress bar** showing progress and estimated time remaining.
-
-Each worker process imports Pictologics before it parses a file (about 1 s), so workers pay off only for large batches. `from_folders()` parses SR files of less than 2.5 MB in total (`SR_POOL_BYTES`) in the calling process, whatever `num_workers` asks for; a few hundred small reports parse faster that way. To find the SR files, it reads each file only up to its SOP Class UID.
-
-```python
-# Parallel processing with 8 workers
-batch = SRDocument.from_folders(
-    paths=["large_dataset/"],
-    num_workers=8,          # Use 8 parallel workers
-    show_progress=True      # Show progress bar (default: True)
-)
-
-# Disable progress bar for silent operation
-batch = SRDocument.from_folders(
-    paths=["data/"],
-    show_progress=False
-)
-```
-
-The progress bar shows:
-- Number of SR files processed
-- Percentage complete
-- Elapsed time and estimated time remaining
-
-### Output Structure
-
-When `output_dir` is specified:
-```
-sr_exports/
-├── all_measurements.csv       # Combined measurements (optional)
-├── processing_log.csv         # Log of all processed files
-├── 1_2_3_4_5_6.csv           # Individual SR (if export_csv=True)
-├── 1_2_3_4_5_6.json          # Individual SR (if export_json=True)
-└── ...
-```
-
-### Processing Log
-
-The processing log tracks each file:
+The processing log has one row for each file:
 
 | Column | Description |
-|--------|-------------|
-| file_path | Source SR file path |
-| sop_instance_uid | SOP Instance UID |
-| patient_id | Patient ID from the SR file |
-| study_instance_uid | Study Instance UID |
-| status | "success" or "error" |
-| error_message | Error details if failed |
-| num_measurements | Count of measurements |
-| csv_path | Path to exported CSV |
-| json_path | Path to exported JSON |
-| processing_time_ms | Time taken to process the file, in milliseconds |
-
+|:--|:--|
+| `file_path` | The SR file |
+| `sop_instance_uid` | The SOP Instance UID |
+| `patient_id` | The patient ID of the report |
+| `study_instance_uid` | The Study Instance UID |
+| `status` | `"success"` or `"error"` |
+| `error_message` | The error, if any |
+| `num_measurements` | The number of measurements |
+| `csv_path`, `json_path` | The exported files |
+| `processing_time_ms` | The time to read the file (ms) |

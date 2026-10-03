@@ -1,1 +1,0 @@
-Enhanced multiframe DICOM files load in one pass from the stored pixels to the float64 output. A 512 x 512 x 200 CT file loads in 72 ms instead of 127 ms, with half the memory (0.53 GB instead of 1.03 GB). The values are the same, bit for bit.

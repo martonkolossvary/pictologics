@@ -1,1 +1,0 @@
-`get_dicom_phases(recursive=True)` now reads the same folder as `load_image(recursive=True)`: the folder with the most DICOM files. Before, it mixed the files of all subfolders. A negative `dataset_index` for DICOM data now raises an error, as it does for NIfTI.

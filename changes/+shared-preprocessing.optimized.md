@@ -1,1 +1,0 @@
-Configurations of one pipeline run now share identical preprocessing. When several configurations start with the same steps, source mode and sentinel value, these steps run once, and the later configurations continue from their result. The six standard configurations, which all start with the same 0.5 mm resampling, take 29-40% less time. Results and run logs are unchanged.

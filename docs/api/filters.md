@@ -52,7 +52,11 @@ periodic on the padded domain.
 
 ## Boundary Conditions
 
+A filter step takes the boundary as a name: `"mirror"`, `"nearest"`, `"periodic"` (or `"wrap"`) or `"zero"` (or `"constant"`). A direct call also takes the enum. See [Boundaries and Padding](../user_guide/image_filtering.md#boundaries-and-padding).
+
 ::: pictologics.filters.BoundaryCondition
+
+## Results and Kernels
 
 ::: pictologics.filters.FilterResult
 

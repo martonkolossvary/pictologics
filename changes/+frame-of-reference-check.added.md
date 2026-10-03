@@ -1,1 +1,0 @@
-DICOM images, SEG masks and RTSTRUCT masks keep their DICOM FrameOfReferenceUID in the new `Image.frame_of_reference_uid`. A mask with another UID gives a warning when it loads onto the image, because it can belong to another scan. Images from other formats have no UID and are not checked.

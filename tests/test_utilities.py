@@ -1350,7 +1350,7 @@ class TestSyntheticDicom:
             show_progress=False,
         )
 
-        export_dir = tmp_path / "csv_export"
+        export_dir = tmp_path / "new" / "csv_export"  # a missing folder is made
         result = db.export_csv(str(export_dir))
 
         assert "patients" in result
@@ -1368,7 +1368,7 @@ class TestSyntheticDicom:
             show_progress=False,
         )
 
-        json_path = tmp_path / "export.json"
+        json_path = tmp_path / "new" / "export.json"  # a missing folder is made
         result = db.export_json(str(json_path))
 
         assert Path(result).exists()

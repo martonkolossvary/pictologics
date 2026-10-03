@@ -1,1 +1,0 @@
-The centre-of-mass shift (KLMA) is now computed in index units before the spacing, without the image origin, which cancels. The value moves by about 1e-13 (relative), and it no longer depends on where the arrays start in the image.

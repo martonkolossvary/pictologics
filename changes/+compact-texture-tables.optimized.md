@@ -1,1 +1,0 @@
-With many grey levels, the GLCM and GLRLM thread tables can hold only the levels that occur. This happens when the full tables would take more than 64 MB and at most half of the levels occur. At 2,048 levels with 400 in the ROI, the peak memory of the texture pass is 100 MB instead of 276 MB. It is also 16 % faster. The matrices and the features are the same.

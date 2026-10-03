@@ -1,1 +1,0 @@
-`add_config` now reports a filter parameter that has no default and that the step leaves out: for example a `gaussian` or `log` step without `sigma_mm`, a `gabor` step without `lambda_mm`, or a `riesz` step without `order`. Before, such a configuration failed only when it ran.

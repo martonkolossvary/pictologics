@@ -14,6 +14,7 @@ from .base import (
     _padding_value_problem,
     ensure_float32,
     get_scipy_mode,
+    resolve_boundary,
 )
 
 
@@ -115,8 +116,7 @@ def laplacian_of_gaussian(
     sigma_voxels = tuple(sigma_mm / s for s in spacing_mm)
 
     # Handle string boundary condition
-    if isinstance(boundary, str):
-        boundary = BoundaryCondition[boundary.upper()]
+    boundary = resolve_boundary(boundary)
 
     problem = _padding_value_problem(boundary, padding_value)
     if problem:

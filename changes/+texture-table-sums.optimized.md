@@ -1,1 +1,0 @@
-The GLCM and GLRLM thread tables add up in threads from 32,768 cells, and large tables are zeroed in threads. The texture matrices of 256 levels in 13 directions take 4.3 ms instead of 9.3 ms. The values are the same.

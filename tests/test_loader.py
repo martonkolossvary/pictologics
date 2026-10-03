@@ -1842,21 +1842,13 @@ class TestRepositioning(unittest.TestCase):
 
     @patch("pictologics.loader._load_dicom_file")
     @patch("pictologics.loader.Path")
-    def test_load_image_with_reference_same_shape_validates_geometry(
+    def test_load_image_with_reference_same_shape_other_origin_is_placed(
         self, mock_Path: MagicMock, mock_load_dcm: MagicMock
     ) -> None:
-        """Same-shaped images still need physical geometry validation."""
+        """A mask of the shape of the image with another origin is placed as a mask of
+        another shape is: shifted by whole voxels, with the overlap check."""
         mock_Path.return_value.exists.return_value = True
         mock_Path.return_value.is_dir.return_value = False
-
-        shifted_img = Image(
-            array=np.ones((10, 10, 10)),
-            spacing=(1.0, 1.0, 1.0),
-            origin=(5.0, 0.0, 0.0),
-            direction=np.eye(3),
-            modality="mask",
-        )
-        mock_load_dcm.return_value = shifted_img
         reference = Image(
             array=np.zeros((10, 10, 10)),
             spacing=(1.0, 1.0, 1.0),
@@ -1864,9 +1856,20 @@ class TestRepositioning(unittest.TestCase):
             direction=np.eye(3),
             modality="CT",
         )
-
-        with self.assertRaisesRegex(ValueError, "Origin mismatch"):
-            load_image("mask.dcm", reference_image=reference)
+        for shift, overlap in ((5.0, True), (8.0, False)):
+            mock_load_dcm.return_value = Image(
+                array=np.ones((10, 10, 10)),
+                spacing=(1.0, 1.0, 1.0),
+                origin=(shift, 0.0, 0.0),
+                direction=np.eye(3),
+                modality="mask",
+            )
+            if overlap:
+                placed = load_image("mask.dcm", reference_image=reference)
+                assert placed.array[: int(shift)].sum() == 0 and placed.array[int(shift) :].all()
+            else:
+                with self.assertRaisesRegex(ValueError, "overlaps only 20.0%"):
+                    load_image("mask.dcm", reference_image=reference)
 
     @patch("pictologics.loaders.seg_loader.load_seg")
     @patch("pictologics.loader._is_dicom_seg")
@@ -3074,3 +3077,33 @@ def test_load_image_takes_the_files_of_one_phase(tmp_path: "os.PathLike[str]") -
     assert load_image(phases[0], reference_image=reference).array.shape == reference.array.shape
     with pytest.raises(ValueError, match="No DICOM files found"):
         load_image([])
+
+
+def test_save_image_writes_64_bit_integers_as_int32(tmp_path: "os.PathLike[str]") -> None:
+    # nibabel refuses 64-bit integers without a dtype: they are saved as int32 when the
+    # values fit, else as int64
+    from pathlib import Path
+
+    import nibabel as nib
+
+    from pictologics.loader import load_image, save_image
+
+    for dtype, value in ((np.int64, 7), (np.uint64, 7), (np.int64, 2**40)):
+        array = np.full((2, 3, 4), value, dtype=dtype)
+        path = Path(tmp_path) / "labels.nii.gz"
+        save_image(Image(array, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), path)
+        stored = nib.load(path).get_data_dtype()
+        assert stored == (np.int32 if value == 7 else np.int64)
+        assert np.array_equal(load_image(path).array, array)
+
+
+def test_save_image_makes_a_missing_folder(tmp_path: "os.PathLike[str]") -> None:
+    # As save_results and save_configs do, save_image makes the folders of its path
+    from pathlib import Path
+
+    from pictologics.loader import load_image, save_image
+
+    path = Path(tmp_path) / "masks" / "p001" / "mask.nii.gz"
+    array = np.arange(24, dtype=np.uint8).reshape(2, 3, 4)
+    save_image(Image(array, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), path)
+    assert np.array_equal(load_image(path).array, array)

@@ -14,6 +14,7 @@ from .base import (
     _uniform_filter,
     ensure_float32,
     get_scipy_mode,
+    resolve_boundary,
 )
 
 
@@ -99,8 +100,7 @@ def mean_filter(
     image = ensure_float32(image)
 
     # Handle string boundary condition
-    if isinstance(boundary, str):
-        boundary = BoundaryCondition[boundary.upper()]
+    boundary = resolve_boundary(boundary)
 
     problem = _padding_value_problem(boundary, padding_value)
     if problem:

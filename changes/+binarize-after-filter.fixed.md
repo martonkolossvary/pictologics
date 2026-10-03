@@ -1,1 +1,0 @@
-A `binarize_mask` step that keeps mask value 0 after a filter now gets filter values for every voxel. Before, the filter computed only the ROI region, so the voxels outside it held 0 (a mean of 7.4 instead of 112.8).

@@ -1,1 +1,0 @@
-`DicomDatabase` now stores binary private values (for example a 60 KB CSA header) and private sequences as their size, such as `<OB, 60000 bytes>`, not as text. A scan of 10,000 files, half with such a header, needs 0.27 GB instead of 1.05 GB. Text private values stay as they are.

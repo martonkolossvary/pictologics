@@ -1,670 +1,349 @@
 # Data Loading
 
-This guide covers all aspects of loading medical imaging data into Pictologics. Whether you're working with NIfTI files, DICOM series, multi-phase acquisitions, or segmentation masks, this page will help you get your data into the `Image` class for radiomics analysis.
+This page loads images and masks into Pictologics: NIfTI, NRRD, MetaImage and DICOM images, multi-phase series, PET in SUV, and masks from NIfTI, DICOM SEG, RTSTRUCT and 3D Slicer files.
+
+## Which Function for Which File
+
+| Input | Function |
+|:--|:--|
+| A NIfTI file (`.nii`, `.nii.gz`) | `load_image(path)` |
+| A NRRD file (`.nrrd`, `.nhdr`) or a 3D Slicer segmentation (`.seg.nrrd`) | `load_image(path)` |
+| A MetaImage file (`.mha`, `.mhd`) | `load_image(path)` |
+| A DICOM folder of one series | `load_image(folder)` (with `series_uid` when the folder holds more than one series) |
+| The DICOM files of one series, or one phase of `get_dicom_phases()` | `load_image([files])`, `load_image(phase)` |
+| One DICOM file (also enhanced multiframe) | `load_image(path)` |
+| A DICOM PET series in SUV | `load_image(folder, suv="bw")` |
+| A DICOM SEG | `load_image(path, reference_image=image)`, or `load_seg()` for each segment |
+| A DICOM RTSTRUCT | `load_image(path, reference_image=image)`, or `load_rtstruct()` for each ROI |
+| Many mask files | `load_and_merge_images()` |
+| The segments or ROIs of a file | `get_segment_info(path)` |
+| A NIfTI copy of an image or a mask | `save_image(image, path)` |
+
+The functions are in `pictologics` (`load_image`, `load_seg`, `load_rtstruct`, `load_and_merge_images`, `save_image`, `create_full_mask`), `pictologics.loaders` (`get_segment_info`) and `pictologics.utilities` (`get_dicom_phases`).
 
 ## The Image Class
 
-All data in Pictologics is represented by the `Image` dataclass, which provides a standardized container for 3D medical image data. All data are stored as 3D numpy arrays, with additional metadata to describe the geometry of the data. If 2D data is provided, it is converted to a 3D numpy array with a singleton dimension.
+Every loader gives an `Image`:
 
 ```python
 from pictologics import Image
 
-# Image attributes:
-# - array: numpy.ndarray (3D, in X, Y, Z order)
-# - spacing: tuple[float, float, float] (voxel dimensions in mm)
-# - origin: tuple[float, float, float] (world coordinates of first voxel)
-# - direction: Optional[numpy.ndarray] (3x3 direction cosine matrix)
-# - modality: str (e.g., "CT", "MR", "Unknown")
-# - frame_of_reference_uid: Optional[str] (the DICOM FrameOfReferenceUID, or None)
+# Image fields:
+# - array: numpy.ndarray, 3D, in (X, Y, Z) order
+# - spacing: (x, y, z) voxel size in mm
+# - origin: (x, y, z) world position of the first voxel, in mm
+# - direction: 3 x 3 matrix of direction cosines (the columns are the axes), or None
+# - modality: for example "CT", "MR", "PT", "Nifti", "Nrrd", "MetaImage", "SEG", "RTSTRUCT", "MergedImage"
+# - source_mask: None, or a bool array of the voxels with image data
+# - frame_of_reference_uid: the DICOM FrameOfReferenceUID, or None
 ```
 
-!!! note
-    Pictologics uses **(X, Y, Z)** axis ordering to match ITK/SimpleITK conventions. This differs from raw DICOM (which uses Rows, Columns = Y, X) and matplotlib (which expects height, width = Y, X). All loaders handle these transformations automatically.
+- **Axis order**: (X, Y, Z), as ITK and SimpleITK use. A DICOM slice is (rows, columns) = (Y, X); the loaders turn it.
+- **World frame**: `origin` and `direction` are in the LPS+ frame (left, posterior, superior) for every format, as in DICOM and ITK. A NIfTI affine is in RAS+, so the loader changes the sign of its X and Y rows. Give an `Image` that you make yourself its geometry in LPS+ too.
+- **Values**: DICOM, NIfTI, NRRD and MetaImage images load as float64 (DICOM with `apply_rescale=True`, the default).
+- **Dimensions**: the NIfTI and DICOM loaders give 3D arrays also for a 2D image (one slice). 2D NRRD and MetaImage files raise an error.
+- `image.with_source_mask(valid)` gives a copy with a source mask (see [Sentinel Values](#sentinel-values)).
 
-!!! note "Physical Geometry"
-    `Image.direction` stores unit direction cosines, while voxel sizes are stored separately in `Image.spacing`. NIfTI affine columns are normalized on load, and DICOM row/column orientation is converted to the same `(X, Y, Z)` convention.
+## Images
 
-!!! note "World Frame"
-    `Image.origin` and `Image.direction` are in the LPS+ world frame (Left, Posterior, Superior) for every format, as in DICOM and ITK/SimpleITK. A NIfTI affine is in RAS+, so the loader changes the sign of its X and Y rows. Give an in-memory `Image` its geometry in LPS+ too.
-
-## Basic Loading with `load_image()`
-
-The `load_image()` function is the primary entry point for loading data. It automatically detects the file format and handles the appropriate loading strategy.
-
-### Loading NIfTI Files
+### NIfTI
 
 ```python
 from pictologics import load_image
 
-# Load a NIfTI file (.nii or .nii.gz)
-image = load_image("path/to/scan.nii.gz")
-mask = load_image("path/to/segmentation.nii.gz")
-
-print(f"Shape: {image.array.shape}")
-print(f"Spacing: {image.spacing}")
-print(f"Origin: {image.origin}")
+image = load_image("scan.nii.gz")
+print(image.array.shape, image.spacing, image.origin)
 ```
 
-### Loading NRRD and MetaImage Files
+### NRRD and MetaImage
 
-`load_image()` also reads NRRD files (`.nrrd`, and `.nhdr` headers with a detached data file) and MetaImage files (`.mha`, and `.mhd` headers with a `.raw` or `.zraw` data file), as 3D Slicer and ITK write them. Pictologics reads them with its own readers, so you do not need another package.
+`load_image()` reads NRRD files (`.nrrd`, and `.nhdr` headers with a detached data file) and MetaImage files (`.mha`, and `.mhd` headers with a `.raw` or `.zraw` data file), as 3D Slicer and ITK write them. Pictologics reads them itself: you need no other package.
 
 ```python
-image = load_image("path/to/scan.nrrd")
-mask = load_image("path/to/segmentation.seg.nrrd", reference_image=image)
+image = load_image("scan.nrrd")
 ```
 
-- The geometry is in the LPS+ frame, as for every format. The loader converts a NRRD file in the RAS or LAS space.
-- A file with one more axis (a 4D image, or the layers of a `.seg.nrrd` file) gives the volume of `dataset_index`, as a 4D NIfTI file does.
-- The readers take raw, gzip, bzip2 and text data (NRRD), and raw, compressed and text data (MetaImage). They do not take data in more than one file, or images with more than one channel.
+- The loader converts the RAS and LAS spaces of NRRD to LPS+.
+- A file with one more axis (a 4D image, or the layers of a `.seg.nrrd` file) gives the volume of `dataset_index`.
+- NRRD data: raw, gzip, bzip2 or text. MetaImage data: raw, zlib or text.
+- An axis of channels (for example colours) raises an error, in both formats: the readers take one value per voxel. Data in more than one file is not supported.
 
-A 3D Slicer `.seg.nrrd` file holds each segment as a label value in a layer. Overlapping segments need more than one layer. `get_segment_info()` lists the segments:
+### DICOM Folders
 
 ```python
-from pictologics.loaders import get_segment_info
-
-for segment in get_segment_info("path/to/segmentation.seg.nrrd"):
-    print(segment["segment_label"], segment["label_value"], segment["layer"])
-
-# The layer of a segment: its voxels hold its label value
-layer = load_image("path/to/segmentation.seg.nrrd", reference_image=image, dataset_index=1)
+image = load_image("dicom_folder/")
 ```
 
-### Loading DICOM Series
+- The loader reads the files at the top of the folder. `recursive=True` takes the subfolder with the most DICOM files.
+- A folder with more than one image series (for example two reconstructions) raises an error that lists the series; `series_uid` chooses one.
+- Files without image pixels (RTSTRUCT, RTPLAN, SR) and SEG or RT dose objects are skipped. Images of another orientation or size than most images (for example a scout) are left out, with a warning.
+- The slices are sorted by their position along the slice normal. The slice spacing comes from the positions: when the spacing tag differs from them by more than 1 %, a warning tells it.
+- Uneven slice positions (a missing slice) and positions that move sideways (a gantry tilt) give a warning.
+- A multi-phase series (for example a cardiac CT) gives its first phase; see [Multi-Volume Data](#multi-volume-data).
 
-For a directory containing DICOM files from a single series:
+### Single and Multiframe DICOM Files
 
 ```python
-# Load all DICOM files in a directory as a single volume
-image = load_image("path/to/dicom_folder/")
-
-# Pictologics automatically:
-# - Finds all DICOM files in the directory
-# - Sorts slices by spatial position
-# - Extracts spacing, origin, and direction from headers
-# - Stacks slices into a 3D volume
+image = load_image("image.dcm")
 ```
 
-### Loading a Single DICOM File
+An enhanced multiframe file gives its geometry from its functional groups. When its frames hold more than one volume (repeated positions), `dataset_index` chooses the volume.
 
-Single DICOM files (e.g., enhanced DICOM, segmentation objects) are also supported:
+### Compressed DICOM
+
+Compressed pixel data loads as uncompressed data does: RLE, JPEG Lossless, JPEG-LS (lossless and near-lossless), JPEG 2000 (lossless and lossy) and baseline JPEG. pydicom decodes it with python-gdcm and Pillow, which install with Pictologics.
+
+- 12-bit lossy JPEG (JPEG Extended) needs `pylibjpeg` and `pylibjpeg-libjpeg` (GPL-3.0); install them yourself to read these files.
+- An error while decoding names the file. Colour (RGB) DICOM raises an error: radiomics needs one value per voxel.
+
+### Intensity Rescaling
+
+`load_image()` applies the `RescaleSlope` and `RescaleIntercept` of each DICOM slice, so the values are real units (for example HU). The image is float64, also without rescale tags.
 
 ```python
-# Load a single DICOM file
-image = load_image("path/to/image.dcm")
+ct = load_image("ct_scan/")                         # HU, float64
+raw = load_image("ct_scan/", apply_rescale=False)    # the stored values, in their stored type
 ```
 
-### Compressed DICOM Data
+| Format | Rescaling |
+|:--|:--|
+| NIfTI | Always the `scl_slope` and `scl_inter` of the header |
+| DICOM | The slope and intercept of each slice, when `apply_rescale=True` (default) |
 
-Compressed pixel data loads like uncompressed data: RLE, JPEG Lossless, JPEG-LS (lossless and near-lossless), JPEG 2000 (lossless and lossy) and baseline JPEG. pydicom decodes it with python-gdcm and Pillow, which install with Pictologics. SEG files with compressed frames load the same way.
+## Multi-Volume Data
 
-12-bit lossy JPEG (JPEG Extended) does not load: its only decoder, pylibjpeg-libjpeg, has a GPL-3.0 license. If you install `pylibjpeg` and `pylibjpeg-libjpeg` yourself, pydicom uses them.
-
-### DICOM Intensity Rescaling
-
-By default, `load_image()` applies **RescaleSlope** and **RescaleIntercept** transformations to DICOM data, converting stored pixel values to real-world values (e.g., Hounsfield Units for CT). For DICOM series this is applied **per slice**, so series with slice-specific rescale metadata are handled correctly. This matches the behavior of NIfTI loading, which always applies its scaling factors.
+`dataset_index` chooses one volume of data with more than one: a 4D NIfTI, NRRD or MetaImage file, the layers of a `.seg.nrrd` file, the phases of a DICOM series, or the volumes of a multiframe DICOM file.
 
 ```python
-# Default: values are converted (e.g., to Hounsfield Units)
-ct = load_image("ct_scan/")
-print(ct.array.min(), ct.array.max())  # e.g., -1024.0 to 3000.0
-
-# If you need raw stored pixel values:
-ct_raw = load_image("ct_scan/", apply_rescale=False)
-print(ct_raw.array.min(), ct_raw.array.max())  # e.g., 0 to 4095
+volume = load_image("fmri.nii.gz", dataset_index=4)  # the 5th volume
 ```
 
-| Format | Rescaling Behavior |
-|--------|-------------------|
-| **NIfTI** | Always applies `scl_slope` and `scl_inter` from header |
-| **DICOM** | Applies each slice's `RescaleSlope` and `RescaleIntercept` when `apply_rescale=True` (default) |
+### Phases of a DICOM Series
 
-### PET Standardized Uptake Values (SUV)
+```python
+from pictologics.utilities import get_dicom_phases
 
-`suv` converts a DICOM PET image (Modality PT) from activity concentration (Bq/ml) to its standardized uptake value when it loads:
+phases = get_dicom_phases("cardiac_ct/")  # also recursive= and series_uid=
+for phase in phases:
+    print(phase.index, phase.label, phase.num_slices, phase.split_tag)
+
+image = load_image("cardiac_ct/", dataset_index=4)  # the 5th phase
+image = load_image(phases[4])                        # the same, from the phase's files
+```
+
+A `DicomPhaseInfo` holds `index`, `label`, `num_slices`, `file_paths`, `split_tag` and `split_value`. The label names the tag and its value: for example `"Phase 10%"`, `"Temporal 2"`, `"Trigger 100ms"`, `"Acquisition 2"`, `"Echo 2"`, `"Volume 2"` (split by repeated positions) or `"Dataset 0"` (one phase).
+
+The phases come from the first of these tags that changes:
+
+1. `NominalPercentageOfCardiacPhase` (cardiac phases)
+2. `TemporalPositionIdentifier`
+3. `TriggerTime`
+4. `AcquisitionNumber`
+5. `EchoNumbers` (multi-echo MR)
+
+A tag splits a series only where slice positions repeat, and each phase holds each position once. So a scanner that writes a new `AcquisitionNumber` every few slices gives one volume. Without such a tag, phase k gets the k-th file at each position (by `InstanceNumber`).
+
+In a pipeline, give the phase as `image_options={"dataset_index": 4}` (see the [Cardiac CT Phases](../tutorials/cardiac_phases.md) tutorial).
+
+## PET in SUV
+
+`suv` converts a DICOM PET image (Modality PT) from activity concentration (Bq/ml) to its standardized uptake value:
 
 ```python
 pet = load_image("pet_series/", suv="bw")
 ```
 
 | `suv` | Normalised by | Unit |
-|-------|---------------|------|
+|:--|:--|:--|
 | `"bw"` | The body weight (PatientWeight) | g/ml |
 | `"lbm"` | The lean body mass by the Janmahasatian formula, from the weight, the height (PatientSize) and the sex (PatientSex) | g/ml |
-| `"lbm_james"` | The lean body mass by the James formula (PERCIST 1.0, and many older programs), from the same values | g/ml |
+| `"lbm_james"` | The lean body mass by the James formula (PERCIST 1.0, and many older programs) | g/ml |
 | `"bsa"` | The body surface area by the Du Bois formula, from the weight and the height | cm²/ml |
 
-The factor follows the [QIBA vendor-neutral pseudo-code](https://qibawiki.rsna.org/index.php/Standardized_Uptake_Value_(SUV)). The images must be attenuation and decay corrected (CorrectedImage with ATTN and DECY, DecayCorrection START), and the injected dose decays from the injection to the series start. For a post-processed series (a series time after the acquisition), the start is the GE private scan time, else the start from the frame times, else the earliest acquisition. Units CNTS take the Philips private SUV factor, and Units GML are SUVbw already. DecayCorrection ADMIN (decay corrected to the injection) takes the dose without decay. A missing, empty or zero attribute raises an error that names it: the loader never guesses a value. The `"lbm"` formula is the one that Tahari et al. (J Nucl Med 2014) recommend for SUL in place of the James formula of PERCIST 1.0; DICOM names it SUVlbm(Janma). In a pipeline, give `image_options={"suv": "bw"}` to `run()`, `run_rois()` or a `run_batch()` case.
+The factor follows the [QIBA vendor-neutral pseudo-code](https://qibawiki.rsna.org/index.php/Standardized_Uptake_Value_(SUV)), and a missing, empty or zero attribute raises an error that names it: the loader never guesses a value. On the [QIBA FDG-PET/CT digital reference object](https://depts.washington.edu/petctdro/DROsuv_main.html), `"bw"` gives its SUV values to within 6.4e-5. See the [PET in SUV](../tutorials/pet_suv.md) tutorial for the rules, the lean body mass formulas and a pipeline.
 
-Checked on the [QIBA FDG-PET/CT digital reference object](https://depts.washington.edu/petctdro/DROsuv_main.html) (female and male, 2013): `"bw"` gives its SUV values (0.00, 1.00, 4.00, 0.10, 0.90 and the test voxels 4.11 and -0.11) to within 6.4e-5. The object gives its SUVlbm values with the James formula: `"lbm_james"` gives them (0.750 and 0.771 times SUVbw for the female and the male object), and `"lbm"` (Janmahasatian) gives 0.660 and 0.758. The James formula fails for very obese patients (its lean body mass falls, and can drop below 0, with more weight), so Tahari et al. recommend Janmahasatian.
+## Masks
 
-### Handling Sentinel (NA) Values
+### Masks on the Image Grid
 
-Medical imaging formats often use a **sentinel value** to represent missing or invalid data. Common examples:
-
-| Modality | Common Sentinel Values |
-|----------|----------------------|
-| CT | -1024, -2048, -32768 (outside tissue HU range) |
-| MR | 0 (often used for background/air) |
-| PET | 0 or negative values |
-
-Since DICOM uses integer storage and cannot represent `NaN`, these sentinel values are substituted for missing data. Pictologics offers two approaches for handling them:
-
-#### Approach 1: Resegmentation (Simple)
-
-Use the **`resegment`** preprocessing step to exclude sentinel values by restricting the ROI to a valid intensity range:
+Load a mask with `reference_image`: the loader places it on the grid of the image.
 
 ```python
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-pipeline.add_config("ct_analysis", [
-    # Exclude sentinel values by filtering to valid HU range
-    {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["intensity", "texture"]}},
-])
+ct = load_image("ct_folder/")
+mask = load_image("segmentation.nii.gz", reference_image=ct)
+# mask.array has the shape and the voxel order of ct.array
 ```
 
-!!! warning "Limitations of resegmentation alone"
-    Resegmentation removes sentinel voxels from the ROI **after** earlier pipeline steps have already
-    run. This means:
+- **Voxel order**: a mask can hold the grid of the image in another voxel order (axes flipped or swapped, as some converters write NIfTI files). The loader turns it to the voxel order of the image. So a DICOM image and a NIfTI mask on the same grid load together.
+- **Cropped masks**: a mask of a part of the grid (for example the box of the ROI) goes to its place in the image, by its origin. A mask of the full shape with another origin goes to its place in the same way.
+- **Other grids**: a mask of another spacing or orientation raises an error. Pictologics does not resample masks onto the image grid.
+- `transpose_axes` turns the axes of a file whose geometry does not show its voxel order, for example `(1, 0, 2)` swaps X and Y.
 
-    - **Resampling**: When the image is resampled to a new voxel spacing, the interpolation kernel
-      reads neighboring voxels — including sentinel values. A valid voxel next to a -2048 sentinel
-      will receive a blended value that is far below its true intensity, corrupting the resampled
-      output.
-    - **Filtering**: Convolution-based filters (e.g., LoG, Gabor, wavelets) sum intensities over
-      a local neighborhood. Any sentinel voxels within the kernel window contribute their artificial
-      values to the filter response, producing incorrect texture and edge features.
+In a pipeline, a mask path gets the image as its `reference_image` by itself: `pipeline.run("ct_folder/", "segmentation.nii.gz", ...)`.
 
-    This approach works well when the pipeline **only** discretises and extracts features (no
-    resampling or filtering). For pipelines that include resampling or filtering, combine
-    resegmentation with **Approach 2** (source masking) — see below.
+### Sub-Voxel Alignment and Overlap
 
-#### Approach 2: Source Masking (Protects Resampling & Filtering)
+Mask origins from other programs can be a small part of a voxel off the image grid. Three settings control the placement:
 
-When your images contain sentinel values that could **contaminate resampling and filtering** (e.g., pre-cropped lesion exports), use sentinel detection and source masking. This creates a *source mask* that ensures sentinel voxels are excluded from interpolation and convolution operations:
+| Parameter | Default | Effect |
+|:--|:--|:--|
+| `subvoxel_warning_threshold` | `0.01` | An offset above this part of a voxel gives a warning; the mask snaps to the nearest voxel |
+| `subvoxel_tolerance` | `0.5` | An offset above this raises an error. 0.5 is the largest offset that rounding can give, so the default never raises; lower it to find imprecise files |
+| `min_overlap_fraction` | `0.5` | At least this part of the mask must lie in the image, else an error (a mask of another patient); 0 turns the check off |
 
 ```python
-from pictologics import load_image
-from pictologics.preprocessing import detect_sentinel_value, create_source_mask_from_sentinel
-
-image = load_image("lesion_export.nii.gz")
-
-# Automatically detect sentinel value
-sentinel = detect_sentinel_value(image)
-print(f"Detected sentinel: {sentinel}")  # e.g., -2048.0
-
-# Create source mask (1 = valid, 0 = sentinel)
-source_mask = create_source_mask_from_sentinel(image, sentinel)
+ct = load_image("ct_folder/")
+mask = load_image("mask.nii.gz", reference_image=ct, subvoxel_warning_threshold=0.1)  # warn above 10 %
+strict = load_image("mask.nii.gz", reference_image=ct, subvoxel_tolerance=0.05)      # error above 5 %
 ```
 
-The source mask enables **masked interpolation** for resampling and **normalized convolution** for filters, preventing sentinel values from bleeding into valid regions.
+In `run()`, the same settings are `mask_subvoxel_tolerance`, `mask_subvoxel_warning_threshold` and `mask_min_overlap_fraction`.
 
-!!! warning "Source masking does not replace resegmentation"
-    The source mask protects **resampling and filtering** and, after resampling, keeps ROI masks
-    inside the valid source extent. It does **not** define a clinical/intensity compartment by
-    itself, and it does not change feature-extraction masks in pipelines with no spatial step.
-    Add a `resegment` step to restrict the ROI to the valid intensity range you want to measure.
-    In practice, you typically need **both**:
+| Problem | Result |
+|:--|:--|
+| Another spacing | `ValueError` (no mask resampling) |
+| Another orientation (not the image axes in another order or with other signs) | `ValueError` |
+| An offset above `subvoxel_warning_threshold` | `UserWarning`, and the mask snaps to the nearest voxel |
+| An offset above `subvoxel_tolerance` | `ValueError` |
+| An overlap below `min_overlap_fraction` | `ValueError` |
+| No overlap (with `min_overlap_fraction=0`) | `UserWarning`, and an empty mask |
+| A partial overlap | The overlapping part is placed; the rest is cut off |
+| A DICOM mask (SEG, RTSTRUCT) of another `FrameOfReferenceUID` | `UserWarning`: the mask can belong to another scan |
 
-    - `source_mode="auto"` (or an explicit source mask) to protect preprocessing and **prevent memory exhaustion**.
-    - `resegment` to define the correct ROI for feature extraction.
+### DICOM SEG
 
-    **Critical Note:** Without `source_mode="auto"`, resampled background voxels (often 0) may fall within your `resegment` range (e.g., -100 to 3000). This causes the **entire image volume** to be included in the ROI, leading to huge memory usage and slow GLCM calculations. `source_mode="auto"` ensures these background voxels are excluded from the ROI.
-
-    See the **[Quick Start](quick_start.md)** guide for a complete workflow and the
-    **[Cookbook](cookbook.md)** for batch processing examples.
-
-    #### Decision Guide: When to use `source_mode`?
-
-    | Image Type | Example | Recommended Mode | Why? |
-    | :--- | :--- | :--- | :--- |
-    | **Full FOV Scan** | Standard CT/MRI (rectangular, includes air/background) | `"full_image"` (Default) | Entire image contains valid physical measurements (even air is approx -1000 HU). No artificial edges to protect. |
-    | **Pre-processed / Cropped** | Skull-stripped brain, cardiac ROI crop, or image with applied mask (background = 0 or -2048) | `"auto"` | The background is *artificial*. Resampling near the tissue edge would blend valid tissue with invalid background (0), corrupting values. `auto` masking prevents this. |
-    | **ROI Mask Provided?** | You have a separate segmentation file (e.g., `liver_mask.nii.gz`) | **Matches Image Type** | The *ROI mask* tells us *where* to extract features. The `source_mode` tells us *what pixel values are valid* for interpolation. Use `"auto"` if the *image itself* has invalid background; use `"full_image"` if it's a raw scan. |
-
-    **Summary**:
-    - **Raw Scan + Mask**: Use `source_mode="full_image"` (default).
-    - **Masked/Cropped Image**: Use `source_mode="auto"`.
-
-!!! tip
-    Check your data's minimum value to identify potential sentinels:
-    ```python
-    image = load_image("scan.dcm")
-    print(f"Min: {image.array.min()}, Max: {image.array.max()}")
-    # If min is -1024 or -2048, those are likely sentinels
-    ```
-
-## Multi-Phase DICOM Series
-
-Many clinical acquisitions contain multiple phases (e.g., cardiac CT with multiple timepoints). Pictologics can detect and load specific phases from datasets.
-
-### Discovering Available Phases
-
-Use `get_dicom_phases()` to explore what's available before loading:
+`load_image()` finds a DICOM SEG by itself. `load_seg()` gives more control:
 
 ```python
-from pictologics.utilities import get_dicom_phases
-
-# Discover phases in a multi-phase DICOM directory
-phases = get_dicom_phases("path/to/cardiac_ct/")
-
-print(f"Found {len(phases)} phases:")
-for phase in phases:
-    print(f"--- Phase {phase.index} ---")
-    print(f"Label:       {phase.label}")
-    print(f"Split Tag:   {phase.split_tag}")
-    print(f"Split Value: {phase.split_value}")
-    print(f"Num Slices:  {phase.num_slices}")
-    # Show first file path as example
-    print(f"Example File: {phase.file_paths[0].name}")
-```
-
-Example output:
-```text
-Found 10 phases:
---- Phase 0 ---
-Label:       Phase 0%
-Split Tag:   NominalPercentageOfCardiacPhase
-Split Value: 0
-Num Slices:  256
-Example File: IM-0001-0001.dcm
---- Phase 1 ---
-Label:       Phase 10%
-Split Tag:   NominalPercentageOfCardiacPhase
-Split Value: 10
-Num Slices:  256
-Example File: IM-0001-0225.dcm
-...
-```
-
-Each `DicomPhaseInfo` object contains:
-
-- `index`: Phase index (0, 1, 2, ...)
-- `label`: Human-readable label (e.g., "CardiacPhase=0", "TemporalPosition=1")
-- `num_slices`: Number of slices in this phase
-- `split_tag`: The DICOM tag used for detection
-- `split_value`: The actual tag value
-
-
-### Loading a Specific Phase
-
-Use the `dataset_index` parameter to load a particular phase:
-
-```python
-# Load the first phase (index 0)
-phase_0 = load_image("path/to/cardiac_ct/", dataset_index=0)
-
-# Load the second phase (index 1)
-phase_1 = load_image("path/to/cardiac_ct/", dataset_index=1)
-```
-
-In a pipeline, `image_options={"dataset_index": 1}` in `run()` loads that phase from the folder path.
-
-### Phase Detection Priority
-
-Pictologics automatically detects phases using these DICOM tags (in order of priority):
-
-1. **NominalPercentageOfCardiacPhase** - Cardiac phases (percentage)
-2. **TemporalPositionIdentifier** - Temporal position index
-3. **TriggerTime** - ECG trigger time
-4. **AcquisitionNumber** - Acquisition sequence number
-5. **EchoNumbers** - Multi-echo MRI
-
-## 4D NIfTI Files
-
-NIfTI files can contain 4D data (3D + time/phase). Use `dataset_index` similarly:
-
-```python
-# Load a 4D NIfTI file - get the first volume
-vol_0 = load_image("path/to/4d_data.nii.gz", dataset_index=0)
-
-# Load the second volume
-vol_1 = load_image("path/to/4d_data.nii.gz", dataset_index=1)
-```
-
-## DICOM Segmentation (SEG) Files
-
-DICOM SEG files are specialized objects containing segmentation masks. Use `load_seg()` for full control, or let `load_image()` auto-detect them.
-
-### Auto-Detection in load_image()
-
-```python
-# load_image() automatically detects DICOM SEG files
-mask = load_image("path/to/segmentation.dcm")
-
-# When loading a SEG as a pipeline mask path, RadiomicsPipeline.run()
-# passes the image as reference_image automatically.
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-results = pipeline.run("path/to/ct_series/", "path/to/segmentation.dcm")
-```
-
-### Detailed Control with load_seg()
-
-```python
-from pictologics import load_seg
+from pictologics import load_image, load_seg
 from pictologics.loaders import get_segment_info
-import numpy as np
 
-# First, inspect what segments are available
-segments = get_segment_info("path/to/segmentation.dcm")
-for seg in segments:
-    print(f"Segment {seg['segment_number']}: {seg['segment_label']}")
+ct = load_image("ct_folder/")
+for segment in get_segment_info("segmentation.dcm"):
+    print(segment["segment_number"], segment["segment_label"])
 
-# Load all segments combined into a single label mask
-# Each segment gets its numeric label (1, 2, 3, etc.)
-combined_mask = load_seg("path/to/segmentation.dcm")
-print(np.unique(combined_mask.array))  # [0, 1, 2, 3, ...]
-# Background = 0, Segment 1 = 1, Segment 2 = 2, etc.
-
-# Load only specific segments
-liver_mask = load_seg(
-    "path/to/segmentation.dcm",
-    segment_numbers=[1, 2]  # Only segments 1 and 2
-)
-
-# Load segments separately (returns dict)
-separate_masks = load_seg(
-    "path/to/segmentation.dcm",
-    combine_segments=False
-)
-# separate_masks = {1: Image(...), 2: Image(...), ...}
+labels = load_seg("segmentation.dcm", reference_image=ct)                          # one label image
+two = load_seg("segmentation.dcm", reference_image=ct, segment_numbers=[1, 2])     # some segments
+masks = load_seg("segmentation.dcm", reference_image=ct, combine_segments=False)   # {number: mask}
 ```
 
-### Working with Separate Segments
+- Give `reference_image`: a SEG often holds frames only on the slices of its ROI, so without it the mask does not have the grid of the image.
+- In one label image, the label of a segment is its segment number (uint8, or uint16 above 255 segments). Where segments overlap, one of them keeps the voxel: load overlapping segments with `combine_segments=False`.
+- A FRACTIONAL SEG gives the voxels at or above `fractional_threshold` (default 0.5). A Label Map SEG loads as the others do; its segment 0 (the background) is left out.
+- `load_seg()` takes the alignment settings of `load_image()`: `transpose_axes`, `subvoxel_tolerance`, `subvoxel_warning_threshold`, `min_overlap_fraction`.
 
-When using `combine_segments=False`, you can iterate over segments for individual analysis:
+For each segment of a label image, use `run_rois()` (see [Many ROIs and Batch Studies](../tutorials/batch.md)). For overlapping segments, run each mask:
 
 ```python
-# Get each segment as a separate binary mask
-masks = load_seg("seg.dcm", combine_segments=False)
-
-# Iterate over segments
-for seg_num, mask in masks.items():
-    print(f"Segment {seg_num}: {mask.array.sum()} voxels")
-
-# Process each segment for radiomics
-for seg_num, mask in masks.items():
-    features = pipeline.run(image=ct, mask=mask)
+for number, mask in masks.items():
+    results = pipeline.run(ct, mask, config_names=["standard_fbn_32"])
 ```
 
-When a mask contains multiple labels in one volume, `RadiomicsPipeline` treats
-all nonzero labels as one combined ROI by default. Label values are never used
-as numeric weights in volume or texture calculations. Add a `binarize_mask` step
-when the run should use only selected label values:
+### DICOM RTSTRUCT
 
-```python
-pipeline.add_config("segment_2_only", [
-    {"step": "binarize_mask", "params": {"mask_values": 2}},
-    {"step": "extract_features", "params": {"families": ["morphology", "intensity"]}},
-])
-```
-
-### Combining Specific Segments into a Binary Mask
-
-To merge selected segments into a single binary mask:
-
-```python
-# Load specific segments separately
-masks = load_seg("seg.dcm", segment_numbers=[1, 2], combine_segments=False)
-
-# Combine into single binary mask using logical OR
-combined = masks[1].array | masks[2].array
-```
-
-### Aligning SEG to a Reference Image
-
-SEG files may have different geometry than the source image. Use `reference_image` to align:
-
-```python
-# Load the CT image
-ct = load_image("path/to/ct_series/")
-
-# Load and align the segmentation to CT geometry
-mask = load_seg(
-    "path/to/segmentation.dcm",
-    reference_image=ct,
-    subvoxel_tolerance=0.05,
-    min_overlap_fraction=0.5,
-)
-
-# Now mask.array.shape == ct.array.shape
-```
-
-`load_seg()` uses the same reference-alignment controls as `load_image()` and
-`load_and_merge_images()`, including `transpose_axes`, `subvoxel_tolerance`,
-`subvoxel_warning_threshold`, and `min_overlap_fraction`.
-
-## DICOM RTSTRUCT Files
-
-A DICOM RT Structure Set (RTSTRUCT) holds the contours of each ROI as polygons, not voxels. Pictologics fills them onto the grid of the image that the contours belong to, so the image is necessary:
+An RT Structure Set holds the contours of each ROI as polygons, not voxels. Pictologics fills them onto the grid of the image of the contours, so it needs the image:
 
 ```python
 from pictologics import RadiomicsPipeline, load_image, load_rtstruct
 from pictologics.loaders import get_segment_info
 
-ct = load_image("path/to/ct_folder/")
-
-# The ROIs: ROI Number, name and number of closed contours
-for roi in get_segment_info("path/to/rtstruct.dcm"):
+ct = load_image("ct_folder/")
+for roi in get_segment_info("rtstruct.dcm"):
     print(roi["segment_number"], roi["segment_label"], roi["contour_count"])
 
-# One label image: the label of each ROI is its ROI Number
-labels = load_image("path/to/rtstruct.dcm", reference_image=ct)
-
-# Binary masks by ROI name, which keep overlapping ROIs (such as a GTV in a PTV)
-masks = load_rtstruct("path/to/rtstruct.dcm", ct, roi_names=["GTV", "PTV"], combine_rois=False)
+labels = load_image("rtstruct.dcm", reference_image=ct)  # one label image: the label is the ROI Number
+masks = load_rtstruct("rtstruct.dcm", ct, roi_names=["GTV", "PTV"], combine_rois=False)  # by name
 results = RadiomicsPipeline().run(ct, masks["GTV"], config_names=["standard_fbn_32"])
 ```
 
-- A voxel is in an ROI when its center lies inside an odd number of the contours of the ROI on its slice (the even-odd rule). So a contour inside another contour cuts a hole.
+- A voxel is in an ROI when its center lies inside an odd number of the contours of the ROI on its slice (the even-odd rule): a contour inside another contour cuts a hole.
 - A center on an edge is inside on one side of the edge only, so two ROIs that share an edge share no voxel.
-- The plane of each contour must be a slice plane of the image. A contour up to `subvoxel_tolerance` voxels (default 0.5) away from a slice is filled on the nearest slice, with a warning above `subvoxel_warning_threshold` (default 0.01).
-- In one label image, a later ROI wins where ROIs overlap. Use `combine_rois=False` for overlapping ROIs.
-- `run(image, mask="rtstruct.dcm")` fills the RTSTRUCT onto the grid of the image, as one label image.
+- The plane of each contour must be a slice plane of the image. A contour up to `subvoxel_tolerance` voxels (default 0.5) from a slice is filled on the nearest slice, with a warning above `subvoxel_warning_threshold`.
+- In one label image, a later ROI wins where ROIs overlap. Use `combine_rois=False` for overlapping ROIs (such as a GTV in a PTV).
+- `run(image, "rtstruct.dcm")` and `run_rois(image, "rtstruct.dcm")` fill the RTSTRUCT onto the grid of the image.
 
-## Merging Multiple Images with `load_and_merge_images()`
+### 3D Slicer Segmentations (.seg.nrrd)
 
-When you have multiple segmentation masks (e.g., different organs, or masks split across files), use `load_and_merge_images()` to combine them.
+A `.seg.nrrd` file holds each segment as a label value in a layer; overlapping segments need more than one layer:
 
-### Basic Merging
+```python
+from pictologics.loaders import get_segment_info
+
+for segment in get_segment_info("segmentation.seg.nrrd"):
+    print(segment["segment_label"], segment["label_value"], segment["layer"])
+
+layer = load_image("segmentation.seg.nrrd", reference_image=ct, dataset_index=1)  # layer 1
+```
+
+### Merging Masks
+
+`load_and_merge_images()` combines many mask files into one image:
 
 ```python
 from pictologics import load_and_merge_images
 
-# Merge multiple mask files into one
-combined_mask = load_and_merge_images([
-    "path/to/liver_mask.nii.gz",
-    "path/to/kidney_mask.nii.gz",
-    "path/to/spleen_mask.nii.gz"
-])
+paths = ["liver.nii.gz", "kidney.nii.gz", "spleen.nii.gz"]
+ct = load_image("ct_folder/")
+merged = load_and_merge_images(paths, reference_image=ct, reposition_to_reference=True, relabel_masks=True)
+# liver = 1, kidney = 2, spleen = 3 (by the order of the paths)
 ```
 
-### Relabeling Masks for Visualization
+| Option | Effect |
+|:--|:--|
+| `relabel_masks=True` | Each file gets its own label: 1, 2, 3, ... in the order of the paths |
+| `binarize=True` | Every voxel that is not 0 becomes 1 before the merge |
+| `conflict_resolution` | Where files overlap: `"max"` (default), `"min"`, `"first"` or `"last"` |
+| `reposition_to_reference=True` | Place each file on the grid of `reference_image`, with the alignment settings above. Without it, every file must have the exact grid of the first, and nothing is turned or placed |
 
-When merging binary masks, assign unique labels to each:
+- The result is float64, with the modality `"MergedImage"`.
+- The files load with `load_image()` without a reference image, so RTSTRUCT paths do not work here (use `load_rtstruct()`), and `series_uid` and `suv` do not apply.
+
+## Sentinel Values
+
+Some images hold a **sentinel value** where they have no data, for example -2048 HU outside the field of view, or 0 around a cropped image. In a pipeline, the `source_mode` of a configuration keeps these voxels out of resampling, filtering and the ROI: see [Source Modes and Sentinel Values](pipeline.md#source-modes-and-sentinel-values).
+
+To find and mark them yourself:
 
 ```python
-# Each mask gets a unique label (1, 2, 3, ...)
-combined = load_and_merge_images(
-    ["mask1.nii.gz", "mask2.nii.gz", "mask3.nii.gz"],
-    relabel_masks=True
-)
-# Result: voxels from mask1 = 1, mask2 = 2, mask3 = 3
+from pictologics.preprocessing import create_source_mask_from_sentinel, detect_sentinel_value
+
+image = load_image("lesion_export.nii.gz")
+sentinel = detect_sentinel_value(image)  # for example -2048.0, or None
+if sentinel is not None:
+    valid = create_source_mask_from_sentinel(image, sentinel)  # True: a voxel with data
+    image = image.with_source_mask(valid.array)
 ```
-
-### Merge Strategy Options
-
-Control how overlapping voxels are handled:
-
-```python
-# "max" (default): Take the maximum value at each voxel
-combined = load_and_merge_images(masks, conflict_resolution="max")
-
-# "min": Take the minimum value at each voxel
-combined = load_and_merge_images(masks, conflict_resolution="min")
-
-# "first": Keep the first non-zero value
-combined = load_and_merge_images(masks, conflict_resolution="first")
-
-# "last": Keep the last non-zero value
-combined = load_and_merge_images(masks, conflict_resolution="last")
-```
-
-## Handling Cropped Masks
-
-Medical imaging software often stores segmentation masks as **cropped volumes** (bounding boxes around the region of interest) to minimize storage. When loading these cropped masks, they need to be repositioned into the original image's coordinate space for proper visualization and analysis.
-
-The `pictologics` loader uses the spatial metadata (`ImagePositionPatient` for DICOM, affine matrix for NIfTI) to calculate where the cropped mask belongs in the full volume.
-
-A mask can hold the grid of the image in another voxel order: axes flipped or swapped, as some converters write NIfTI files. The loader then turns the mask to the voxel order of the image first. So a DICOM image and a NIfTI mask on the same grid load together:
-
-```python
-ct = load_image("path/to/dicom_folder/")
-mask = load_image("path/to/segmentation.nii.gz", reference_image=ct)
-# mask.array has the shape and the voxel order of ct.array
-```
-
-
-### Repositioning a Single Cropped Mask
-
-```python
-# Load the full CT image
-ct = load_image("path/to/full_ct/")
-
-# Load a cropped mask and reposition it
-cropped_mask = load_image(
-    "path/to/cropped_mask.nii.gz",
-    reference_image=ct
-)
-# cropped_mask now has the same shape as ct
-```
-
-### Merging Multiple Cropped Masks
-
-```python
-# Load CT as reference
-ct = load_image("path/to/ct/")
-
-# Merge cropped masks into reference space
-combined = load_and_merge_images(
-    ["cropped_liver.nii.gz", "cropped_kidney.nii.gz"],
-    reference_image=ct,
-    reposition_to_reference=True,
-    relabel_masks=True
-)
-```
-
-### Handling Axis Transposition
-
-The loader turns the axes itself when the geometry of the file tells the voxel order. Use `transpose_axes` only for a file with swapped axes that its geometry does not show:
-
-```python
-combined = load_and_merge_images(
-    mask_paths,
-    reference_image=ct,
-    reposition_to_reference=True,
-    transpose_axes=(1, 0, 2)  # Swap X and Y axes
-)
-```
-
-### Sub-Voxel Alignment and Overlap Safeguards
-
-DICOM software from different vendors sometimes stores mask origins with small floating-point imprecision, resulting in fractional-voxel offsets relative to the reference image grid. Pictologics handles this gracefully with two configurable thresholds:
-
-| Parameter | Default | Effect |
-|-----------|---------|--------|
-| `subvoxel_warning_threshold` | `0.01` | Drift above this (~1% of a voxel) emits a `UserWarning` but snaps to the nearest voxel and continues. |
-| `subvoxel_tolerance` | `0.5` | Drift above this raises a `ValueError`. At the default of 0.5 (the mathematical maximum for rounding), valid masks never error. Lower this to detect suspiciously imprecise coordinates. |
-| `min_overlap_fraction` | `0.5` | At least 50% of the mask's voxel volume must lie within the reference image space, otherwise a `ValueError` is raised. This prevents silently loading masks from the wrong patient. Set to `0.0` to disable. |
-
-```python
-# Dataset with known DICOM precision quirks — suppress sub-voxel warnings
-# by keeping the default tolerance (0.5) but raising the warning threshold:
-combined = load_and_merge_images(
-    mask_paths,
-    reference_image=ct,
-    reposition_to_reference=True,
-    subvoxel_warning_threshold=0.1,   # only warn if drift > 10% of a voxel
-)
-
-# Stricter project — flag any drift above 5% of a voxel as an error:
-combined = load_and_merge_images(
-    mask_paths,
-    reference_image=ct,
-    reposition_to_reference=True,
-    subvoxel_tolerance=0.05,
-)
-```
-
-### Error Handling
-
-| Issue | Behavior |
-|-------|----------|
-| Spacing mismatch | `ValueError` raised (resampling not yet supported) |
-| Orientation mismatch | `ValueError` raised when the mask axes are not the image axes in another order or with other signs; resample the mask to the image grid |
-| Sub-voxel drift > `subvoxel_warning_threshold` | `UserWarning` emitted, nearest-voxel snapping applied |
-| Sub-voxel drift > `subvoxel_tolerance` | `ValueError` raised |
-| Overlap fraction < `min_overlap_fraction` | `ValueError` raised to prevent wrong-patient mask loading |
-| Mask outside reference bounds (`min_overlap_fraction=0.0`) | `UserWarning` emitted, empty volume returned |
-| Mask of another DICOM frame of reference | `UserWarning` emitted: a DICOM image, a SEG and an RTSTRUCT keep their `FrameOfReferenceUID`, and a mask with another UID can belong to another scan |
-| Partial overlap | Valid region is positioned, rest is clipped |
-
-!!! tip
-    **Label Order**: When using `relabel_masks=True`, labels are assigned based on the order of files in `image_paths`. Use `sorted()` for consistent ordering, or specify the exact order you want.
 
 ## Saving Images
 
-`save_image()` writes an image, a mask or a response map as a NIfTI file (`.nii` or `.nii.gz`). The geometry goes back to the RAS+ affine of NIfTI, so `load_image()` reads the same array and geometry, and other tools (3D Slicer, ITK) read the same grid:
+`save_image()` writes an image, a mask or a response map as a NIfTI file (`.nii` or `.nii.gz`). The geometry goes back to the RAS+ affine of NIfTI, so `load_image()`, 3D Slicer and ITK read the same grid:
 
 ```python
 from pictologics import load_image, load_rtstruct, save_image
 
-ct = load_image("path/to/ct_folder/")
-masks = load_rtstruct("path/to/rtstruct.dcm", ct, roi_names=["GTV"], combine_rois=False)
+ct = load_image("ct_folder/")
+masks = load_rtstruct("rtstruct.dcm", ct, roi_names=["GTV"], combine_rois=False)
 save_image(masks["GTV"], "gtv.nii.gz")  # an RTSTRUCT ROI as a NIfTI mask
 ```
 
-- A bool mask is saved as uint8. Other arrays keep their type (float64 images, float32 response maps, uint8 masks).
+- A bool mask is saved as uint8, and a 64-bit integer array as int32 when its values fit. Other arrays keep their type.
 - NIfTI keeps the geometry in float32 (about 1e-5 mm).
+- A NIfTI file has no `FrameOfReferenceUID` and no DICOM modality: a saved mask no longer gets the frame-of-reference check.
 
 ## Creating a Full Mask
 
-When you don't have a segmentation mask and want to analyze the entire image:
+To analyse the whole image, make a mask of ones on its grid:
 
 ```python
 from pictologics import create_full_mask
 
-# Create a mask of all ones matching the image geometry
-image = load_image("scan.nii.gz")
 full_mask = create_full_mask(image)
-
-# Now use full_mask for whole-image analysis
 ```
 
-!!! tip
-    If you pass `mask=None` to `RadiomicsPipeline.run()`, it automatically creates a full mask internally.
-
-
-
-## Summary of Loading Functions
-
-| Function | Purpose |
-|----------|---------|
-| `load_image()` | Main entry point - loads NIfTI, NRRD (also `.seg.nrrd`), MetaImage, DICOM series, single DICOM, DICOM SEG, or DICOM RTSTRUCT (with `reference_image`) |
-| `load_seg()` | Detailed DICOM SEG loading with segment selection and alignment |
-| `load_rtstruct()` | DICOM RTSTRUCT contours filled onto a reference image, as one label image or masks by ROI name |
-| `get_segment_info()` | Inspect available segments in a DICOM SEG, RTSTRUCT or `.seg.nrrd` file |
-| `save_image()` | Save an image, mask or response map as NIfTI |
-| `load_and_merge_images()` | Combine multiple images/masks with various strategies |
-| `create_full_mask()` | Create an all-ones mask matching image geometry |
-| `get_dicom_phases()` | Discover available phases in multi-phase DICOM |
+`RadiomicsPipeline.run()` makes it by itself when `mask` is `None`.
 
 ## Next Steps
 
-- [Pipeline & Preprocessing](pipeline.md) - Configure and run the radiomics pipeline
-- [Cookbook](cookbook.md) - End-to-end batch processing scripts
+- [The Pipeline](pipeline.md): run the radiomics pipeline.
+- [Masks from Other Tools](../tutorials/masks.md): label maps, probability maps, SEG, RTSTRUCT and 3D Slicer masks in a pipeline.
+- [Tutorials](../tutorials/batch.md): many ROIs and cases, cardiac phases, PET and MR.

@@ -345,7 +345,7 @@ class TestSRDocument:
             measurement_groups=[group],
         )
 
-        csv_path = tmp_path / "output.csv"
+        csv_path = tmp_path / "new" / "output.csv"  # a missing folder is made
         result = doc.export_csv(str(csv_path))
 
         assert result == csv_path
@@ -367,7 +367,7 @@ class TestSRDocument:
             measurement_groups=[group],
         )
 
-        json_path = tmp_path / "output.json"
+        json_path = tmp_path / "new" / "output.json"  # a missing folder is made
         result = doc.export_json(str(json_path))
 
         assert result == json_path
@@ -874,7 +874,7 @@ class TestSRBatch:
         batch = SRBatch(documents=[doc], processing_log=[], output_dir=None)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = Path(tmpdir) / "combined.csv"
+            output_path = Path(tmpdir) / "new" / "combined.csv"  # a missing folder is made
             result = batch.export_combined_csv(output_path)
             assert result.exists()
             df = pd.read_csv(result)
@@ -895,7 +895,7 @@ class TestSRBatch:
         batch = SRBatch(documents=[], processing_log=log, output_dir=None)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = Path(tmpdir) / "log.csv"
+            output_path = Path(tmpdir) / "new" / "log.csv"  # a missing folder is made
             result = batch.export_log(output_path)
             assert result.exists()
             df = pd.read_csv(result)

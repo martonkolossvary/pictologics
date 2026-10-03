@@ -1,6 +1,6 @@
 # Deduplication API
 
-The deduplication module provides intelligent optimization for multi-configuration radiomic feature extraction. When multiple configurations share preprocessing steps but differ only in discretization, the system avoids redundant computation by identifying which feature families can be computed once and reused.
+When configurations share their preprocessing, the deduplication module finds the feature families that get the same input in more than one configuration. The pipeline computes each such family one time and copies the values.
 
 ## Overview
 
@@ -31,7 +31,7 @@ results = pipeline.run(image, mask, config_names=["config1", "config2", "config3
 print(pipeline.deduplication_stats)
 ```
 
-For complete usage examples, see [Case 7: Multi-configuration batch with deduplication](../user_guide/cookbook.md#case-7-multi-configuration-batch-with-deduplication).
+For a complete example, see [Many Discretisations](../user_guide/cookbook.md#6-many-discretisations) in the Cookbook, and [Shared Work Between Configurations](../user_guide/pipeline.md#shared-work-between-configurations).
 
 ---
 
@@ -61,18 +61,16 @@ assert results["fbn_8"]["joint_average_60VM"] != results["fbn_32"]["joint_averag
 
 ### Data Tables and Concatenation
 
-When you concatenate results into a single DataFrame (e.g., for machine learning), every configuration row is **complete**—no missing values due to deduplication:
+Deduplication never leaves a feature out: each configuration gets all features of its families, computed or copied. When the configurations ask for the same families, a table with one row for each configuration has the same columns in every row:
 
 ```python
 import pandas as pd
 
-# Deduplication copies each computed family into every config that reuses it, so all
-# configs expose the same feature keys — stacking them leaves no missing values.
 rows = [{"config": name, **results[name].to_dict()} for name in results]
-df = pd.DataFrame(rows)
-print(df.shape)                    # one row per config; columns = config + all features
-print(int(df.isna().sum().sum()))  # 0 - no NaN values
+table = pd.DataFrame(rows)  # one row for each configuration
 ```
+
+When the configurations ask for other families (for example an `orig` configuration with the morphology and intensity features, and others with the texture features), each row has the columns of its own families, and the other cells are empty (`NaN`). A feature can also be `NaN` for its own reason, for example a PCA of too few voxels.
 
 ---
 
@@ -84,6 +82,7 @@ print(int(df.isna().sum().sum()))  # 0 - no NaN values
       members:
         - version
         - family_dependencies
+        - family_options
         - get_version
         - to_dict
         - from_dict

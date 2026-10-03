@@ -1,385 +1,209 @@
-# Pipeline & Preprocessing
+# The Pipeline
 
-The `RadiomicsPipeline` is the core engine of Pictologics for executing reproducible, standardized radiomic feature extraction workflows. It manages the entire lifecycle from preprocessing to feature extraction and logging.
+`RadiomicsPipeline` runs configurations on an image and a mask. A configuration is a named list of steps: the first steps prepare the image and the masks, and the `extract_features` step computes the features. Each configuration gives one `pandas.Series` of features.
 
-## Why Use the Pipeline?
+| Page | Contents |
+|:--|:--|
+| This page | How to run the pipeline: configurations, masks, image options, source modes, many ROIs and many cases |
+| [Pipeline Steps](pipeline_steps.md) | Each step and its parameters |
+| [Results and Logs](results.md) | The result tables, the feature catalog and the processing log |
+| [Configuration & Reproducibility](configurations.md) | Save, share and load configurations |
 
-1.  **Reproducibility**: Define a configuration once and apply it consistently to every image.
-2.  **State Management**: The pipeline tracks the image and masks (morphological and intensity) through every step.
-3.  **Standardisation**: Built-in configurations follow IBSI standards.
-4.  **Batch Processing**: Run multiple configurations (e.g., different binning strategies) on the same image in a single pass.
-5.  **Flexibility**: Steps execute **linearly**, so you can arrange them in any order or repeat steps.
-
-## Getting Started
+## A First Run
 
 ```python
 from pictologics import RadiomicsPipeline, format_results, save_results
 
-# 1. Initialize the pipeline
 pipeline = RadiomicsPipeline()
-
-# 2. Run a predefined configuration
 results = pipeline.run(
-    image="path/to/image.nii.gz",
-    mask="path/to/mask.nii.gz",
-    subject_id="Subject_001",
-    config_names=["standard_fbn_32"],
+    image="ct.nii.gz",
+    mask="lesion.nii.gz",
+    subject_id="p001",
+    config_names=["standard_fbs_16"],
 )
-
-# 3. Format and save results
-row = format_results(results, fmt="wide", meta={"subject_id": "Subject_001"})
-save_results([row], "results.csv")
+row = format_results(results, meta={"subject_id": "p001"})
+save_results([row], "features.csv")
 ```
 
-### Masks Are Optional
+- `results` is a dictionary: one feature Series for each configuration.
+- `format_results` makes one row, with a column for each feature, for example `standard_fbs_16__mean_intensity_Q4LE`.
+- `subject_id` goes into the processing log only. To put it in the table, give it to `format_results` in `meta`.
 
-`RadiomicsPipeline.run(...)` accepts an optional `mask` argument:
+## Which Configurations Run
 
-- Pass a mask path or `Image` object → used as the ROI (standard workflow).
-- Omit `mask` (or pass `mask=None` / `mask=""`) → Pictologics generates a full (all-ones) ROI mask, treating the **entire image** as the initial ROI.
+- `RadiomicsPipeline()` starts with the six standard configurations. `RadiomicsPipeline(load_standard=False)` starts with none.
+- `config_names` sets the configurations to run, in its order. A name that is in the list two times runs one time.
+- `"all_standard"` in `config_names` stands for the six standard configurations.
+- Without `config_names`, `run()` runs every configuration of the pipeline. When the standard configurations are among them, a warning tells you so.
+- An unknown name raises a `ValueError` with the closest name.
 
-When you pass a **mask path**, the mask is loaded with the already-loaded image as
-`reference_image`, so DICOM SEG objects and cropped masks can be aligned to image
-geometry before extraction. When you pass an in-memory `Image` mask, Pictologics
-validates that shape, spacing, origin, and direction already match the image.
+### The Standard Configurations
 
-Mask values use **nonzero membership** semantics by default: values `1`, `2`,
-`3`, etc. all mean "inside the ROI". Label numbers are not treated as weights
-for volume, texture, or intensity calculations. Add a `binarize_mask` step when
-you need to select a specific label or label range from a multi-label mask.
+The six standard configurations resample to 0.5 mm cubic voxels (linear interpolation). They compute the intensity, morphology, texture, histogram and IVH features.
 
-!!! info "Complete Feature Sets Guaranteed"
-    Every configuration always returns a `pandas.Series` with the **full set of expected
-    feature names** — even when extraction fails partially or entirely.
+| Configuration | Discretisation |
+|:--|:--|
+| `standard_fbn_8`, `standard_fbn_16`, `standard_fbn_32` | 8, 16 or 32 bins (FBN) |
+| `standard_fbs_8`, `standard_fbs_16`, `standard_fbs_32` | Bins of 8, 16 or 32 HU from -1000 HU (FBS) |
 
-    - **Empty ROI** (e.g., too strict `resegment` thresholds): all features are `NaN`.
-    - **Partial failures** (e.g., mesh generation error, PCA with ≤3 voxels):
-      successfully computed features retain their values; only the missing features are `NaN`.
-    - **Unexpected errors**: all features are `NaN`.
+The FBS bins start at -1000 HU in every image, so these three configurations are for CT. For MR and PET, use the FBN configurations or your own.
 
-    Other configurations in the same `run()` call continue normally.  The processing log
-    records errors and the step that caused them.
+### Templates
 
-    This design ensures that multi-configuration batch runs always produce a complete,
-    predictable result dictionary — downstream formatting, concatenation, and CSV export
-    work without missing columns or unexpected exceptions.
+A template is a file of configurations in the package. `RadiomicsPipeline.from_template(name)` makes a pipeline with the configurations of the template only.
 
-    See [Result Guarantees](#result-guarantees) for details.
-
-    ```python
-    results = pipeline.run(image, mask, config_names=["strict", "lenient"])
-    # If "strict" empties the ROI:
-    #   results["strict"]  -> Series of NaN (all expected feature names present)
-    #   results["lenient"] -> Series of computed values
-    ```
-
-!!! note "Morphology with Whole-Image ROI"
-    With a maskless run, morphology features describe the ROI mask after mask-refining steps
-    (e.g., `resegment`, `keep_largest_component`). This is valid computationally, but may not be
-    scientifically meaningful for all studies.
-
-### Image Options
-
-For an image path, `image_options` gives options to `load_image`: for example a phase of a multi-phase DICOM folder, or a PET series as SUV. The log entry of each configuration records them. `run_rois()` and the cases of `run_batch()` take them too.
+| Template | Configurations |
+|:--|:--|
+| `standard` | The six standard configurations |
+| `lv` | 30, for CT of the left ventricular myocardium, in four compartments: whole, fat, myocardial tissue and calcium |
+| `coronary` | 30, for coronary plaque in CT angiography, in four plaque types: all, non-calcified, low-attenuation and calcified |
 
 ```python
-results = pipeline.run("cardiac_ct/", "lv_mask.nii.gz", image_options={"dataset_index": 4})
-results = pipeline.run("pet_series/", "lesion.nii.gz", image_options={"suv": "bw"})
+pipeline = RadiomicsPipeline.from_template("coronary")
+print(pipeline.list_configs())                    # coronary_orig, coronary_fbn_16, ...
+print(pipeline.get_config("coronary_cp_fbs_16"))  # the steps of one configuration
+pipeline.merge_configs(RadiomicsPipeline.from_template("lv"))  # add a second template
 ```
 
-## Predefined Configurations
+Each compartment of a cardiac template has an `orig` configuration (intensity and morphology features) and FBN and FBS configurations (texture, histogram and IVH features). The configurations use `source_mode="auto"` with the sentinel value -3024 HU. See [Cardiac CT Phases](../tutorials/cardiac_phases.md).
 
-Pictologics includes **6 standard configurations** designed for common radiomics workflows. All share:
-
-- **Resampling**: 0.5mm × 0.5mm × 0.5mm isotropic spacing with linear image interpolation
-- **Feature Families**: intensity, morphology, texture, histogram, and IVH
-- **Performance**: Spatial/local intensity disabled by default
-
-| Configuration | Method | Parameters |
-| :--- | :--- | :--- |
-| `standard_fbn_8` | Fixed Bin Number | `n_bins=8` |
-| `standard_fbn_16` | Fixed Bin Number | `n_bins=16` |
-| `standard_fbn_32` | Fixed Bin Number | `n_bins=32` |
-| `standard_fbs_8` | Fixed Bin Size | `bin_width=8.0` |
-| `standard_fbs_16` | Fixed Bin Size | `bin_width=16.0` |
-| `standard_fbs_32` | Fixed Bin Size | `bin_width=32.0` |
+## Your Own Configuration
 
 ```python
-# Run a single configuration
-results = pipeline.run(image, mask, config_names=["standard_fbn_32"])
-
-# Run all 6 standard configurations
-all_results = pipeline.run(image, mask, config_names=["all_standard"])
-```
-
-!!! tip "Configuration Management"
-    For detailed documentation on FBN vs FBS guidance, export/import, YAML/JSON formats, schema versioning, and sharing configurations, see the **[Configuration & Reproducibility](configurations.md)** guide.
-
-## Linear Step Execution
-
-Steps are applied **one after another** in the exact sequence you define. You can **repeat steps**, **arrange steps in any order**, and implement **complex multi-stage preprocessing**:
-
-```python
-# Example: Complex workflow with repeated steps
-complex_config = [
-    {"step": "resample", "params": {"new_spacing": (2.0, 2.0, 2.0)}},
-    {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    {"step": "filter_outliers", "params": {"sigma": 3.0}},
-    {"step": "round_intensities", "params": {}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["texture", "histogram"]}},
-]
-```
-
-### Intelligent Image Routing
-
-After discretisation, the pipeline maintains both the **original (raw)** image and the **discretised** image, ensuring each feature type gets the appropriate input automatically:
-
-| Feature Family | Image Used | Why |
-|:---------------|:-----------|:----|
-| **Intensity** | Raw image | Statistics require original continuous values |
-| **Morphology** | Raw image | Volume/surface calculations use original geometry |
-| **Histogram** | Discretised | Bin-based statistics require integer bins |
-| **Texture** (GLCM, GLRLM, etc.) | Discretised | Co-occurrence matrices require discrete grey levels |
-| **IVH** | Configurable | Can use raw (continuous) or discretised values |
-
-## Available Preprocessing Steps
-
-### 1. `resample`
-
-Resamples the image and mask to a new voxel spacing.
-
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `new_spacing` | `tuple` | *(required)* | Target spacing (x, y, z) in mm |
-| `interpolation` | `str` | `"linear"` | Image interpolation: `"linear"`, `"cubic"`, `"nearest"` |
-| `mask_interpolation` | `str` | `"nearest"` | Mask interpolation: `"nearest"`, `"linear"` |
-| `mask_threshold` | `float` | `0.5` | Threshold for non-nearest mask interpolation |
-| `round_intensities` | `bool` | `False` | Round intensities to nearest integer after resampling |
-
-Before it resamples, the pipeline checks that the new grid fits in the memory of the computer. A configuration needs at least 24 bytes for each voxel of the new grid. When only steps near the ROI follow, the pipeline resamples only the region around the ROI, and the check uses that region. A filter after the resample needs the whole grid. When the grid does not fit, the configuration stops with a `MemoryError` in its log entry, and its features are `NaN`.
-
-### 2. `resegment`
-
-Refines ROI masks based on intensity thresholds, excluding voxels outside the specified range from feature extraction. By default, resegmentation applies to both the morphology mask and the intensity mask, so morphology volumes and shape features describe the selected compartment, not the original geometric ROI. Set `apply_to="intensity"` only when morphology should remain anchored to the original ROI extent.
-
-!!! warning "Memory Usage Alert"
-    If your image has a background that resamples to 0, and 0 is within your `resegment` range, **you must use `source_mode="auto"`**.
-    Otherwise, `resegment` will include the entire background in the ROI, causing memory exhaustion during texture calculation. `source_mode="auto"` ensures the background remains excluded.
-
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `range_min` | `float` | `None` | Minimum intensity value |
-| `range_max` | `float` | `None` | Maximum intensity value |
-| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
-
-### 3. `filter_outliers`
-
-Removes outliers from ROI masks based on standard deviations from the mean. Like `resegment`, this defaults to both masks so compartment morphology reflects the filtered voxel set. Use `apply_to="intensity"` to remove outliers only from intensity, texture, histogram, and IVH calculations.
-
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `sigma` | `float` | `3.0` | Number of standard deviations |
-| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
-
-### 4. `keep_largest_component`
-
-Restricts the mask to the largest connected component.
-
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
-
-### 5. `grow_mask`
-
-Grows or shrinks the mask by a distance in mm, or keeps a ring at its edge: for example the fat around a vessel, or the tissue around a lesion. The distances use the spacing of each axis, so the mask changes by the same amount in every direction, straight out from its surface. Put the step after `resample` and before `resegment`: a `resegment` step then keeps one tissue of the ring, for example fat from -190 to -30 HU.
-
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `to_mm` | `float` | *(required)* | Grow the mask by this distance (mm). A negative distance shrinks it |
-| `from_mm` | `float` | `None` | Leave out the mask grown (or shrunk, when negative) by this distance, which leaves a ring. Must be below `to_mm` |
-| `nearest_roi` | `bool` | `False` | In `run_rois`: give each added voxel to its nearest ROI of the label map |
-| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
-
-```python
-fat_ring = [
-    {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5)}},
-    {"step": "grow_mask", "params": {"from_mm": 0, "to_mm": 3}},  # the 3 mm around the mask
-    {"step": "resegment", "params": {"range_min": -190, "range_max": -30}},  # fat
-    {"step": "extract_features", "params": {"families": ["intensity"]}},
-]
-```
-
-| `to_mm` | `from_mm` | Result |
-|:--------|:----------|:-------|
-| `3` | | The mask grown by 3 mm |
-| `-1` | | The mask without its outer 1 mm |
-| `3` | `0` | The ring of 3 mm around the mask |
-| `5` | `2` | The ring from 2 to 5 mm around the mask |
-| `0` | `-1` | The outer 1 mm of the mask |
-
-Outside the mask, the distance of a voxel is the distance from its center to the nearest center of a mask voxel. Inside the mask, it is the distance to the nearest center of a voxel outside the mask. The voxels past the image edge count as outside, so a shrink also removes the mask voxels at the image edge. The mask changes by whole voxels: a grow by 1 mm on 0.4 mm voxels adds 2 voxels along an axis. A grown voxel without image data (see `source_mode`) leaves the mask. The same change is the function `pictologics.preprocessing.grow_mask`.
-
-With `nearest_roi`, `run_rois` gives each added voxel to the ROI of the label map with the nearest voxel. The rings of touching ROIs (for example the AHA segments of the myocardium, or the segments of a vessel) then share the space between them, and no ring covers another ROI. Where two vessel segments meet, the border between their rings is square to the vessel; at the free ends of the vessel, the ring goes around the end. `run()` has one ROI, so `nearest_roi` changes nothing there.
-
-### 6. `round_intensities`
-
-Rounds image intensities to the nearest integer. Useful before discretisation if values are close to integers.
-
-*No parameters.*
-
-### 7. `binarize_mask`
-
-Creates a binary mask from a multi-label mask. Without this step, all nonzero
-labels are treated as one combined ROI. Use `mask_values` to select specific
-segments before feature extraction.
-
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `threshold` | `float` | `0.5` | Threshold value for binarization |
-| `mask_values` | `int`, `list`, or `tuple` | `None` | Specific label(s) to select. Tuple `(min, max)` selects an inclusive range; in a YAML or JSON file, write the range as `{range: [min, max]}`, because a plain list selects only the listed labels |
-| `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
-
-### 8. `normalise`
-
-Normalises the intensities with one linear map, `(x - center) / scale`: for MR images and other images without fixed units. The center and the scale come from the statistics of a region. IBSI asks you to report the method; it sets no rule.
-
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `method` | `str` | *(required)* | `"zscore"`: the mean and the standard deviation (the region gets mean 0 and standard deviation 1). `"percentile"`: the lower percentile and the distance to the upper one (that range becomes 0 to 1) |
-| `region` | `str` | *(required)* | `"roi"`: the intensity mask. `"image"`: every voxel with image data (see `source_mode`) |
-| `percentiles` | `list` | `[1, 99]` | The two percentiles of the `"percentile"` method; `[0, 100]` takes the minimum and the maximum |
-| `range_min` | `float` | `None` | Leave voxels below this value out of the statistics, for example the MR background |
-| `range_max` | `float` | `None` | Leave voxels above this value out of the statistics |
-
-```python
-mr_config = [
+pipeline = RadiomicsPipeline(load_standard=False)
+pipeline.add_config("ct_fbs_25", [
     {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "normalise", "params": {"method": "zscore", "region": "image", "range_min": 10}},
-    {"step": "resegment", "params": {"range_min": -3, "range_max": 3}},  # outliers out
-    {"step": "discretise", "params": {"method": "FBS", "bin_width": 0.25}},
-    {"step": "extract_features", "params": {"families": ["intensity", "texture"]}},
-]
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    {"step": "discretise", "params": {"method": "FBS", "bin_width": 25}},
+    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture"]}},
+])
+results = pipeline.run("ct.nii.gz", "lesion.nii.gz", config_names=["ct_fbs_25"])
 ```
 
-The map changes every voxel of the image. With `region` `"roi"`, the ROI gets mean 0 and standard deviation 1, so its first-order features lose their information; a whole-image or reference region keeps it. The log entry of the step records the map (`center_effective`, `scale_effective`). The step must come before `discretise`. It cancels the FBS start of earlier `resegment` steps, as a filter does, because the units change: a later `resegment` step or `min_val` sets the start again. Region `"image"` needs the whole grid, so the steps before it do not cut the image to the ROI region. To normalise by another mask (for example a reference tissue), use the function `pictologics.preprocessing.normalise_image` before the pipeline.
+`add_config` checks the configuration before it keeps it:
 
-### 9. `discretise`
+- the step names, and the parameter names of each step and of each filter type;
+- the parameters that a step or a filter needs, for example `new_spacing`, or the `sigma_mm` of a LoG filter;
+- the values: the spacing, the discretise method and its bins, the filter boundary and padding, the wavelet level, the texture distances, the grow distances and the normalise settings;
+- the feature family names;
+- the step order rules (see [Step Order](#step-order)).
 
-Discretises image intensities into bins. **Required** before texture feature extraction.
+A mistake raises one `ValueError` that lists every problem, with the closest valid name:
 
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `method` | `str` | *(required)* | `"FBN"` (Fixed Bin Number) or `"FBS"` (Fixed Bin Size) |
-| `n_bins` | `int` | `None` | Number of bins (for FBN) |
-| `bin_width` | `float` | `None` | Width of each bin (for FBS) |
-| `min_val` | `float` | `None` | The start of the first bin. FBS default: the lower bound of an earlier `resegment` step (IBSI). FBN default: the ROI minimum |
-| `max_val` | `float` | `None` | The end of the last bin (for FBN). Default: the ROI maximum |
+```text
+ValueError: Configuration 'ct' has 2 problem(s):
+  - step 0 (resample): unknown parameter 'spacing' (did you mean 'new_spacing'?)
+  - step 0 (resample): missing parameter 'new_spacing'
+```
 
-FBS bins start at the same value in every image, so that a grey level has the same intensity range in every image (IBSI). An FBS step without `min_val` starts at the largest lower bound of the `resegment` steps that change the intensity mask (`apply_to` `"both"` or `"intensity"`). A `filter` or `normalise` step after them cancels this start, because the values have other units then. Without `min_val` and without such a `resegment` step, `add_config` raises an error. The log entry of the step records the start that it used (`min_val_effective`). An FBS `ivh_discretisation` follows the same rule.
+- `add_config(..., validate=False)` checks only the structure: a list of dictionaries, each with a `step` key. A mistake then shows at run time: the log entry gets the error, and the features are `NaN`.
+- `add_config` keeps a copy of the steps. A later change to your list does not change the configuration.
+- The pipeline does not check a configuration from a file (`load_configs`, `from_yaml`, `from_json`, `from_dict`) by default. With `validate=True`, each problem gives a `UserWarning`, and the configuration loads all the same.
 
-### 10. `filter`
+## Step Order
 
-Applies an IBSI 2 image filter. See the **[Image Filtering](image_filtering.md)** guide for detailed documentation.
+The steps run one after another, in the order of the list. A step can go at any position, and a step can repeat. These rules apply:
 
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `type` | `str` | *(required)* | `"mean"`, `"gaussian"`, `"log"`, `"laws"`, `"gabor"`, `"wavelet"`, `"simoncelli"`, `"riesz"` |
-| `boundary` | `str` | `"mirror"` | Boundary condition |
-| `padding_value` | `float` | `0` | The constant of the `"constant"` (or `"zero"`) boundary (IBSI 2 Z3VE) |
+1. The texture families need an earlier `discretise` step. Without it, `add_config` raises an error.
+2. A `normalise` step must come before the `discretise` step.
+3. FBS needs a start that is the same in every image: `min_val`, or a `resegment` step with `range_min` before it. A `filter` or `normalise` step after that `resegment` step cancels its start, because the units change. Without a start, `add_config` raises an error.
+4. The histogram features read the discretised image. Without a `discretise` step, they give a warning.
+5. A `resegment` step reads the image as it is at that position. Put it before a `filter` step to select by HU, and after a `normalise` step to select by the normalised values.
 
-**Filter-specific parameters:**
+### Two Masks
 
-| Filter | Required Params | Optional Params |
-|:-------|:----------------|:----------------|
-| `mean` | `support` | `boundary` |
-| `gaussian` | `sigma_mm` | `truncate`, `boundary` |
-| `log` | `sigma_mm` | `truncate`, `boundary` |
-| `laws` | `kernel` | `rotation_invariant`, `pooling`, `compute_energy`, `energy_distance`, `boundary` |
-| `gabor` | `sigma_mm`, `lambda_mm`, `gamma` | `rotation_invariant`, `delta_theta`, `pooling`, `response`, `boundary` |
-| `wavelet` | `wavelet`, `level`, `decomposition` | `rotation_invariant`, `pooling`, `boundary` |
-| `simoncelli` | `level` | — |
-| `riesz` | `order` | `variant`, `sigma_mm`, `level` |
+The pipeline keeps two masks:
 
-!!! note "Automatic Spacing Injection"
-    For filters requiring physical spacing (`gaussian`, `log`, `gabor`), the pipeline uses the image's voxel spacing automatically.
+- The **morphological mask** gives the shape features.
+- The **intensity mask** gives the voxels of all other features.
 
-### 11. `extract_features`
-
-Calculates radiomic features from the current state.
-
-| Parameter | Type | Default | Description |
-|:----------|:-----|:--------|:------------|
-| `families` | `list[str]` | *(required)* | Feature families to extract (see table below) |
-| `include_spatial_intensity` | `bool` | `False` | Include Moran's I / Geary's C |
-| `include_local_intensity` | `bool` | `False` | Include local intensity peaks |
-| `ivh_params` | `dict` | `None` | Parameters for IVH: `bin_width`, `min_val`, `max_val`, etc. |
-| `ivh_discretisation` | `dict` | `None` | Temporary discretisation for IVH only |
-| `ivh_use_continuous` | `bool` | `False` | Use raw values for IVH |
-| `texture_matrix_params` | `dict` | `None` | Texture options (IBSI 1): `ngldm_alpha` (NGLDM coarseness, default 0), `glcm_distance` (the GLCM pair distance along each of the 13 directions), `ngtdm_distance` and `ngldm_distance` (the Chebyshev distance of the neighbourhood). The distances are whole numbers of 1 or more (default 1). E.g., `{"glcm_distance": 2, "ngldm_alpha": 1}` |
-
-**Available feature families:**
-
-| Family | Description |
-|:-------|:------------|
-| `"intensity"` | First-order statistics (Mean, Skewness, etc.) |
-| `"spatial_intensity"` | Moran's I / Geary's C only |
-| `"local_intensity"` | Local/global intensity peak features only |
-| `"morphology"` | Shape and size features (Volume, Sphericity, etc.) |
-| `"texture"` | GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM |
-| `"glcm"`, `"glrlm"`, `"glszm"`, `"gldzm"`, `"ngtdm"`, `"ngldm"` | Individual texture subfamilies |
-| `"texture_glcm"`, `"texture_glrlm"`, etc. | Explicit texture-subfamily aliases |
-| `"histogram"` | Intensity histogram features |
-| `"ivh"` | Intensity-Volume Histogram features |
-
-## Working with Results
-
-The `format_results()` function converts pipeline output into different formats for analysis or export.
-
-### Format Options
-
-=== "Wide Format"
-
-    One row per subject with all features as columns. Column names use the pattern `{config}__{feature}`.
-
-    ```python
-    row = format_results(results, fmt="wide", meta={"subject_id": "case1"})
-    # Returns: {"subject_id": "case1", "standard_fbn_32__mean_intensity_Q4LE": 123.4, ...}
-    ```
-
-=== "Long Format"
-
-    Tidy data with one row per feature. Config name is automatically included.
-
-    ```python
-    df = format_results(results, fmt="long", meta={"subject_id": "case1"}, output_type="pandas")
-    # Returns DataFrame: [subject_id, config, feature_key, value]
-    ```
-
-### Output Types
-
-| Type | Returns |
-|:-----|:--------|
-| `"dict"` (default) | Python dictionary (wide) or list of dicts (long) |
-| `"pandas"` | `pandas.DataFrame` |
-| `"json"` | JSON string |
-
-### Batch Processing Pattern
+At the start, both masks are the ROI. A mask step changes both masks by default. With `apply_to` `"morph"` or `"intensity"`, it changes one of them. For example, this step selects the voxels of the intensity features, and the shape features keep the whole ROI:
 
 ```python
-all_rows = []
-for file in image_files:
-    res = pipeline.run(image=file, ...)
-    all_rows.append(format_results(res, fmt="wide", meta={"filename": file.name}))
-
-# Save everything at once
-save_results(all_rows, "full_study_results.csv")
+{"step": "resegment", "params": {"range_min": -100, "range_max": 200, "apply_to": "intensity"}}
 ```
 
-### Batch Runs with `run_batch`
+### The Image of Each Feature Family
 
-`run_batch()` runs the configurations on many cases, in several processes when you ask for them. It writes the result of each case to its own file as soon as the case ends, so a stopped batch can go on later.
+After a `discretise` step, the pipeline keeps two images: the image before the discretisation, and the discretised image. After a `filter` step, the image is the response map.
+
+| Feature family | Reads |
+|:--|:--|
+| Intensity, spatial intensity, local intensity | The image before the discretisation |
+| Morphology | The morphological mask. The integrated intensity (99N0) and the centre of mass shift (KLMA) also read the image before the discretisation |
+| Histogram, texture | The discretised image |
+| IVH | The discretised image; with `ivh_use_continuous`, the image before the discretisation |
+
+## Masks
+
+- **A mask path**: the pipeline loads the mask with the image as `reference_image`. So a DICOM SEG, an RTSTRUCT, a cropped mask or a mask in another voxel order goes onto the grid of the image (see [Data Loading](data_loading.md#masks)). The settings `mask_subvoxel_tolerance`, `mask_subvoxel_warning_threshold` and `mask_min_overlap_fraction` control the placement, as in `load_image`.
+- **An `Image` mask**: it must have the grid of the image: the same shape, spacing, origin and direction. Else `run()` raises a `ValueError`.
+- **No mask**: without `mask` (or with `mask=None`), the whole image is the ROI. The morphology features then describe the ROI after the mask steps, for example after `resegment`.
+- **Labels**: each voxel that is not 0 is in the ROI. So the labels 1, 2 and 3 make one ROI, and a label is not a weight. To use one label, add a `binarize_mask` step with `mask_values`, or use [`run_rois`](#many-rois-run_rois).
+- **Probability masks**: a float mask with values between whole numbers (for example a probability map) gives a warning, because each voxel above 0 counts as ROI. Add a `binarize_mask` step with a `threshold`, for example 0.5.
+- **NaN voxels**: an ROI voxel with a NaN or infinite intensity leaves the intensity mask before the features, with a warning. When no ROI voxel has a finite intensity, the configuration ends with an empty ROI.
+
+## Image Options
+
+For an image path, `image_options` gives options to `load_image`: for example a phase of a DICOM folder, a series, or a PET series as SUV. The log entry of each configuration records them. `run_rois()` and the cases of `run_batch()` take them too.
+
+```python
+lv = RadiomicsPipeline.from_template("lv")
+results = lv.run("cardiac_ct/", "lv_mask.nii.gz", image_options={"dataset_index": 4}, config_names=["lv_orig"])
+
+pipeline = RadiomicsPipeline()
+results = pipeline.run("pet_series/", "lesion.nii.gz", image_options={"suv": "bw"}, config_names=["standard_fbn_32"])
+```
+
+An `Image` takes no options: `image_options` with an `Image` raises a `ValueError`. An option that `load_image` does not know raises a `TypeError`.
+
+## Source Modes and Sentinel Values
+
+Some images hold a **sentinel value** where they have no data: for example -2048 HU outside the field of view of a CT, or -3024 HU (a stored -2000 with a rescale intercept of -1024). These voxels must stay out of the resampling and the filters, because an interpolation or a filter near them mixes the sentinel into the voxels with data. The `source_mode` of a configuration tells the pipeline which voxels hold image data.
+
+| `source_mode` | The voxels with image data |
+|:--|:--|
+| `"full_image"` (default) | All voxels |
+| `"roi_only"` | The voxels of the ROI. `sentinel_value` is not used |
+| `"auto"` | The voxels without the sentinel value: the `sentinel_value` that you give, else a value that the pipeline finds, with a warning |
+
+```python
+pipeline.add_config("padded_ct", steps, source_mode="auto", sentinel_value=-2048)
+```
+
+- **A known padding value**: use `"auto"` with `sentinel_value`. This is the safest choice.
+- **An unknown padding value**: `"auto"` alone looks for -2048, -3024, -1024, -1000, 0 and -32768. A value is a sentinel when it fills at least 5 % of the image, and when it is more than 2 times as frequent outside the ROI as inside. A warning gives the value that the pipeline found, or tells that it found none: the pipeline then uses all voxels. Check the warning, because a real tissue value can pass the test.
+- **`"roi_only"`**: for an image with data in the ROI only, for example an export of a lesion. The voxels outside the ROI do not go into the resampling or the filters.
+- **The effect**: the resampling and the mean, Gaussian, LoG and Laws filters leave out the voxels without data (normalized interpolation and convolution); the other filters fill them with 0 (see [Source Masks for Sentinel Values](image_filtering.md#source-masks-for-sentinel-values)). After a `resample` step and after a `grow_mask` step, the masks also lose the voxels without data. With region `"image"`, a `normalise` step reads only the voxels with data.
+
+!!! warning "No mask and a padded image"
+    Without a mask, the whole image is the ROI. When the `resegment` range holds the padding value, the background stays in the ROI, and the texture features can need much memory. Set a `resegment` range that leaves out the padding value, or use `source_mode="auto"` with the `sentinel_value` of the padding and a `resample` step: the resampling takes the voxels without data out of the masks.
+
+## Many ROIs: `run_rois`
+
+`run_rois()` runs the configurations on each ROI of a label map, with one image load. In a label map, each voxel holds the label of its ROI, and 0 for the background (for example an organ segmentation, a DICOM SEG loaded with `combine_segments=True`, or an RTSTRUCT).
+
+```python
+results = pipeline.run_rois(
+    "ct.nii.gz",
+    "organs.nii.gz",
+    labels={"liver": 5, "spleen": 1},  # default: every label of the map
+    subject_id="p001",
+    config_names=["ct_fbs_25"],
+)
+rows = [format_results(series, meta={"subject_id": "p001", "roi": roi}) for roi, series in results.items()]
+save_results(rows, "p001_rois.csv")
+```
+
+- Each ROI gets the results of `run()` with a mask of its label alone, bit for bit.
+- `run_rois` loads the image once, checks it for NaN values once, and makes each mask only inside the box of its label. On a CT of 512 × 512 × 200 voxels with 100 labels, one `run()` for each label took 1.81 s with a 1 mm texture configuration, and `run_rois` took 0.92 s. With intensity features alone, the times were 1.21 s and 0.29 s.
+- The result is a dictionary from ROI names to the results of `run()`. The name of an ROI is its name in `labels`, else its label as text, for example `"3"`. The log entries of an ROI hold its name in `roi`.
+- A [`grow_mask`](pipeline_steps.md#grow_mask) step with `nearest_roi` gives each added voxel to its nearest ROI, so the rings of touching ROIs do not overlap.
+- A label map cannot hold overlapping ROIs. For segments that overlap, load each segment as its own mask (`load_seg(..., combine_segments=False)`), and call `run()` for each.
+
+## Many Cases: `run_batch`
+
+`run_batch()` runs the configurations on many cases, in more than one process when you ask for it. It writes the result of each case to its own file when the case ends, so a stopped batch can go on later.
 
 ```python
 from pictologics import RadiomicsPipeline, save_results
@@ -395,437 +219,78 @@ if __name__ == "__main__":  # the worker processes import this script again
     save_results(table, "results/features.csv")
 ```
 
-- **Cases**: each case is a dict, or a row of a DataFrame, with the `run()` arguments of one image: `subject_id` and `image` (both required), `mask`, the mask settings such as `mask_subvoxel_tolerance`, and `image_options` (see [Image Options](#image-options)). A case with a label map gives `rois` (and optionally `labels`, as in `run_rois()`) in place of `mask`: each of its ROIs gets a row, with its name in `roi`, and `grow_mask` steps with `nearest_roi` share the rings between the ROIs.
-- **Result files**: the result of a case goes to `results/cases/<subject_id>.json`. The file holds the status, the error, the warnings, the run time, the features and the processing log of the case.
-- **Resume**: a second call with the same folder skips each case whose file has the same image, image options, mask (or label map and labels) and configurations (by their `config_hash`). A failed case runs again. To run a case again, delete its file.
-- **Workers**: with `workers=4`, four processes run the cases, and each process uses a quarter of the numba threads. Each process holds one case at a time, so the memory need grows with the number of workers. On 28 CT cases (512 × 512 × 200) with a 1 mm configuration, 1 process with 14 threads did 3.1 cases per second, and 4 processes with 3 threads each did 6.6.
-- **Script guard**: the workers start with spawn on every platform, and spawn imports your script again. Keep the call inside `if __name__ == "__main__":`.
-- **Status**: the returned DataFrame has one row for each case (one for each ROI of a label map case), in the order of the cases: `subject_id`, `status`, `error`, `warnings`, `seconds` and the features in the wide format of `format_results()`. The status is `"completed"`; `"incomplete"` when a configuration ended with an empty ROI or an error; or `"failed"` when the case did not run, for example because its image did not load.
-- **Errors and warnings**: an error of one case does not stop the batch. The warnings of a case go to its `warnings` column, not to the screen.
+- **Cases**: a list of dicts, or a DataFrame with one row for each case. A case holds the `run()` arguments of one image: `subject_id` and `image` (required), `mask`, the mask settings and `image_options`. A case with a label map gives `rois` (and optionally `labels`) in place of `mask`, and gets one row for each ROI.
+- **Result files**: the result of a case goes to `results/cases/<subject_id>.json`, with its status, error, warnings, run time, features and processing log.
+- **Resume**: a second call with the same folder skips each case whose file holds the same image, image options, mask (or label map and labels) and configurations (by their `config_hash`). A failed case runs again. To run a case again, delete its file.
+- **Workers**: with `workers=4`, four processes run the cases, and each process uses a quarter of the numba threads. Each process holds one case at a time, so the memory need grows with the number of workers. Keep the call inside `if __name__ == "__main__":`, because the workers start with spawn on every platform.
+- **The table**: one row for each case (one for each ROI of a label map case), in the order of the cases: `subject_id`, `status`, `error`, `warnings`, `seconds` and the features in the wide format of `format_results()`. The status is `"completed"`; `"incomplete"` when a configuration ended with an empty ROI or an error; or `"failed"` when the case did not run, for example because its image did not load.
+- **Errors**: an error of one case does not stop the batch. The warnings of a case go to its `warnings` column. The sentinel and NaN warnings also go to the `logging` module (see [Warnings](#warnings)).
+- **Mistakes in the cases**: a case without `subject_id` or `image`, with an unknown key, with both `mask` and `rois`, or with the file name of another case raises a `ValueError` before the batch starts.
 
-### Many ROIs with `run_rois`
+The [Many ROIs and Batch Studies](../tutorials/batch.md) tutorial shows a full study.
 
-`run_rois()` runs the configurations on each ROI of a label map. In a label map, each voxel holds the label of its ROI, and 0 for the background (for example an organ segmentation, or a DICOM SEG loaded with `combine_segments=True`).
+## Result Guarantees
 
-```python
-results = pipeline.run_rois(
-    "ct.nii.gz",
-    "organs.nii.gz",
-    labels={"liver": 5, "spleen": 1},  # default: every label in the map
-    config_names=["study"],
-)
-rows = [format_results(series, meta={"subject_id": "p001", "roi": roi}) for roi, series in results.items()]
-save_results(rows, "p001_rois.csv")
-```
+Each configuration of a run gives a Series with all feature names of the configuration, also when a step or a feature fails:
 
-Each ROI gets the results of `run()` with a mask of its label alone, bit for bit. `run_rois` loads the image once, checks it for NaN values once, and makes each mask only inside the box of its label. On a CT of 512 × 512 × 200 voxels with 100 labels, one `run()` for each label took 1.81 s with a 1 mm texture configuration and 1.21 s with intensity features alone; `run_rois` took 0.92 s and 0.29 s. The log entries of an ROI hold its name in `roi`. A [`grow_mask`](#5-grow_mask) step with `nearest_roi` gives each added voxel to its nearest ROI, so the rings of touching ROIs do not overlap. A label map cannot hold overlapping ROIs: for segments that overlap, load each segment as its own mask (`load_seg(..., combine_segments=False)`) and call `run()` for each.
+| Failure | Example | Result |
+|:--|:--|:--|
+| Empty ROI | A `resegment` range that keeps no voxel | All features are `NaN`. The log status is `"empty_roi"` |
+| One feature | No surface mesh, or a PCA of 3 voxels or fewer | That feature is `NaN`. The other features keep their values |
+| One feature family | An error in the texture features | The features of that family are `NaN`. A warning names the family, and the log entry lists it in `family_errors` |
+| One step | An error in a preprocessing step | All features are `NaN`. The log status is `"error"`, with the error and the failed step |
 
-### Result Guarantees
+- The other configurations of the run go on.
+- The rows of many cases have the same columns, so `save_results` merges them without gaps.
+- A mistake in the arguments of `run()` (an unknown configuration, a mask on another grid, an image that does not load) raises an error, and no configuration runs.
 
-Every configuration in a `run()` call **always** returns a `pandas.Series` with a
-complete, predictable set of feature names — regardless of whether extraction
-succeeded, partially succeeded, or failed entirely.  This guarantee holds at three
-levels:
+## Shared Work Between Configurations
 
-| Failure Level | Example | Behaviour |
-|:---|:---|:---|
-| **Whole-configuration failure** | Empty ROI after `resegment` | All features set to `NaN` |
-| **Partial feature failure** | Mesh generation error in morphology, PCA with ≤3 voxels, empty texture matrix | Successfully computed features retain their values; only the missing features are set to `NaN` |
-| **Feature family failure** | An error inside one family, for example the texture features | The features of that family are `NaN`; the other families keep their values. A warning names the family, and the log entry lists it in `family_errors` |
-| **Unexpected runtime error** | Uncaught exception in a preprocessing step | All features set to `NaN` |
+Configurations often start with the same steps. The pipeline does this shared work one time:
 
-In every case:
-
-- **No missing columns.** The feature names in the returned Series are identical to
-  those a fully successful extraction would have produced.
-- **Other configurations continue.** A failure in one configuration does not prevent
-  subsequent configurations from running.
-- **Errors are logged.** The processing log records the error message and the step that
-  caused the failure, accessible via `pipeline.save_log()`.
-
-This design makes batch processing safe: when you collect rows from many subjects with
-`format_results()` and merge them with `save_results()`, every row has the same columns.
-There are no ragged rows, no missing columns, and no unexpected exceptions.
-
-!!! note "Name-Based Merging"
-    `format_results()` and `save_results()` always merge results by **column name**,
-    never by position.  Even though all configurations now produce the same set of
-    feature names, the merging logic is inherently name-based — columns are identified
-    by their `{config}__{feature}` key (wide format) or `feature_key` value (long
-    format), so results are always aligned correctly.
-
-#### How It Works Internally
-
-The pipeline uses a static `FEATURE_NAMES` registry (in `pictologics.features`) that
-enumerates every feature name produced by each family.  Three mechanisms ensure
-completeness:
-
-1. **Empty ROI**: When `EmptyROIMaskError` is raised during preprocessing, the pipeline
-   builds a full NaN Series directly from the registry without attempting extraction.
-2. **Partial failures**: After each `extract_features` call, a backfill step compares
-   the returned feature keys against the registry and inserts `NaN` for any missing
-   keys.  This catches edge cases where individual features cannot be computed (e.g.,
-   mesh fails → surface-based morphology features are `NaN`, but volume from voxel
-   counting is preserved).
-3. **Unexpected errors**: If an unhandled exception interrupts extraction, the general
-   error handler backfills all expected feature names with `NaN` using the same
-   registry.
-
-#### Example: Empty ROI in a Multi-Configuration Run
+- **Shared steps**: when configurations start with the same steps (with the same parameters, the same source mode and the same sentinel value), the steps run one time, and each configuration goes on from their result.
+- **Shared feature families**: with `deduplicate=True` (default), a feature family that gets the same input in two configurations is computed one time and copied. For example, the morphology and intensity features of configurations that differ only in a last `discretise` step. Each family has its own rule: the texture, histogram and IVH families read the discretisation, and each family reads only its own options of `extract_features`.
 
 ```python
-pipeline.add_config("strict", [
-    {"step": "resegment", "params": {"range_min": 100, "range_max": 200}},
-    {"step": "extract_features", "params": {"families": ["intensity"]}},
-])
-pipeline.add_config("lenient", [
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 3000}},
-    {"step": "extract_features", "params": {"families": ["intensity"]}},
-])
-
-results = pipeline.run(image, mask, config_names=["strict", "lenient"])
-
-# If the strict range empties the ROI:
-#   results["strict"]  -> 18 intensity features, all NaN
-#   results["lenient"] -> 18 intensity features, computed values
-#
-# format_results() works normally — the NaN row merges cleanly with other rows:
-row = format_results(results, fmt="wide", meta={"subject_id": "case1"})
+results = pipeline.run(image, mask, config_names=["all_standard"])
+print(pipeline.deduplication_stats)  # reused_families, computed_families, cache_hit_rate
 ```
 
-!!! tip "Detecting Failed Configurations"
-    After a batch run, inspect the processing log to find which configurations
-    failed or produced partial results:
+- The results are the same with and without the shared work.
+- The rules have a version, `"1.1.0"` by default. A new version of Pictologics keeps the old versions, so `RadiomicsPipeline(deduplication_rules="1.1.0")` gives the same reuse in later versions.
+- See the [Deduplication API](../api/deduplication.md) for the rules of each family.
 
-    ```python
-    for entry in pipeline.get_log():
-        if entry["status"] != "completed":
-            print(f"{entry['config_name']}: {entry['status']}: {entry['error']}")
-    ```
+## Warnings
 
-    `get_log()` returns a copy of the log: one entry for each configuration run, with its
-    status (`"completed"`, `"empty_roi"` or `"error"`), error, failed step and run time
-    (`elapsed_seconds`). The log grows with each run, so call `pipeline.clear_log()` in a
-    long loop over cases.
+The pipeline tells you about a problem with a `UserWarning`. A warning does not stop the run.
 
-## Feature Catalog
+| Warning | Cause |
+|:--|:--|
+| `run() without config_names runs all ... configurations` | `run()` without `config_names` on a pipeline with the standard configurations |
+| `The mask holds values that are not whole numbers` | A probability mask without a `binarize_mask` step |
+| `Left out ... ROI voxels with a NaN or infinite intensity` | NaN or infinite voxels in the ROI |
+| `Auto-detected sentinel value ...` or `No sentinel value auto-detected` | `source_mode="auto"` without `sentinel_value` |
+| `Histogram features requested but image is not discretised` | The histogram family without a `discretise` step |
+| A warning that names a feature family | An error in that family (see [Result Guarantees](#result-guarantees)) |
 
-The [`describe_features()`][pictologics.pipeline.RadiomicsPipeline.describe_features] method returns a DataFrame cataloguing every feature the pipeline will produce **before** you run it.  Each row is one *(configuration, feature)* pair with columns describing the feature identity, family membership, and the preprocessing state at the `extract_features` step that produces that feature.
-
-The catalog follows the same ordered step model as configuration files. If a configuration repeats a preprocessing step, the corresponding `*_params` cell contains a compact JSON array with one entry per occurrence, including the original 1-based `step_index`. This keeps CSV exports readable while preserving a machine-readable audit trail.
+The NaN and sentinel warnings also go to the `logging` module, which prints them to the screen (stderr) when your script does not set up logging, also in `run_batch`. To hide them, raise the level of the logger:
 
 ```python
-pipeline = RadiomicsPipeline()
-catalog = pipeline.describe_features()
-catalog.head()
+import logging
+import warnings
+
+logging.getLogger().setLevel(logging.ERROR)  # no WARNING lines of the logging module
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")           # no UserWarnings of this run
+    results = pipeline.run(image, mask, config_names=["ct_fbs_25"])
 ```
 
-| Column | Description |
-|---|---|
-| `config` | Configuration name |
-| `feature_key` | Full feature key as it appears in the output |
-| `feature_name` | Human-readable name (IBSI code stripped) |
-| `ibsi_code` | 3–4 character IBSI identifier |
-| `family` | Granular family (e.g. `glcm`, `ivh`) |
-| `family_group` | Broad category: *Intensity*, *Morphology*, or *Texture* |
-| `requires_discretisation` | Whether the family needs discretised input |
-| `uses_morph_mask` / `uses_intensity_mask` | Which runtime mask(s) the feature row depends on |
-| `source_mode` / `sentinel_value` | Source-mask configuration metadata |
-| `feature_extraction_step_index` / `feature_extraction_params` | Which `extract_features` step produced the row and its parameters |
-| `preprocessing_sequence` | Ordered preprocessing steps before extraction, e.g. `1:resample > 2:resegment > 3:discretise` |
-| `preprocessing_steps` | Full ordered preprocessing step records as compact JSON |
-| `is_discretised` / `discretisation_method` / `discretisation_param` | Discretisation details |
-| `is_resampled` / `resampling_spacing` / `interpolation` | Resampling details |
-| `is_resegmented` / `resegment_apply_to` / `resegment_params` | Resegmentation details and effective mask target |
-| `is_outlier_filtered` / `filter_outliers_apply_to` / `filter_outliers_params` | Outlier filtering details and effective mask target |
-| `is_intensity_rounded` / `round_intensities_params` | Intensity rounding details |
-| `keeps_largest_component` / `keep_largest_component_apply_to` / `keep_largest_component_params` | Largest-component mask processing details and effective mask target |
-| `is_mask_grown` / `grow_mask_apply_to` / `grow_mask_params` | Mask growing details and effective mask target |
-| `is_normalised` / `normalisation_method` / `normalise_params` | Intensity normalisation details |
-| `is_mask_binarized` / `binarize_mask_apply_to` / `binarize_mask_params` | Mask binarization details and effective mask target |
-| `is_filtered` / `filter_type` / `filter_params` | Response-map filter details |
-
-The step-parameter columns (`resample_params`, `resegment_params`, `discretise_params`, `filter_params`, etc.) contain only parameters explicitly present in the configuration. Effective summary columns such as `interpolation` and `discretisation_method` include runtime defaults when a step omits them.
-
-### Typical Use Cases
-
-**Export a data dictionary** alongside study results:
-
-```python
-catalog.to_csv("feature_catalog.csv", index=False)
-```
-
-**Filter features** for downstream analysis:
-
-```python
-# Only texture features from FBN configs
-texture_fbn = catalog[
-    (catalog["family_group"] == "Texture")
-    & (catalog["discretisation_method"] == "FBN")
-]
-```
-
-## Deduplication (Performance Optimization)
-
-When running multiple configurations that share preprocessing steps, the pipeline **automatically avoids redundant computation**.
-
-!!! info "Enabled by Default"
-    Deduplication is enabled by default (`deduplicate=True`). Just run multiple configs to benefit.
-
-### How It Works
-
-A feature family is reused only when everything that can change its values is the same in both configurations:
-
-- the `source_mode` and `sentinel_value`;
-- every preprocessing step before `extract_features`, with the same parameters and in the same order;
-- the `extract_features` options other than `families` (for example `ivh_params`, `texture_matrix_params`, and `include_spatial_intensity`).
-
-The only exception is a `discretise` step at the end of the preprocessing:
-
-| Feature Family | Ignores a final `discretise` step |
-| :--- | :--- |
-| **Morphology** | Yes |
-| **Intensity** (including spatial and local intensity) | Yes |
-| **IVH** | Only with `ivh_use_continuous=True` |
-| **Texture / Histogram** | No |
-
-When configs share preprocessing but differ only in a final discretization step:
-
-- **Morphology** and **intensity** are computed **once** and reused
-- **Texture**, **histogram**, and discretized **IVH** are computed per configuration
-- Cache reuse is scoped by feature family as well as preprocessing signature; texture, histogram, and IVH do not reuse each other's cached values.
-- Preprocessing order is part of the signature. The same steps in a different order are computed independently because they can produce different ROIs and intensities.
-- A configuration with more than one `extract_features` step is always computed on its own.
-
-### Checking Statistics
-
-```python
-stats = pipeline.deduplication_stats
-print(f"Cache hit rate: {stats['cache_hit_rate']:.1%}")
-print(f"Reused: {stats['reused_families']} families")
-print(f"Computed: {stats['computed_families']} families")
-```
-
-!!! note "Results Are Always Complete"
-    Deduplication does not affect the completeness guarantee.  Reused features are
-    **deep copied** into each configuration's results, and every config returns a
-    complete feature set — no missing values.
-
-### Configuration
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `deduplicate` | `bool` | `True` | Enable/disable deduplication |
-| `deduplication_rules` | `str` or `DeduplicationRules` | `"1.1.0"` | Rules version for reproducibility |
-
-!!! tip "API Reference"
-    For detailed documentation of `ConfigurationAnalyzer`, `DeduplicationPlan`, `PreprocessingSignature`, and `DeduplicationRules`, see the **[Deduplication API](../api/deduplication.md)** reference.
-
-## Logging
-
-The pipeline maintains a detailed log of every step executed, including parameters and errors.
-
-```python
-# Save log after running
-pipeline.save_log("pipeline_execution_log.json")
-
-# Clear log between runs
-pipeline.clear_log()
-```
-
-The saved JSON is self-describing. It contains a log schema version, pipeline
-schema version, Pictologics package version when available, the mask ROI
-semantics used for the run, and an `entries` array. Each entry records:
-
-- Timestamp, subject ID, image source, and mask source
-- Configuration name and a full configuration snapshot
-- Source mode, sentinel detection status, and effective sentinel value
-- Deduplication settings and whether a deduplication plan was used
-- Mask repositioning settings used when loading mask paths
-- List of executed steps with serialized parameters
-- Final configuration status, error text, failed step, and feature count when applicable
-- The configuration hash (`config_hash`), the versions and thread count of the run (`environment`), and the run time of the configuration (`elapsed_seconds`)
-
-`pipeline.get_log()` returns a copy of the entries. The log grows with each run until `clear_log()`.
-
-## Examples
-
-### Standard Suite (Fast Baseline)
-
-Run all 6 built-in configurations:
-
-```python
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-results = pipeline.run(
-    image="path/to/image.nii.gz",
-    mask="path/to/mask.nii.gz",
-    config_names=["all_standard"],
-)
-```
-
-### Enable Spatial/Local Intensity Extras
-
-```python
-cfg = [
-    {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5)}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {
-        "step": "extract_features",
-        "params": {
-            "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-            "include_spatial_intensity": True,  # Moran's I / Geary's C
-            "include_local_intensity": True,    # Local intensity peaks
-        },
-    },
-]
-
-pipeline = RadiomicsPipeline().add_config("with_extras", cfg)
-results = pipeline.run("image.nii.gz", "mask.nii.gz", config_names=["with_extras"])
-```
-
-### IVH with Physical-Unit Mapping
-
-```python
-cfg = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "discretise", "params": {"method": "FBS", "bin_width": 25.0, "min_val": -1000}},
-    {
-        "step": "extract_features",
-        "params": {
-            "families": ["ivh"],
-            "ivh_params": {"bin_width": 25.0, "min_val": -1000, "target_range_max": 400},
-        },
-    },
-]
-```
-
-### Custom CT Pipeline
-
-```python
-custom_config = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "resegment", "params": {"range_min": -150, "range_max": 250}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
-    {"step": "extract_features", "params": {
-        "families": ["intensity", "morphology", "texture", "histogram", "ivh"]
-    }},
-]
-
-pipeline = RadiomicsPipeline().add_config("my_custom_ct", custom_config)
-results = pipeline.run(image, mask, config_names=["my_custom_ct"])
-```
-
-### LoG Filtered Features
-
-```python
-log_config = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic"}},
-    {"step": "round_intensities", "params": {}},
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-    {"step": "filter", "params": {"type": "log", "sigma_mm": 1.5, "truncate": 4.0}},
-    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "histogram"]}},
-]
-```
-
-### Manual Step-by-Step Extraction
-
-If you need granular control, call features directly without the pipeline:
-
-```python
-import numpy as np
-from pictologics import load_image
-from pictologics.preprocessing import (
-    resample_image, resegment_mask, filter_outliers,
-    discretise_image, apply_mask
-)
-from pictologics.features.intensity import calculate_intensity_features
-from pictologics.features.morphology import calculate_morphology_features
-from pictologics.features.texture import calculate_all_texture_features
-
-# Load and preprocess
-image = load_image("image.nii.gz")
-mask = load_image("mask.nii.gz")
-image = resample_image(image, new_spacing=(1.0, 1.0, 1.0))
-mask = resample_image(mask, new_spacing=(1.0, 1.0, 1.0), interpolation="nearest")
-mask = resegment_mask(image, mask, range_min=-1000, range_max=400)
-
-# Discretise for texture
-disc_image = discretise_image(image, method="FBN", n_bins=32, roi_mask=mask)
-
-# Extract features
-morph = calculate_morphology_features(mask, image=image, intensity_mask=mask)
-intensity = calculate_intensity_features(apply_mask(image, mask))
-texture = calculate_all_texture_features(disc_image.array, mask.array, n_bins=32)
-# families=["glcm", "ngtdm"] computes only these families (and only their matrices)
-
-all_features = {**morph, **intensity, **texture}
-print(f"Extracted {len(all_features)} features")
-```
-
-!!! tip "Use the Pipeline Instead"
-    The `RadiomicsPipeline` accomplishes the same workflow with automatic image routing, logging,
-    deduplication, and configuration export. Manual extraction is mainly useful for debugging
-    or understanding the underlying process.
-
-## Performance & Tips
-
-- **Spatial/local intensity** add time on large ROIs. Keep them disabled unless needed. Spatial intensity uses FFT convolutions on large ROIs. If the FFT needs more than 16 GB, or more than half of the memory, a slow pair loop runs instead, with a warning.
-- **Texture** requires discretisation. Without a `discretise` step, the pipeline raises an error.
-- For large 3D images, consider coarser spacing for exploratory work.
-- For CT in Hounsfield Units, FBS (`bin_width`) is often more interpretable; for MRI/PET, FBN (`n_bins`) may be preferable.
-
-!!! tip "JIT Warmup"
-    Numba-accelerated kernels (texture, morphology, intensity, filters) compile the first time
-    they run. `import pictologics` triggers this compilation eagerly via `warmup_jit()`, so the
-    cost is paid once at import instead of during your first extraction call. Set
-    `PICTOLOGICS_DISABLE_WARMUP=1` to skip it — faster import, but the first call to each kernel
-    will compile on demand. When timing or benchmarking, either leave warmup enabled or run one
-    untimed extraction first so compilation isn't counted in your numbers.
-
-!!! tip "Deduplication Across Configs"
-    Deduplication is on by default and is the biggest lever for multi-config batches: configs
-    that share a preprocessing prefix reuse morphology/intensity feature families instead of
-    recomputing them. Inspect `pipeline.deduplication_stats` after a `run()` call to see the
-    cache hit rate. See [Deduplication](#deduplication-performance-optimization) above for details.
-
-!!! tip "Choosing `source_mode`"
-    - `"full_image"` (default) — the image is a standard whole scan with valid data everywhere.
-    - `"roi_only"` — only ROI voxels are valid; pass `sentinel_value` for deterministic background handling.
-    - `"auto"` — scans for common sentinel values (e.g. `-2048`, `-1024`) and behaves like `roi_only`
-      if any are found, otherwise like `full_image`. Use this for cropped/pre-masked images when
-      you're unsure of the exact sentinel value.
-
-    See the [source_mode decision guide](data_loading.md#handling-sentinel-na-values) for a full comparison.
-
-!!! tip "Filtering Performance"
-    - Resample to **isotropic spacing** before applying the Gabor filter — its 2D in-plane kernel
-      assumes equal spacing along all axes and warns if it isn't.
-    - Simoncelli and Riesz cache their frequency-domain transfer functions, keyed by array
-      **shape** (plus `level`/`order`), so repeated filtering calls on same-shaped images/ROIs
-      skip that rebuild — grouping same-shape batches together avoids redundant work.
-
-!!! tip "Reproducibility"
-    Pin `deduplication_rules` explicitly (e.g. `RadiomicsPipeline(deduplication_rules="1.1.0")`) so
-    a future default-rules change can't silently alter which features get reused. Use
-    `pipeline.save_configs(...)` / `RadiomicsPipeline.load_configs(...)` to export and re-import
-    configurations verbatim — see [Configuration & Reproducibility](configurations.md) for the full workflow.
+Put the `setLevel` line at the top of the script, outside `if __name__ == "__main__":`, so that the workers of `run_batch` run it too. The log entries keep the sentinel value and the status of each configuration.
 
 ## Troubleshooting
 
-**`EmptyROIMaskError`** — raised internally when preprocessing (e.g. `resegment`, `filter_outliers`)
-removes every voxel from the ROI. You won't see this exception directly: `run()` catches it and
-returns a `pandas.Series` of `NaN` for that configuration so batch runs keep going (see
-[Result Guarantees](#result-guarantees)). To resolve it, relax the offending step's thresholds or
-check `pipeline.get_log()` for the failed step and its error message.
-
-**`MemoryError` at the resample step** (`"Resampling to ... mm makes a grid of ... voxels. It needs at least ... GB, more than the ... GB of memory of this computer."`) — the new grid does not fit in memory. This happens, for example, with a PET image at 0.5 mm without a mask: its grid has about 4 billion voxels. Use a larger spacing, pass a mask, or crop the image.
-
-**Spacing-mismatch `ValueError`** (`"...Resampling would be required but is not yet supported."`) —
-raised when loading/repositioning a mask whose voxel spacing differs from its reference image by
-more than 1%. Pictologics can reposition cropped masks into a reference image's coordinate space,
-but it does not resample them. Resample the mask (or image) to matching spacing before loading, or
-verify you're pointing at the correct reference image. See
-[Error Handling](data_loading.md#error-handling) in the Data Loading guide for the full table of
-loader-time errors and warnings.
+- **All features are `NaN`**: look at the log entry of the configuration, `pipeline.get_log()`. Its `status`, `error` and `failed_step` tell the cause. An `"empty_roi"` status means that a mask step removed every voxel: for example a `resegment` range that does not fit the image units.
+- **`ValueError` at `add_config`**: the message lists each problem of the configuration. Correct the names and values, or see [Pipeline Steps](pipeline_steps.md).
+- **`MemoryError` in the log of a resample step**: the new grid does not fit in the memory of the computer. The message gives the grid size and the memory need, for example for a PET image at 0.5 mm without a mask (about 4 billion voxels). Use a larger spacing, give a mask, or crop the image.
+- **A mask on another grid**: a mask of another spacing or orientation raises a `ValueError` at load time, because Pictologics does not resample masks. See [Data Loading](data_loading.md#sub-voxel-alignment-and-overlap).
+- **A slow first run**: numba compiles its code on the first import. See [Installation](installation.md#the-first-import).

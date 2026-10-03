@@ -1264,3 +1264,5 @@ def test_normalise_image_by_its_region() -> None:
             normalise_image(image, **kwargs)
     with pytest.raises(ValueError, match="do not spread"):
         normalise_image(Image(np.full((3, 3, 3), 7.0), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), "zscore")
+    with pytest.raises(ValueError, match="Dimension mismatch between mask"):
+        normalise_image(image, "zscore", mask=Image(inside[:4], image.spacing, image.origin))

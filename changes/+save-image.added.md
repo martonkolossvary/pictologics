@@ -1,1 +1,0 @@
-`save_image` writes an image, a mask or a response map as a NIfTI file. The geometry goes back to the RAS+ affine of NIfTI, so `load_image` and SimpleITK read the same array and LPS+ geometry. A bool mask is saved as uint8. So an RTSTRUCT, SEG or `.seg.nrrd` mask can become a NIfTI file.

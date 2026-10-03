@@ -234,6 +234,8 @@ _PREPROCESSING_PARAM_COLUMNS = {
 }
 _MASK_APPLY_TARGETS = ("both", "morph", "intensity")
 _NORMALISE_REGIONS = ("roi", "image")
+# The boundary names of a filter step ("wrap" is the scipy name of "periodic")
+_BOUNDARY_NAMES = ("mirror", "nearest", "periodic", "zero", "constant", "wrap")
 _INTENSITY_MASK_FAMILIES = {
     "intensity",
     "spatial_intensity",
@@ -827,10 +829,18 @@ def _step_problems(
             response = params["response"]
             problem = f"unknown gabor response '{response}'{_hint(response, _GABOR_RESPONSES)}"
         problems.extend([problem] if problem else [])
+        boundary = params.get("boundary")
+        boundary_name = (
+            boundary.name.lower()
+            if isinstance(boundary, BoundaryCondition)
+            else str(boundary).lower()
+        )
+        if boundary is not None and boundary_name not in _BOUNDARY_NAMES:
+            problems.append(f"unknown boundary {boundary!r}{_hint(boundary, _BOUNDARY_NAMES)}")
         padding = params.get("padding_value", 0)
         if isinstance(padding, bool) or not isinstance(padding, (int, float)):
             problems.append(f"padding_value must be a number, not {padding!r}")
-        elif padding and str(params.get("boundary", "")).lower() not in ("zero", "constant"):
+        elif padding and boundary_name not in ("zero", "constant"):
             problems.append(
                 f"padding_value {padding!r} needs boundary 'constant' (or 'zero'), not "
                 f"{params.get('boundary', 'the default')!r}"
@@ -1252,30 +1262,37 @@ class RadiomicsPipeline:
         Args:
             name: Unique name for this configuration.
             steps: List of steps. Each step is a dict with 'step' (name) and 'params' (dict).
-                   Supported steps:
-                   - 'resample': params: new_spacing (required), interpolation (optional)
+                   Supported steps (see the step reference of the user guide):
+                   - 'resample': params: new_spacing (required), interpolation,
+                       mask_interpolation, mask_threshold, round_intensities
                    - 'resegment': params: range_min, range_max, apply_to
                    - 'filter_outliers': params: sigma, apply_to
+                   - 'keep_largest_component': params: apply_to
+                   - 'grow_mask': params: to_mm (required), from_mm, nearest_roi, apply_to
+                   - 'round_intensities': params: None
                    - 'binarize_mask': params: threshold (float, default 0.5),
                        mask_values (int | list[int] | tuple[int, int]), apply_to ('morph'|'intensity'|'both')
-                   - 'keep_largest_component': params: None
-                   - 'round_intensities': params: None
-                   - 'discretise': params: method, n_bins/bin_width, etc.
+                   - 'normalise': params: method and region (required), percentiles,
+                       range_min, range_max
+                   - 'discretise': params: method (default FBN), n_bins/bin_width, min_val,
+                       max_val, cutoffs
                    - 'filter': params: type (required), plus filter-specific params
-                   - 'extract_features': params: families (list), etc.
-            source_mode: How to handle source voxel validity for resampling/filtering:
-                - "full_image" (default): All voxels contain real data. Traditional behavior.
-                - "roi_only": Only ROI voxels contain real data; others have sentinel values.
-                - "auto": Auto-detect sentinel values; emit warning if found.
-            sentinel_value: If specified, explicitly set the sentinel value instead
-                of auto-detecting. Only used when source_mode is "roi_only" or "auto".
+                   - 'extract_features': params: families (default: intensity, morphology,
+                       texture, histogram, ivh), and the option dicts
+            source_mode: Which voxels hold image data, for resampling and filtering:
+                - "full_image" (default): every voxel.
+                - "roi_only": the voxels of the ROI (sentinel_value is not used).
+                - "auto": the voxels without the sentinel value: `sentinel_value`, else
+                  a value found in the image (with a warning).
+            sentinel_value: The padding value of the image, for source_mode "auto".
             validate: If True (default), check the steps now: the step names, the
-                parameter names of each step and each filter type, the feature family
-                names, the discretise method and its bin settings, and that texture
-                features have an earlier 'discretise' step. A mistake raises one
-                ValueError that lists every problem (with the closest valid name), so
-                it cannot give silent NaN columns later. False only checks the
-                structure.
+                parameter names of each step and each filter type (and the missing
+                required ones), the parameter values, the feature family names, the
+                discretise method and its bin settings, the FBS start, and the step
+                order (texture features need an earlier 'discretise' step; normalise
+                comes before discretise). A mistake raises one ValueError that lists
+                every problem (with the closest valid name), so it cannot give silent
+                NaN columns later. False only checks the structure.
 
         Raises:
             ValueError: If `steps` is not a list, if `source_mode` is not one of
@@ -1285,9 +1302,9 @@ class RadiomicsPipeline:
         Note:
             - Texture features require a prior 'discretise' step.
             - IVH features are configured via 'ivh_params' dict.
-            - The source_mode setting affects resampling and filtering operations.
-              In 'roi_only' mode, boundary regions use normalized interpolation to
-              exclude sentinel voxels.
+            - The source_mode setting affects resampling and filtering operations:
+              they leave out the voxels without image data (normalized interpolation
+              and convolution).
 
         Example:
             ```python
@@ -2341,11 +2358,15 @@ class RadiomicsPipeline:
         """
         Return a copy of the processing log.
 
-        The log has one entry for each configuration that `run()` ran, in run order. An
-        entry holds the configuration name, the subject, the image and mask sources, the
-        status (`"completed"`, `"empty_roi"` or `"error"`), the error and the failed step
-        when there is one, the executed steps, the feature count and the run time
-        (`elapsed_seconds`). The log grows with each run until `clear_log()`.
+        The log has one entry for each configuration that `run()` or `run_rois()` ran, in
+        run order (`run_batch()` writes the log of each case into its result file). An
+        entry holds the configuration name and its `config_hash`, the subject, the image
+        and mask sources, the `image_options`, the status (`"completed"`, `"empty_roi"`
+        or `"error"`), the error and the failed step when there is one, the errors of
+        single feature families (`family_errors`), the executed steps, the feature count,
+        the run time (`elapsed_seconds`), the `environment` (the versions of Python and
+        the packages, and the thread count) and, for `run_rois()`, the `roi`. The log
+        grows with each run until `clear_log()`.
 
         Example:
             ```python
@@ -4012,15 +4033,14 @@ class RadiomicsPipeline:
         return result
 
     def _make_serializable(self, obj: Any) -> Any:
-        """Convert tuples and other non-serializable types to serializable forms."""
-        if isinstance(obj, tuple):
-            return list(obj)
-        elif isinstance(obj, dict):
+        """Convert tuples and other non-serializable types to serializable forms (also the
+        items of a tuple, such as the numpy numbers of a spacing)."""
+        if isinstance(obj, dict):
             return {
                 k: self._make_serializable(_mask_values_file_form(v) if k == "mask_values" else v)
                 for k, v in obj.items()
             }
-        elif isinstance(obj, list):
+        elif isinstance(obj, (list, tuple)):
             return [self._make_serializable(item) for item in obj]
         elif isinstance(obj, np.ndarray):
             return obj.tolist()

@@ -1,1 +1,0 @@
-python-gdcm (3.0.10 or newer) is now a dependency. With it, Pictologics loads DICOM data in every common compression: JPEG Lossless, JPEG-LS, JPEG 2000, baseline JPEG and RLE, also in SEG files. 12-bit lossy JPEG (JPEG Extended) needs pylibjpeg-libjpeg (GPL-3.0), which you can install yourself.

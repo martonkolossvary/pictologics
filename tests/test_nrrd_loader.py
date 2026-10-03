@@ -212,3 +212,19 @@ def test_seg_nrrd_segment_info(tmp_path: Path) -> None:
     ]  # fmt: skip
     with pytest.raises(ValueError, match="holds no segments"):
         get_segment_info(_write(tmp_path / "plain.nrrd", HEADER, _raw(VALUES)))
+
+
+def test_nrrd_channel_axes_raise(tmp_path: Path) -> None:
+    # An axis of colours (or vectors) holds channels, not volumes: the reader takes one
+    # value per voxel, so it raises (a "list" axis of 3D Slicer layers loads as volumes)
+    header = [line.replace("dimension: 3", "dimension: 4") for line in HEADER]
+    header = [line.replace("sizes: 4 3 2", "sizes: 3 4 3 2") for line in header]
+    header = [
+        line.replace("space directions: ", "space directions: none ").replace(
+            "kinds: domain domain domain", "kinds: RGB-color domain domain domain"
+        )
+        for line in header
+    ]
+    path = _write(tmp_path / "rgb.nrrd", header, _raw(np.zeros((2, 3, 4, 3), np.int16)))
+    with pytest.raises(ValueError, match="an axis of kind 'rgb-color' holds channels"):
+        load_image(path)

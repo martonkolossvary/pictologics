@@ -633,7 +633,8 @@ class DicomDatabase:
         """Export DataFrames to separate CSV files.
 
         Args:
-            base_path: Base path for output files (without extension).
+            base_path: Base path for output files (without extension). A missing
+                folder is made.
             levels: List of levels to export ('patients', 'studies', 'series',
                    'instances'). Defaults to all levels.
             include_instance_lists: Whether to include InstanceSOPUIDs and
@@ -656,6 +657,7 @@ class DicomDatabase:
         if levels is None:
             levels = ["patients", "studies", "series", "instances"]
 
+        Path(base_path).parent.mkdir(parents=True, exist_ok=True)
         created_files = {}
 
         for level in levels:
@@ -688,7 +690,7 @@ class DicomDatabase:
         """Export full hierarchy to JSON.
 
         Args:
-            json_path: Path for the output JSON file.
+            json_path: Path for the output JSON file. A missing folder is made.
             include_instance_lists: Whether to include per-instance file paths
                 in the JSON output. Defaults to True for full export.
 
@@ -759,6 +761,7 @@ class DicomDatabase:
 
             data["patients"].append(patient_dict)
 
+        Path(json_path).parent.mkdir(parents=True, exist_ok=True)
         with open(json_path, "w") as f:
             json.dump(data, f, indent=2, default=str)
 

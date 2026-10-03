@@ -1,1 +1,0 @@
-A filter with a periodic boundary read the wrong image end when the pipeline filtered only the ROI region near an image edge. The LoG, wavelet and Laws features were then wrong, up to 7.5 times off. Such an axis is now filtered whole.

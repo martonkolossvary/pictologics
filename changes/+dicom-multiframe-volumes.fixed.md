@@ -1,1 +1,0 @@
-An enhanced multiframe DICOM file with several volumes no longer loads as one mixed image. Its frames sit at repeated positions, and `dataset_index` now picks one volume by the temporal position index or cardiac phase of the frames. A file with one volume and a `dataset_index` above 0 now raises an error.

@@ -1,1 +1,0 @@
-When no later step reads the new grid away from the ROI, the resample step computes only the region around the ROI box, grown by the local intensity sphere when a later step needs it. The rest of the grid is never made, so a full CT at 0.5 mm needs a fraction of the time and memory. The features are the same, bit for bit. `resample_image` has a new `region` argument for this.

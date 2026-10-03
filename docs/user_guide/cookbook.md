@@ -1,1598 +1,363 @@
 # Cookbook
 
-Practical, end-to-end recipes for common Pictologics workflows. Each recipe shows how to combine loading, preprocessing, feature extraction, and result export into reusable scripts.
-
-!!! tip "Share Your Configurations"
-    All custom configurations used in these recipes can be exported to YAML/JSON files for reproducibility.
-    Use `pipeline.save_configs("my_configs.yaml")` to save and share configurations.
-    See the **[Configuration & Reproducibility](configurations.md)** guide for details.
-
-## Case 1: Batch radiomics from a folder of NIfTI files (no masks)
-
-### Scenario
-
-You have a folder of NIfTI volumes where each file is a separate pre-cropped lesion export. There are **no separate mask files** — voxels outside the region of interest may be filled with a **sentinel value** (e.g., -2048 HU).
-
-You want to:
-
-- Process every `*.nii` / `*.nii.gz` file in a folder.
-- Use the whole image as the initial ROI (because no mask is provided).
-- Automatically detect and handle sentinel values in each image.
-- Use sentinel-aware resampling and filtering (masked interpolation / normalized convolution).
-- Resample to **0.5×0.5×0.5 mm**.
-- Restrict the ROI to intensities in **[-100, 3000]** (CT HU example).
-- Remove disjoint parts by keeping the **largest connected component**.
-- Compute **all radiomic feature families** for four discretisation settings:
-  - FBN with `n_bins=8`
-  - FBN with `n_bins=16`
-  - FBS with `bin_width=8`
-  - FBS with `bin_width=16`
-- Export a **single wide CSV** where:
-  - Each row is one input NIfTI file.
-  - Columns include metadata (e.g., filename) + all computed features.
-- Save pipeline logs to a separate folder.
-
-### Important notes
-
-!!! note
-    - **Maskless pipeline runs**: `RadiomicsPipeline.run(...)` accepts `mask=None`, `mask=""`, or an omitted mask argument.
-      In that case, Pictologics generates a full (all-ones) ROI mask internally (whole-image ROI).
-    - **Complete feature sets guaranteed**: Every configuration always returns a `pandas.Series` with the full set of
-      expected feature names.  If preprocessing removes all voxels (empty ROI), all features are `NaN`.  If individual
-      features cannot be computed (e.g., mesh generation failure, PCA with too few voxels), only those features are
-      `NaN` and successfully computed features retain their values.  Other configurations in the same run continue
-      normally.  This guarantees that `format_results()` and `save_results()` always produce a table with identical
-      columns across subjects — no missing columns, no ragged rows, no unexpected exceptions.  The processing log
-      records which configurations encountered errors.
-    - **Morphology on whole-image ROI**: Shape features describe the shape of the ROI mask.
-      With a maskless run, the ROI starts as the full image volume. The `resegment` step then restricts
-      the ROI to voxels within a valid intensity range, removing sentinel-valued voxels. After resegmentation
-      and connected-component filtering, the resulting morphology features describe the shape of the
-      actual data region (e.g., the lesion) rather than the full image bounding box. This is generally
-      the desired behavior, but verify that the derived ROI matches your scientific intent.
-    - **Sentinel value handling — two complementary mechanisms**: These NIfTI files may contain sentinel
-      values (e.g., -1024, -2048) marking missing or invalid data. Handling them properly requires
-      **both** of the following:
-
-        1. **`source_mode="auto"`** creates a *source mask* that protects **resampling and filtering**.
-           It applies masked interpolation (resampling ignores sentinel neighbors) and normalized
-           convolution (filter kernels exclude sentinel voxels), and after resampling it keeps ROI masks
-           inside the valid source extent. It does not define an intensity compartment by itself.
-        2. **`resegment`** restricts the **ROI** to a valid intensity range, effectively excluding sentinel
-           voxels from **feature extraction**. By default it updates both morphology and intensity masks,
-           so compartment volumes and shape features reflect the selected voxel range.
-
-        You typically need both: `source_mode="auto"` to protect preprocessing, and `resegment` to
-        define the correct ROI for analysis.
-    - **Automatic sentinel detection**: With `source_mode="auto"`, the pipeline scans for common sentinel values
-      (-2048, -3024, -1024, -1000, 0, -32768) and records detected values in the processing log so you can verify which
-      value was detected in each image.
-    - **Mask generation**: When `mask` is omitted, the pipeline generates a full ROI mask. The `resegment` step
-      then removes sentinel voxels from the ROI, effectively deriving the correct analysis mask automatically
-      from the non-sentinel voxels.
-
-!!! tip "Performance Tip: Manual Feature Separation"
-    This example demonstrates **manual feature separation** for maximum efficiency:
-    
-    - **`case1_orig`**: Extracts morphology and intensity features (discretization-independent) — computed **once**
-    - **`case1_fbn_*` / `case1_fbs_*`**: Extract only texture, histogram, and IVH features (discretization-dependent)
-    
-    This approach avoids redundant computation entirely. The `orig` results contain morphology/intensity 
-    that apply to all discretization strategies, while each discretization config contains only the 
-    features that actually depend on it. See [Case 8](#case-8-manual-feature-separation-advanced) for 
-    a detailed explanation of this technique.
-
-    Note that you don't have to do this manually — the pipeline's **automatic deduplication** can detect
-    shared preprocessing steps across configurations and avoid recomputing them for you. This is
-    demonstrated in [Case 7](#case-7-multi-configuration-batch-with-deduplication).
-
-### Full example script
-
-!!! example "Full example script"
-    ```python
-    from pathlib import Path
-
-    from pictologics import RadiomicsPipeline
-    from pictologics.results import format_results, save_results
-
-
-    def main():
-        # Configure paths
-        input_dir = Path("path/to/nifti_folder")
-        output_csv = Path("results.csv")
-        log_dir = Path("logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Define common preprocessing steps
-        base_steps = [
-            # Resample to 0.5mm isotropic. Round intensities to integers (useful for HU).
-            {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5), "round_intensities": True}},
-            # Exclude voxels outside standard HU range
-            {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
-            # Keep only the largest connected component of the ROI mask
-            {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-        ]
-
-        # Shared feature extraction for discretization-independent features
-        extract_orig = {
-            "step": "extract_features",
-            "params": {
-                "families": ["morphology", "intensity"],  # Not affected by discretization
-                "include_spatial_intensity": False,
-                "include_local_intensity": False,
-            },
-        }
-
-        # Shared feature extraction for discretization-dependent features
-        extract_discretized = {
-            "step": "extract_features",
-            "params": {
-                "families": ["texture", "histogram", "ivh"],  # Require discretization
-                "include_spatial_intensity": False,
-                "include_local_intensity": False,
-            },
-        }
-
-        # Initialize the pipeline (deduplication enabled by default)
-        pipeline = RadiomicsPipeline()
-
-        # Add "orig" config for discretization-independent features (computed once)
-        # source_mode="auto" detects sentinel values and protects resampling/filtering
-        pipeline.add_config(
-            "case1_orig",
-            base_steps + [extract_orig],
-            source_mode="auto",
-        )
-
-        # Add discretization-dependent configs (texture/histogram/ivh only)
-        for n_bins in (8, 16):
-            pipeline.add_config(
-                f"case1_fbn_{n_bins}",
-                base_steps + [
-                    {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
-                    extract_discretized,
-                ],
-                source_mode="auto",
-            )
-
-        for bin_width in (8, 16):
-            pipeline.add_config(
-                f"case1_fbs_{bin_width}",
-                base_steps + [
-                    {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
-                    extract_discretized,
-                ],
-                source_mode="auto",
-            )
-
-        # Prepare for batch processing
-        rows = []
-        nifti_paths = sorted(input_dir.glob("*.nii*"))
-        if not nifti_paths:
-            raise ValueError(f"No NIfTI files found in: {input_dir}")
-
-        # Process each NIfTI file
-        for path in nifti_paths:
-            # Simple suffix stripping using Python 3.9+ removesuffix
-            subject_id = path.name.removesuffix(".nii.gz").removesuffix(".nii")
-            pipeline.clear_log()
-
-            # Run pipeline (mask omitted -> whole-image ROI)
-            # "case1_orig" contains morphology/intensity, others contain texture/histogram/ivh
-            results = pipeline.run(
-                image=str(path),
-                subject_id=subject_id,
-                config_names=["case1_orig", "case1_fbn_8", "case1_fbn_16", "case1_fbs_8", "case1_fbs_16"],
-            )
-
-            # Format results as flat dictionary and add metadata
-            row = format_results(
-                results,
-                fmt="wide",
-                meta={"subject_id": subject_id, "file": str(path)}
-            )
-            rows.append(row)
-
-            # Save per-case logs
-            pipeline.save_log(str(log_dir / f"{subject_id}.json"))
-
-        # Consolidated export of all results
-        save_results(rows, output_csv)
-        print(f"Wrote {len(rows)} rows to {output_csv}")
-
-    if __name__ == "__main__":
-        main()
-    ```
-
-### Output format
-
-- One row per file.
-- Columns include:
-  - `subject_id`
-  - `file`
-  - Feature columns prefixed by configuration name (e.g., `case1_fbn_8__mean_intensity_Q4LE`).
-- Every row has the **same set of columns**, even if some images trigger empty ROIs or
-  partial feature failures.  Failed features appear as `NaN`.
-
-!!! tip "Alternative: Explicit Sentinel Value"
-    If you know the sentinel value in advance, use `source_mode="roi_only"` with `sentinel_value` for deterministic behavior:
-    ```python
-    pipeline.add_config(
-        "case1_orig",
-        base_steps + [extract_orig],
-        source_mode="roi_only",
-        sentinel_value=-2048,
-    )
-    ```
-
-## Case 2: Batch radiomics from DICOM case folders (Image + Segmentation)
-
-### Scenario
-
-You have a folder of *cases*. Each case is a separate folder and contains two subfolders:
-
-- `Image/`: the DICOM image series (CT/MR/etc.), stored at an arbitrary depth.
-- `Segmentation/`: the DICOM segmentation, also stored at an arbitrary depth.
-
-You want to:
-
-- For each case, recursively discover the DICOM series folders.
-- Load the image series and segmentation series.
-- Convert the segmentation to a binary ROI mask by keeping all voxels where the segmentation value is `> 0` (handled automatically during loading).
-- Resample to **1×1×1 mm**.
-- Do **not** apply intensity filtering/resegmentation, and do **not** keep the largest connected component.
-- Compute all radiomic feature families for two discretisations:
-  - FBS with `bin_width=256`
-  - FBN with `n_bins=64`
-- Export a **long-format CSV** (tidy data, one row per feature).
-- Save pipeline logs into a separate folder (one JSON per case).
-- Show a progress bar during batch processing.
-
-### Notes
-
-!!! note
-    - **Progress bar**: This example uses `tqdm`, which Pictologics installs.
-    - **Segmentation DICOM at arbitrary depth**: The helper `_find_dicom_series_root(...)` looks for the subfolder with
-        the most `.dcm` files and uses that as the series root.
-    - **Multiple masks in one SEG**: If your segmentation DICOM encodes multiple labels (e.g., values 1..N), the
-        `_binarize_segmentation_mask(...)` step turns it into a single ROI by keeping all voxels where the value is `> 0`.
-    - **Multi-phase DICOM series**: If your image series contains multiple phases (e.g., cardiac CT with 10%, 20%... phases),
-        use `get_dicom_phases()` to discover available phases and `dataset_index` to select one:
-        ```python
-        from pictologics.utilities import get_dicom_phases
-        
-        phases = get_dicom_phases(str(image_root))
-        print(f"Found {len(phases)} phases")
-        # Load a specific phase (default is 0)
-        image = load_image(str(image_root), recursive=True, dataset_index=0)
-        ```
-
-### Full example script
-
-!!! example "Full example script"
-    ```python
-    from pathlib import Path
-    import numpy as np
-    from pictologics import Image, RadiomicsPipeline, load_image, load_and_merge_images
-    from pictologics.results import format_results, save_results
-
-
-    def main():
-        # Configure paths
-        cases_dir = Path("path/to/cases_root")
-        output_csv = Path("dicom_results_long.csv")
-        log_dir = Path("dicom_logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Find all case directories
-        case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
-        if not case_dirs:
-            raise ValueError(f"No case folders found in: {cases_dir}")
-
-        # Shared feature extraction settings
-        extract_all = {
-            "step": "extract_features",
-            "params": {
-                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-                "include_spatial_intensity": False,
-                "include_local_intensity": False,
-            },
-        }
-
-        # Initialize the pipeline
-        pipeline = RadiomicsPipeline()
-
-        # Configuration A: Fixed Bin Size
-        pipeline.add_config(
-            "case2_fbs_256",
-            [
-                {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-                {"step": "discretise", "params": {"method": "FBS", "bin_width": 256.0, "min_val": -1000.0}},
-                extract_all,
-            ],
-        )
-
-        # Configuration B: Fixed Bin Number
-        pipeline.add_config(
-            "case2_fbn_64",
-            [
-                {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-                {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
-                extract_all,
-            ],
-        )
-
-        # Use tqdm for a progress bar
-        from tqdm import tqdm
-
-        rows = []
-        for case_dir in tqdm(case_dirs, desc="Radiomics (DICOM cases)", unit="case"):
-            subject_id = case_dir.name
-            image_root = case_dir / "Image"
-            seg_root = case_dir / "Segmentation"
-
-            # load_image with recursive=True finds the best series folder automatically
-            image = load_image(str(image_root), recursive=True)
-            
-            # Load the segmentation using load_and_merge_images with binarize=True
-            # recursive=True ensures we find the DICOM series inside the Segmentation folder
-            mask = load_and_merge_images(
-                [str(seg_root)], 
-                binarize=True, 
-                recursive=True
-            )
-
-            pipeline.clear_log()
-
-            # Execute extraction for both configurations
-            results = pipeline.run(
-                image=image,
-                mask=mask,
-                subject_id=subject_id,
-                config_names=["case2_fbs_256", "case2_fbn_64"],
-            )
-
-            # Format results and store
-            row = format_results(
-                results,
-                fmt="long",  # Tidy format: [subject_id, config, feature_key, value]
-                meta={
-                    "subject_id": subject_id,
-                    "image_root": str(image_root),
-                    "seg_root": str(seg_root),
-                },
-                output_type="pandas",  # One DataFrame per case
-            )
-            rows.append(row)
-
-            # Save per-case logs
-            pipeline.save_log(str(log_dir / f"{subject_id}.json"))
-
-        # Final export (save_results joins the list of DataFrames)
-        save_results(rows, output_csv)
-        print(f"Wrote {len(rows)} cases to {output_csv}")
-
-    if __name__ == "__main__":
-        main()
-    ```
-
-## Case 3: Batch radiomics from a flat NIfTI folder (multiple masks per image)
-
-### Scenario
-
-You have a single large folder containing both images and masks as NIfTI files.
-
-- Image files end with `_IMG` (e.g., `CASE001_IMG.nii.gz`).
-- Mask files end with `MASKn` where `n` is a number (e.g., `CASE001_MASK1.nii.gz`, `CASE001_MASK2.nii.gz`).
-- There can be multiple segmentation masks per image.
-
-You want to:
-
-- For each image, automatically find all its corresponding masks.
-- Merge all masks into a single ROI using `load_and_merge_images(...)`.
-- Do **not** apply any preprocessing (no resampling, no thresholding, no connected components).
-- Compute radiomics for the **six standard discretisations** (FBN 8/16/32 and FBS 8/16/32).
-- Export a **long-format JSON** file for easy ingestion into NoSQL databases or web apps.
-- Save logs for each case into a separate folder.
-- Show a progress bar during batch processing.
-
-!!! tip
-    **Flexible Image Loading**
-    The `load_and_merge_images` function uses `load_image` for each path in its input list. This means you can merge:
-    - **Multiple NIfTI files** (as shown here).
-    - **DICOM series folders**.
-    - **Single DICOM slice files**.
-    - Or a **mix** of these formats, provided they share the same spatial geometry.
-
-    You can also pass **`recursive=True`** (to search subfolders) or **`dataset_index=N`** (for 4D files) to control how each mask is loaded.
-
-!!! tip "Performance Tip: Deduplication"
-    This example runs 6 configurations where only discretisation differs. With **deduplication enabled 
-    by default**, morphology and intensity features are computed once and reused across all configurations, 
-    providing significant speedup. To disable this optimization, set `deduplicate=False`. 
-    See [Deduplication](pipeline.md#deduplication-performance-optimization) for details.
-
-### Full example script
-
-!!! example "Full example script"
-    ```python
-    from pathlib import Path
-
-    import numpy as np
-
-    from pictologics import Image, RadiomicsPipeline, load_and_merge_images, load_image
-    from pictologics.results import format_results, save_results
-
-
-    def main():
-        # Configure paths
-        input_dir = Path("path/to/nifti_folder")
-        output_file = Path("case3_results_long.json")
-        log_dir = Path("case3_logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Use tqdm for a progress bar
-        from tqdm import tqdm
-
-        # Identify all images (files ending in _IMG)
-        image_paths = sorted(input_dir.glob("*_IMG.nii*"))
-        if not image_paths:
-            raise ValueError(f"No *_IMG NIfTI files found in: {input_dir}")
-
-        # Initialize the pipeline (deduplication is enabled by default)
-        # Since all 6 configs share identical preprocessing (only discretisation differs),
-        # morphology and intensity features are computed once and reused across all configs
-        pipeline = RadiomicsPipeline()
-
-        # Shared feature extraction settings
-        extract_all = {
-            "step": "extract_features",
-            "params": {
-                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-                "include_spatial_intensity": False,
-                "include_local_intensity": False,
-            },
-        }
-
-        # Add 6 target configurations (no preprocessing requested)
-        for n_bins in (8, 16, 32):
-            pipeline.add_config(
-                f"case3_fbn_{n_bins}",
-                [
-                    {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
-                    extract_all,
-                ],
-            )
-
-        for bin_width in (8.0, 16.0, 32.0):
-            pipeline.add_config(
-                f"case3_fbs_{int(bin_width)}",
-                [
-                    # FBS needs the same start in every image: -1000 HU (air), as the standard configs
-                    {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width, "min_val": -1000.0}},
-                    extract_all,
-                ],
-            )
-
-        target_configs = [
-            "case3_fbn_8", "case3_fbn_16", "case3_fbn_32",
-            "case3_fbs_8", "case3_fbs_16", "case3_fbs_32",
-        ]
-
-        # Process each image and its associated masks
-        rows = []
-        for img_path in tqdm(image_paths, desc="Radiomics (NIfTI images)", unit="image"):
-            # Strip extensions and _IMG suffix to get case ID
-            subject_id = img_path.name.removesuffix(".nii.gz").removesuffix(".nii").removesuffix("_IMG")
-
-            # Find all corresponding masks (e.g., CASE001_MASK1.nii.gz, etc.)
-            mask_paths = sorted(input_dir.glob(f"{subject_id}_MASK*.nii*"))
-            if not mask_paths:
-                raise ValueError(f"No masks found for {subject_id}")
-
-            image = load_image(str(img_path))
-
-            # Merge multiple masks into one and ensure binary semantics
-            mask = load_and_merge_images(
-                [str(p) for p in mask_paths],
-                reference_image=image,
-                binarize=True
-            )
-
-            pipeline.clear_log()
-
-            # Run extraction for all target configurations
-            results = pipeline.run(
-                image=image,
-                mask=mask,
-                subject_id=subject_id,
-                config_names=target_configs,
-            )
-
-            # Format results and store metadata
-            row = format_results(
-                results,
-                fmt="long",
-                meta={
-                    "subject_id": subject_id,
-                    "image": str(img_path),
-                    "masks": ";".join(str(p) for p in mask_paths),
-                },
-                output_type="pandas",  # One DataFrame per case
-            )
-            rows.append(row)
-
-            # Save per-case logs
-            pipeline.save_log(str(log_dir / f"{subject_id}.json"))
-
-        # Consolidated export (save_results handles list of DataFrames for long format automatically)
-        save_results(rows, output_file)
-        print(f"Wrote {len(rows)} cases to {output_file}")
-
-
-    if __name__ == "__main__":
-        main()
-    ```
-
-
-## Case 4: Parallel batch radiomics from DICOM cases (merge multiple segmentation folders)
-
-### Scenario
-
-You have a folder of *cases*. Each case is a separate folder and contains:
-
-- `Image/`: the DICOM image series (CT/MR/etc.), stored at an arbitrary depth.
-- `Segmentation/`: **multiple** subfolders, each containing a segmentation series at an arbitrary depth.
-
-You want to:
-
-- For each case, recursively discover the DICOM image series folder.
-- Discover **all** segmentation series folders under `Segmentation/` and load them.
-- Convert each segmentation to a binary mask (values `> 0` become 1).
-- Merge all binary masks into a single ROI mask per case.
-- Apply **all preprocessing steps supported by the pipeline** (resample, resegment, outlier filtering,
-  intensity rounding, and largest connected component).
-- Compute radiomics for **six discretisations** (FBN 8/16/32 and FBS 8/16/32).
-- Run cases **in parallel** on multiple CPU cores, with a user-controlled `n_jobs`.
-- Export a **single wide JSON** file (one object per case) and save per-case logs.
-
-### Notes
-
-!!! note
-    - **Progress bar**: This example uses `tqdm`, which Pictologics installs.
-    - **Multiprocessing requirement**: On Windows/macOS, keep the parallel execution inside
-      `if __name__ == "__main__":` (as shown) to avoid process-spawn issues.
-    - **Threads per worker**: Each worker process uses all numba threads unless you limit them. The
-      example gives each of the `n_jobs` workers its share of the cores (`init_worker`), so that the
-      workers do not compete for the same cores.
-    - **JIT warmup in parallel workers**: Pictologics performs a Numba JIT warmup at package import.
-        With `ProcessPoolExecutor`, each worker is a separate Python process, so warmup happens **once per worker process**
-        (on its first import of `pictologics`) and then stays warm for all cases that worker processes.
-        It is **not** re-run for every case unless you explicitly call `warmup_jit()` inside your per-case function.
-        You can disable auto-warmup via `PICTOLOGICS_DISABLE_WARMUP=1` if you prefer to skip the upfront cost.
-    - **Preprocessing parameters are dataset-dependent**: The `resegment` range here uses the CT HU example
-      `[-100, 3000]`. Adjust or remove it for non-CT data.
-
-!!! tip "Simpler: `run_batch`"
-    When each case has one image path and one mask path, `pipeline.run_batch()` does the parallel
-    part for you: workers with their share of the threads, one result file per case, a status
-    table, and resume after a stop. See [Batch Runs with `run_batch`](pipeline.md#batch-runs-with-run_batch).
-    This case merges several segmentation folders for each case, so it keeps its own workers.
-
-!!! tip "Performance Tip: Deduplication"
-    This example demonstrates **manual feature separation** combined with parallel processing:
-    
-    - **`case4_orig`**: Extracts morphology and intensity features (discretization-independent) — computed **once per case**
-    - **`case4_fbn_*` / `case4_fbs_*`**: Extract only texture, histogram, and IVH features (discretization-dependent)
-    
-    This approach ensures discretization-independent features are never recomputed. See [Case 8](#case-8-manual-feature-separation-advanced) 
-    for a detailed explanation of this technique.
-
-### Full example script
-
-!!! example "Full example script"
-    ```python
-    import os
-    from concurrent.futures import ProcessPoolExecutor, as_completed
-    from pathlib import Path
-    import numpy as np
-    from pictologics import Image, RadiomicsPipeline, load_image, load_and_merge_images
-    from pictologics.results import format_results, save_results
-
-
-    def init_worker(threads):
-        """Give each worker process its share of the numba threads."""
-        import numba
-
-        numba.set_num_threads(threads)
-
-
-    def collect_segmentation_series_roots(seg_root):
-        """Collect all segmentation series subfolders."""
-        if not seg_root.exists():
-            raise ValueError(f"Folder does not exist: {seg_root}")
-
-        subdirs = sorted([p for p in seg_root.iterdir() if p.is_dir()])
-        if not subdirs:
-            return [seg_root]
-
-        return subdirs
-
-    def build_case4_pipeline():
-        """Define the pipeline with manual feature separation for efficiency."""
-        pipeline = RadiomicsPipeline()
-
-        # Define standard CT preprocessing
-        preprocess_steps = [
-            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-            {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
-            {"step": "filter_outliers", "params": {"sigma": 3.0}},
-            {"step": "round_intensities", "params": {}},
-            {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-        ]
-
-        # Discretization-independent features (computed once)
-        extract_orig = {
-            "step": "extract_features",
-            "params": {
-                "families": ["morphology", "intensity"],
-                "include_spatial_intensity": False,
-                "include_local_intensity": False,
-            },
-        }
-
-        # Discretization-dependent features only
-        extract_discretized = {
-            "step": "extract_features",
-            "params": {
-                "families": ["texture", "histogram", "ivh"],
-                "include_spatial_intensity": False,
-                "include_local_intensity": False,
-            },
-        }
-
-        # Add "orig" config for discretization-independent features
-        pipeline.add_config("case4_orig", preprocess_steps + [extract_orig])
-
-        # Add discretisation variants (texture/histogram/ivh only)
-        for n_bins in (8, 16, 32):
-            pipeline.add_config(
-                f"case4_fbn_{n_bins}",
-                preprocess_steps + [{"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}}, extract_discretized],
-            )
-
-        for bin_width in (8.0, 16.0, 32.0):
-            pipeline.add_config(
-                f"case4_fbs_{int(bin_width)}",
-                preprocess_steps + [{"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}}, extract_discretized],
-            )
-
-        config_names = ["case4_orig"] + [f"case4_fbn_{b}" for b in (8, 16, 32)] + [f"case4_fbs_{b}" for b in (8, 16, 32)]
-        return pipeline, config_names
-
-    def process_case(case_dir, log_dir):
-        """Worker function for single case processing."""
-        case_path = Path(case_dir)
-        subject_id = case_path.name
-        image_root = case_path / "Image"
-        seg_root = case_path / "Segmentation"
-
-        # Load image recursively
-        image = load_image(str(image_root), recursive=True)
-
-        # Load and merge all found segmentations
-        seg_roots = collect_segmentation_series_roots(seg_root)
-        
-        # load_and_merge_images handles multiple paths, geometry checking, and binarization
-        try:
-            mask = load_and_merge_images(
-                [str(p) for p in seg_roots], 
-                reference_image=image, 
-                binarize=True, 
-                recursive=True
-            )
-        except ValueError as e:
-             raise ValueError(f"Failed to load/merge masks for {subject_id}: {e}")
-
-        # Setup and run pipeline
-        pipeline, config_names = build_case4_pipeline()
-        pipeline.clear_log()
-        results = pipeline.run(image=image, mask=mask, subject_id=subject_id, config_names=config_names)
-
-        # Save results and log
-        Path(log_dir).mkdir(parents=True, exist_ok=True)
-        pipeline.save_log(str(Path(log_dir) / f"{subject_id}.json"))
-
-        return format_results(
-            results,
-            fmt="wide",
-            meta={
-                "subject_id": subject_id,
-                "image_root": str(image_root),
-                "seg_roots": ";".join(str(p) for p in seg_roots),
-            },
-        )
-
-    def main():
-        # Configure paths
-        cases_dir = Path("path/to/cases_root")
-        output_file = Path("case4_parallel_results.json")
-        log_dir = Path("case4_logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Start parallel processing
-        n_jobs = 4
-        case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
-        if not case_dirs:
-            raise ValueError(f"No case folders found in: {cases_dir}")
-
-        from tqdm import tqdm
-        rows = []
-        errors = []
-
-        # Map each case to the worker function
-        threads = max(1, (os.cpu_count() or 1) // n_jobs)
-        with ProcessPoolExecutor(max_workers=n_jobs, initializer=init_worker, initargs=(threads,)) as executor:
-            futures = {
-                executor.submit(process_case, str(case_dir), str(log_dir)): case_dir
-                for case_dir in case_dirs
-            }
-
-            with tqdm(total=len(futures), desc="Radiomics (parallel cases)", unit="case") as pbar:
-                for fut in as_completed(futures):
-                    case_dir = futures[fut]
-                    try:
-                        rows.append(fut.result())
-                    except Exception as e:
-                        errors.append((str(case_dir), repr(e)))
-                    finally:
-                        pbar.update(1)
-
-        # Final data export: the finished cases, also when other cases failed
-        save_results(rows, output_file)
-        print(f"Wrote {len(rows)} cases to {output_file}")
-
-        if errors:
-            msg = "\n".join(f"- {case}: {err}" for case, err in errors)
-            raise RuntimeError(f"One or more cases failed:\n{msg}")
-
-    if __name__ == "__main__":
-        main()
-    ```
-
-!!! tip "DICOM masks with sub-voxel coordinate offsets"
-    Some DICOM vendors store segmentation origins with minor floating-point imprecision,
-    causing sub-voxel misalignment with the reference image. If you see `UserWarning`
-    messages about sub-voxel drift during loading, this is handled automatically via
-    nearest-voxel snapping. To suppress these warnings for a known-good dataset,
-    raise `subvoxel_warning_threshold`:
-
-    ```python
-    mask = load_and_merge_images(
-        seg_paths,
-        reference_image=image,
-        reposition_to_reference=True,
-        subvoxel_warning_threshold=0.1,  # warn only for > 10% voxel drift
-    )
-    ```
-
-    To prevent loading masks from the wrong patient, the default `min_overlap_fraction=0.5`
-    ensures at least 50% of each mask's volume must lie within the reference scan space.
-    A `ValueError` is raised if this threshold is not met. Lower it if masks legitimately
-    extend beyond the scan boundary (e.g. whole-organ segmentations near the scan edge).
-
-## Case 5: Batch radiomics from DICOM SEG files with multiple segments
-
-### Scenario
-
-You have a folder of *cases*. Each case contains:
-
-- `Image/`: the DICOM image series (CT/MR/etc.)
-- `segmentation.dcm`: a DICOM SEG file with multiple labeled segments (e.g., liver, spleen, kidneys)
-
-You want to:
-
-- Load the image and inspect the available segments in the SEG file.
-- Process **each segment separately** to get per-organ radiomics.
-- Apply standard preprocessing and compute features for each segment.
-- Export results with segment labels in the output.
-
-### Notes
-
-!!! note
-    - **`get_segment_info()`** returns metadata about each segment (number, label, algorithm).
-    - **`load_seg()` with `combine_segments=False`** returns a dict mapping segment numbers to `Image` objects.
-    - **Alignment**: Use `reference_image` to ensure the SEG mask matches the CT geometry.
-
-!!! tip "Faster for segments that do not overlap: `run_rois`"
-    When no voxel belongs to two segments, load the SEG as one label map
-    (`load_seg(seg_file, reference_image=image)`) and call `pipeline.run_rois(image, label_map,
-    labels={seg["segment_label"]: seg["segment_number"] for seg in segments})`. It gives the same
-    features, and it is 2 to 4 times faster with many segments. See
-    [Many ROIs with `run_rois`](pipeline.md#many-rois-with-run_rois).
-
-### Full example script
-
-!!! example "Full example script"
-    ```python
-    from pathlib import Path
-    from pictologics import load_image, load_seg, RadiomicsPipeline
-    from pictologics.loaders import get_segment_info
-    from pictologics.results import format_results, save_results
-
-
-    def main():
-        # Configure paths
-        cases_dir = Path("path/to/cases_root")
-        output_csv = Path("case5_per_segment_results.csv")
-        log_dir = Path("case5_logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Find all case directories
-        case_dirs = sorted([p for p in cases_dir.iterdir() if p.is_dir()])
-        if not case_dirs:
-            raise ValueError(f"No case folders found in: {cases_dir}")
-
-        # Initialize pipeline with standard config
-        pipeline = RadiomicsPipeline()
-        pipeline.add_config(
-            "case5_fbn_32",
-            [
-                {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-                {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-                {
-                    "step": "extract_features",
-                    "params": {
-                        "families": ["intensity", "morphology", "texture", "histogram"],
-                        "include_spatial_intensity": False,
-                        "include_local_intensity": False,
-                    },
-                },
-            ],
-        )
-
-        from tqdm import tqdm
-        rows = []
-
-        for case_dir in tqdm(case_dirs, desc="Radiomics (per-segment)", unit="case"):
-            subject_id = case_dir.name
-            image_root = case_dir / "Image"
-            seg_file = case_dir / "segmentation.dcm"
-
-            # Load the reference image
-            image = load_image(str(image_root), recursive=True)
-
-            # Inspect available segments
-            segments = get_segment_info(str(seg_file))
-            print(f"\n{subject_id}: Found {len(segments)} segments")
-            for seg in segments:
-                print(f"  Segment {seg['segment_number']}: {seg['segment_label']}")
-
-            # Load each segment separately, aligned to image geometry
-            segment_masks = load_seg(
-                str(seg_file),
-                combine_segments=False,  # Returns dict {seg_num: Image}
-                reference_image=image
-            )
-
-            # Process each segment
-            for seg_num, mask in segment_masks.items():
-                # Find segment label from metadata
-                seg_info = next(s for s in segments if s["segment_number"] == seg_num)
-                seg_label = seg_info["segment_label"]
-
-                pipeline.clear_log()
-                results = pipeline.run(
-                    image=image,
-                    mask=mask,
-                    subject_id=f"{subject_id}_{seg_label}",
-                    config_names=["case5_fbn_32"],
-                )
-
-                row = format_results(
-                    results,
-                    fmt="wide",
-                    meta={
-                        "subject_id": subject_id,
-                        "segment_number": seg_num,
-                        "segment_label": seg_label,
-                    },
-                )
-                rows.append(row)
-
-                # Save per-segment log
-                pipeline.save_log(str(log_dir / f"{subject_id}_{seg_label}.json"))
-
-        # Export all results
-        save_results(rows, output_csv)
-        print(f"\nWrote {len(rows)} rows to {output_csv}")
-
-
-    if __name__ == "__main__":
-        main()
-    ```
-
-### Output format
-
-- One row per segment per case.
-- Columns include:
-  - `subject_id` - Case identifier
-  - `segment_number` - Numeric segment ID from SEG file
-  - `segment_label` - Human-readable segment name (e.g., "Liver", "Spleen")
-  - Feature columns prefixed by configuration name
-
-## Case 6: Filtered radiomics using IBSI 2 filters
-
-### Scenario
-
-You want to extract radiomic features from filtered response maps (IBSI 2 paradigm). This is useful for:
-
-- Capturing texture at multiple scales (LoG with different σ values).
-- Extracting directional texture patterns (Gabor filters).
-- Multi-resolution analysis (wavelet decomposition).
-
-You want to:
-
-- Apply multiple filters to each image.
-- Extract intensity features from each filtered response map.
-- Compare features across filter types and parameters.
-
-### Key concepts
-
-- **Filter step before feature extraction**: Apply `filter` after preprocessing but before `extract_features`.
-- **Intensity features from filtered images**: First-order statistics (mean, variance, skewness) capture texture properties at different scales.
-- **Morphology is filter-independent**: Morphology features depend only on mask geometry, not intensity values. Compute morphology once from the original (unfiltered) image and reuse across all filter configurations.
-- **No discretisation for filtered images**: IBSI 2 Phase 2 recommends intensity features from continuous filtered values.
-
-### Full example script
-
-!!! example "Full example script"
-    ```python
-    from pathlib import Path
-    from pictologics import RadiomicsPipeline
-    from pictologics.results import format_results, save_results
-    
-    
-    def main():
-        # Configure paths
-        image_path = Path("path/to/image.nii.gz")
-        mask_path = Path("path/to/mask.nii.gz")
-        output_csv = Path("filtered_radiomics.csv")
-    
-        # Initialize pipeline
-        pipeline = RadiomicsPipeline()
-    
-        # IBSI 2 Phase 2 preprocessing (Config B)
-        preprocess_steps = [
-            {"step": "resample", "params": {
-                "new_spacing": (1.0, 1.0, 1.0), 
-                "interpolation": "cubic"
-            }},
-            {"step": "round_intensities", "params": {}},
-            {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
-        ]
-
-        # --- Configuration: Morphology from original image (computed once) ---
-        # Morphology features depend on mask geometry, NOT intensity values,
-        # so they are identical regardless of which filter is applied.
-        pipeline.add_config(
-            "orig",
-            preprocess_steps + [
-                {"step": "extract_features", "params": {"families": ["morphology"]}},
-            ],
-        )
-    
-        # Feature extraction (intensity only for filtered images)
-        extract_intensity = {
-            "step": "extract_features",
-            "params": {"families": ["intensity"]},
-        }
-    
-        # Collect filter config names
-        filter_configs = []
-    
-        # --- Configuration 1: LoG at multiple scales ---
-        for sigma in [1.5, 3.0, 5.0]:
-            name = f"log_sigma_{sigma}"
-            pipeline.add_config(
-                name,
-                preprocess_steps + [
-                    {"step": "filter", "params": {
-                        "type": "log",
-                        "sigma_mm": sigma,
-                        "truncate": 4.0,
-                    }},
-                    extract_intensity,
-                ],
-            )
-            filter_configs.append(name)
-    
-        # --- Configuration 2: Gabor filter ---
-        name = "gabor_5mm"
-        pipeline.add_config(
-            name,
-            preprocess_steps + [
-                {"step": "filter", "params": {
-                    "type": "gabor",
-                    "sigma_mm": 5.0,
-                    "lambda_mm": 2.0,
-                    "gamma": 1.5,
-                    "rotation_invariant": True,
-                    "delta_theta": 0.7853981633974483,  # pi/4
-                    "pooling": "average",
-                }},
-                extract_intensity,
-            ],
-        )
-        filter_configs.append(name)
-    
-        # --- Configuration 3: Wavelet decomposition ---
-        for decomp in ["LLH", "HHL", "HHH"]:
-            name = f"wavelet_{decomp}"
-            pipeline.add_config(
-                name,
-                preprocess_steps + [
-                    {"step": "filter", "params": {
-                        "type": "wavelet",
-                        "wavelet": "db3",
-                        "level": 1,
-                        "decomposition": decomp,
-                        "rotation_invariant": True,
-                        "pooling": "average",
-                    }},
-                    extract_intensity,
-                ],
-            )
-            filter_configs.append(name)
-    
-        # --- Configuration 4: Laws texture energy ---
-        name = "laws_L5E5E5"
-        pipeline.add_config(
-            name,
-            preprocess_steps + [
-                {"step": "filter", "params": {
-                    "type": "laws",
-                    "kernel": "L5E5E5",
-                    "rotation_invariant": True,
-                    "pooling": "max",
-                    "compute_energy": True,
-                    "energy_distance": 7,
-                }},
-                extract_intensity,
-            ],
-        )
-        filter_configs.append(name)
-    
-        # Run pipeline - include "orig" for morphology + all filter configs for intensity
-        all_configs = ["orig"] + filter_configs
-        results = pipeline.run(
-            image=str(image_path),
-            mask=str(mask_path),
-            subject_id="subject_001",
-            config_names=all_configs,
-        )
-    
-        # Format and save
-        row = format_results(
-            results,
-            fmt="wide",
-            meta={"subject_id": "subject_001"},
-        )
-        save_results([row], output_csv)
-        print(f"Saved filtered radiomics to {output_csv}")
-    
-        # Display key features for each filter
-        print("\nMean values from each filter:")
-        for config in filter_configs:
-            mean_val = results[config].get("mean_intensity_Q4LE", "N/A")
-            print(f"  {config}: {mean_val:.4f}" if isinstance(mean_val, float) else f"  {config}: {mean_val}")
-    
-    
-    if __name__ == "__main__":
-        main()
-    ```
-
-### Output format
-
-- One row per subject with features from each filter as separate columns.
-- Column names use the pattern `{filter_config}__mean_intensity_Q4LE` (e.g., `log_sigma_1.5__mean_intensity_Q4LE`).
-
-### Combining with standard texture features
-
-You can also run both filtered and standard texture configs together:
+Complete scripts for common tasks. Change the paths, and each script runs as it is. The [tutorials](../tutorials/batch.md) explain single topics in more detail.
+
+## Find a Recipe
+
+| Task | Recipe |
+|:--|:--|
+| Images without mask files, for example lesion exports with -2048 outside the lesion | [1. Images without masks](#1-images-without-masks) |
+| DICOM cases with a DICOM SEG or RTSTRUCT | [2. DICOM cases with a segmentation](#2-dicom-cases-with-a-segmentation) |
+| Many mask files for one image | [3. Many masks for one image](#3-many-masks-for-one-image) |
+| Each segment of a SEG, an RTSTRUCT or a label map as its own ROI | [4. Each segment as its own ROI](#4-each-segment-as-its-own-roi) |
+| Features of filtered images (IBSI 2) | [5. Filtered radiomics](#5-filtered-radiomics) |
+| Many discretisations of one image | [6. Many discretisations](#6-many-discretisations) |
+| A data dictionary of the features | [7. A data dictionary](#7-a-data-dictionary) |
+| The fat or tissue around an ROI | [Rings Around an ROI](../tutorials/rings.md) |
+| The phases of a cardiac CT | [Cardiac CT Phases](../tutorials/cardiac_phases.md) |
+| PET images in SUV | [PET in SUV](../tutorials/pet_suv.md) |
+| MR images | [MR Radiomics with Normalisation](../tutorials/mr_normalisation.md) |
+| Quality images of the masks | [Utilities](utilities.md#quality-images-of-many-cases) |
+| A study from a DICOM archive: find the series, run the cases, join the clinical data | [From a DICOM Archive to a Study Table](../tutorials/dicom_study.md) |
+| Masks from nnU-Net, TotalSegmentator, 3D Slicer, ITK-SNAP or a treatment planning system | [Masks from Other Tools](../tutorials/masks.md) |
+
+## Common Mistakes
+
+1. **No `config_names`**: `RadiomicsPipeline()` holds the six standard configurations. `run()` without `config_names` runs them all, and `save_configs()` without `config_names` saves them all. Give `config_names`, or start with `RadiomicsPipeline(load_standard=False)`.
+2. **FBS without a start**: an FBS `discretise` step needs `min_val`, or a `resegment` step with `range_min` before it. A filter or a `normalise` step cancels that start: after them, give `min_val`.
+3. **`roi_only` with a sentinel value**: `source_mode="roi_only"` does not use `sentinel_value`. For a known padding value, use `source_mode="auto", sentinel_value=-2048`.
+4. **A mask `Image` on another grid**: `run()` places a mask path on the grid of the image, but an `Image` mask must already have that grid. Load a mask with `load_image(path, reference_image=image)`, or give the path to `run()`.
+5. **Label masks**: each voxel that is not 0 is in the ROI. For one label, add a `binarize_mask` step. For each label, use `run_rois` (recipe 4).
+6. **Morphology after a filter**: the integrated intensity (99N0) and the centre of mass shift (KLMA) read the image, so after a filter they read the response map. Compute the morphology in a configuration without the filter (recipe 5).
+7. **A name that exists**: `add_config` with the name of a configuration in the pipeline replaces that configuration. Do not use the names of the standard configurations, such as `standard_fbn_32`, for your own.
+8. **Workers without a guard**: keep `run_batch(..., workers=4)` in `if __name__ == "__main__":`. The workers import your script again.
+
+## 1. Images Without Masks
+
+**The task**: a folder of NIfTI lesion exports. Each file holds a CT of one lesion, with -2048 outside the lesion, and there is no mask file. The study needs the intensity and shape features, and the texture features of four discretisations.
 
 ```python
-# Standard texture config (unfiltered)
-pipeline.add_config("standard_fbn_32", [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["texture"]}},
-])
+from pathlib import Path
 
-# Run all configs together
-all_configs = filter_configs + ["standard_fbn_32"]
-results = pipeline.run(image, mask, config_names=all_configs)
-```
+from pictologics import RadiomicsPipeline, save_results
 
-## Output Options
-
-For details on result formatting (`wide` vs `long`, `output_type` options) and export functions, see the [Pipeline & Preprocessing - Working with Results](pipeline.md#working-with-results).
-
-## Case 7: Multi-configuration batch with deduplication
-
-### Scenario
-
-You want to run a comprehensive radiomic analysis using multiple discretization strategies (e.g., FBN with 8/16/32 bins and FBS with 8/16/32 bin widths) while maximizing performance. All configurations share the same preprocessing steps.
-
-!!! info "Deduplication is Enabled by Default"
-    Starting with pictologics v0.3.2, deduplication is **enabled by default** (`deduplicate=True`). You don't need to explicitly enable it—just create a pipeline and run multiple configurations to benefit from automatic optimization.
-
-You want to:
-
-- Apply standard preprocessing (resample, resegment, filter outliers, keep largest component).
-- Run **6 discretization strategies** for comprehensive coverage.
-- **Optimize performance** by avoiding redundant computation of features that don't depend on discretization.
-- Track and report deduplication statistics to understand the performance benefit.
-
-### Key concepts
-
-The deduplication system reuses a feature family only when the source mode, every preprocessing step before extraction, and the extraction options are the same. Only a final discretization step may differ:
-
-| Feature Family | Ignores a final discretization step |
-| :--- | :--- |
-| **Morphology** | Yes |
-| **Intensity** | Yes |
-| **Texture / Histogram** | No |
-| **IVH** | Only with `ivh_use_continuous=True` |
-
-When configs share preprocessing but differ only in discretization:
-
-- **Morphology** and **intensity** features are computed **once** and reused.
-- **Texture**, **histogram**, and (typically) **IVH** are computed **per configuration**.
-- Cache reuse is scoped by feature family, so histogram and IVH features are never copied from texture results even when their preprocessing dependencies match.
-
-### How Results Are Handled
-
-!!! note "Complete Results for All Configurations"
-    When deduplication reuses features, they are **copied** into the results dictionary—never empty or missing. Every configuration returns a complete feature set with identical values for reused families.
-
-| What happens | Details |
-| :--- | :--- |
-| **First config** | All feature families are computed and stored in cache |
-| **Subsequent configs** | Matching feature families are **copied** from cache; differing families are computed fresh |
-| **Final results** | Every config has **complete features**—no NaN values, no missing columns |
-
-This means when you concatenate results into a DataFrame for machine learning or statistical analysis, all rows are complete:
-
-```python
-import pandas as pd
-
-# Each config has complete results
-df = pd.DataFrame([results[cfg] for cfg in config_names])
-print(df.isna().sum().sum())  # 0 - no missing values!
-```
-
-This can reduce total computation time significantly—especially for morphology features which involve expensive surface area calculations.
-
-### Full example script
-
-!!! example "Full example script"
-    ```python
-    from pathlib import Path
-    import time
-    
-    from pictologics import RadiomicsPipeline
-    from pictologics.results import format_results, save_results
-    
-    
-    def main():
-        # Configure paths
-        image_path = Path("path/to/image.nii.gz")
-        mask_path = Path("path/to/mask.nii.gz")
-        output_csv = Path("case7_dedup_results.csv")
-    
-        # Define shared preprocessing steps
-        preprocess_steps = [
-            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-            {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
-            {"step": "filter_outliers", "params": {"sigma": 3.0}},
-            {"step": "round_intensities", "params": {}},
-            {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
-        ]
-    
-        # Shared feature extraction settings
-        extract_all = {
-            "step": "extract_features",
-            "params": {
-                "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-                "include_spatial_intensity": False,
-                "include_local_intensity": False,
-            },
-        }
-    
-        # ========================================
-        # Run WITH deduplication (enabled by default)
-        # ========================================
-        pipeline_dedup = RadiomicsPipeline()  # deduplicate=True is the default!
-    
-        # Add 6 configurations (only discretisation differs)
-        for n_bins in (8, 16, 32):
-            pipeline_dedup.add_config(
-                f"fbn_{n_bins}",
-                preprocess_steps + [
-                    {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
-                    extract_all,
-                ],
-            )
-    
-        for bin_width in (8.0, 16.0, 32.0):
-            pipeline_dedup.add_config(
-                f"fbs_{int(bin_width)}",
-                preprocess_steps + [
-                    {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
-                    extract_all,
-                ],
-            )
-    
-        config_names = ["fbn_8", "fbn_16", "fbn_32", "fbs_8", "fbs_16", "fbs_32"]
-    
-        # Run with deduplication
-        start = time.perf_counter()
-        results = pipeline_dedup.run(
-            image=str(image_path),
-            mask=str(mask_path),
-            subject_id="subject_001",
-            config_names=config_names,
-        )
-        elapsed_dedup = time.perf_counter() - start
-    
-        # ========================================
-        # Check deduplication statistics
-        # ========================================
-        stats = pipeline_dedup.deduplication_stats
-        print("\n=== Deduplication Statistics ===")
-        print(f"Reused feature families: {stats['reused_families']}")
-        print(f"Computed feature families: {stats['computed_families']}")
-        print(f"Cache hit rate: {stats['cache_hit_rate']:.1%}")
-        print(f"Time with deduplication: {elapsed_dedup:.2f}s")
-    
-        # ========================================
-        # Format and save results
-        # ========================================
-        row = format_results(
-            results,
-            fmt="wide",
-            meta={"subject_id": "subject_001"},
-        )
-        save_results([row], output_csv)
-        print(f"\nSaved results to {output_csv}")
-    
-        # Verify all configs have the same morphology features (computed once, reused)
-        ref_volume = results["fbn_8"].get("volume_RNU0", None)
-        for config in config_names[1:]:
-            vol = results[config].get("volume_RNU0", None)
-            assert vol == ref_volume, f"Volume mismatch for {config}"
-        print("✓ Morphology features identical across all configurations (as expected)")
-    
-    
-    if __name__ == "__main__":
-        main()
-    ```
-
-### Expected output
-
-When running 6 configurations with shared preprocessing:
-
-```
-=== Deduplication Statistics ===
-Reused feature families: 10
-Computed feature families: 20
-Cache hit rate: 33.3%
-Time with deduplication: 12.34s
-
-Saved results to case7_dedup_results.csv
-✓ Morphology features identical across all configurations (as expected)
-```
-
-The cache hit rate reflects that:
-
-- **Morphology** (1 family) is computed once, reused 5 times → 5 cache hits
-- **Intensity** (1 family) is computed once, reused 5 times → 5 cache hits
-- **Texture** (6 subfamilies × 6 configs = 36) computed fresh each time
-- **Histogram** (1 × 6 configs) computed fresh each time
-- **IVH** (1 × 6 configs) computed fresh each time
-
-The actual speedup depends on your data, but morphology calculations (especially surface area) are often the most expensive, so avoiding 5 redundant morphology computations can provide significant time savings.
-
-### Configuration options
-
-Deduplication is enabled by default, but you can disable or customize it:
-
-```python
-# Default behavior - deduplication enabled (no explicit setting needed)
-pipeline = RadiomicsPipeline()
-
-# Disable deduplication (features computed independently for each config)
-pipeline_no_dedup = RadiomicsPipeline(deduplicate=False)
-
-# Lock to a specific rules version for reproducibility
-pipeline_versioned = RadiomicsPipeline(deduplication_rules="1.1.0")
-
-# Access deduplication configuration
-print(f"Deduplication enabled: {pipeline.deduplication_enabled}")
-print(f"Rules version: {pipeline.deduplication_rules.version}")
-```
-
-### When to disable deduplication
-
-In most cases, you should leave deduplication enabled (the default). However, you might disable it if:
-
-| Scenario | Reason |
-| :--- | :--- |
-| **Debugging** | To verify that features are computed correctly for each config |
-| **Memory constraints** | Caching results consumes memory during the run |
-| **Single config** | No benefit when running only one configuration |
-
-### Serialization
-
-Deduplication settings are preserved when exporting/importing pipeline configurations:
-
-```python
-# Export includes deduplication settings
-pipeline.save_configs("my_pipeline.yaml")
-
-# Import preserves settings
-loaded = RadiomicsPipeline.load_configs("my_pipeline.yaml")
-print(f"Loaded deduplicate setting: {loaded.deduplication_enabled}")
-```
-
-!!! tip "Learn More"
-    For detailed documentation of the deduplication system, including the underlying classes and how feature family dependencies are determined, see the [Deduplication](pipeline.md#deduplication-performance-optimization) section in the Pipeline guide and the [Deduplication API](../api/deduplication.md) reference.
-
-## Case 8: Manual Feature Separation (Advanced)
-
-!!! info "Case 7 vs Case 8"
-    - **Case 7** uses **automatic deduplication** (enabled by default) where the pipeline internally optimizes computation and copies results to matching configs
-    - **Case 8** demonstrates **manual feature separation** where YOU explicitly control which features are computed in which configs
-    
-    For most users, automatic deduplication (Case 7) is simpler and sufficient. Manual separation gives you maximum control and transparency.
-
-### Scenario
-
-You want **complete control** over which features are computed for which configurations, avoiding any redundant computation. This is an alternative to automatic deduplication that gives you explicit control over your pipeline structure.
-
-This approach is ideal when:
-
-- You want clear separation between "baseline" features and "variant" features.
-- You're combining multiple filters with multiple discretization strategies.
-- You need to ensure morphology is computed exactly once across all configurations.
-
-### The Core Concept
-
-Different feature families have different dependencies:
-
-| Feature Family | Depends On | Independent Of |
-| :--- | :--- | :--- |
-| **Morphology** | Mask geometry (resample, resegment, filter_outliers, binarize_mask, keep_largest_component) | Response-map filters, discretization |
-| **Intensity** | Intensity preprocessing (resample, resegment, filter_outliers, **filter**) | Discretization |
-| **Texture, Histogram, IVH** | All of the above + **discretization** | — |
-
-This means:
-
-1. **Morphology** can be computed once and reused across configurations with the same mask geometry, including the same resegmentation and outlier-filtering targets.
-2. **Intensity** can be computed once per unique preprocessing+filter combination.
-3. **Texture/Histogram/IVH** must be computed for each discretization strategy.
-
-### Example 1: Standard Radiomics with Manual Separation
-
-```python
-from pictologics import RadiomicsPipeline
-
-# Common preprocessing
-preprocess = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
-    {"step": "keep_largest_component", "params": {"apply_to": "morph"}},
+STEPS = [
+    {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5), "round_intensities": True}},
+    {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},  # HU
+    {"step": "keep_largest_component", "params": {}},
 ]
+DISCRETISATIONS = {
+    "fbn_8": {"method": "FBN", "n_bins": 8},
+    "fbn_16": {"method": "FBN", "n_bins": 16},
+    "fbs_8": {"method": "FBS", "bin_width": 8},  # bins from -100 HU, the resegment start
+    "fbs_16": {"method": "FBS", "bin_width": 16},
+}
 
-pipeline = RadiomicsPipeline()
 
-# Config 1: "orig" - morphology + intensity (computed ONCE)
-pipeline.add_config("orig", preprocess + [
-    {"step": "extract_features", "params": {
-        "families": ["morphology", "intensity"],
-    }},
-])
+def build_pipeline():
+    pipeline = RadiomicsPipeline(load_standard=False)
+    padding = {"source_mode": "auto", "sentinel_value": -2048}  # the value outside the lesion
+    pipeline.add_config("orig", STEPS + [
+        {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
+    ], **padding)
+    for name, discretise in DISCRETISATIONS.items():
+        pipeline.add_config(name, STEPS + [
+            {"step": "discretise", "params": discretise},
+            {"step": "extract_features", "params": {"families": ["texture", "histogram", "ivh"]}},
+        ], **padding)
+    return pipeline
 
-# Configs 2-7: Discretization-dependent features only
+
+if __name__ == "__main__":
+    pipeline = build_pipeline()
+    cases = [
+        {"subject_id": path.name.removesuffix(".gz").removesuffix(".nii"), "image": str(path)}
+        for path in sorted(Path("lesion_exports").glob("*.nii*"))
+    ]
+    table = pipeline.run_batch(cases, "results", workers=2)
+    print(table.loc[table["status"] != "completed", ["subject_id", "status", "error"]])
+    save_results(table, "results/features.csv")
+```
+
+- **No mask**: a case without `mask` uses the whole image as the ROI. The `resample` step takes the voxels of -2048 out of the ROI (`source_mode="auto"` with `sentinel_value`), the `resegment` step keeps -100 to 3000 HU, and `keep_largest_component` keeps the lesion only.
+- **A compact table**: the `orig` configuration gives the intensity and morphology features. The other four give only the features that read the discretisation. So the table has each feature one time, for example `orig__mean_intensity_Q4LE` and `fbn_8__joint_entropy_TU9B`.
+- **Shared work**: the five configurations start with the same three steps, so the steps run one time for each image.
+- **An unknown padding value**: leave out `sentinel_value`. The pipeline then finds the value of each image, with a warning.
+- **The result files**: `results/cases/<subject_id>.json` holds the features and the log of each case. A second run skips the cases that are done.
+
+## 2. DICOM Cases with a Segmentation
+
+**The task**: one folder for each case, with a DICOM image series and its DICOM SEG (or RTSTRUCT) file, each at any depth:
+
+```text
+cases/
+  p001/
+    Image/          the DICOM series
+    Segmentation/   one SEG or RTSTRUCT file
+  p002/
+    ...
+```
+
+```python
+from pathlib import Path
+
+from pictologics import RadiomicsPipeline, save_results
+
+EXTRACT = {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"]}}
+
+
+def segmentation_file(folder):
+    """The one DICOM file of a segmentation folder, at any depth."""
+    files = sorted(Path(folder).rglob("*.dcm"))
+    if len(files) != 1:
+        raise ValueError(f"{folder} holds {len(files)} DICOM files, not 1")
+    return str(files[0])
+
+
+if __name__ == "__main__":
+    pipeline = RadiomicsPipeline(load_standard=False)
+    for name, discretise in {
+        "fbs_25": {"method": "FBS", "bin_width": 25, "min_val": -1000},
+        "fbn_64": {"method": "FBN", "n_bins": 64},
+    }.items():
+        pipeline.add_config(name, [
+            {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+            {"step": "discretise", "params": discretise},
+            EXTRACT,
+        ])
+
+    cases = [
+        {
+            "subject_id": case.name,
+            "image": str(case / "Image"),
+            "image_options": {"recursive": True},  # the series at any depth
+            "mask": segmentation_file(case / "Segmentation"),
+        }
+        for case in sorted(Path("cases").iterdir())
+        if case.is_dir()
+    ]
+    table = pipeline.run_batch(cases, "results", workers=4)
+    save_results(table, "results/features.csv")
+
+    # The long format: one row for each feature
+    features = [column for column in table.columns if "__" in column]
+    long = table.melt(id_vars=["subject_id"], value_vars=features, var_name="column", value_name="value")
+    long[["config", "feature_key"]] = long["column"].str.split("__", n=1, expand=True)
+    save_results(long.drop(columns="column"), "results/features_long.csv")
+```
+
+- **The mask**: the pipeline loads the SEG or the RTSTRUCT onto the grid of the image. All segments (or ROIs) of the file together make the ROI, because each voxel that is not 0 is in the ROI. For each segment on its own, see recipe 4.
+- **Phases**: for a series with more than one phase (for example a cardiac CT), give the phase in `image_options`, for example `{"recursive": True, "dataset_index": 4}`. `get_dicom_phases(folder, recursive=True)` lists the phases (see [Cardiac CT Phases](../tutorials/cardiac_phases.md)).
+- **Offsets**: a mask origin a small part of a voxel off the image grid gives a warning, and the mask snaps to the nearest voxel. Give `mask_subvoxel_warning_threshold` in a case to change the limit (see [Sub-Voxel Alignment](data_loading.md#sub-voxel-alignment-and-overlap)).
+
+**More than one SEG file in a case**: merge the files into one mask file first, and give that file as the `mask` of the case.
+
+```python
+from pictologics import load_and_merge_images, load_image, save_image
+
+for case in sorted(Path("cases").iterdir()):
+    image = load_image(str(case / "Image"), recursive=True)
+    seg_files = sorted((case / "Segmentation").rglob("*.dcm"))
+    mask = load_and_merge_images(seg_files, reference_image=image, reposition_to_reference=True, binarize=True)
+    save_image(mask, Path("merged_masks") / f"{case.name}.nii.gz")
+```
+
+`load_and_merge_images` takes SEG files and other image files, but not RTSTRUCT files. For an RTSTRUCT, use `load_rtstruct` (see [Data Loading](data_loading.md#dicom-rtstruct)).
+
+## 3. Many Masks for One Image
+
+**The task**: one folder holds the images and their masks as NIfTI files: `CASE001_IMG.nii.gz`, and `CASE001_MASK1.nii.gz`, `CASE001_MASK2.nii.gz` and more for each image. The masks of an image together make one ROI. The study needs the features of six discretisations, without other steps, as long-format JSON.
+
+```python
+from pathlib import Path
+
+from pictologics import RadiomicsPipeline, format_results, load_and_merge_images, load_image, save_results
+
+EXTRACT = {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"]}}
+
+pipeline = RadiomicsPipeline(load_standard=False)
 for n_bins in (8, 16, 32):
-    pipeline.add_config(f"fbn_{n_bins}", preprocess + [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
-        {"step": "extract_features", "params": {
-            "families": ["texture", "histogram", "ivh"],  # NO morphology/intensity
-        }},
+    pipeline.add_config(f"fbn_{n_bins}", [{"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}}, EXTRACT])
+for bin_width in (8, 16, 32):
+    pipeline.add_config(f"fbs_{bin_width}", [
+        {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width, "min_val": -1000}},  # from air
+        EXTRACT,
     ])
 
-for bin_width in (8.0, 16.0, 32.0):
-    pipeline.add_config(f"fbs_{int(bin_width)}", preprocess + [
-        {"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}},
-        {"step": "extract_features", "params": {
-            "families": ["texture", "histogram", "ivh"],
-        }},
-    ])
+folder = Path("nifti_folder")
+tables = []
+for image_path in sorted(folder.glob("*_IMG.nii*")):
+    subject_id = image_path.name.split("_IMG")[0]
+    mask_paths = sorted(folder.glob(f"{subject_id}_MASK*.nii*"))
+    if not mask_paths:
+        raise ValueError(f"No masks for {subject_id}")
+    image = load_image(str(image_path))
+    mask = load_and_merge_images(mask_paths, reference_image=image, reposition_to_reference=True, binarize=True)
+    results = pipeline.run(image, mask, subject_id=subject_id, config_names=pipeline.list_configs())
+    tables.append(format_results(results, fmt="long", meta={"subject_id": subject_id}, output_type="pandas"))
+    pipeline.clear_log()
 
-# Run all configs
-results = pipeline.run(
-    image="path/to/image.nii.gz",
-    mask="path/to/mask.nii.gz",
-    config_names=["orig", "fbn_8", "fbn_16", "fbn_32", "fbs_8", "fbs_16", "fbs_32"],
-)
-
-# Results structure:
-# - results["orig"] contains morphology + intensity (applies to all)
-# - results["fbn_8"] contains texture/histogram/ivh for FBN with 8 bins
-# - etc.
+save_results(tables, "results/features_long.json")
 ```
 
-### Example 2: Filtered Radiomics with Manual Separation
+- `binarize=True` makes each mask 0 and 1 before the merge, so the merged mask is one ROI. With `relabel_masks=True` in place of `binarize`, each file gets its own label (1, 2, 3, ...), for `run_rois`.
+- The six configurations differ only in the discretisation, so the intensity and morphology features are computed one time and copied (see recipe 6).
+- The JSON file holds a list of rows: `subject_id`, `config`, `feature_key` and `value`, with `null` for `NaN`.
 
-When combining filters, remember:
+## 4. Each Segment as Its Own ROI
 
-- **Morphology** is filter-independent (computed from mask geometry)
-- **Intensity** is filter-dependent (computed from filtered response map)
+**The task**: each case holds a DICOM series and a SEG file with segments, for example the liver, the spleen and the kidneys. The study needs a row for each segment.
 
 ```python
-from pictologics import RadiomicsPipeline
+from pathlib import Path
 
-preprocess = [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+from pictologics import RadiomicsPipeline, save_results
+from pictologics.loaders import get_segment_info
+
+if __name__ == "__main__":
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("fbn_32", [
+        {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+        {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture", "histogram"]}},
+    ])
+
+    cases = []
+    for case in sorted(Path("cases").iterdir()):
+        seg_file = str(case / "segmentation.dcm")
+        labels = {s["segment_label"]: s["segment_number"] for s in get_segment_info(seg_file)}
+        cases.append({
+            "subject_id": case.name,
+            "image": str(case / "Image"),
+            "image_options": {"recursive": True},
+            "rois": seg_file,  # a label map: each segment has its number
+            "labels": labels,  # the ROI names in the table
+        })
+    table = pipeline.run_batch(cases, "results", workers=4)
+    save_results(table, "results/features_by_segment.csv")  # one row for each segment
+```
+
+- **The label map**: the pipeline loads the SEG as one label image, in which each voxel holds the number of its segment. `run_rois` (here through `run_batch`) gives each segment the features of `run()` with a mask of that segment alone, and it is much faster than one run for each segment.
+- **The table**: one row for each segment, with its name in the column `roi`. The names in `labels` must differ.
+- **An RTSTRUCT**: give its path as `rois`. `get_segment_info` gives its ROI names and numbers in the same form.
+- **A label map file**: give a NIfTI label map as `rois`, with `labels={"liver": 1, "spleen": 2}` (or no `labels` for all labels).
+
+**Overlapping segments** (for example a tumour inside an organ) do not fit in one label image. Load each segment as its own mask, and run each:
+
+```python
+from pictologics import format_results, load_image, load_seg
+
+image = load_image("cases/p001/Image", recursive=True)
+masks = load_seg("cases/p001/segmentation.dcm", reference_image=image, combine_segments=False)  # {number: mask}
+names = {s["segment_number"]: s["segment_label"] for s in get_segment_info("cases/p001/segmentation.dcm")}
+rows = [
+    format_results(pipeline.run(image, mask, config_names=["fbn_32"]), meta={"subject_id": "p001", "roi": names[number]})
+    for number, mask in masks.items()
 ]
+save_results(rows, "results/p001_segments.csv")
+```
 
-pipeline = RadiomicsPipeline()
+## 5. Filtered Radiomics
 
-# Config 1: Morphology from original image (computed ONCE, reused for all filters)
-pipeline.add_config("orig_morphology", preprocess + [
-    {"step": "extract_features", "params": {"families": ["morphology"]}},
+**The task**: the features of IBSI 2 filter response maps of a CT: LoG at two scales, a Laws energy map, a Gabor filter and a wavelet, with the preprocessing of IBSI 2 Phase 2 (configuration B).
+
+```python
+import math
+
+from pictologics import RadiomicsPipeline, format_results, save_results
+
+PREPROCESS = [  # IBSI 2 Phase 2, configuration B
+    {"step": "resample", "params": {
+        "new_spacing": (1.0, 1.0, 1.0), "interpolation": "cubic", "mask_interpolation": "linear", "mask_threshold": 0.5,
+    }},
+    {"step": "round_intensities", "params": {}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},  # HU, before the filters
+]
+FILTERS = {
+    "log_1.5": {"type": "log", "sigma_mm": 1.5},
+    "log_3": {"type": "log", "sigma_mm": 3.0},
+    "laws_e5": {"type": "laws", "kernel": "L5E5E5", "rotation_invariant": True, "pooling": "max",
+                "compute_energy": True, "energy_distance": 7},
+    "gabor": {"type": "gabor", "sigma_mm": 5.0, "lambda_mm": 2.0, "gamma": 1.5, "rotation_invariant": True,
+              "delta_theta": math.pi / 4, "pooling": "average"},
+    "wavelet_hhh": {"type": "wavelet", "wavelet": "db3", "level": 1, "decomposition": "HHH",
+                    "rotation_invariant": True, "pooling": "average"},
+}
+
+pipeline = RadiomicsPipeline(load_standard=False)
+pipeline.add_config("orig", PREPROCESS + [
+    {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
 ])
-
-# Config 2: Intensity from original (unfiltered) image
-pipeline.add_config("orig_intensity", preprocess + [
-    {"step": "extract_features", "params": {"families": ["intensity"]}},
-])
-
-# Configs 3+: Intensity from each filtered response map
-for sigma in [1.5, 3.0, 5.0]:
-    pipeline.add_config(f"log_{sigma}", preprocess + [
-        {"step": "filter", "params": {"type": "log", "sigma_mm": sigma}},
+for name, params in FILTERS.items():
+    pipeline.add_config(name, PREPROCESS + [
+        {"step": "filter", "params": params},
         {"step": "extract_features", "params": {"families": ["intensity"]}},
     ])
-
-pipeline.add_config("gabor", preprocess + [
-    {"step": "filter", "params": {
-        "type": "gabor", "sigma_mm": 5.0, "lambda_mm": 2.0, "gamma": 1.0,
-        "rotation_invariant": True, "delta_theta": 0.7853981633974483,  # pi/4
-        "pooling": "average",
-    }},
-    {"step": "extract_features", "params": {"families": ["intensity"]}},
+pipeline.add_config("log_1.5_fbn_32", PREPROCESS + [  # texture of a response map
+    {"step": "filter", "params": FILTERS["log_1.5"]},
+    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
+    {"step": "extract_features", "params": {"families": ["texture", "histogram"]}},
 ])
 
-# Run all
-results = pipeline.run(
-    image="path/to/image.nii.gz",
-    mask="path/to/mask.nii.gz",
-)
-
-# Results structure:
-# - results["orig_morphology"] contains morphology (applies to ALL configs)
-# - results["orig_intensity"] contains intensity from original image
-# - results["log_1.5"] contains intensity from LoG σ=1.5 filtered image
-# - etc.
+results = pipeline.run("ct.nii.gz", "gtv.nii.gz", subject_id="p001", config_names=pipeline.list_configs())
+save_results([format_results(results, meta={"subject_id": "p001"})], "filtered_features.csv")
+print(results["log_1.5"]["mean_intensity_Q4LE"])
 ```
 
-### Example 3: Combined Filters + Discretization
+- **The resegment step** comes before the filters, so it selects the voxels by HU.
+- **Morphology** comes from the `orig` configuration, without a filter (see [Common Mistakes](#common-mistakes), item 6).
+- **Texture of a response map**: use FBN, or FBS with `min_val`, because the filter cancels the FBS start of the `resegment` step.
+- **Shared work**: the configurations start with the same three steps, so the steps run one time. The filters compute only the region around the ROI.
+- **The log** of each filter step records the requested and the effective parameters and boundary. For the Gabor filter, report the `response` (default `"modulus"`). See [Image Filtering](image_filtering.md).
 
-The most complex scenario: multiple filters AND multiple discretization strategies.
+## 6. Many Discretisations
+
+**The task**: the features of six discretisations of one image, with the same preprocessing. The pipeline computes the features that do not read the discretisation one time, and copies them.
 
 ```python
 from pictologics import RadiomicsPipeline
 
-preprocess = [
+PREPROCESS = [
     {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
     {"step": "resegment", "params": {"range_min": -100, "range_max": 3000}},
+    {"step": "filter_outliers", "params": {"sigma": 3.0}},
+    {"step": "round_intensities", "params": {}},
+    {"step": "keep_largest_component", "params": {}},
 ]
+EXTRACT = {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"]}}
 
-pipeline = RadiomicsPipeline()
+pipeline = RadiomicsPipeline(load_standard=False)  # shared work is on by default
+for n_bins in (8, 16, 32):
+    pipeline.add_config(f"fbn_{n_bins}", PREPROCESS + [{"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}}, EXTRACT])
+for bin_width in (8, 16, 32):
+    pipeline.add_config(f"fbs_{bin_width}", PREPROCESS + [{"step": "discretise", "params": {"method": "FBS", "bin_width": bin_width}}, EXTRACT])
 
-# === TIER 1: Morphology (computed ONCE) ===
-pipeline.add_config("orig_morphology", preprocess + [
-    {"step": "extract_features", "params": {"families": ["morphology"]}},
-])
-
-# === TIER 2: Intensity per filter ===
-# Original (unfiltered)
-pipeline.add_config("orig_intensity", preprocess + [
-    {"step": "extract_features", "params": {"families": ["intensity"]}},
-])
-
-# LoG filters
-for sigma in [1.5, 3.0]:
-    pipeline.add_config(f"log_{sigma}_intensity", preprocess + [
-        {"step": "filter", "params": {"type": "log", "sigma_mm": sigma}},
-        {"step": "extract_features", "params": {"families": ["intensity"]}},
-    ])
-
-# === TIER 3: Texture per discretization (original image only) ===
-for n_bins in (16, 32):
-    pipeline.add_config(f"orig_fbn_{n_bins}", preprocess + [
-        {"step": "discretise", "params": {"method": "FBN", "n_bins": n_bins}},
-        {"step": "extract_features", "params": {"families": ["texture", "histogram"]}},
-    ])
-
-# Note: Texture from filtered images would require discretization of the filtered
-# response map, which is less common but can be added similarly if needed.
+results = pipeline.run("ct.nii.gz", "lesion.nii.gz", config_names=pipeline.list_configs())
+print(pipeline.deduplication_stats)
+# {'reused_families': 10, 'computed_families': 20, 'cache_hit_rate': 0.333...}
 ```
 
-### Comparison: Manual vs Automatic Deduplication
+- **The counts**: the morphology and the intensity families are computed one time and copied to the other five configurations (10 copies). The texture, histogram and IVH families read the discretisation, so they are computed for each configuration (18), with the morphology and intensity families of the first (2): 20 in all.
+- **The results**: each configuration has all its features. The copied values are the same as computed values.
+- **The preprocessing**: the five steps before the `discretise` step run one time.
+- **A compact table**: to have each intensity and morphology feature one time in the table, put them in their own configuration, as in recipe 1.
+- **Settings**: `RadiomicsPipeline(deduplicate=False)` computes each family in each configuration, for example to measure the time of each. `RadiomicsPipeline(deduplication_rules="1.1.0")` pins the rules. `save_configs` writes these settings, and `load_configs` reads them.
 
-| Aspect | Manual Separation | Automatic Deduplication |
-| :--- | :--- | :--- |
-| **Setup complexity** | More config definitions | Simpler (one config per variant) |
-| **Result structure** | Features split across configs | All features in each config |
-| **Memory usage** | Lower (no caching) | Higher (cached results) |
-| **Transparency** | Explicit control | Magic happens internally |
-| **Filter handling** | You control morphology placement | Morphology auto-shared |
+## 7. A Data Dictionary
 
-### When to Use Manual Separation
-
-!!! success "Recommended For"
-    - Complex filter + discretization combinations
-    - Maximum memory efficiency
-    - When you want explicit control over computation
-    - Research scenarios requiring clear provenance
-
-!!! warning "Consider Automatic Deduplication Instead"
-    - Simple discretization-only scenarios (automatic dedup handles this well)
-    - When you want all features in each result dictionary
-    - Rapid prototyping
-
-## Case 9: Feature Catalog & Data Dictionary
-
-### Scenario
-
-Before running extraction you want to know **exactly** which features and
-preprocessing steps each configuration produces.  You may also need to
-export a data dictionary for a study protocol or filter features by family.
-
-### Full example
+**The task**: a table of all features of the configurations, before the run, for a study protocol.
 
 ```python
 from pictologics import RadiomicsPipeline
 
 pipeline = RadiomicsPipeline()
 catalog = pipeline.describe_features()
-
-# 1. Export a CSV data dictionary
 catalog.to_csv("feature_catalog.csv", index=False)
 
-# 2. How many features per configuration?
-print(catalog.groupby("config").size())
-
-# 3. Only texture features from FBN configurations
-texture_fbn = catalog[
-    (catalog["family_group"] == "Texture")
-    & (catalog["discretisation_method"] == "FBN")
-]
+print(catalog.groupby("config").size())  # the number of features of each configuration
+texture_fbn = catalog[(catalog["family_group"] == "Texture") & (catalog["discretisation_method"] == "FBN")]
 print(texture_fbn[["config", "feature_name", "ibsi_code"]].head())
-
-# 4. Which families require discretisation?
-print(
-    catalog[["family", "requires_discretisation"]]
-    .drop_duplicates()
-    .sort_values("family")
-)
-
-# 5. Filter-aware: show only features from filtered configs
-filtered = catalog[catalog["is_filtered"]]
-print(filtered[["config", "filter_type", "filter_params"]].drop_duplicates())
+print(catalog[["family", "requires_discretisation"]].drop_duplicates().sort_values("family"))
 ```
+
+See [The Feature Catalog](results.md#the-feature-catalog-describe_features) for all columns.

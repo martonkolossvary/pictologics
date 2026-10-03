@@ -35,7 +35,7 @@ Example:
 from dataclasses import dataclass
 from typing import Optional
 
-CAPABILITIES_SCHEMA_VERSION = "1.0.0"
+CAPABILITIES_SCHEMA_VERSION = "1.1.0"  # 1.1.0: the "gaussian" entry
 """Semantic version of the :data:`FILTER_CAPABILITIES` schema.
 
 Bump the major component on breaking changes (field removal/retyping), the
@@ -320,8 +320,8 @@ def get_filter_capabilities(name: str) -> FilterCapability:
     Look up the capability record for a filter by its pipeline filter-type name.
 
     Args:
-        name: Pipeline filter-type name, e.g. ``"mean"``, ``"log"``, ``"laws"``,
-            ``"gabor"``, ``"wavelet"``, ``"simoncelli"``, ``"riesz"``,
+        name: Pipeline filter-type name, e.g. ``"mean"``, ``"gaussian"``, ``"log"``,
+            ``"laws"``, ``"gabor"``, ``"wavelet"``, ``"simoncelli"``, ``"riesz"``,
             ``"riesz_log"``, or ``"riesz_simoncelli"``.
 
     Returns:

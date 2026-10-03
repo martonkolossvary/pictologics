@@ -1,1 +1,0 @@
-The Gaussian filter (IBSI 2 8BC3) smooths the image at the scale `sigma_mm`, with the filter size cutoff `truncate`. Use it as `gaussian_filter`, or as the filter type `"gaussian"` in a pipeline. With a source mask, it uses normalized convolution, as the other filters.

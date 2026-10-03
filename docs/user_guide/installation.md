@@ -1,58 +1,85 @@
 # Installation
 
-## Prerequisites
+## Requirements
 
-- Python 3.12+
-- pip
+- Python 3.12, 3.13 or 3.14.
+- pip, or another Python package installer.
 
-## Installation via Pip
+## Install from PyPI
 
 ```bash
 pip install pictologics
 ```
 
-## Installation from GitHub
+pip also installs the packages that Pictologics needs:
 
-If you want the latest development version (or you want to install before the
-next PyPI release), you can install directly from the GitHub repository.
+| Package | For |
+|:--|:--|
+| NumPy, SciPy, Numba | The computations (Numba compiles the fast parts) |
+| nibabel | NIfTI files |
+| pydicom, python-gdcm, Pillow | DICOM files, also compressed ones (JPEG Lossless, JPEG-LS, JPEG 2000, baseline JPEG) |
+| PyWavelets | The wavelet filters |
+| pandas | The result tables |
+| PyYAML | Configuration files |
+| Matplotlib | The slice viewers (`visualize_slices`, `save_slices`) |
+| tqdm | The progress bar of `run_batch` |
 
-### Latest from `main`
+!!! note "12-bit lossy JPEG DICOM"
+    python-gdcm reads all compressed DICOM types except 12-bit lossy JPEG (JPEG Extended). For these files, also install `pylibjpeg` and `pylibjpeg-libjpeg` (GPL-3.0, so Pictologics does not install it for you).
+
+## Install from GitHub
+
+The newest development version:
 
 ```bash
 pip install "pictologics @ git+https://github.com/martonkolossvary/pictologics.git@main"
 ```
 
-### Pinned to a tag or commit
+A tag or a commit:
 
 ```bash
-# Example: install from a tag
-pip install "pictologics @ git+https://github.com/martonkolossvary/pictologics.git@v0.1.0"
-
-# Example: install from a commit SHA
+pip install "pictologics @ git+https://github.com/martonkolossvary/pictologics.git@v0.6.0"
 pip install "pictologics @ git+https://github.com/martonkolossvary/pictologics.git@<commit_sha>"
 ```
 
-### Editable install (development)
+## Development Install
 
-Use this if you plan to modify the code.
+The project uses [Poetry](https://python-poetry.org/) for its development tools (tests, type checks, docs):
 
 ```bash
 git clone https://github.com/martonkolossvary/pictologics.git
 cd pictologics
-pip install -e .
+poetry install
 ```
 
-## Eager Compilation (Warmup)
+`pip install -e .` gives an editable package, but without the test and docs tools.
 
-Pictologics uses Numba for Just-In-Time (JIT) compilation to accelerate feature extraction. To ensure fast runtime performance, Pictologics performs an **automatic warmup mechanism** during import. This compiles the core functions immediately when `import pictologics` is executed.
+## The First Import
 
-!!! note
-    This may cause the `import pictologics` statement to take a few seconds (typically 2-10s depending on your CPU) to complete. This is expected behavior and guarantees that subsequent function calls are executed at full speed without initial compilation lag.
+Numba compiles the fast parts of Pictologics for your computer. So `import pictologics` compiles them on the first import (a warm-up), and keeps the compiled code in a disk cache:
 
-### Disabling Warmup
+- The first import can take about half a minute (27 s on an Apple M4 Pro).
+- Later imports read the cache: about 2 s.
+- A new version of Pictologics or of Numba compiles again on its first import.
 
-If you need fast import times (e.g., for CLI tools checking versions or lightweight scripts) and are willing to pay the compilation cost at the first function call, you can disable this behavior by setting the environment variable:
+Set `NUMBA_CACHE_DIR` to keep the cache in another folder, for example when the package folder is read-only.
+
+To import without the warm-up, for example in a script that only prints a version:
 
 ```bash
 export PICTOLOGICS_DISABLE_WARMUP=1
+```
+
+The first call of each function then compiles its code.
+
+## Threads
+
+Pictologics computes in parallel on all cores. Set the number of threads with the environment variable `NUMBA_NUM_THREADS`, or with `numba.set_num_threads()` in your script. One setting limits all parallel parts, also the filters. See [Tips for Speed and Memory](../tutorials/performance.md).
+
+## Check the Installation
+
+```python
+import pictologics
+
+print(pictologics.__version__)
 ```

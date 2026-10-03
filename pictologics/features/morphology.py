@@ -18,7 +18,8 @@ Key Features:
 
 Optimization:
 -------------
-Uses `numba` for optimizing the Khachiyan algorithm for MVEE calculation.
+Uses `numba` kernels for the marching cubes mesh, the moments, the convex hull candidates,
+the oriented bounding box and the Khachiyan algorithm of the MVEE.
 
 Example:
     Calculate morphology features from a mask:

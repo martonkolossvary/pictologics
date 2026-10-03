@@ -1,1 +1,0 @@
-Every step now counts a voxel as ROI when its mask value is not 0, as the documentation states. Before, the bin limits, the sentinel search, Moran's I, the local intensity peak and the GLDZM distance map counted only values above 0. So negative labels gave another ROI in some families.

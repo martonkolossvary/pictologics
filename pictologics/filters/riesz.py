@@ -138,10 +138,10 @@ def riesz_transform(
         Riesz-transformed image (real part)
 
     Raises:
-        ValueError: If `order` sums to 0 (i.e. every component is 0), which
-            would correspond to a zero-order (identity) transform, or if
-            `boundary` is a string that is not a valid `BoundaryCondition`
-            member name.
+        ValueError: If `order` is not one whole number of 0 or more for each axis with a
+            sum above 0 (a sum of 0 is the identity), if `boundary` is a string that is not
+            a valid `BoundaryCondition` member name, or if `padding_value` is not 0 with a
+            boundary other than the constant one.
 
     Example:
         Compute first-order Riesz transform along the k1 axis:
@@ -298,8 +298,9 @@ def riesz_log(
         Riesz-transformed LoG response
 
     Raises:
-        ValueError: If `boundary` is a string that is not a valid
-            `BoundaryCondition` member name.
+        ValueError: If `order` is not valid (see `riesz_transform`), if `boundary` is a
+            string that is not a valid `BoundaryCondition` member name, or if
+            `padding_value` is not 0 with a boundary other than the constant one.
 
     Example:
         Compute first-order Riesz transform of LoG-filtered image at 5mm scale:
@@ -418,8 +419,10 @@ def riesz_simoncelli(
         Riesz-transformed Simoncelli response
 
     Raises:
-        ValueError: If `boundary` is a string that is not a valid
-            `BoundaryCondition` member name.
+        ValueError: If `level` or `order` is not valid (see `simoncelli_wavelet` and
+            `riesz_transform`), if `boundary` is a string that is not a valid
+            `BoundaryCondition` member name, or if `padding_value` is not 0 with a
+            boundary other than the constant one.
 
     Example:
         Compute second-order Riesz transform (Hessian-like) of Simoncelli level 2:

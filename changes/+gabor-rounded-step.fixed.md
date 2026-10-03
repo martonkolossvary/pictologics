@@ -1,1 +1,0 @@
-A Gabor `delta_theta` with few digits, for example 0.785398 for π/4, now gives the whole number of orientations (8, of which 4 are computed). Before, it gave 9 orientations, and the pooled response moved by up to 12 %.

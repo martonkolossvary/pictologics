@@ -31,9 +31,8 @@ This differs from raw DICOM and matplotlib conventions:
 - **DICOM pixel_array**: Returns (Rows, Columns) = (Y, X) for 2D slices
 - **Matplotlib imshow**: Expects (height, width) = (Y, X)
 
-The loaders handle the necessary axis transformations automatically. When using
-visualization utilities like `visualize_mask_overlay()`, slices are internally
-transposed for correct display.
+The loaders handle the necessary axis transformations automatically. The visualization
+utilities (`visualize_slices()`, `save_slices()`) transpose the slices for display.
 
 World Coordinate Frame:
 -----------------------
@@ -1061,7 +1060,14 @@ def load_image(
     if reference_image is not None:
         if transpose_axes is None:
             loaded_image = _reoriented(loaded_image, reference_image)
-        if loaded_image.array.shape != reference_image.array.shape or transpose_axes is not None:
+        # A mask of the shape of the image with another origin (by whole voxels, or by a
+        # part of a voxel) is placed as a mask of another shape is
+        same_origin = np.allclose(loaded_image.origin, reference_image.origin, atol=1e-5, rtol=1e-5)
+        if (
+            loaded_image.array.shape != reference_image.array.shape
+            or transpose_axes is not None
+            or not same_origin
+        ):
             loaded_image = _position_in_reference(
                 loaded_image,
                 reference_image,
@@ -1083,12 +1089,13 @@ def save_image(image: Image, path: str | Path) -> None:
 
     The geometry goes back to the RAS+ affine of NIfTI (the X and Y rows change sign),
     so ``load_image`` reads the same array and geometry. NIfTI keeps the geometry in
-    float32. A bool array is saved as uint8; other arrays keep their type (float64
-    images, float32 response maps, uint8 masks).
+    float32. A bool array is saved as uint8, and a 64-bit integer array as int32 when its
+    values fit (few programs read 64-bit NIfTI integers); other arrays keep their type
+    (float64 images, float32 response maps, uint8 masks).
 
     Args:
         image: The Image to save.
-        path: The file path, ending with .nii or .nii.gz.
+        path: The file path, ending with .nii or .nii.gz. A missing folder is made.
 
     Raises:
         ValueError: If the path does not end with .nii or .nii.gz.
@@ -1109,11 +1116,20 @@ def save_image(image: Image, path: str | Path) -> None:
     affine[:3, :3] = _direction_matrix(image.direction) * np.asarray(image.spacing, dtype=float)
     affine[:3, 3] = image.origin
     affine[:2] *= -1.0  # LPS+ to RAS+: the X and Y rows change sign
-    array = image.array.view(np.uint8) if image.array.dtype == np.bool_ else image.array
-    nifti = Nifti1Image(array, affine)  # type: ignore[no-untyped-call]
+    array: npt.NDArray[Any] = (
+        image.array.view(np.uint8) if image.array.dtype == np.bool_ else image.array
+    )
+    if array.dtype.kind in "iu" and array.dtype.itemsize == 8 and array.size:
+        # nibabel refuses 64-bit integers without a dtype (few programs read them): int32
+        # when the values fit
+        info = np.iinfo(np.int32)
+        if info.min <= array.min() and array.max() <= info.max:
+            array = array.astype(np.int32)
+    nifti = Nifti1Image(array, affine, dtype=array.dtype)  # type: ignore[no-untyped-call]
     nifti.set_qform(affine, code=1)  # type: ignore[no-untyped-call]  # scanner coordinates, as ITK writes
     nifti.set_sform(affine, code=1)  # type: ignore[no-untyped-call]
     nifti.header.set_xyzt_units("mm")  # type: ignore[no-untyped-call]
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     nifti.to_filename(path)
 
 

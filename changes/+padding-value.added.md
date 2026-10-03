@@ -1,1 +1,0 @@
-Every filter takes `padding_value`, the constant of constant value padding (IBSI 2 Z3VE), with the boundary `"constant"` (also named `"zero"`). For example, -1000 pads a CT image with air instead of water. A value other than 0 with another boundary is an error, also as a config problem. The default 0 gives the old values.

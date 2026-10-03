@@ -1,1 +1,0 @@
-Gabor filters now use an FFT as long as the padded slice, not as long as the whole linear convolution. The kept part of the response is the same, so the values move only by the float32 rounding (up to 7e-7 of the largest response). Gabor filters are 1.2 to 1.6 times faster.

@@ -1,1 +1,0 @@
-`run()` without `config_names` still runs every configuration, but it now warns when the standard configurations run too. Pass `config_names`, or create the pipeline with `RadiomicsPipeline(load_standard=False)`, to run only your own.

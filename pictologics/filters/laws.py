@@ -22,6 +22,7 @@ from .base import (
     _uniform_filter,
     ensure_float32,
     get_scipy_mode,
+    resolve_boundary,
 )
 
 # Normalized Laws kernels (IBSI 2 Table 6)
@@ -292,8 +293,7 @@ def laws_filter(
         raise ValueError(f"Expected 3 kernel names for 3D, got {len(kernel_names)}: {kernel_names}")
 
     # Handle boundary condition
-    if isinstance(boundary, str):
-        boundary = BoundaryCondition[boundary.upper()]
+    boundary = resolve_boundary(boundary)
     mode = get_scipy_mode(boundary)
 
     # Validate pooling method if used

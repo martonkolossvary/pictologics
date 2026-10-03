@@ -1,1 +1,0 @@
-A Gabor filter in the pipeline now cuts each slice to the ROI region, grown by the kernel radius, before its FFT. Before, it filtered whole slices through the region. On a CT of 512 x 512 voxels with an ROI, the axial Gabor filter is 3.5 to 4.3 times faster. The values in the region move only by the float32 rounding of the smaller FFT (up to 4.4e-7 of the largest response).

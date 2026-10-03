@@ -1,1 +1,0 @@
-The Gabor filter gives the part of its complex response that `response` names (IBSI 2 5P3T): `"modulus"` (the default, as before), `"angle"`, `"real"` or `"imaginary"`. Rotation-invariant pooling pools that part over all orientations. The modulus and the real part keep the shortcut over orientations that repeat at θ + π.

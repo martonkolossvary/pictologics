@@ -1,1 +1,0 @@
-An error in one feature family no longer makes every feature of its configuration NaN. Only the features of that family are NaN, a warning names the family, and the log entry lists it in `family_errors`. `run_batch` marks such a case "incomplete".

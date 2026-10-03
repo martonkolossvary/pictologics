@@ -2387,11 +2387,12 @@ def test_step_filter_unknown_boundary_raises(
     mock_image: Image,
     mock_mask: Image,
 ) -> None:
-    """An unrecognised boundary string must raise (never silently fall back to mirror)."""
-    pipeline.add_config(
-        "filter_bad_boundary",
-        [{"step": "filter", "params": {"type": "mean", "support": 3, "boundary": "bogus"}}],
-    )
+    """An unrecognised boundary string must raise (never silently fall back to mirror):
+    add_config names it, and without the check the run stops the configuration."""
+    steps = [{"step": "filter", "params": {"type": "mean", "support": 3, "boundary": "bogus"}}]
+    with pytest.raises(ValueError, match="unknown boundary 'bogus'"):
+        pipeline.add_config("filter_bad_boundary", steps)
+    pipeline.add_config("filter_bad_boundary", steps, validate=False)
     pipeline.run(mock_image, mock_mask, config_names=["filter_bad_boundary"])
     log = pipeline._log[-1]
     assert "error" in log
@@ -6198,3 +6199,21 @@ def test_run_batch_runs_label_map_cases_by_roi(tmp_path: Any) -> None:
     assert again.equals(table.iloc[:3])
     with pytest.raises(ValueError, match="gives a mask and rois"):
         pipeline.run_batch([{**cases[0], "rois": rois}], tmp_path / "x", show_progress=False)
+
+
+def test_saved_configs_keep_numpy_numbers_of_tuples(tmp_path: Any) -> None:
+    # The numpy numbers inside a tuple (a spacing) become plain numbers, so YAML and JSON
+    # files load back with the same configuration; an enum boundary takes a padding value
+    from pictologics.filters import BoundaryCondition
+
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [
+        {"step": "resample", "params": {"new_spacing": (np.float64(1.0), np.int64(1), 1)}},
+        {"step": "filter", "params": {"type": "mean", "support": 3, "boundary": BoundaryCondition.ZERO, "padding_value": -1.0}},
+        {"step": "extract_features", "params": {"families": ["intensity"]}},
+    ])  # fmt: skip
+    for suffix in ("yaml", "json"):
+        pipeline.save_configs(tmp_path / f"c.{suffix}")
+        loaded = RadiomicsPipeline.load_configs(tmp_path / f"c.{suffix}", load_standard=False)
+        spacing = loaded.get_config("c")[0]["params"]["new_spacing"]
+        assert list(spacing) == [1.0, 1, 1] and all(type(v) in (int, float) for v in spacing)

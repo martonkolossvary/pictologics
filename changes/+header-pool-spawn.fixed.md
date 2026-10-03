@@ -1,1 +1,0 @@
-When the default start method is forkserver (the Linux default from Python 3.14), the header pool of `DicomDatabase` and `SRDocument.from_folders` uses spawn. A forkserver keeps the environment of its first start, so this pool and your own process pools mixed up the warm-up setting.

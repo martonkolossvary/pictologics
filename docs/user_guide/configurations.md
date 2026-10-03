@@ -1,176 +1,82 @@
 # Configuration & Reproducibility
 
-Pictologics provides a comprehensive configuration management system designed for **reproducible radiomics research**. This guide covers the standard configurations, configuration file formats, and tools for sharing and managing pipeline configurations.
+A configuration is a named list of steps. This page describes the configurations of the package, the configuration files, and how to share a configuration, so that another site gets the same features.
 
-## Overview
+## The Standard Configurations
 
-The configuration system enables you to:
+`RadiomicsPipeline()` starts with six standard configurations. All six:
 
-- **Use standard configurations** – Pre-tested, IBSI-compliant setups for common radiomics workflows
-- **Export and import configurations** – Save your pipeline settings to YAML/JSON files for version control
-- **Share configurations** – Collaborate by exchanging configuration files with colleagues
-- **Ensure reproducibility** – Schema versioning ensures configurations remain compatible across versions
+- resample to 0.5 × 0.5 × 0.5 mm, with linear interpolation for the image and nearest neighbour for the mask;
+- compute the intensity, morphology, texture, histogram and IVH features;
+- leave out the spatial and local intensity features, because they take much time on large ROIs.
 
-## Using Standard Configurations
-
-Pictologics includes **6 standard configurations** optimized for radiomics feature extraction. All standard configurations share these characteristics:
-
-- Isotropic resampling to **0.5mm × 0.5mm × 0.5mm**
-- Linear interpolation for images, nearest-neighbor for masks
-- Complete feature extraction: **intensity**, **morphology**, **texture**, **histogram**, and **IVH**
-- Performance-optimized: spatial and local intensity features disabled by default
-
-### Running a Single Configuration
+| Configuration | Discretisation |
+|:--|:--|
+| `standard_fbn_8` | 8 bins (FBN) |
+| `standard_fbn_16` | 16 bins (FBN) |
+| `standard_fbn_32` | 32 bins (FBN) |
+| `standard_fbs_8` | Bins of 8 HU from -1000 HU (FBS) |
+| `standard_fbs_16` | Bins of 16 HU from -1000 HU (FBS) |
+| `standard_fbs_32` | Bins of 32 HU from -1000 HU (FBS) |
 
 ```python
 from pictologics import RadiomicsPipeline
 
 pipeline = RadiomicsPipeline()
 results = pipeline.run(image, mask, config_names=["standard_fbn_32"])
+results = pipeline.run(image, mask, config_names=["standard_fbn_16", "standard_fbs_16"])
+results = pipeline.run(image, mask, config_names=["all_standard"])  # all six
 ```
 
-### Running All Standard Configurations
-
-Process all 6 standard configurations in a single call using the special `"all_standard"` shorthand:
-
-```python
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-all_results = pipeline.run(image, mask, config_names=["all_standard"], subject_id="patient_001")
-```
-
-### Running Multiple Specific Configurations
-
-```python
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-results = pipeline.run(
-    image,
-    mask,
-    config_names=["standard_fbn_16", "standard_fbn_32", "standard_fbs_16"],
-    subject_id="patient_001",
-)
-```
-
-### Accessing Results
-
-Results are returned as a dictionary mapping configuration names to `pandas.Series` objects:
-
-```python
-# Access features for a specific configuration
-features = results["standard_fbn_32"]
-print(features["mean_intensity_Q4LE"])  # Access a single feature by name
-
-# Iterate over all configurations
-for config_name, series in results.items():
-    print(f"{config_name}: {len(series)} features")
-
-# Convert to a pandas DataFrame (one row per configuration)
-import pandas as pd
-df = pd.DataFrame(results).T
-```
-
-## Configuration Specifications
-
-### Fixed Bin Number (FBN) Configurations
-
-FBN discretisation divides the intensity range into a **fixed number of bins**, regardless of the actual intensity values. This approach is useful when you want consistent bin counts across different images.
-
-| Configuration | Bins | Use Case |
-|---------------|------|----------|
-| `standard_fbn_8` | 8 | Low-resolution texture analysis, small ROIs |
-| `standard_fbn_16` | 16 | Balanced resolution and noise robustness |
-| `standard_fbn_32` | 32 | High-resolution texture analysis (recommended default) |
-
-#### Full Specification: `standard_fbn_32`
+The steps of `standard_fbs_16`, as `pipeline.get_config("standard_fbs_16")` gives them:
 
 ```yaml
-standard_fbn_32:
-  description: "Standard FBN-32: 0.5mm isotropic resampling, 32 fixed bins"
-  steps:
-    - step: resample
-      params:
-        new_spacing: [0.5, 0.5, 0.5]
-        interpolation: linear
-    - step: discretise
-      params:
-        method: FBN
-        n_bins: 32
-    - step: extract_features
-      params:
-        families:
-          - intensity
-          - morphology
-          - texture
-          - histogram
-          - ivh
-        include_spatial_intensity: false
-        include_local_intensity: false
+- step: resample
+  params:
+    new_spacing: [0.5, 0.5, 0.5]
+    interpolation: linear
+- step: discretise
+  params:
+    method: FBS
+    bin_width: 16.0
+    min_val: -1000.0
+- step: extract_features
+  params:
+    families: [intensity, morphology, texture, histogram, ivh]
+    include_spatial_intensity: false
+    include_local_intensity: false
 ```
 
-### Fixed Bin Size (FBS) Configurations
+The FBN configurations have `method: FBN` and `n_bins` in place of `bin_width` and `min_val`.
 
-FBS discretisation uses a **fixed bin width** (in Hounsfield Units for CT). A grey level has the same HU range in every image only when the bins start at the same value in every image, so every FBS step has a fixed start. IBSI strongly recommends the lower bound of the resegmentation range as this start:
+## FBN or FBS
 
-- An FBS step with `min_val` starts at `min_val`.
-- An FBS step without `min_val` starts at the lower bound of an earlier `resegment` step.
-- Without both, `add_config` raises an error. A start at the minimum of each ROI would give a grey level another HU range in each image.
+| | FBN (a fixed bin number) | FBS (a fixed bin size) |
+|:--|:--|:--|
+| **The bins** | `n_bins` bins over the intensity range of each ROI | Bins of `bin_width` from a start that is the same in every image |
+| **A grey level** | Another intensity range in each image | The same intensity range in every image |
+| **CT** | Possible | Recommended: the HU values have a fixed meaning |
+| **MR and PET** | Recommended | After a `normalise` step (MR) or in SUV (PET), the values have the same meaning in every image, so FBS suits them too |
+| **Small ROIs** | Each bin holds voxels | Many bins can be empty |
 
-The standard FBS configurations start at -1000 HU, the HU of air. The [Cardiac CT Templates](#cardiac-ct-templates) start at the lower bound of each resegment range.
+- An FBS step needs a fixed start: `min_val`, or a `resegment` step with `range_min` before it. IBSI recommends the lower bound of the resegmentation range. Without both, `add_config` raises an error.
+- The standard FBS configurations start at -1000 HU, the HU of air. The cardiac templates start at the lower bound of the HU range of each configuration.
 
-| Configuration | Bin Width | Use Case |
-|---------------|-----------|----------|
-| `standard_fbs_8` | 8.0 HU | High-resolution intensity preservation |
-| `standard_fbs_16` | 16.0 HU | Balanced resolution (recommended for CT) |
-| `standard_fbs_32` | 32.0 HU | Noise-robust analysis |
+## The Cardiac Templates
 
-#### Full Specification: `standard_fbs_16`
-
-```yaml
-standard_fbs_16:
-  description: "Standard FBS-16: 0.5mm isotropic resampling, 16.0 HU bins from -1000 HU"
-  steps:
-    - step: resample
-      params:
-        new_spacing: [0.5, 0.5, 0.5]
-        interpolation: linear
-    - step: discretise
-      params:
-        method: FBS
-        bin_width: 16.0
-        min_val: -1000.0
-    - step: extract_features
-      params:
-        families:
-          - intensity
-          - morphology
-          - texture
-          - histogram
-          - ivh
-        include_spatial_intensity: false
-        include_local_intensity: false
-```
-
-## Cardiac CT Templates
-
-Two templates of the package hold configurations for cardiac CT. Load a template with `RadiomicsPipeline.from_template()`:
+Two templates of the package hold configurations for cardiac CT:
 
 ```python
-from pictologics import RadiomicsPipeline
-
 pipeline = RadiomicsPipeline.from_template("lv")
 results = pipeline.run(image, mask, config_names=["lv_myo_orig", "lv_myo_fbs_16"])
 
-# Add a template to a pipeline that has other configurations
-pipeline.merge_configs(RadiomicsPipeline.from_template("coronary"))
+pipeline.merge_configs(RadiomicsPipeline.from_template("coronary"))  # add the second template
 ```
 
 Each template has four compartments. The `resegment` step of a configuration keeps the HU range of its compartment. All configurations resample to 0.5 mm and use `source_mode="auto"`.
 
 | Template | Compartment | Prefix | HU range |
-|----------|-------------|--------|----------|
+|:--|:--|:--|:--|
 | `lv` | Whole left ventricular myocardium | `lv_` | -179.999 to 2000 |
 | | Fat | `lv_fat_` | -179.999 to -30 |
 | | Myocardial tissue | `lv_myo_` | -29 to 350 |
@@ -180,746 +86,242 @@ Each template has four compartments. The `resegment` step of a configuration kee
 | | Low-attenuation plaque | `coronary_lap_` | -99.999 to 29.999 |
 | | Calcified plaque | `coronary_cp_` | 351 to 3000 |
 
-The lower bounds -179.999 and -99.999 keep -180 HU and -100 HU out, also for resampled values. The upper bounds 29.999 and 350.999 keep low-attenuation plaque below 30 HU and non-calcified plaque below the 351 HU of calcified plaque.
+- The lower bounds -179.999 and -99.999 keep -180 HU and -100 HU out, also for resampled values. The upper bounds 29.999 and 350.999 keep low-attenuation plaque below 30 HU and non-calcified plaque below the 351 HU of calcified plaque.
+- The configurations of each compartment:
+    - `<prefix>orig`: the intensity and morphology features.
+    - `<prefix>fbn_16`, `<prefix>fbn_32` and `<prefix>fbn_64`: 16, 32 or 64 bins (FBN); the texture, histogram and IVH features.
+    - `<prefix>fbs_16`, `<prefix>fbs_32` and `<prefix>fbs_64`: bins of 16, 32 or 64 HU (FBS), from the lower bound of the HU range; the texture, histogram and IVH features.
+    - The whole compartments (`lv_` and `coronary_`) also have `fbn_128` and `fbs_128`.
+- The `lv` configurations leave out voxels of -3024 HU (`sentinel_value=-3024`): CT padding is often stored as -2000 with a rescale intercept of -1024. The `coronary` configurations find the padding value of each image, with a warning.
+- `from_template("standard")` gives the six standard configurations.
 
-For each compartment, the configurations are:
+## Change a Configuration
 
-- `<prefix>orig`: intensity and morphology features.
-- `<prefix>fbn_16`, `<prefix>fbn_32` and `<prefix>fbn_64`: FBN discretisation with 16, 32 or 64 bins; texture, histogram and IVH features.
-- `<prefix>fbs_16`, `<prefix>fbs_32` and `<prefix>fbs_64`: FBS discretisation with bins of 16, 32 or 64 HU; texture, histogram and IVH features. The bins start at the lower bound of the HU range, as IBSI recommends.
-- The whole compartments (`lv_` and `coronary_`) also have `fbn_128` and `fbs_128`.
-
-The `lv` configurations leave out voxels of -3024 HU (`sentinel_value=-3024`): CT padding is often stored as -2000 with a rescale intercept of -1024. The `coronary` configurations find the padding value of each image themselves.
-
-`from_template("standard")` gives the six standard configurations.
-
-## Choosing the Right Configuration
-
-### FBN vs FBS: Decision Guide
-
-| Factor | FBN | FBS |
-|--------|-----|-----|
-| **Intensity range** | Variable (adapts to image) | Fixed: the bins start at the same value in every image (`min_val` or a resegment lower bound) |
-| **Cross-study comparison** | Less suitable | Preferred |
-| **Small ROIs** | Better (ensures bin coverage) | May have empty bins |
-| **CT imaging** | Acceptable | Recommended |
-| **MRI imaging** | Recommended | Less suitable (no standard units) |
-| **IBSI recommendation** | Supported | Supported |
-
-### Performance Considerations
-
-The standard configurations have `include_spatial_intensity` and `include_local_intensity` set to `false` for performance:
-
-- **Spatial intensity features**: Compare all pairs of ROI voxels. Large ROIs use FFT convolutions, which are fast but need about 32 bytes per point of a grid twice the ROI box along each axis
-- **Local intensity features**: Require local neighborhood analysis
-
-To enable these features, create a custom configuration variant:
+`get_config` gives a copy of the steps. Change the copy, and add it with a new name:
 
 ```python
-from pictologics import RadiomicsPipeline
-
 pipeline = RadiomicsPipeline()
-
-# Get the standard config and modify it
-config = pipeline.get_config("standard_fbn_32")
-
-# Find the extract_features step and enable spatial intensity
-for step in config:
+steps = pipeline.get_config("standard_fbn_32")
+for step in steps:
     if step["step"] == "extract_features":
-        step["params"]["include_spatial_intensity"] = True
-        step["params"]["include_local_intensity"] = True
-
-# Add as a new configuration
-pipeline.add_config("fbn_32_with_spatial", config)
+        step["params"]["include_spatial_intensity"] = True  # Moran's I and Geary's C
+        step["params"]["include_local_intensity"] = True    # the intensity peaks
+pipeline.add_config("fbn_32_with_spatial", steps)
+pipeline.remove_config("standard_fbn_8")  # remove a configuration
 ```
+
+The spatial intensity features compare all pairs of ROI voxels. On large ROIs, they use an FFT, which needs about 32 bytes for each point of a grid two times the ROI box along each axis.
 
 ## Configuration Files
 
-Pictologics supports **YAML** and **JSON** formats for configuration files. YAML is recommended for human readability.
+`save_configs` writes the configurations to a YAML or a JSON file, by the file extension. A pipeline from `RadiomicsPipeline()` also holds the six standard configurations, so give `config_names`, or start with `load_standard=False`:
 
-Configuration files are ordered step lists. The pipeline applies each step in
-the order shown, and repeated preprocessing steps are allowed. The feature
-catalog returned by `describe_features()` mirrors this model: for every output
-feature it records the preprocessing steps that occurred before the
-`extract_features` step, including repeated-step parameters as compact JSON
-arrays. It also records which runtime mask(s) each feature row uses and the
-effective `apply_to` target for mask-changing steps such as `resegment`,
-`filter_outliers`, `keep_largest_component`, `grow_mask`, and `binarize_mask`.
+```python
+from pictologics import RadiomicsPipeline
 
-### YAML Format Specification
+pipeline = RadiomicsPipeline(load_standard=False)
+pipeline.add_config("ct_fbs_25", [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    {"step": "discretise", "params": {"method": "FBS", "bin_width": 25}},
+    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture"]}},
+], source_mode="auto", sentinel_value=-2048)
+
+pipeline.save_configs("configs/study.yaml")                             # all configurations
+pipeline.save_configs("configs/study.json", config_names=["ct_fbs_25"])  # these only
+```
+
+The YAML file:
 
 ```yaml
-schema_version: "1.0"
-pictologics_version: "0.4.1"
-exported_at: "2026-01-31T12:00:00.000000"
+schema_version: '1.0'
+pictologics_version: 0.6.0
+exported_at: '2026-10-03T19:57:36.489287'
 mask_roi_semantics: nonzero_values_are_roi_membership
 configs:
-  my_custom_config:
-    source_mode: full_image
+  ct_fbs_25:
     steps:
-      - step: resample
-        params:
-          new_spacing: [1.0, 1.0, 1.0]
-      - step: discretise
-        params:
-          method: FBN
-          n_bins: 32
-      - step: extract_features
-        params:
-          families:
-            - intensity
-            - morphology
-            - texture
+    - step: resample
+      params:
+        new_spacing:
+        - 1.0
+        - 1.0
+        - 1.0
+    - step: resegment
+      params:
+        range_min: -1000
+        range_max: 400
+    - step: discretise
+      params:
+        method: FBS
+        bin_width: 25
+    - step: extract_features
+      params:
+        families:
+        - intensity
+        - morphology
+        - texture
+    source_mode: auto
+    sentinel_value: -2048
 deduplication:
   enabled: true
-  rules_version: "1.1.0"
+  rules_version: 1.1.0
 ```
 
-### JSON Format Specification
+- **The fields**: the schema version of the file, the Pictologics version and the export time, the mask meaning (each voxel that is not 0 is ROI), the configurations with their steps, source mode and sentinel value, and the [deduplication](pipeline.md#shared-work-between-configurations) settings.
+- **Ranges**: a `binarize_mask` range `(2, 4)` goes into a file as `{range: [2, 4]}`, because a list selects only the listed labels.
+- **NumPy numbers**: NumPy numbers in the steps (for example `np.float64(0.5)`) go into the file as plain numbers.
+- **Old files**: a configuration can also be a plain list of steps, without `steps`, `source_mode` and `sentinel_value`.
+- **Schema versions**: the current schema version is 1.0. A file without a version is version 1.0. A file of an unknown version loads with a warning.
 
-```json
-{
-  "schema_version": "1.0",
-  "pictologics_version": "0.4.1",
-  "exported_at": "2026-01-31T12:00:00.000000",
-  "mask_roi_semantics": "nonzero_values_are_roi_membership",
-  "configs": {
-    "my_custom_config": {
-      "source_mode": "full_image",
-      "steps": [
-        {
-          "step": "resample",
-          "params": {"new_spacing": [1.0, 1.0, 1.0]}
-        },
-        {
-          "step": "discretise",
-          "params": {"method": "FBN", "n_bins": 32}
-        },
-        {
-          "step": "extract_features",
-          "params": {"families": ["intensity", "morphology", "texture"]}
-        }
-      ]
-    }
-  },
-  "deduplication": {
-    "enabled": true,
-    "rules_version": "1.1.0"
-  }
-}
-```
-
-For backward compatibility, loaders also accept the older shorthand where a
-configuration value is directly a list of steps. New exports use the explicit
-`steps` form so configuration-level metadata such as `source_mode` and
-`sentinel_value` can round-trip.
-
-Mask labels also round-trip with explicit semantics: exported files record that
-all nonzero mask values are ROI membership by default. Use a `binarize_mask`
-step with `mask_values` when a configuration should select one label, a set of
-labels, or a label range before feature extraction.
-
-### Schema Versioning
-
-Configuration files include a `schema_version` field to ensure forward compatibility:
-
-- **Current version**: `1.0`
-- Files without a version are treated as version `1.0`
-- Future versions will include automatic migration when loading older configs
-- Exports include the Pictologics package version when available so collaborators
-  can match the implementation used for a run
-
-## Sharing Configurations
-
-### Exporting Configurations
-
-Save your configurations to share with collaborators or for version control:
+## Load Configurations
 
 ```python
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-
-# Add custom configurations
-pipeline.add_config("my_study_config", [
-    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
-    {"step": "discretise", "params": {"method": "FBN", "n_bins": 32}},
-    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture"]}},
-])
-
-# Export to YAML (recommended for readability)
-pipeline.save_configs("my_configs.yaml")
-
-# Export to JSON
-pipeline.save_configs("my_configs.json")
-
-# Export specific configs only
-pipeline.save_configs("study_config.yaml", config_names=["my_study_config"])
+pipeline = RadiomicsPipeline.load_configs("configs/study.yaml")                     # the file only
+pipeline = RadiomicsPipeline.load_configs("configs/study.yaml", validate=True)      # with checks
+pipeline = RadiomicsPipeline.load_configs("configs/study.yaml", load_standard=True)  # and the standard ones
 ```
 
-### Importing Configurations
+- `load_configs`, `from_yaml`, `from_json` and `from_dict` make a pipeline with the configurations of the file only. `load_standard=True` adds the standard configurations.
+- The loaders do not check the steps by default. With `validate=True`, they make the checks of `add_config`: each problem gives a `UserWarning`, and the configuration loads all the same. Use it for a file from another person.
+- The deduplication settings of the file apply to the new pipeline.
 
-Load configurations from files. The resulting pipeline contains **only** the configurations defined in the file:
+Text in place of files, for example for a database:
 
 ```python
-from pictologics import RadiomicsPipeline
-
-# Load from YAML file (only file configs, no standard configs)
-pipeline = RadiomicsPipeline.load_configs("my_configs.yaml")
-
-# Load from JSON file
-pipeline = RadiomicsPipeline.load_configs("my_configs.json")
-
-# Load with validation (logs warnings for unknown parameters)
-pipeline = RadiomicsPipeline.load_configs("my_configs.yaml", validate=True)
-
-# Load file configs AND include standard configs
-pipeline = RadiomicsPipeline.load_configs("my_configs.yaml", load_standard=True)
+text = pipeline.to_yaml()  # or to_json(), to_dict()
+copy = RadiomicsPipeline.from_yaml(text)  # or from_json(), from_dict()
 ```
 
-!!! note "Standard Configurations"
-    By default, `load_configs()`, `from_yaml()`, `from_json()`, and `from_dict()` create a
-    pipeline with **only** the provided configurations. Standard configurations (e.g.,
-    `standard_fbn_32`) are not included unless you pass `load_standard=True`.
-    
-    If you need both your file configs and standard configs, you have two options:
-    
-    1. Pass `load_standard=True` to any loading method
-    2. Load your file, then merge with a standard pipeline:
-    
-    ```python
-    loaded = RadiomicsPipeline.load_configs("my_configs.yaml")
-    loaded.merge_configs(RadiomicsPipeline())  # Add standard configs
-    ```
-
-### String-based Export/Import
-
-For integration with databases or web services:
+## Merge Configurations
 
 ```python
-from pictologics import RadiomicsPipeline
-
-pipeline = RadiomicsPipeline()
-pipeline.add_config("my_config", [...])
-
-# Export to string
-yaml_string = pipeline.to_yaml()
-json_string = pipeline.to_json()
-
-# Import from string
-pipeline2 = RadiomicsPipeline.from_yaml(yaml_string)
-pipeline3 = RadiomicsPipeline.from_json(json_string)
+pipeline = RadiomicsPipeline.load_configs("team_a.yaml")
+pipeline.merge_configs(RadiomicsPipeline.load_configs("team_b.yaml"))                  # keep a name that exists, with a warning
+pipeline.merge_configs(RadiomicsPipeline.load_configs("team_b.yaml"), overwrite=True)  # replace it
 ```
 
-### Merging Configurations
+`merge_configs` keeps the source mode and the sentinel value of each configuration.
 
-Combine configurations from multiple sources:
+## The Template Files
 
-```python
-from pictologics import RadiomicsPipeline
-
-# Load configs from different sources
-pipeline1 = RadiomicsPipeline.load_configs("team_a_configs.yaml")
-pipeline2 = RadiomicsPipeline.load_configs("team_b_configs.yaml")
-
-# Merge into pipeline1
-pipeline1.merge_configs(pipeline2)
-
-# Handle duplicates explicitly
-pipeline1.merge_configs(pipeline2, overwrite=True)  # Overwrite existing
-pipeline1.merge_configs(pipeline2, overwrite=False)  # Keep existing (default)
-```
-
-Merging preserves configuration metadata such as `source_mode` and
-`sentinel_value`, so shared configurations remain portable after being combined
-with local or standard configuration sets.
-
-### Configuration Validation
-
-When loading configurations, enable validation to catch potential issues:
-
-```python
-# Validation logs warnings for:
-# - Unknown step types
-# - Unknown parameters for known steps
-# - Missing required parameters
-
-pipeline = RadiomicsPipeline.load_configs("config.yaml", validate=True)
-```
-
-## Template System (Advanced)
-
-For programmatic access to configuration templates, Pictologics provides a template loading API.
-
-### Loading Templates
+The templates are YAML files in the package. The template functions read them:
 
 ```python
 from pictologics.templates import (
+    get_all_templates,
+    get_standard_templates,
+    get_template_metadata,
     list_template_files,
     load_template_file,
-    get_standard_templates,
-    get_all_templates,
-    get_template_metadata,
 )
 
-# List available template files
-files = list_template_files()
-# ['standard_configs.yaml']
-
-# Load all standard configurations
-standard_configs = get_standard_templates()
-# {'standard_fbn_8': [...], 'standard_fbn_16': [...], ...}
-
-# Get metadata from a template file
-metadata = get_template_metadata("standard_configs.yaml")
-# {'schema_version': '1.0', 'description': '...', 'config_names': ['standard_fbn_8', ...]}
-
-# Load a specific template file
-all_configs = load_template_file("standard_configs.yaml")
+list_template_files()        # ['standard_configs.yaml', 'lv_configs.yaml', 'coronary_configs.yaml']
+get_standard_templates()     # the steps of the 6 standard configurations
+get_all_templates()          # the steps of all 66 configurations of the 3 files
+get_template_metadata("lv_configs.yaml")  # the schema version, the description and the config names
+load_template_file("lv_configs.yaml")     # the whole file as a dictionary
 ```
 
-### Creating Custom Template Files
+Your own configuration file loads with `load_configs`. Write it with `save_configs`, or by hand in the format above.
 
-You can create your own template files and load them:
+## A Study at Two Sites
 
-```python
-from pictologics import RadiomicsPipeline
-import yaml
+Site A makes the configurations, tests them and sends the file. Site B loads the file and runs its cases. Both sites then get the features of the same steps.
 
-# Define your organization's standard configs
-org_configs = {
-    "schema_version": "1.0",
-    "description": "Organization standard configurations",
-    "configs": {
-        "org_standard_ct": [
-            {"step": "resample", "params": {"new_spacing": [0.5, 0.5, 0.5]}},
-            {"step": "discretise", "params": {"method": "FBS", "bin_width": 25.0, "min_val": -1000}},
-            {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture"]}},
-        ],
-        "org_standard_pet": [
-            {"step": "resample", "params": {"new_spacing": [2.0, 2.0, 2.0]}},
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 64}},
-            {"step": "extract_features", "params": {"families": ["intensity", "texture"]}},
-        ],
-    }
-}
-
-# Save to file
-with open("org_configs.yaml", "w") as f:
-    yaml.dump(org_configs, f)
-
-# Load into pipeline
-pipeline = RadiomicsPipeline.load_configs("org_configs.yaml")
-```
-
-## Best Practices for Reproducibility
-
-### 1. Version Control Your Configurations
-
-Always include configuration files in your version control system:
-
-```bash
-# Add to git
-git add configs/study_configs.yaml
-git commit -m "Add radiomics configuration for study XYZ"
-```
-
-### 2. Document Configuration Choices
-
-Include comments in your YAML files explaining parameter choices:
-
-```yaml
-schema_version: "1.0"
-description: |
-  Configurations for lung nodule analysis study.
-  FBS-25 chosen based on literature recommendation for CT texture analysis.
-  0.5mm resampling matches thin-slice CT acquisition protocol.
-configs:
-  lung_nodule_primary:
-    - step: resample
-      params:
-        new_spacing: [0.5, 0.5, 0.5]  # Match acquisition protocol
-    # ... rest of config
-```
-
-### 3. Export Before Major Changes
-
-Before modifying your pipeline, export the current state:
-
-```python
-pipeline.save_configs("configs_backup_2026-01-31.yaml")
-```
-
-### 4. Use Validation When Loading External Configs
-
-```python
-# Always validate configs from external sources
-pipeline = RadiomicsPipeline.load_configs("collaborator_config.yaml", validate=True)
-```
-
-### 5. Include Schema Version in Publications
-
-When publishing radiomics research, report:
-
-- Pictologics version
-- Configuration file (as supplementary material)
-- Schema version used
-
-## End-to-End Example: Multi-Site Radiomics Study
-
-This section provides a complete, real-world workflow demonstrating how to create, save, load, and apply configurations across a multi-site radiomics study. The scenario involves:
-
-- **Site A (Primary)**: Creates and validates the study configuration
-- **Site B (Collaborator)**: Receives and applies the same configuration
-- **Both sites**: Process their local cohorts with identical settings
-
-### Step 1: Design the Study Configuration (Site A)
-
-Site A designs a custom configuration tailored to their lung nodule CT analysis study:
+### 1. Make and Test the Configurations (Site A)
 
 ```python
 from pictologics import RadiomicsPipeline
 
-# Initialize pipeline
-pipeline = RadiomicsPipeline()
-
-# Define a study-specific configuration
-# This config is designed for thin-slice chest CT with lung nodule segmentations
-lung_nodule_config = [
-    # Step 1: Resample to 0.5mm isotropic (matches thin-slice CT)
-    {
-        "step": "resample",
-        "params": {
-            "new_spacing": [0.5, 0.5, 0.5],
-            "interpolation": "cubic",  # Cubic spline for smooth interpolation
-        }
-    },
-    # Step 2: Resegment to lung window and remove outliers
-    {
-        "step": "resegment",
-        "params": {
-            "range_min": -1000,  # Air
-            "range_max": 400,    # Soft tissue upper limit
-        }
-    },
-    # Step 3: Keep only the largest connected component (remove satellite lesions)
-    {
-        "step": "keep_largest_component",
-        "params": {}
-    },
-    # Step 4: Fixed Bin Size; the bins start at -1000 HU, the lower bound of the resegment range
-    {
-        "step": "discretise",
-        "params": {
-            "method": "FBS",
-            "bin_width": 25.0,  # 25 HU bins (common for CT texture)
-        }
-    },
-    # Step 5: Extract all feature families
-    {
-        "step": "extract_features",
-        "params": {
-            "families": ["intensity", "morphology", "texture", "histogram", "ivh"],
-            "include_spatial_intensity": False,  # Skip for performance
-            "include_local_intensity": False,
-        }
-    },
+base = [
+    {"step": "resample", "params": {"new_spacing": (0.5, 0.5, 0.5), "interpolation": "cubic"}},
+    {"step": "resegment", "params": {"range_min": -1000, "range_max": 400}},
+    {"step": "keep_largest_component", "params": {}},
+    {"step": "discretise", "params": {"method": "FBS", "bin_width": 25.0}},  # bins from -1000 HU
+    {"step": "extract_features", "params": {"families": ["intensity", "morphology", "texture", "histogram", "ivh"]}},
 ]
+pipeline = RadiomicsPipeline(load_standard=False)
+pipeline.add_config("nodule_fbs_25", base)
+wider = [dict(step) for step in base]
+wider[3] = {"step": "discretise", "params": {"method": "FBS", "bin_width": 50.0}}
+pipeline.add_config("nodule_fbs_50", wider)  # a second bin width, for a sensitivity analysis
 
-# Add the configuration to the pipeline
-pipeline.add_config("lung_nodule_fbs25", lung_nodule_config)
+results = pipeline.run("test/ct.nii.gz", "test/nodule.nii.gz", config_names=["nodule_fbs_25"])
+features = results["nodule_fbs_25"]
+print(len(features), features["volume_RNU0"], features["mean_intensity_Q4LE"])
+print(pipeline.get_log()[-1]["status"])  # "completed"
 
-# Also add a variant with different bin width for sensitivity analysis
-lung_nodule_fbs50 = lung_nodule_config.copy()
-lung_nodule_fbs50[3] = {
-    "step": "discretise",
-    "params": {"method": "FBS", "bin_width": 50.0}
-}
-pipeline.add_config("lung_nodule_fbs50", lung_nodule_fbs50)
-
-# Verify the configurations are registered
-print("Available configurations:", pipeline.list_configs())
+pipeline.save_configs("configs/nodule_study_v1.yaml")
 ```
 
-### Step 2: Test the Configuration Locally (Site A)
-
-Before sharing, validate the configuration on a sample case:
-
-```python
-from pictologics import load_image
-
-# Load a test case
-image = load_image("test_data/ct_scan.nii.gz")
-mask = load_image("test_data/nodule_segmentation.nii.gz")
-
-# Run the primary configuration
-results = pipeline.run(
-    image=image,
-    mask=mask,
-    subject_id="test_case_001",
-    config_names=["lung_nodule_fbs25"],
-)
-
-# Inspect results
-config_features = results["lung_nodule_fbs25"]
-print(f"Extracted {len(config_features)} features")
-print(f"Sample features:")
-print(f"  - Volume: {config_features.get('volume_RNU0', 'N/A'):.2f} mm³")
-print(f"  - Mean intensity: {config_features.get('mean_intensity_Q4LE', 'N/A'):.2f} HU")
-
-# Save execution log for audit
-pipeline.save_log("logs/test_run_001.json")
-```
-
-`save_log()` writes a JSON object with `log_schema_version`,
-`pipeline_schema_version`, `pictologics_version`, `mask_roi_semantics`,
-`exported_at`, `entry_count`, and an `entries` array. Each entry includes the
-configuration snapshot, executed step parameters, source-mode and sentinel
-information, deduplication settings, mask alignment settings, and error/status
-fields needed to reproduce or audit the run on another machine.
-
-Each entry also records how the values were made:
-
-| Field | Meaning |
-|:------|:--------|
-| `config_hash` | The SHA-256 of the configuration (source mode, sentinel value and steps) as canonical JSON. The same configuration gives the same hash in every run and session, also after `save_configs()` and `load_configs()`. |
-| `environment` | The Python version, the platform, the versions of numpy, scipy, numba, PyWavelets, nibabel, pydicom and python-gdcm, and the numba thread count of the run. |
-| `elapsed_seconds` | The run time of the configuration. |
-
-`pipeline.get_log()` returns a copy of the same entries without a file.
-
-Every executed `filter` step additionally records what was **requested** versus what
-was **effective**, so a parameter that the pipeline defaults, substitutes, or cannot
-apply exactly is always visible:
-
-| Field | Meaning |
-|:------|:--------|
-| `boundary_requested` | The boundary the step asked for (or the default that applied). |
-| `boundary_effective` | The boundary actually used — e.g. `periodic` for the FFT-based filters unless a boundary was explicitly requested. |
-| `params_requested` | The filter parameters exactly as supplied in the step configuration. |
-| `params_effective` | The keyword arguments actually passed to the filter, including values the pipeline injects (such as `spacing_mm`) and dispatch keys (such as the Riesz `variant`). Arrays are recorded as compact descriptors (shape and voxel counts), never as raw data. |
-
-### Step 3: Export Configuration for Sharing (Site A)
-
-Save the configuration to a file that can be shared with collaborators:
-
-```python
-# Export to YAML (human-readable, good for version control)
-pipeline.save_configs(
-    "configs/lung_nodule_study_v1.yaml",
-    config_names=["lung_nodule_fbs25", "lung_nodule_fbs50"]
-)
-
-print("Configuration exported successfully!")
-print("Share 'configs/lung_nodule_study_v1.yaml' with Site B")
-```
-
-The exported YAML file will look like this:
-
-```yaml
-schema_version: "1.0"
-pictologics_version: "0.4.1"
-exported_at: "2026-01-31T10:30:00.000000"
-mask_roi_semantics: nonzero_values_are_roi_membership
-configs:
-  lung_nodule_fbs25:
-    source_mode: full_image
-    steps:
-      - step: resample
-        params:
-          new_spacing: [0.5, 0.5, 0.5]
-          interpolation: cubic
-      - step: resegment
-        params:
-          range_min: -1000
-          range_max: 400
-      - step: keep_largest_component
-        params: {}
-      - step: discretise
-        params:
-          method: FBS
-          bin_width: 25.0
-      - step: extract_features
-        params:
-          families: [intensity, morphology, texture, histogram, ivh]
-          include_spatial_intensity: false
-          include_local_intensity: false
-  lung_nodule_fbs50:
-    # ... similar structure with bin_width: 50.0
-deduplication:
-  enabled: true
-  rules_version: "1.1.0"
-```
-
-### Step 4: Load and Apply Configuration (Site B)
-
-Site B receives the configuration file and processes their cohort:
+### 2. Run the Cases (Site B)
 
 ```python
 from pathlib import Path
-from pictologics import RadiomicsPipeline, load_image
-from pictologics.results import format_results, save_results
 
-# Load the shared configuration (with validation)
-pipeline = RadiomicsPipeline.load_configs(
-    "configs/lung_nodule_study_v1.yaml",
-    validate=True  # Logs warnings for any issues
-)
+from pictologics import RadiomicsPipeline, save_results
 
-# Verify loaded configurations
-print("Loaded configurations:", pipeline.list_configs())
-
-# Define the local data directory
-data_dir = Path("site_b_data/")
-output_dir = Path("site_b_results/")
-output_dir.mkdir(exist_ok=True)
-
-# Process all cases
-all_results = []
-for case_folder in sorted(data_dir.glob("patient_*")):
-    patient_id = case_folder.name
-    
-    # Load image and mask
-    image = load_image(case_folder / "ct.nii.gz")
-    mask = load_image(case_folder / "nodule.nii.gz")
-    
-    # Run the primary configuration
-    results = pipeline.run(
-        image=image,
-        mask=mask,
-        subject_id=patient_id,
-        config_names=["lung_nodule_fbs25"],
-    )
-    
-    # Format for CSV export
-    row = format_results(
-        results,
-        fmt="wide",
-        meta={"subject_id": patient_id},
-    )
-    all_results.append(row)
-    
-    config_features = results["lung_nodule_fbs25"]
-    print(f"Processed {patient_id}: {len(config_features)} features")
-
-# Save all results to CSV
-save_results(all_results, output_dir / "site_b_features.csv")
-print(f"Results saved to {output_dir / 'site_b_features.csv'}")
+if __name__ == "__main__":
+    pipeline = RadiomicsPipeline.load_configs("configs/nodule_study_v1.yaml", validate=True)
+    cases = [
+        {"subject_id": folder.name, "image": str(folder / "ct.nii.gz"), "mask": str(folder / "nodule.nii.gz")}
+        for folder in sorted(Path("site_b_data").glob("patient_*"))
+    ]
+    table = pipeline.run_batch(cases, "site_b_results", workers=4)
+    save_results(table, "site_b_results/features.csv")
 ```
 
-### Step 5: Combine Results from Both Sites
+`run_batch` writes each case to `site_b_results/cases/`, with its processing log, and skips the cases that are done when it runs again. See [Many Cases](pipeline.md#many-cases-run_batch).
 
-After both sites complete processing, merge the results:
+### 3. Join the Tables
 
 ```python
 import pandas as pd
 
-# Load results from both sites
-site_a_df = pd.read_csv("site_a_results/site_a_features.csv")
-site_b_df = pd.read_csv("site_b_results/site_b_features.csv")
-
-# Add site identifier
-site_a_df["site"] = "A"
-site_b_df["site"] = "B"
-
-# Combine into a single dataset
-combined_df = pd.concat([site_a_df, site_b_df], ignore_index=True)
-
-# Verify consistent feature extraction
-print(f"Total patients: {len(combined_df)}")
-print(f"Features per patient: {len(combined_df.columns) - 2}")  # Exclude id and site
-print(f"Site A: {len(site_a_df)} patients")
-print(f"Site B: {len(site_b_df)} patients")
-
-# Save combined dataset
-combined_df.to_csv("combined_study_features.csv", index=False)
+site_a = pd.read_csv("site_a_results/features.csv").assign(site="A")
+site_b = pd.read_csv("site_b_results/features.csv").assign(site="B")
+study = pd.concat([site_a, site_b], ignore_index=True)
+study.to_csv("study_features.csv", index=False)
 ```
 
-### Step 6: Archive Configuration with Study Data
+Both tables have the same feature columns, because both sites ran the same configurations.
 
-For long-term reproducibility, archive the configuration alongside results:
+### 4. Keep the Record
 
-```python
-from datetime import datetime
-import shutil
+Keep these files with the study data:
 
-# Create study archive
-archive_dir = Path(f"study_archive_{datetime.now().strftime('%Y%m%d')}")
-archive_dir.mkdir(exist_ok=True)
+1. The configuration file, `configs/nodule_study_v1.yaml`.
+2. The feature table.
+3. The result files of the cases, with their processing logs. Each log entry holds the `config_hash`, the Pictologics version and the package versions.
+4. The feature catalog: `pipeline.describe_features().to_csv("feature_catalog.csv", index=False)`.
 
-# Copy configuration
-shutil.copy("configs/lung_nodule_study_v1.yaml", archive_dir / "configuration.yaml")
+See [What to Report](results.md#what-to-report).
 
-# Copy results
-shutil.copy("combined_study_features.csv", archive_dir / "features.csv")
+## Good Practice
 
-# Export pipeline logs
-pipeline.save_log(archive_dir / "processing_log.json")
-
-# Create a README with study metadata
-readme = f"""
-# Lung Nodule Radiomics Study
-Date: {datetime.now().isoformat()}
-Pictologics Version: 1.0.0
-Configuration Schema: 1.0
-
-## Configurations Used
-- lung_nodule_fbs25: Primary analysis (25 HU bin width)
-- lung_nodule_fbs50: Sensitivity analysis (50 HU bin width)
-
-## Sites
-- Site A: {len(site_a_df)} patients
-- Site B: {len(site_b_df)} patients
-
-## Files
-- configuration.yaml: Pipeline configuration (shareable)
-- features.csv: Extracted radiomic features
-- processing_log.json: Execution audit log
-"""
-
-with open(archive_dir / "README.md", "w") as f:
-    f.write(readme)
-
-print(f"Study archive created: {archive_dir}/")
-```
-
-### Key Takeaways
-
-This workflow demonstrates several important practices:
-
-| Practice | Benefit |
-|----------|---------|
-| **Custom configurations** | Tailored to specific imaging protocol and clinical question |
-| **YAML export** | Human-readable, version-controllable, shareable |
-| **Validation on load** | Catches configuration issues early |
-| **Consistent processing** | Both sites use identical preprocessing and extraction |
-| **Audit logging** | Complete record of processing steps |
-| **Archival** | Long-term reproducibility for publications |
-
-!!! success "Reproducibility Achieved"
-    By sharing the YAML configuration file, both sites process their data with **identical settings**, 
-    ensuring that any differences in extracted features reflect true biological variation rather than 
-    methodological inconsistencies.
+- Keep the configuration files in version control (for example git), with the analysis code.
+- Write the reason for each choice in the `description` of the file, or in YAML comments (`# ...`).
+- Load a file from another person with `validate=True`.
+- Report the Pictologics version, the configuration file and the `config_hash` of each configuration.
+- Pin the deduplication rules for a long study: `RadiomicsPipeline(deduplication_rules="1.1.0")`.
 
 ## Quick Reference
 
-| Task | Method |
-|------|--------|
-| Run standard config | `pipeline.run(image, mask, config_names=["standard_fbn_32"])` |
-| Run all standard configs | `pipeline.run(image, mask, config_names=["all_standard"])` |
-| List available configs | `pipeline.list_configs()` |
-| Get config details | `pipeline.get_config("config_name")` |
-| Add custom config | `pipeline.add_config("name", steps)` |
-| Remove config | `pipeline.remove_config("name")` |
-| Export to YAML | `pipeline.save_configs("file.yaml")` |
-| Export to JSON | `pipeline.save_configs("file.json")` |
-| Import from file | `RadiomicsPipeline.load_configs("file.yaml")` |
-| Import with standard configs | `RadiomicsPipeline.load_configs("file.yaml", load_standard=True)` |
-| Merge configs | `pipeline.merge_configs(other_pipeline)` |
-| Export to string | `pipeline.to_yaml()` / `pipeline.to_json()` |
-| Import from string | `RadiomicsPipeline.from_yaml(s)` / `RadiomicsPipeline.from_json(s)` |
+| Task | Code |
+|:--|:--|
+| Run a configuration | `pipeline.run(image, mask, config_names=["standard_fbn_32"])` |
+| Run the standard configurations | `pipeline.run(image, mask, config_names=["all_standard"])` |
+| Load a template | `RadiomicsPipeline.from_template("coronary")` |
+| List the configurations | `pipeline.list_configs()` |
+| Get the steps of a configuration | `pipeline.get_config("name")` |
+| Add a configuration | `pipeline.add_config("name", steps)` |
+| Remove a configuration | `pipeline.remove_config("name")` |
+| Save to a file | `pipeline.save_configs("file.yaml", config_names=[...])` |
+| Load from a file | `RadiomicsPipeline.load_configs("file.yaml", validate=True)` |
+| Load with the standard configurations | `RadiomicsPipeline.load_configs("file.yaml", load_standard=True)` |
+| Merge configurations | `pipeline.merge_configs(other)` |
+| Text | `pipeline.to_yaml()`, `RadiomicsPipeline.from_yaml(text)` |
+| The feature catalog | `pipeline.describe_features()` |
 
-!!! tip "See Also"
-    - [Pipeline & Preprocessing](pipeline.md) – Complete pipeline documentation
-    - [Image Filtering](image_filtering.md) – Adding filters to configurations
-    - [Cookbook](cookbook.md) – End-to-end batch processing examples
+See also: [The Pipeline](pipeline.md), [Pipeline Steps](pipeline_steps.md), [Image Filtering](image_filtering.md) and the [Cookbook](cookbook.md).

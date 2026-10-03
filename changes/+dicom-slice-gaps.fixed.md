@@ -1,1 +1,0 @@
-`load_image` now warns when the slices of a DICOM series are not evenly spaced, for example when a slice is missing. It also warns when the slice positions move sideways from the slice normal (a gantry tilt). The loader does not correct these cases, so the image is wrong after a gap and sheared with a tilt.

@@ -1,1 +1,0 @@
-The wavelet, Simoncelli and Riesz filters now check their inputs and raise a clear error, also at `add_config`. Before, wavelet level 0 returned no response, a decomposition such as "LH" filtered only 2 of the 3 axes, and a Riesz order with 2 values ran on a 3D image. A lowercase decomposition such as "lhl" now works, and whole numbers such as 2.0 work as levels and orders.

@@ -16,6 +16,7 @@ from .base import (
     _prepare_masked_image,
     ensure_float32,
     get_scipy_mode,
+    resolve_boundary,
 )
 
 # The parts of the complex Gabor response (IBSI 2 response map, 5P3T)
@@ -119,7 +120,7 @@ def gabor_filter(
         ```
 
     Note:
-        - Returns modulus |h| = |g ⊗ f| for feature extraction
+        - Returns the part of h = g ⊗ f that `response` names (default the modulus |h|)
         - 2D filter applied slice-by-slice, then optionally over planes
         - Uses single complex FFT convolution for ~2x speedup
         - Each plane's kernel uses that plane's own two in-plane spacings.
@@ -144,8 +145,7 @@ def gabor_filter(
         spacing_mm = (float(spacing_mm),) * 3
 
     # Handle boundary
-    if isinstance(boundary, str):
-        boundary = BoundaryCondition[boundary.upper()]
+    boundary = resolve_boundary(boundary)
     mode = get_scipy_mode(boundary)
 
     # Validate pooling parameter early

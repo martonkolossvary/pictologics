@@ -1,1 +1,0 @@
-Each log entry now records how its values were made. `config_hash` is the SHA-256 of the configuration, the same in every run and session. `environment` holds the Python version, the platform, the versions of numpy, scipy, numba, PyWavelets, nibabel, pydicom and python-gdcm, and the numba thread count. Before, the log held only the Pictologics version.

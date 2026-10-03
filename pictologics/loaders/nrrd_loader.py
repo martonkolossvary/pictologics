@@ -64,6 +64,10 @@ _KEY_VALUE = re.compile(r"([^:]+):=(.*)")
 _VECTOR = re.compile(r"none|\(([^)]*)\)")
 
 
+# The NRRD axis kinds of channels (not volumes, as the "list" layers of 3D Slicer are)
+_CHANNEL_KINDS = ("color", "vector", "matrix", "complex", "quaternion", "normal")
+
+
 def _read_header(path: Path) -> tuple[dict[str, str], dict[str, str], int]:
     """The fields (names in lower case, without spaces), the key/value pairs, and the byte
     offset where attached data start."""
@@ -176,6 +180,16 @@ def _load_nrrd(path: str | Path, dataset_index: int = 0) -> Image:
         given = fields.get("spacings", "nan " * dimension).split()
         spacing = np.array([float(given[a]) if given[a] != "nan" else 1.0 for a in spatial])
         direction, origin = np.eye(3), np.zeros(3)
+    channels = [
+        kind
+        for axis, kind in enumerate(fields.get("kinds", "").lower().split())
+        if axis not in spatial and any(word in kind for word in _CHANNEL_KINDS)
+    ]
+    if channels:
+        raise ValueError(
+            f"'{path}': an axis of kind '{channels[0]}' holds channels (for example colours); "
+            "the reader takes images of one value per voxel."
+        )
     values = _read_values(path, fields, offset, math.prod(sizes))
     return Image(
         array=_float64_volume(values, sizes, spatial, dataset_index),

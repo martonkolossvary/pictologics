@@ -31,8 +31,10 @@ class BoundaryCondition(Enum):
         print(boundary.value)
         # "reflect"
 
-        # Also constructible from the scipy mode string used by get_scipy_mode
+        # By name (the filters take the names, in any case)
         boundary = BoundaryCondition["MIRROR"]
+        # By the scipy mode string of get_scipy_mode
+        boundary = BoundaryCondition("reflect")
         ```
     """
 
@@ -237,7 +239,7 @@ def resolve_boundary(boundary: Union[BoundaryCondition, str]) -> BoundaryConditi
 
     Args:
         boundary: Either a `BoundaryCondition` member, or one of the
-            (case-insensitive) names "zero", "nearest", "periodic", "mirror".
+            (case-insensitive) names "zero", "constant", "nearest", "periodic", "mirror".
 
     Returns:
         The resolved `BoundaryCondition`.
@@ -251,7 +253,7 @@ def resolve_boundary(boundary: Union[BoundaryCondition, str]) -> BoundaryConditi
     try:
         return BoundaryCondition[str(boundary).upper()]
     except KeyError:
-        valid = ", ".join(member.name.lower() for member in BoundaryCondition)
+        valid = ", ".join(name.lower() for name in BoundaryCondition.__members__)
         raise ValueError(
             f"Unknown boundary condition: {boundary!r}. Valid values: {valid}"
         ) from None

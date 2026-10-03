@@ -1,1 +1,0 @@
-Rotation-invariant Laws filters compute their base responses 3 at a time, each with its share of the threads. They are 1.4 to 2 times faster, with 40 % to 45 % less memory for kernels with 6 bases. Rotation-invariant wavelets keep at most about 2 GB of responses in flight. The values are the same.

@@ -1,1 +1,0 @@
-The Simoncelli and Riesz transfer tables keep only half of their rows, because the other rows mirror them. The products use mirrored views and run in threads, so the values are the same. The cached tables need half the memory and build 1.6 to 2 times faster, and warm calls take 3 % to 20 % less time.

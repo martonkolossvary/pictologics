@@ -1,1 +1,0 @@
-`save_slices` raises `ValueError` for a single slice index outside the image, and `visualize_slices` for an `initial_slice` outside the image. Before, -1 saved the last slice as `slice_-001.png`, and an index past the end raised an `IndexError`. A NumPy integer now selects its slice; before, it selected slice 0.

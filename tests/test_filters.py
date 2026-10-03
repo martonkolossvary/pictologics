@@ -1886,3 +1886,22 @@ def test_padding_value_is_constant_value_padding() -> None:
     np.testing.assert_allclose(energy, uniform_filter(np.abs(plain.astype(np.float64)), 5, mode="constant"), rtol=1e-5)  # fmt: skip
     energy, valid = laws_filter(image, "E5L5S5", "constant", compute_energy=True, source_mask=mask, padding_value=value)  # fmt: skip
     assert energy.shape == valid.shape == image.shape
+
+
+def test_filters_name_unknown_boundaries() -> None:
+    # Every filter resolves its boundary by name, so an unknown name gives one ValueError
+    # that lists the names (also "constant")
+    from pictologics.filters import gabor_filter, laplacian_of_gaussian, laws_filter, mean_filter
+
+    image = np.zeros((6, 6, 6))
+    calls = (
+        lambda: mean_filter(image, 3, boundary="reflect"),
+        lambda: laplacian_of_gaussian(image, 1.0, boundary="reflect"),
+        lambda: laws_filter(image, "L5E5E5", boundary="reflect"),
+        lambda: gabor_filter(image, 1.0, 2.0, boundary="reflect"),
+    )
+    for call in calls:
+        with pytest.raises(
+            ValueError, match="Valid values: zero, nearest, periodic, mirror, constant"
+        ):
+            call()
