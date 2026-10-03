@@ -83,7 +83,9 @@ Example:
 
 from __future__ import annotations
 
+import difflib
 import math
+from collections.abc import Iterable
 from functools import lru_cache
 from typing import Any, Optional, cast
 
@@ -95,6 +97,9 @@ from numpy import typing as npt
 from scipy.ndimage import distance_transform_cdt
 
 from ._utils import compute_nonzero_bbox, merge_bboxes, roi_min_max
+
+# The texture feature families, in the order of their features
+_TEXTURE_FAMILIES = ("glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm")
 
 
 def _maybe_crop_to_bbox(
@@ -2248,12 +2253,14 @@ def calculate_all_texture_features(
     glcm_distance: int = 1,
     ngtdm_distance: int = 1,
     ngldm_distance: int = 1,
+    families: Optional[str | Iterable[str]] = None,
 ) -> dict[str, float]:
     """
     Calculate all texture features (GLCM, GLRLM, GLSZM, GLDZM, NGTDM, NGLDM).
 
-    This is a convenience wrapper that computes all texture matrices and then
-    extracts all available features.
+    This is a convenience wrapper that computes the texture matrices once and then
+    extracts the features. `families` chooses the families; the matrices of the other
+    families are not computed.
 
     Args:
         disc_array: Discretised image array.
@@ -2267,9 +2274,14 @@ def calculate_all_texture_features(
             the 13 directions (IBSI 1). Default 1.
         ngtdm_distance: The Chebyshev distance δ of the NGTDM neighbourhood. Default 1.
         ngldm_distance: The Chebyshev distance δ of the NGLDM neighbourhood. Default 1.
+        families: The families to calculate, from "glcm", "glrlm", "glszm", "gldzm",
+            "ngtdm" and "ngldm" (one name, or a list). None (default): all six.
 
     Returns:
-        Dictionary of all texture features.
+        Dictionary of the texture features of the families, in the order above.
+
+    Raises:
+        ValueError: If a family name is not one of the six.
 
     Example:
         ```python
@@ -2285,9 +2297,23 @@ def calculate_all_texture_features(
         # 95
         print(round(features["contrast_ACUI"], 3))
         # 10.526
+        glcm_only = calculate_all_texture_features(disc_array, mask_array, 8, families="glcm")
         ```
     """
-    results = {}
+    chosen = set(
+        _TEXTURE_FAMILIES
+        if families is None
+        else [families]
+        if isinstance(families, str)
+        else families
+    )
+    for name in chosen - set(_TEXTURE_FAMILIES):
+        close = difflib.get_close_matches(str(name), _TEXTURE_FAMILIES, n=1)
+        hint = f" (did you mean '{close[0]}'?)" if close else ""
+        raise ValueError(
+            f"Unknown texture family {name!r}{hint}. The families: {', '.join(_TEXTURE_FAMILIES)}."
+        )
+    results: dict[str, float] = {}
 
     # Crop once to the ROI bounding box and use the cropped arrays everywhere below.
     # The per-family feature functions scan the mask (ROI voxel counts, GLCM Ng_eff),
@@ -2303,6 +2329,12 @@ def calculate_all_texture_features(
         n_bins,
         distance_mask=distmask_c,
         ngldm_alpha=ngldm_alpha,
+        calc_glcm="glcm" in chosen,
+        calc_glrlm="glrlm" in chosen,
+        calc_ngtdm="ngtdm" in chosen,
+        calc_ngldm="ngldm" in chosen,
+        calc_glszm="glszm" in chosen,
+        calc_gldzm="gldzm" in chosen,
         compact=True,
         planar=planar,
         glcm_distance=glcm_distance,
@@ -2313,49 +2345,45 @@ def calculate_all_texture_features(
     roi = texture_matrices["roi"]
 
     # GLCM (the texture ROI, in one mask type and layout)
-    results.update(
-        calculate_glcm_features(
-            disc_c, roi.view(np.uint8), n_bins, glcm_matrix=texture_matrices["glcm"]
+    if "glcm" in chosen:
+        results.update(
+            calculate_glcm_features(
+                disc_c, roi.view(np.uint8), n_bins, glcm_matrix=texture_matrices["glcm"]
+            )
         )
-    )
-
-    # GLRLM
-    results.update(
-        calculate_glrlm_features(
-            disc_c,
-            roi,
-            n_bins,
-            glrlm_matrix=texture_matrices["glrlm"],
-            n_directions=_directions(planar).size,
+    if "glrlm" in chosen:
+        results.update(
+            calculate_glrlm_features(
+                disc_c,
+                roi,
+                n_bins,
+                glrlm_matrix=texture_matrices["glrlm"],
+                n_directions=_directions(planar).size,
+            )
         )
-    )
-
-    # GLSZM
-    results.update(_glszm_features_from_cells(texture_matrices["glszm_cells"], roi))
-
-    # GLDZM
-    results.update(
-        calculate_gldzm_features(
-            disc_c,
-            roi,
-            n_bins,
-            gldzm_matrix=texture_matrices["gldzm"],
-            distance_mask=(distmask_c if distmask_c is not None else mask_c),
+    if "glszm" in chosen:
+        results.update(_glszm_features_from_cells(texture_matrices["glszm_cells"], roi))
+    if "gldzm" in chosen:
+        results.update(
+            calculate_gldzm_features(
+                disc_c,
+                roi,
+                n_bins,
+                gldzm_matrix=texture_matrices["gldzm"],
+                distance_mask=(distmask_c if distmask_c is not None else mask_c),
+            )
         )
-    )
-
-    # NGTDM
-    results.update(
-        calculate_ngtdm_features(
-            disc_c,
-            mask_c,
-            n_bins,
-            ngtdm_matrices=(texture_matrices["ngtdm_s"], texture_matrices["ngtdm_n"]),
+    if "ngtdm" in chosen:
+        results.update(
+            calculate_ngtdm_features(
+                disc_c,
+                mask_c,
+                n_bins,
+                ngtdm_matrices=(texture_matrices["ngtdm_s"], texture_matrices["ngtdm_n"]),
+            )
         )
-    )
-    # NGLDM
-    results.update(
-        calculate_ngldm_features(disc_c, roi, n_bins, ngldm_matrix=texture_matrices["ngldm"])
-    )
-
+    if "ngldm" in chosen:
+        results.update(
+            calculate_ngldm_features(disc_c, roi, n_bins, ngldm_matrix=texture_matrices["ngldm"])
+        )
     return results

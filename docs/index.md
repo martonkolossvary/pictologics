@@ -32,7 +32,7 @@ See also the [NOTICE](NOTICE.md) file for attribution and third-party library in
 ## Key Features
 
 *   **Loaders**: Support for NIfTI, NRRD, MetaImage and DICOM images, segmentations (DICOM-SEG, DICOM-RTSTRUCT, 3D Slicer `.seg.nrrd`), and report (DICOM-SR) formats.
-*   **Preprocessing**: Resampling, resegmentation, outlier filtering, mask growing and rings in mm, discretisation and others.
+*   **Preprocessing**: Resampling, resegmentation, outlier filtering, mask growing and rings in mm, MR intensity normalisation, PET SUV, discretisation and others.
 *   **Features**:
     *   **Morphology**: Volume, Surface Area, Compactness, etc.
     *   **Intensity**: Mean, Median, Skewness, Kurtosis, etc.

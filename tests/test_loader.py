@@ -218,7 +218,7 @@ class TestLoader(unittest.TestCase):
         mock_path_obj.is_dir.return_value = True
 
         load_image("some_dir")
-        mock_load_series.assert_called_once_with(mock_path_obj, 0, True, None)
+        mock_load_series.assert_called_once_with(mock_path_obj, 0, True, None, None)
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader._load_nifti")
@@ -246,7 +246,7 @@ class TestLoader(unittest.TestCase):
         mock_path_obj.is_dir.return_value = False
 
         load_image("image.dcm")
-        mock_load_dcm.assert_called_once_with("image.dcm", True, 0)
+        mock_load_dcm.assert_called_once_with("image.dcm", True, 0, None)
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader._load_dicom_file")
@@ -259,7 +259,7 @@ class TestLoader(unittest.TestCase):
 
         # Should try dicom loader if extension doesn't match nifti
         load_image("image.unknown")
-        mock_load_dcm.assert_called_once_with("image.unknown", True, 0)
+        mock_load_dcm.assert_called_once_with("image.unknown", True, 0, None)
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader._load_dicom_file")

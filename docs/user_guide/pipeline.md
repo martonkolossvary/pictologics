@@ -78,6 +78,15 @@ you need to select a specific label or label range from a multi-label mask.
     (e.g., `resegment`, `keep_largest_component`). This is valid computationally, but may not be
     scientifically meaningful for all studies.
 
+### Image Options
+
+For an image path, `image_options` gives options to `load_image`: for example a phase of a multi-phase DICOM folder, or a PET series as SUV. The log entry of each configuration records them. `run_rois()` and the cases of `run_batch()` take them too.
+
+```python
+results = pipeline.run("cardiac_ct/", "lv_mask.nii.gz", image_options={"dataset_index": 4})
+results = pipeline.run("pet_series/", "lesion.nii.gz", image_options={"suv": "bw"})
+```
+
 ## Predefined Configurations
 
 Pictologics includes **6 standard configurations** designed for common radiomics workflows. All share:
@@ -232,7 +241,31 @@ segments before feature extraction.
 | `mask_values` | `int`, `list`, or `tuple` | `None` | Specific label(s) to select. Tuple `(min, max)` selects an inclusive range; in a YAML or JSON file, write the range as `{range: [min, max]}`, because a plain list selects only the listed labels |
 | `apply_to` | `str` | `"both"` | `"both"`, `"morph"`, or `"intensity"` |
 
-### 8. `discretise`
+### 8. `normalise`
+
+Normalises the intensities with one linear map, `(x - center) / scale`: for MR images and other images without fixed units. The center and the scale come from the statistics of a region. IBSI asks you to report the method; it sets no rule.
+
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `method` | `str` | *(required)* | `"zscore"`: the mean and the standard deviation (the region gets mean 0 and standard deviation 1). `"percentile"`: the lower percentile and the distance to the upper one (that range becomes 0 to 1) |
+| `region` | `str` | *(required)* | `"roi"`: the intensity mask. `"image"`: every voxel with image data (see `source_mode`) |
+| `percentiles` | `list` | `[1, 99]` | The two percentiles of the `"percentile"` method; `[0, 100]` takes the minimum and the maximum |
+| `range_min` | `float` | `None` | Leave voxels below this value out of the statistics, for example the MR background |
+| `range_max` | `float` | `None` | Leave voxels above this value out of the statistics |
+
+```python
+mr_config = [
+    {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0)}},
+    {"step": "normalise", "params": {"method": "zscore", "region": "image", "range_min": 10}},
+    {"step": "resegment", "params": {"range_min": -3, "range_max": 3}},  # outliers out
+    {"step": "discretise", "params": {"method": "FBS", "bin_width": 0.25}},
+    {"step": "extract_features", "params": {"families": ["intensity", "texture"]}},
+]
+```
+
+The map changes every voxel of the image. With `region` `"roi"`, the ROI gets mean 0 and standard deviation 1, so its first-order features lose their information; a whole-image or reference region keeps it. The log entry of the step records the map (`center_effective`, `scale_effective`). The step must come before `discretise`. It cancels the FBS start of earlier `resegment` steps, as a filter does, because the units change: a later `resegment` step or `min_val` sets the start again. Region `"image"` needs the whole grid, so the steps before it do not cut the image to the ROI region. To normalise by another mask (for example a reference tissue), use the function `pictologics.preprocessing.normalise_image` before the pipeline.
+
+### 9. `discretise`
 
 Discretises image intensities into bins. **Required** before texture feature extraction.
 
@@ -244,9 +277,9 @@ Discretises image intensities into bins. **Required** before texture feature ext
 | `min_val` | `float` | `None` | The start of the first bin. FBS default: the lower bound of an earlier `resegment` step (IBSI). FBN default: the ROI minimum |
 | `max_val` | `float` | `None` | The end of the last bin (for FBN). Default: the ROI maximum |
 
-FBS bins start at the same value in every image, so that a grey level has the same intensity range in every image (IBSI). An FBS step without `min_val` starts at the largest lower bound of the `resegment` steps that change the intensity mask (`apply_to` `"both"` or `"intensity"`). A `filter` step after them cancels this start, because the filter response has other units. Without `min_val` and without such a `resegment` step, `add_config` raises an error. The log entry of the step records the start that it used (`min_val_effective`). An FBS `ivh_discretisation` follows the same rule.
+FBS bins start at the same value in every image, so that a grey level has the same intensity range in every image (IBSI). An FBS step without `min_val` starts at the largest lower bound of the `resegment` steps that change the intensity mask (`apply_to` `"both"` or `"intensity"`). A `filter` or `normalise` step after them cancels this start, because the values have other units then. Without `min_val` and without such a `resegment` step, `add_config` raises an error. The log entry of the step records the start that it used (`min_val_effective`). An FBS `ivh_discretisation` follows the same rule.
 
-### 9. `filter`
+### 10. `filter`
 
 Applies an IBSI 2 image filter. See the **[Image Filtering](image_filtering.md)** guide for detailed documentation.
 
@@ -272,7 +305,7 @@ Applies an IBSI 2 image filter. See the **[Image Filtering](image_filtering.md)*
 !!! note "Automatic Spacing Injection"
     For filters requiring physical spacing (`gaussian`, `log`, `gabor`), the pipeline uses the image's voxel spacing automatically.
 
-### 10. `extract_features`
+### 11. `extract_features`
 
 Calculates radiomic features from the current state.
 
@@ -362,9 +395,9 @@ if __name__ == "__main__":  # the worker processes import this script again
     save_results(table, "results/features.csv")
 ```
 
-- **Cases**: each case is a dict, or a row of a DataFrame, with the `run()` arguments of one image: `subject_id` and `image` (both required), `mask`, and the mask settings such as `mask_subvoxel_tolerance`.
+- **Cases**: each case is a dict, or a row of a DataFrame, with the `run()` arguments of one image: `subject_id` and `image` (both required), `mask`, the mask settings such as `mask_subvoxel_tolerance`, and `image_options` (see [Image Options](#image-options)).
 - **Result files**: the result of a case goes to `results/cases/<subject_id>.json`. The file holds the status, the error, the warnings, the run time, the features and the processing log of the case.
-- **Resume**: a second call with the same folder skips each case whose file has the same image, mask and configurations (by their `config_hash`). A failed case runs again. To run a case again, delete its file.
+- **Resume**: a second call with the same folder skips each case whose file has the same image, image options, mask and configurations (by their `config_hash`). A failed case runs again. To run a case again, delete its file.
 - **Workers**: with `workers=4`, four processes run the cases, and each process uses a quarter of the numba threads. Each process holds one case at a time, so the memory need grows with the number of workers. On 28 CT cases (512 × 512 × 200) with a 1 mm configuration, 1 process with 14 threads did 3.1 cases per second, and 4 processes with 3 threads each did 6.6.
 - **Script guard**: the workers start with spawn on every platform, and spawn imports your script again. Keep the call inside `if __name__ == "__main__":`.
 - **Status**: the returned DataFrame has one row for each case, in the order of the cases: `subject_id`, `status`, `error`, `warnings`, `seconds` and the features in the wide format of `format_results()`. The status is `"completed"`; `"incomplete"` when a configuration ended with an empty ROI or an error; or `"failed"` when the case did not run, for example because its image did not load.
@@ -508,6 +541,7 @@ catalog.head()
 | `is_intensity_rounded` / `round_intensities_params` | Intensity rounding details |
 | `keeps_largest_component` / `keep_largest_component_apply_to` / `keep_largest_component_params` | Largest-component mask processing details and effective mask target |
 | `is_mask_grown` / `grow_mask_apply_to` / `grow_mask_params` | Mask growing details and effective mask target |
+| `is_normalised` / `normalisation_method` / `normalise_params` | Intensity normalisation details |
 | `is_mask_binarized` / `binarize_mask_apply_to` / `binarize_mask_params` | Mask binarization details and effective mask target |
 | `is_filtered` / `filter_type` / `filter_params` | Response-map filter details |
 
@@ -724,6 +758,7 @@ disc_image = discretise_image(image, method="FBN", n_bins=32, roi_mask=mask)
 morph = calculate_morphology_features(mask, image=image, intensity_mask=mask)
 intensity = calculate_intensity_features(apply_mask(image, mask))
 texture = calculate_all_texture_features(disc_image.array, mask.array, n_bins=32)
+# families=["glcm", "ngtdm"] computes only these families (and only their matrices)
 
 all_features = {**morph, **intensity, **texture}
 print(f"Extracted {len(all_features)} features")

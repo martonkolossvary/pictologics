@@ -155,6 +155,7 @@ Steps execute **in the order you define them**, so you have full control over th
 | `keep_largest_component` | Remove small disconnected mask fragments | When your mask has noise or satellite lesions |
 | `grow_mask` | Grow or shrink the mask, or keep a ring at its edge (in mm) | For the tissue around a lesion or a vessel, or to drop the edge voxels |
 | `binarize_mask` | Select specific labels from a multi-label mask | When your mask encodes multiple structures |
+| `normalise` | Map the intensities by a z-score or a percentile range | For MR images and other images without fixed units |
 | `discretise` | Bin intensities for texture features (FBN or FBS) | **Required** before `extract_features` with texture |
 | `filter` | Apply IBSI 2 image filters (LoG, Gabor, Wavelets, etc.) | For filtered radiomics / response map analysis |
 | `extract_features` | Calculate radiomic features from the processed ROI | The final step — produces the output features |

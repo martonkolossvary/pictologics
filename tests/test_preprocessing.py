@@ -27,6 +27,7 @@ from pictologics.preprocessing import (
     filter_outliers,
     grow_mask,
     keep_largest_component,
+    normalise_image,
     resample_image,
     resegment_mask,
     round_intensities,
@@ -1222,3 +1223,44 @@ def test_nearest_roi_map_and_part() -> None:
     kept = _nearest_roi_part(grow_mask(mask, 1.5), mask, nearest, 1).array
     assert_array_equal(kept[tuple(added.T)], (owner == 1).astype(np.uint8))
     assert (kept[mask.array != 0] == 1).all()
+
+
+def test_normalise_image_by_its_region() -> None:
+    # z-score and percentile maps from the statistics of a mask, the whole image or a
+    # value range (NaN voxels left out); the map changes every voxel.
+    rng = np.random.default_rng(2)
+    values = rng.normal(300.0, 40.0, (8, 9, 10))
+    values[0, 0, 0] = np.nan
+    image = Image(values, (1.0, 1.0, 2.0), (0.0, 0.0, 0.0))
+    inside = np.zeros(values.shape, dtype=np.uint8)
+    inside[2:6, 2:6, 2:6] = 5
+    mask = Image(inside, image.spacing, image.origin)
+    finite = values[np.isfinite(values)]
+    z = normalise_image(image, "zscore")
+    assert np.isnan(z.array[0, 0, 0]) and z.spacing == image.spacing
+    assert np.allclose(z.array[1:], ((values - finite.mean()) / finite.std())[1:])
+    roi = normalise_image(image, "zscore", mask=mask).array[inside != 0]
+    assert abs(roi.mean()) < 1e-12 and abs(roi.std() - 1.0) < 1e-12
+    low, high = np.percentile(finite, (5.0, 95.0))
+    ranged = normalise_image(image, "percentile", percentiles=(5.0, 95.0))
+    assert np.allclose(ranged.array[1:], ((values - low) / (high - low))[1:])
+    middle = finite[(finite >= 280.0) & (finite <= 320.0)]
+    banded = normalise_image(
+        image, "percentile", percentiles=(0, 100), range_min=280.0, range_max=320.0
+    )
+    assert np.allclose(banded.array[1:], ((values - middle.min()) / np.ptp(middle))[1:])
+    for kwargs, message in (
+        ({"method": "minmax"}, "method must be one of"),
+        ({"method": "percentile", "percentiles": (50, 50)}, "percentiles must be two numbers"),
+        ({"method": "percentile", "percentiles": [1]}, "percentiles must be two numbers"),
+        ({"method": "zscore", "range_min": "0"}, "range_min must be a number"),
+        (
+            {"method": "zscore", "range_min": 5.0, "range_max": 1.0},
+            r"range_min \(5.0\) must not be above",
+        ),
+        ({"method": "zscore", "range_min": 1e9}, "holds no voxel"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            normalise_image(image, **kwargs)
+    with pytest.raises(ValueError, match="do not spread"):
+        normalise_image(Image(np.full((3, 3, 3), 7.0), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), "zscore")

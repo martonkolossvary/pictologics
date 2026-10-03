@@ -70,6 +70,7 @@ from .features.intensity import (
 )
 from .features.morphology import calculate_morphology_features
 from .features.texture import (
+    _TEXTURE_FAMILIES,
     _directions,
     _glszm_features_from_cells,
     _planar_axes,
@@ -98,10 +99,13 @@ from .filters.riesz import _riesz_order_problem
 from .filters.wavelets import _wavelet_problem
 from .loader import Image, _validate_geometry, create_full_mask, load_image
 from .preprocessing import (
+    _NORMALISE_METHODS,
     _all_finite,
     _grow_problem,
     _nearest_roi_map,
     _nearest_roi_part,
+    _normalise_problem,
+    _normalised,
     _output_grid,
     _region_origin,
     _roi_region,
@@ -203,7 +207,6 @@ _REQUIRES_DISCRETISATION: dict[str, bool] = {
     "ngldm": True,
 }
 
-_TEXTURE_FAMILIES = ("glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm")
 _DEFAULT_FEATURE_FAMILIES = ["intensity", "morphology", "texture", "histogram", "ivh"]
 _PREPROCESSING_STEPS = (
     "resample",
@@ -213,6 +216,7 @@ _PREPROCESSING_STEPS = (
     "keep_largest_component",
     "grow_mask",
     "binarize_mask",
+    "normalise",
     "discretise",
     "filter",
 )
@@ -224,10 +228,12 @@ _PREPROCESSING_PARAM_COLUMNS = {
     "keep_largest_component": "keep_largest_component_params",
     "grow_mask": "grow_mask_params",
     "binarize_mask": "binarize_mask_params",
+    "normalise": "normalise_params",
     "discretise": "discretise_params",
     "filter": "filter_params",
 }
 _MASK_APPLY_TARGETS = ("both", "morph", "intensity")
+_NORMALISE_REGIONS = ("roi", "image")
 _INTENSITY_MASK_FAMILIES = {
     "intensity",
     "spatial_intensity",
@@ -309,7 +315,7 @@ def _has_roi(array: npt.NDArray[Any]) -> bool:
 # range". A start at the minimum of each ROI gives a grey level another meaning in each image.
 _FBS_START_PROBLEM = (
     "FBS needs a start that is the same for every image: set min_val, or add a resegment "
-    "step with range_min before it (after the last filter step)"
+    "step with range_min before it (after the last filter or normalise step)"
 )
 
 
@@ -378,11 +384,13 @@ def _prefix_keys(steps: list[dict[str, Any]], metadata: dict[str, Any]) -> list[
 
 def _needs_full_grid(later_steps: list[dict[str, Any]]) -> bool:
     """Whether a later step reads a filtered image outside the ROI region (another
-    filter, a resample, or a binarize_mask that selects mask value 0, so voxels outside
-    the ROI); otherwise a filter computes only the region around the ROI."""
+    filter, a resample, a binarize_mask that selects mask value 0, so voxels outside
+    the ROI, or a normalise step over the whole image); otherwise a filter computes only
+    the region around the ROI."""
     return any(
         step["step"] in ("filter", "resample")
         or (step["step"] == "binarize_mask" and _selects_background(step.get("params") or {}))
+        or (step["step"] == "normalise" and (step.get("params") or {}).get("region") == "image")
         for step in later_steps
     )
 
@@ -763,6 +771,20 @@ def _step_problems(
         else:
             problem = _spacing_problem(params["new_spacing"])
             problems.extend([problem] if problem else [])
+    elif name == "normalise":
+        for key, options in (("method", _NORMALISE_METHODS), ("region", _NORMALISE_REGIONS)):
+            if key not in params:
+                problems.append(f"missing parameter '{key}'")
+            elif params[key] not in options:
+                problems.append(f"unknown {key} '{params[key]}'{_hint(params[key], options)}")
+        if "percentiles" in params and params.get("method") != "percentile":
+            problems.append("percentiles need method 'percentile'")
+        problem = _normalise_problem(
+            params.get("percentiles", (1.0, 99.0)), params.get("range_min"), params.get("range_max")
+        )
+        problems.extend([problem] if problem else [])
+        if discretised:
+            problems.append("a normalise step must come before the discretise step")
     elif name == "grow_mask":
         if "to_mm" not in params:
             problems.append("missing parameter 'to_mm'")
@@ -908,7 +930,7 @@ def _config_problems(steps: Any, source_mode: Any = "full_image") -> list[str]:
                 params.get("range_min") is not None
                 and params.get("apply_to", "both") in ("both", "intensity")
             )
-        elif name == "filter":
+        elif name in ("filter", "normalise"):  # other units: no FBS start
             fbs_start = False
     return problems
 
@@ -1014,6 +1036,8 @@ class PipelineState:
     # In run_rois, for the grow_mask steps with nearest_roi: the nearest ROI of each voxel
     # (see _nearest_roi_map) and the label of this ROI.
     roi_nearest: Optional[tuple[Image, int]] = None
+    # The center and the scale of the last normalise step: (x - center) / scale.
+    normalisation: Optional[tuple[float, float]] = None
 
 
 class EmptyROIMaskError(ValueError):
@@ -1340,6 +1364,7 @@ class RadiomicsPipeline:
         mask_subvoxel_tolerance: float = 0.5,
         mask_subvoxel_warning_threshold: float = 0.01,
         mask_min_overlap_fraction: float = 0.5,
+        image_options: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, pd.Series]:
         """
         Run configurations on the provided image and mask.
@@ -1364,6 +1389,10 @@ class RadiomicsPipeline:
             mask_min_overlap_fraction: Minimum fraction of the mask volume that must
                 intersect with the image space when loading from a path (default: 0.5).
                 Has no effect when mask is a pre-loaded Image object.
+            image_options: Options of ``load_image`` for an image path, for example
+                ``{"dataset_index": 4}`` (the 5th cardiac phase of a DICOM folder),
+                ``{"suv": "bw"}`` (a PET series as SUV) or ``{"series_uid": "..."}``.
+                The log entry records them. An Image takes no options.
 
         Returns:
             Dictionary mapping config names to pandas Series of features.
@@ -1412,7 +1441,7 @@ class RadiomicsPipeline:
             mask_subvoxel_warning_threshold,
             mask_min_overlap_fraction,
         )
-        orig_img, img_source = self._run_image(image)
+        orig_img, img_source = self._run_image(image, image_options)
         orig_mask, mask_source, mask_was_generated = self._run_mask(mask, orig_img, mask_settings)
         _validate_geometry(orig_mask, orig_img, "mask", "image")
         if isinstance(config_names, str):
@@ -1427,15 +1456,21 @@ class RadiomicsPipeline:
             config_names,
             self._target_configs(config_names),
             mask_settings,
+            image_options=image_options,
         )
 
     @staticmethod
-    def _run_image(image: str | Path | Image) -> tuple[Image, str]:
-        """The image of a run (a float64 array) and its source for the log."""
+    def _run_image(
+        image: str | Path | Image, image_options: Optional[Mapping[str, Any]] = None
+    ) -> tuple[Image, str]:
+        """The image of a run (a float64 array) and its source for the log; an image path
+        loads with the `load_image` options `image_options`."""
         if isinstance(image, (str, Path)):
-            orig_img = load_image(str(image))
+            orig_img = load_image(str(image), **(image_options or {}))
             img_source = str(image)
         elif isinstance(image, Image):
+            if image_options:
+                raise ValueError("image_options apply to an image path, not to an Image.")
             orig_img = image
             img_source = "InMemory"
         else:
@@ -1491,11 +1526,13 @@ class RadiomicsPipeline:
         mask_settings: tuple[float, float, float],
         nonfinite: Optional[bool] = None,
         roi_nearest: Optional[tuple[Image, int]] = None,
+        image_options: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, pd.Series]:
         """The part of `run()` after the loading: `target_configs` run (see
-        `_target_configs`), and the log records the requested `config_names`. `nonfinite`
-        (whether the image has NaN or infinite values) is found when it is None.
-        `roi_nearest`: see PipelineState.roi_nearest."""
+        `_target_configs`), and the log records the requested `config_names` and the
+        `image_options` of the image load. `nonfinite` (whether the image has NaN or
+        infinite values) is found when it is None. `roi_nearest`: see
+        PipelineState.roi_nearest."""
         mask_subvoxel_tolerance, mask_subvoxel_warning_threshold, mask_min_overlap_fraction = (
             mask_settings
         )
@@ -1731,6 +1768,7 @@ class RadiomicsPipeline:
                 "config_name": config_name,
                 "config_hash": self._hash_of(config_name),
                 "image_source": img_source,
+                "image_options": self._make_serializable(dict(image_options or {})),
                 "mask_source": mask_source,
                 "source_mode": source_mode.value,
                 "sentinel_detected": sentinel_detected,
@@ -1822,6 +1860,10 @@ class RadiomicsPipeline:
                     }
                     if step_name == "discretise" and params.get("method") == "FBS":
                         step_log_entry["min_val_effective"] = state.discretisation_min
+                    if step_name == "normalise":
+                        center, scale = cast(tuple[float, float], state.normalisation)
+                        step_log_entry["center_effective"] = center
+                        step_log_entry["scale_effective"] = scale
                     if step_name == "filter":
                         step_log_entry["boundary_requested"] = state.filter_boundary_requested
                         step_log_entry["boundary_effective"] = state.filter_boundary_effective
@@ -1903,6 +1945,7 @@ class RadiomicsPipeline:
         mask_subvoxel_tolerance: float = 0.5,
         mask_subvoxel_warning_threshold: float = 0.01,
         mask_min_overlap_fraction: float = 0.5,
+        image_options: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, dict[str, pd.Series]]:
         """
         Run configurations on each ROI of a label map, with one image load.
@@ -1927,6 +1970,7 @@ class RadiomicsPipeline:
             mask_subvoxel_tolerance: As in `run()`, for a label map path.
             mask_subvoxel_warning_threshold: As in `run()`, for a label map path.
             mask_min_overlap_fraction: As in `run()`, for a label map path.
+            image_options: As in `run()`: options of `load_image` for an image path.
 
         Returns:
             For each ROI name (the label as text, such as `"3"`, or the name of the
@@ -1954,7 +1998,7 @@ class RadiomicsPipeline:
             mask_subvoxel_warning_threshold,
             mask_min_overlap_fraction,
         )
-        orig_img, img_source = self._run_image(image)
+        orig_img, img_source = self._run_image(image, image_options)
         label_map, mask_source, _ = self._run_mask(rois, orig_img, mask_settings)
         _validate_geometry(label_map, orig_img, "mask", "image")
         values = label_map.array
@@ -2005,6 +2049,7 @@ class RadiomicsPipeline:
                 mask_settings,
                 nonfinite,
                 None if nearest is None else (nearest, int(label)),
+                image_options,
             )
             for entry in self._log[start:]:
                 entry["roi"] = name
@@ -2024,10 +2069,12 @@ class RadiomicsPipeline:
         Run configurations on many cases, with one result file for each case.
 
         Each case is a mapping, or a row of a DataFrame, with the `run()` arguments of one
-        image: `subject_id` and `image` (required), `mask`, and the mask settings. When a
-        case ends, `run_batch` writes its result to `output_dir/cases/<subject_id>.json`.
-        A later call with the same output folder skips each case whose file holds the
-        same image, mask and configurations, so a stopped batch goes on where it stopped.
+        image: `subject_id` and `image` (required), `mask`, the mask settings and
+        `image_options` (for example a cardiac phase or SUV). When a case ends,
+        `run_batch` writes its result to `output_dir/cases/<subject_id>.json`. A later
+        call with the same output folder skips each case whose file holds the same image,
+        image options, mask and configurations, so a stopped batch goes on where it
+        stopped.
         A failed case runs again. To run a case again, delete its file.
 
         With `workers` above 1, the cases run in that many processes, and each process
@@ -2105,6 +2152,7 @@ class RadiomicsPipeline:
                     record["status"] != "failed"
                     and record["config_hashes"] == hashes
                     and [record["image"], record["mask"]] == sources
+                    and record.get("image_options") == _case_options(case)
                 ):
                     outcomes[index] = record
         todo = [index for index in range(len(records)) if index not in outcomes]
@@ -2178,6 +2226,7 @@ class RadiomicsPipeline:
         record: dict[str, Any] = {
             "subject_id": case["subject_id"],
             "image": _case_source(case["image"]),
+            "image_options": _case_options(case),
             "mask": _case_source(case.get("mask")),
             "config_hashes": hashes,
         }
@@ -2504,6 +2553,23 @@ class RadiomicsPipeline:
                 state.intensity_mask = _grow(state.intensity_mask)
 
             self._ensure_nonempty_roi(state, context="grow_mask")
+
+        elif step_name == "normalise":
+            select = state.intensity_mask.array != 0 if params["region"] == "roi" else None
+            if state.source_mask is not None:  # only voxels with image data
+                valid = state.source_mask.array
+                select = valid if select is None else select & valid
+            state.image, center, scale = _normalised(
+                state.image,
+                params["method"],
+                select,
+                tuple(params.get("percentiles", (1.0, 99.0))),
+                params.get("range_min"),
+                params.get("range_max"),
+            )
+            state.normalisation = (center, scale)
+            state.raw_image = state.image
+            state.resegment_min = None  # other units
 
         elif step_name == "binarize_mask":
             apply_to = _get_apply_to(params, "binarize_mask")
@@ -3520,6 +3586,9 @@ class RadiomicsPipeline:
             "is_mask_binarized": False,
             "binarize_mask_apply_to": None,
             "binarize_mask_params": None,
+            "is_normalised": False,
+            "normalisation_method": None,
+            "normalise_params": None,
             "is_discretised": False,
             "discretisation_method": None,
             "discretisation_param": None,
@@ -3602,6 +3671,13 @@ class RadiomicsPipeline:
             meta["is_mask_binarized"] = True
             meta["binarize_mask_apply_to"] = RadiomicsPipeline._catalog_value(
                 [record["params"].get("apply_to", "both") for record in binarize_records]
+            )
+
+        normalise_records = records_by_step["normalise"]
+        if normalise_records:
+            meta["is_normalised"] = True
+            meta["normalisation_method"] = RadiomicsPipeline._catalog_value(
+                [record["params"].get("method") for record in normalise_records]
             )
 
         discretise_records = records_by_step["discretise"]
@@ -3845,6 +3921,9 @@ class RadiomicsPipeline:
             "is_mask_binarized",
             "binarize_mask_apply_to",
             "binarize_mask_params",
+            "is_normalised",
+            "normalisation_method",
+            "normalise_params",
             "is_filtered",
             "filter_type",
             "filter_params",
@@ -4333,6 +4412,7 @@ class RadiomicsPipeline:
         "binarize_mask": {"threshold", "mask_values", "apply_to"},
         "keep_largest_component": {"apply_to"},
         "grow_mask": {"to_mm", "from_mm", "nearest_roi", "apply_to"},
+        "normalise": {"method", "region", "percentiles", "range_min", "range_max"},
         "round_intensities": set(),
         "discretise": {
             "method",
@@ -4411,6 +4491,12 @@ class RadiomicsPipeline:
 # ---------------------------------------------------------------------------
 # run_batch: the cases and the workers
 # ---------------------------------------------------------------------------
+
+
+def _case_options(case: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """The image_options of a run_batch case as its record holds them (JSON), or None."""
+    options = case.get("image_options")
+    return None if not options else json.loads(json.dumps(_json_safe(dict(options)), default=str))
 
 
 def _case_source(value: Any) -> Optional[str]:

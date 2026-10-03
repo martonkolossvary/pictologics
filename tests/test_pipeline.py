@@ -3974,6 +3974,9 @@ _DESCRIBE_COLUMNS = [
     "is_mask_binarized",
     "binarize_mask_apply_to",
     "binarize_mask_params",
+    "is_normalised",
+    "normalisation_method",
+    "normalise_params",
     "is_filtered",
     "filter_type",
     "filter_params",
@@ -6019,3 +6022,133 @@ def test_describe_features_records_grow_steps() -> None:
     assert json.loads(row["grow_mask_params"]) == [
         {"params": {"apply_to": "intensity", "from_mm": 0, "to_mm": 3}, "step_index": 1}
     ]
+
+
+def test_normalise_step_maps_the_image_by_its_region() -> None:
+    # The step gives the image of normalise_image (statistics of the ROI, or of the whole
+    # image without the voxels of no data); the log has the center and the scale; the
+    # step before a whole-image normalise keeps the whole grid.
+    from pictologics.pipeline import _needs_full_grid
+    from pictologics.preprocessing import normalise_image
+
+    image, mask = _grow_case()
+    values = image.array.copy()
+    values[:, :, :3] = -2048.0  # no image data
+    image = Image(values + 300.0, image.spacing, image.origin)
+    intensity = {"step": "extract_features", "params": {"families": ["intensity"]}}
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("roi", [
+        {"step": "normalise", "params": {"method": "zscore", "region": "roi"}},
+        intensity,
+    ])  # fmt: skip
+    pipeline.add_config(
+        "image",
+        [
+            {"step": "normalise", "params": {"method": "percentile", "region": "image", "percentiles": [2, 98], "range_min": 0}},
+            intensity,
+        ],
+        source_mode="auto",
+        sentinel_value=-1748.0,
+    )  # fmt: skip
+    pipeline.add_config("plain", [intensity])
+    results = pipeline.run(image, mask, config_names=["roi", "image"])
+    assert abs(results["roi"]["mean_intensity_Q4LE"]) < 1e-9
+    assert results["roi"]["intensity_variance_ECT3"] == pytest.approx(1.0, rel=1e-9)
+    data = Image(values + 300.0, image.spacing, image.origin)
+    valid = Image((values != -2048.0).astype(np.uint8), image.spacing, image.origin)
+    expected = normalise_image(data, "percentile", valid, (2, 98), range_min=0)
+    plain = pipeline.run(expected, mask, config_names=["plain"])["plain"]
+    assert results["image"]["mean_intensity_Q4LE"] == pytest.approx(
+        plain["mean_intensity_Q4LE"], rel=1e-12
+    )
+    log = {entry["config_name"]: entry["steps_executed"][0] for entry in pipeline.get_log()}
+    kept = (values + 300.0)[(values != -2048.0)]
+    assert log["image"]["center_effective"] == pytest.approx(np.percentile(kept, 2))
+    assert log["roi"]["scale_effective"] > 0
+    assert _needs_full_grid([{"step": "normalise", "params": {"region": "image"}}])
+    assert not _needs_full_grid([{"step": "normalise", "params": {"region": "roi"}}])
+
+
+def test_normalise_step_problems() -> None:
+    # add_config checks the options; a normalise step cancels the FBS start, as a filter.
+    normalise = {"step": "normalise", "params": {"method": "zscore", "region": "roi"}}
+    for params, message in (
+        ({"region": "roi"}, "missing parameter 'method'"),
+        ({"method": "zcore", "region": "roi"}, "unknown method 'zcore' (did you mean 'zscore'?)"),
+        ({"method": "zscore", "region": "body"}, "unknown region 'body'"),
+        ({"method": "zscore", "region": "roi", "percentiles": [1, 99]}, "percentiles need method 'percentile'"),
+        ({"method": "percentile", "region": "roi", "percentiles": [99, 1]}, "percentiles must be two numbers"),
+    ):  # fmt: skip
+        problems = _steps_problems([{"step": "normalise", "params": params}])
+        assert len(problems) == 1 and problems[0].startswith(f"step 0 (normalise): {message}")
+    discretise = {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}}
+    assert _steps_problems([discretise, normalise]) == [
+        "step 1 (normalise): a normalise step must come before the discretise step"
+    ]
+    reseg = {"step": "resegment", "params": {"range_min": 0, "range_max": 500}}
+    fbs = {"step": "discretise", "params": {"method": "FBS", "bin_width": 0.25}}
+    assert _steps_problems([reseg, fbs]) == []
+    assert "after the last filter or normalise step" in _steps_problems([reseg, normalise, fbs])[0]
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "c", [normalise, {"step": "extract_features", "params": {"families": ["intensity"]}}]
+    )
+    row = pipeline.describe_features().iloc[0]
+    assert row["is_normalised"] and row["normalisation_method"] == "zscore"
+
+
+def test_image_options_load_the_image_path() -> None:
+    # run, run_rois and run_batch pass image_options to load_image for an image path
+    # (here the second volume of a 4D NIfTI file); the log and the batch record hold
+    # them, and a batch case runs again when its options change.
+    import tempfile
+    from pathlib import Path
+
+    import nibabel as nib
+
+    rng = np.random.default_rng(4)
+    volumes = rng.normal(40.0, 20.0, (10, 10, 10, 2))
+    volumes[..., 1] = volumes[..., 0] + 100.0
+    labels = np.zeros((10, 10, 10), dtype=np.uint8)
+    labels[2:6, 2:6, 2:6] = 1
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "image.nii.gz"
+        nib.save(nib.Nifti1Image(volumes, np.eye(4)), path)
+        nib.save(nib.Nifti1Image(labels, np.eye(4)), Path(folder) / "mask.nii.gz")
+        mask = str(Path(folder) / "mask.nii.gz")
+        pipeline = RadiomicsPipeline(load_standard=False)
+        pipeline.add_config(
+            "c", [{"step": "extract_features", "params": {"families": ["intensity"]}}]
+        )
+        first = pipeline.run(str(path), mask, config_names=["c"])["c"]["mean_intensity_Q4LE"]
+        second = pipeline.run(
+            str(path), mask, config_names=["c"], image_options={"dataset_index": 1}
+        )
+        assert second["c"]["mean_intensity_Q4LE"] == pytest.approx(first + 100.0)
+        assert pipeline.get_log()[-1]["image_options"] == {"dataset_index": 1}
+        rois = pipeline.run_rois(
+            str(path), mask, config_names=["c"], image_options={"dataset_index": 1}
+        )
+        assert rois["1"]["c"].equals(second["c"])
+        with pytest.raises(ValueError, match="image_options apply to an image path"):
+            pipeline.run(
+                Image(volumes[..., 0], (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)),
+                image_options={"dataset_index": 1},
+            )
+        case = {
+            "subject_id": "s",
+            "image": str(path),
+            "mask": mask,
+            "image_options": {"dataset_index": 1},
+        }
+        out = Path(folder) / "batch"
+        table = pipeline.run_batch([case], out, config_names=["c"], show_progress=False)
+        record = json.loads((out / "cases" / "s.json").read_text())
+        assert record["image_options"] == {"dataset_index": 1}
+        assert table.loc[0, "c__mean_intensity_Q4LE"] == pytest.approx(first + 100.0)
+        with patch.object(RadiomicsPipeline, "_run_case", side_effect=AssertionError("ran")):
+            pipeline.run_batch([case], out, config_names=["c"], show_progress=False)  # resumed
+        again = pipeline.run_batch(
+            [{**case, "image_options": None}], out, config_names=["c"], show_progress=False
+        )
+        assert again.loc[0, "c__mean_intensity_Q4LE"] == pytest.approx(first)

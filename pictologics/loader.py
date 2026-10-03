@@ -781,6 +781,7 @@ def load_image(
     subvoxel_warning_threshold: float = 0.01,
     min_overlap_fraction: float = 0.5,
     series_uid: Optional[str] = None,
+    suv: Optional[str] = None,
 ) -> Image:
     """
     Load a medical image from a file path or directory.
@@ -856,14 +857,22 @@ def load_image(
             folder holds more than one image series (for example two reconstructions of
             one scan). Without it, such a folder raises an error that lists the series.
             Only used for DICOM folders.
+        suv (str | None): Convert a DICOM PET image (Modality PT) to its standardized
+            uptake value: ``"bw"`` (body weight, g/ml), ``"lbm"`` (lean body mass by the
+            Janmahasatian formula, g/ml) or ``"bsa"`` (body surface area by the Du Bois
+            formula, cm2/ml). The factor follows the QIBA vendor-neutral pseudo-code: it
+            needs attenuation and decay corrected images, and the dose, its half-life
+            and the injection and scan times from the header; ``"lbm"`` and ``"bsa"``
+            also need the height (and ``"lbm"`` the sex). None (default): no conversion.
 
     Returns:
         Image: An `Image` object containing the 3D numpy array and metadata (spacing, origin, etc.).
 
     Raises:
         ValueError: If the path does not exist, the file format is not supported,
-            the file is corrupt/unreadable, or a DICOM folder holds more than one
-            image series and ``series_uid`` does not choose one.
+            the file is corrupt/unreadable, a DICOM folder holds more than one
+            image series and ``series_uid`` does not choose one, or ``suv`` is set
+            for an image that is not DICOM PET or lacks an attribute that the SUV needs.
 
     Example:
         **Loading a NIfTI file:**
@@ -931,7 +940,14 @@ def load_image(
         # Load the 5th phase (40%)
         img = load_image("cardiac_ct/", dataset_index=4)
         ```
+
+        **Loading a PET series as SUV (body weight):**
+        ```python
+        pet = load_image("pet_series/", suv="bw")
+        ```
     """
+    if suv is not None and not apply_rescale:
+        raise ValueError("suv needs apply_rescale=True (the activity concentrations).")
     phase_files = getattr(path, "file_paths", None)  # a DicomPhaseInfo
     if phase_files is not None or isinstance(path, (list, tuple)):
         loaded_image = _load_dicom_series(
@@ -939,6 +955,7 @@ def load_image(
             dataset_index,
             apply_rescale,
             series_uid,
+            suv,
         )
         if reference_image is not None:
             _validate_geometry(loaded_image, reference_image, "loaded image", "reference image")
@@ -954,7 +971,13 @@ def load_image(
             target_path = path_obj
             if recursive:
                 target_path = _find_best_dicom_series_dir(path_obj)
-            loaded_image = _load_dicom_series(target_path, dataset_index, apply_rescale, series_uid)
+            loaded_image = _load_dicom_series(
+                target_path, dataset_index, apply_rescale, series_uid, suv
+            )
+        elif suv is not None and path.lower().endswith(
+            (".nii", ".nii.gz", ".nrrd", ".nhdr", ".mha", ".mhd")
+        ):
+            raise ValueError(f"suv needs a DICOM PET image, not the file '{path}'.")
         elif path.lower().endswith((".nii", ".nii.gz")):
             loaded_image = _load_nifti(path, dataset_index)
         elif path.lower().endswith((".nrrd", ".nhdr")):
@@ -967,8 +990,11 @@ def load_image(
             loaded_image = _load_metaimage(path, dataset_index)
         else:
             # Attempt to load as a single DICOM file if extension is not NIfTI
-            # Check if it's a DICOM SEG file first
-            if _is_dicom_seg(path):
+            # Check if it's a DICOM SEG or RTSTRUCT file first
+            is_seg = _is_dicom_seg(path)
+            if suv is not None and (is_seg or _dicom_sop_class(path) == _RTSTRUCT_SOP_CLASS):
+                raise ValueError(f"suv needs a DICOM PET image, not the mask file '{path}'.")
+            if is_seg:
                 from pictologics.loaders.seg_loader import load_seg
 
                 if dataset_index != 0 or fill_value != 0.0:
@@ -1011,7 +1037,7 @@ def load_image(
                 )
 
             try:
-                loaded_image = _load_dicom_file(path, apply_rescale, dataset_index)
+                loaded_image = _load_dicom_file(path, apply_rescale, dataset_index, suv)
             except _DicomContentError:
                 raise
             except Exception as read_error:
@@ -1621,6 +1647,7 @@ def _load_dicom_series(
     dataset_index: int = 0,
     apply_rescale: bool = True,
     series_uid: Optional[str] = None,
+    suv: Optional[str] = None,
 ) -> Image:
     """
     Load a DICOM series (a set of DICOM files) from a directory.
@@ -1662,6 +1689,7 @@ def _load_dicom_series(
             to False to get raw stored values.
         series_uid: The SeriesInstanceUID of the series to load when the folder
             holds more than one image series.
+        suv: None, or the SUV of a PET series ("bw", "lbm", "bsa"; see load_image).
 
     Returns:
         Image: A standardized `Image` object.
@@ -1756,7 +1784,14 @@ def _load_dicom_series(
     positions = [getattr(s, "ImagePositionPatient", None) for s in slices]
     if all(p is not None for p in positions):
         _warn_on_uneven_slices(positions, slice_normal, source)
+    factor = None
+    if suv is not None:
+        from pictologics.loaders.pet_suv import _suv_factor
+
+        factor = _suv_factor(slices, suv)
     volume = _stack_slices(slices, apply_rescale)
+    if factor is not None:
+        volume *= factor
 
     # Spacing
     try:
@@ -1975,7 +2010,9 @@ def _phase_frames(
     return np.array([meta["file_path"] for meta in phases[dataset_index]], dtype=np.intp)
 
 
-def _load_dicom_file(path: str, apply_rescale: bool = True, dataset_index: int = 0) -> Image:
+def _load_dicom_file(
+    path: str, apply_rescale: bool = True, dataset_index: int = 0, suv: Optional[str] = None
+) -> Image:
     """
     Load a single DICOM file as a 3D image.
 
@@ -2000,6 +2037,7 @@ def _load_dicom_file(path: str, apply_rescale: bool = True, dataset_index: int =
         dataset_index (int): The volume to load when the frames of a multiframe file
             hold more than one (frames at repeated positions, split by their temporal
             position or cardiac phase, else by their order). Default 0.
+        suv: None, or the SUV of a PET image ("bw", "lbm", "bsa"; see load_image).
 
     Returns:
         Image: A standardized `Image` object.
@@ -2013,6 +2051,11 @@ def _load_dicom_file(path: str, apply_rescale: bool = True, dataset_index: int =
     except Exception as e:
         raise ValueError(f"Corrupt or invalid DICOM file '{path}': {e}") from e
     _check_one_sample(getattr(dcm, "SamplesPerPixel", None), path)
+    factor = None
+    if suv is not None:
+        from pictologics.loaders.pet_suv import _suv_factor
+
+        factor = _suv_factor([dcm], suv)
     data = _decoded_pixels(dcm)
     for keyword in _PIXEL_KEYWORDS:  # the decoded array holds the pixels now
         if keyword in dcm:
@@ -2129,7 +2172,7 @@ def _load_dicom_file(path: str, apply_rescale: bool = True, dataset_index: int =
         origin = (0.0, 0.0, 0.0)
 
     return Image(
-        array=data,
+        array=data if factor is None else data * factor,
         spacing=spacing,
         origin=origin,
         direction=direction,

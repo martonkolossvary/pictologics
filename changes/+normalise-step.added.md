@@ -1,0 +1,1 @@
+A `normalise` step and the function `normalise_image` map the intensities of MR images and other images without fixed units: a z-score or a percentile range, with the statistics of the ROI or of the whole image (an optional value range leaves out the background). The step cancels the FBS start, as a filter does, and its log entry records the center and the scale.

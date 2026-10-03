@@ -14,6 +14,7 @@ warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 # Import the module under test
 import pictologics.features.texture as texture_module
@@ -804,3 +805,30 @@ def test_texture_distances_match_loops_over_the_voxels() -> None:
         assert np.isclose(features[key], value, rtol=1e-12, equal_nan=True), key
     empty = texture_module.calculate_all_texture_matrices(levels, roi * 0, 8, ngldm_distance=2)
     assert empty["ngldm"].shape == (8, 125)
+
+
+def test_texture_features_of_chosen_families() -> None:
+    # families gives the features of those families alone, the values of the full call,
+    # with no matrix of the other families; one name may come as a str.
+    rng = np.random.default_rng(10)
+    levels = rng.integers(1, 7, (9, 8, 7)).astype(np.float64)
+    roi = (rng.random(levels.shape) > 0.2).astype(np.uint8)
+    full = texture_module.calculate_all_texture_features(levels, roi, 6)
+    for families in (["glcm"], "ngtdm", ("glszm", "gldzm"), ["ngldm", "glrlm"]):
+        with patch.object(
+            texture_module, "_texture_matrices", wraps=texture_module._texture_matrices
+        ) as spy:
+            part = texture_module.calculate_all_texture_features(levels, roi, 6, families=families)
+        chosen = {families} if isinstance(families, str) else set(families)
+        flags = {k[5:] for k, v in spy.call_args.kwargs.items() if k.startswith("calc_") and v}
+        assert flags == chosen
+        assert part and all(part[key] == full[key] or np.isnan(part[key]) for key in part)
+    assert set(full) == set().union(
+        *(texture_module.calculate_all_texture_features(levels, roi, 6, families=f) for f in texture_module._TEXTURE_FAMILIES)
+    )  # fmt: skip
+    with pytest.raises(
+        ValueError, match=r"Unknown texture family 'glmc' \(did you mean 'glcm'\?\)"
+    ):
+        texture_module.calculate_all_texture_features(levels, roi, 6, families=["glmc"])
+    with pytest.raises(ValueError, match="Unknown texture family 'shape'. The families"):
+        texture_module.calculate_all_texture_features(levels, roi, 6, families="shape")

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from dataclasses import replace
 from typing import Any, Literal, Optional, cast
 
 import numpy as np
@@ -1854,3 +1855,114 @@ def _nearest_roi_part(grown: Image, mask: Image, nearest: Image, label: int) -> 
     other = added[nearest.array[tuple(where.T)] != label]
     grown.array[tuple(other.T)] = 0
     return grown
+
+
+_NORMALISE_METHODS = ("zscore", "percentile")
+
+
+def _normalise_problem(percentiles: Any, range_min: Any, range_max: Any) -> Optional[str]:
+    """Why normalise_image cannot take these percentiles and value range, or None."""
+    numbers = (int, float, np.integer, np.floating)
+    if not (
+        isinstance(percentiles, (list, tuple))
+        and len(percentiles) == 2
+        and all(isinstance(p, numbers) and not isinstance(p, bool) for p in percentiles)
+        and 0 <= percentiles[0] < percentiles[1] <= 100
+    ):
+        return (
+            f"percentiles must be two numbers from 0 to 100, the first lower, not {percentiles!r}"
+        )
+    for name, value in (("range_min", range_min), ("range_max", range_max)):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, numbers)):
+            return f"{name} must be a number, not {value!r}"
+    if range_min is not None and range_max is not None and range_min > range_max:
+        return f"range_min ({range_min}) must not be above range_max ({range_max})"
+    return None
+
+
+def normalise_image(
+    image: Image,
+    method: str,
+    mask: Optional[Image] = None,
+    percentiles: tuple[float, float] = (1.0, 99.0),
+    range_min: Optional[float] = None,
+    range_max: Optional[float] = None,
+) -> Image:
+    """
+    Normalise the intensities of an image with one linear map, (x - center) / scale.
+
+    For MR images and other images without fixed units. The method sets the center and
+    the scale from the statistics of a region: `"zscore"` takes the mean and the
+    standard deviation (over N), so the region gets mean 0 and standard deviation 1;
+    `"percentile"` takes the lower percentile and the distance to the upper one, so
+    that range becomes 0 to 1 (`(0, 100)`: the minimum and the maximum). The region is
+    the voxels of `mask` (every voxel that is not 0; default: the whole image) with a
+    finite value from `range_min` to `range_max` (each optional, for example to leave out
+    the background). The map changes every voxel of the image.
+
+    Args:
+        image: The image.
+        method: `"zscore"` or `"percentile"`.
+        mask: The voxels of the statistics, for example a reference tissue. None: the
+            whole image.
+        percentiles: The lower and the upper percentile of the `"percentile"` method.
+        range_min: Leave voxels below this value out of the statistics.
+        range_max: Leave voxels above this value out of the statistics.
+
+    Returns:
+        The normalised image (float64), with the geometry of `image`.
+
+    Raises:
+        ValueError: If an option is not valid, the region holds no voxel, or its values
+            do not spread (a scale of 0).
+
+    Example:
+        ```python
+        from pictologics.preprocessing import normalise_image
+
+        normalised = normalise_image(mr_image, "zscore", mask=muscle_mask)
+        ```
+    """
+    problem = (
+        f"method must be one of {_NORMALISE_METHODS}, not {method!r}"
+        if method not in _NORMALISE_METHODS
+        else _normalise_problem(percentiles, range_min, range_max)
+    )
+    if problem:
+        raise ValueError(problem)
+    select = None if mask is None else mask.array != 0
+    return _normalised(image, method, select, percentiles, range_min, range_max)[0]
+
+
+def _normalised(
+    image: Image,
+    method: str,
+    select: Optional[npt.NDArray[np.bool_]],
+    percentiles: tuple[float, float],
+    range_min: Optional[float],
+    range_max: Optional[float],
+) -> tuple[Image, float, float]:
+    """`image` normalised by the statistics of the voxels in `select` (None: all) with a
+    finite value in the range, and the center and scale of the map."""
+    array = image.array
+    keep = np.isfinite(array) if select is None else select & np.isfinite(array)
+    if range_min is not None:
+        keep &= array >= range_min
+    if range_max is not None:
+        keep &= array <= range_max
+    values = array[keep]
+    if values.size == 0:
+        raise ValueError("The normalise region holds no voxel with a finite value in its range.")
+    if method == "zscore":
+        center, scale = float(values.mean()), float(values.std())
+    else:
+        low, high = np.percentile(values, percentiles)
+        center, scale = float(low), float(high - low)
+    if not scale > 0:
+        raise ValueError(
+            f"The values of the normalise region do not spread (scale {scale:g}), so they "
+            "cannot set the scale."
+        )
+    normalised = np.subtract(array, center, dtype=np.float64)
+    normalised /= scale
+    return replace(image, array=normalised), center, scale

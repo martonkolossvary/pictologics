@@ -1,0 +1,1 @@
+`load_image(..., suv="bw")` converts a DICOM PET image to its standardized uptake value by the QIBA vendor-neutral pseudo-code: body weight (`"bw"`), lean body mass by the Janmahasatian formula (`"lbm"`) or body surface area by the Du Bois formula (`"bsa"`). A missing or unsupported DICOM attribute raises an error that names it.

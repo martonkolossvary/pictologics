@@ -18,6 +18,10 @@ Preprocessing utilities for image manipulation and sentinel value handling.
 
 ::: pictologics.preprocessing.grow_mask
 
+## Intensity Normalisation
+
+::: pictologics.preprocessing.normalise_image
+
 ## Outlier Filtering
 
 ::: pictologics.preprocessing.filter_outliers

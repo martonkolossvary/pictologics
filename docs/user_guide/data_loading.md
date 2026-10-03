@@ -119,6 +119,22 @@ print(ct_raw.array.min(), ct_raw.array.max())  # e.g., 0 to 4095
 | **NIfTI** | Always applies `scl_slope` and `scl_inter` from header |
 | **DICOM** | Applies each slice's `RescaleSlope` and `RescaleIntercept` when `apply_rescale=True` (default) |
 
+### PET Standardized Uptake Values (SUV)
+
+`suv` converts a DICOM PET image (Modality PT) from activity concentration (Bq/ml) to its standardized uptake value when it loads:
+
+```python
+pet = load_image("pet_series/", suv="bw")
+```
+
+| `suv` | Normalised by | Unit |
+|-------|---------------|------|
+| `"bw"` | The body weight (PatientWeight) | g/ml |
+| `"lbm"` | The lean body mass by the Janmahasatian formula, from the weight, the height (PatientSize) and the sex (PatientSex) | g/ml |
+| `"bsa"` | The body surface area by the Du Bois formula, from the weight and the height | cm²/ml |
+
+The factor follows the [QIBA vendor-neutral pseudo-code](https://qibawiki.rsna.org/index.php/Standardized_Uptake_Value_(SUV)). The images must be attenuation and decay corrected (CorrectedImage with ATTN and DECY, DecayCorrection START), and the injected dose decays from the injection to the series start. For a post-processed series (a series time after the acquisition), the start is the GE private scan time, else the start from the frame times, else the earliest acquisition. Units CNTS take the Philips private SUV factor, and Units GML are SUVbw already. DecayCorrection ADMIN (decay corrected to the injection) takes the dose without decay. A missing, empty or zero attribute raises an error that names it: the loader never guesses a value. The `"lbm"` formula is the one that Tahari et al. (J Nucl Med 2014) recommend for SUL in place of the James formula of PERCIST 1.0; DICOM names it SUVlbm(Janma). In a pipeline, give `image_options={"suv": "bw"}` to `run()`, `run_rois()` or a `run_batch()` case.
+
 ### Handling Sentinel (NA) Values
 
 Medical imaging formats often use a **sentinel value** to represent missing or invalid data. Common examples:
@@ -281,6 +297,8 @@ phase_0 = load_image("path/to/cardiac_ct/", dataset_index=0)
 # Load the second phase (index 1)
 phase_1 = load_image("path/to/cardiac_ct/", dataset_index=1)
 ```
+
+In a pipeline, `image_options={"dataset_index": 1}` in `run()` loads that phase from the folder path.
 
 ### Phase Detection Priority
 
