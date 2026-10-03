@@ -395,12 +395,12 @@ if __name__ == "__main__":  # the worker processes import this script again
     save_results(table, "results/features.csv")
 ```
 
-- **Cases**: each case is a dict, or a row of a DataFrame, with the `run()` arguments of one image: `subject_id` and `image` (both required), `mask`, the mask settings such as `mask_subvoxel_tolerance`, and `image_options` (see [Image Options](#image-options)).
+- **Cases**: each case is a dict, or a row of a DataFrame, with the `run()` arguments of one image: `subject_id` and `image` (both required), `mask`, the mask settings such as `mask_subvoxel_tolerance`, and `image_options` (see [Image Options](#image-options)). A case with a label map gives `rois` (and optionally `labels`, as in `run_rois()`) in place of `mask`: each of its ROIs gets a row, with its name in `roi`, and `grow_mask` steps with `nearest_roi` share the rings between the ROIs.
 - **Result files**: the result of a case goes to `results/cases/<subject_id>.json`. The file holds the status, the error, the warnings, the run time, the features and the processing log of the case.
-- **Resume**: a second call with the same folder skips each case whose file has the same image, image options, mask and configurations (by their `config_hash`). A failed case runs again. To run a case again, delete its file.
+- **Resume**: a second call with the same folder skips each case whose file has the same image, image options, mask (or label map and labels) and configurations (by their `config_hash`). A failed case runs again. To run a case again, delete its file.
 - **Workers**: with `workers=4`, four processes run the cases, and each process uses a quarter of the numba threads. Each process holds one case at a time, so the memory need grows with the number of workers. On 28 CT cases (512 × 512 × 200) with a 1 mm configuration, 1 process with 14 threads did 3.1 cases per second, and 4 processes with 3 threads each did 6.6.
 - **Script guard**: the workers start with spawn on every platform, and spawn imports your script again. Keep the call inside `if __name__ == "__main__":`.
-- **Status**: the returned DataFrame has one row for each case, in the order of the cases: `subject_id`, `status`, `error`, `warnings`, `seconds` and the features in the wide format of `format_results()`. The status is `"completed"`; `"incomplete"` when a configuration ended with an empty ROI or an error; or `"failed"` when the case did not run, for example because its image did not load.
+- **Status**: the returned DataFrame has one row for each case (one for each ROI of a label map case), in the order of the cases: `subject_id`, `status`, `error`, `warnings`, `seconds` and the features in the wide format of `format_results()`. The status is `"completed"`; `"incomplete"` when a configuration ended with an empty ROI or an error; or `"failed"` when the case did not run, for example because its image did not load.
 - **Errors and warnings**: an error of one case does not stop the batch. The warnings of a case go to its `warnings` column, not to the screen.
 
 ### Many ROIs with `run_rois`

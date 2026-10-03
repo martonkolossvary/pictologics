@@ -6152,3 +6152,49 @@ def test_image_options_load_the_image_path() -> None:
             [{**case, "image_options": None}], out, config_names=["c"], show_progress=False
         )
         assert again.loc[0, "c__mean_intensity_Q4LE"] == pytest.approx(first)
+
+
+def test_run_batch_runs_label_map_cases_by_roi(tmp_path: Any) -> None:
+    # A case with rois (and labels) runs run_rois: one row for each ROI, with its name in
+    # roi, the results of run_rois; a failed one gives one row; the record holds the
+    # label map and the labels, so a resumed batch skips the case and other labels run
+    # it again. A case cannot give a mask and rois.
+    import nibabel as nib
+
+    cases = _batch_cases(tmp_path)
+    labels = np.zeros((12, 12, 12), dtype=np.uint8)
+    labels[3:6, 3:9, 3:9] = 1
+    labels[6:9, 3:9, 3:9] = 2
+    nib.save(nib.Nifti1Image(labels, np.eye(4)), tmp_path / "labels.nii.gz")
+    rois = str(tmp_path / "labels.nii.gz")
+    batch = [
+        {"subject_id": "map", "image": cases[0]["image"], "rois": rois, "labels": {"low": 1, "high": 2}},
+        cases[1],
+        {"subject_id": "lost", "image": str(tmp_path / "none.nii.gz"), "rois": rois},
+    ]  # fmt: skip
+    pipeline = _batch_test_pipeline()
+    table = pipeline.run_batch(batch, tmp_path / "out", show_progress=False)
+    assert table["subject_id"].tolist() == ["map", "map", "p/1", "lost"]
+    assert table["roi"].tolist()[:2] == ["low", "high"] and table["roi"].isna().tolist()[2:] == [
+        True,
+        True,
+    ]
+    assert table["status"].tolist() == ["incomplete", "incomplete", "incomplete", "failed"]
+    assert "ROI low, empty: " in table.loc[0, "error"]
+    with pytest.warns(UserWarning, match="No sentinel value auto-detected"):
+        direct = pipeline.run_rois(cases[0]["image"], rois, labels={"low": 1, "high": 2})
+    for row, roi in ((0, "low"), (1, "high")):
+        assert (
+            table.loc[row, "first__mean_intensity_Q4LE"]
+            == direct[roi]["first"]["mean_intensity_Q4LE"]
+        )
+    record = json.loads((tmp_path / "out" / "cases" / "map.json").read_text())
+    assert (record["rois"], record["labels"], record["mask"]) == (rois, {"low": 1, "high": 2}, None)
+    with patch.object(RadiomicsPipeline, "_run_case", wraps=pipeline._run_case) as spy:
+        again = pipeline.run_batch(batch[:2], tmp_path / "out", show_progress=False)
+        assert spy.call_count == 0
+        pipeline.run_batch([{**batch[0], "labels": [1]}], tmp_path / "out", show_progress=False)
+        assert spy.call_count == 1
+    assert again.equals(table.iloc[:3])
+    with pytest.raises(ValueError, match="gives a mask and rois"):
+        pipeline.run_batch([{**cases[0], "rois": rois}], tmp_path / "x", show_progress=False)

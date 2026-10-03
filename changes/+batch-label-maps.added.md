@@ -1,0 +1,1 @@
+A `run_batch()` case can give a label map (`rois`, and optionally `labels`) in place of `mask`: it runs `run_rois()`, so each ROI gets a row of the result table, with its name in `roi`, and `grow_mask` steps with `nearest_roi` share the rings between the ROIs. The resume compares the label map and the labels too.

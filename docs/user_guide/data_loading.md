@@ -131,9 +131,12 @@ pet = load_image("pet_series/", suv="bw")
 |-------|---------------|------|
 | `"bw"` | The body weight (PatientWeight) | g/ml |
 | `"lbm"` | The lean body mass by the Janmahasatian formula, from the weight, the height (PatientSize) and the sex (PatientSex) | g/ml |
+| `"lbm_james"` | The lean body mass by the James formula (PERCIST 1.0, and many older programs), from the same values | g/ml |
 | `"bsa"` | The body surface area by the Du Bois formula, from the weight and the height | cm²/ml |
 
 The factor follows the [QIBA vendor-neutral pseudo-code](https://qibawiki.rsna.org/index.php/Standardized_Uptake_Value_(SUV)). The images must be attenuation and decay corrected (CorrectedImage with ATTN and DECY, DecayCorrection START), and the injected dose decays from the injection to the series start. For a post-processed series (a series time after the acquisition), the start is the GE private scan time, else the start from the frame times, else the earliest acquisition. Units CNTS take the Philips private SUV factor, and Units GML are SUVbw already. DecayCorrection ADMIN (decay corrected to the injection) takes the dose without decay. A missing, empty or zero attribute raises an error that names it: the loader never guesses a value. The `"lbm"` formula is the one that Tahari et al. (J Nucl Med 2014) recommend for SUL in place of the James formula of PERCIST 1.0; DICOM names it SUVlbm(Janma). In a pipeline, give `image_options={"suv": "bw"}` to `run()`, `run_rois()` or a `run_batch()` case.
+
+Checked on the [QIBA FDG-PET/CT digital reference object](https://depts.washington.edu/petctdro/DROsuv_main.html) (female and male, 2013): `"bw"` gives its SUV values (0.00, 1.00, 4.00, 0.10, 0.90 and the test voxels 4.11 and -0.11) to within 6.4e-5. The object gives its SUVlbm values with the James formula: `"lbm_james"` gives them (0.750 and 0.771 times SUVbw for the female and the male object), and `"lbm"` (Janmahasatian) gives 0.660 and 0.758. The James formula fails for very obese patients (its lean body mass falls, and can drop below 0, with more weight), so Tahari et al. recommend Janmahasatian.
 
 ### Handling Sentinel (NA) Values
 

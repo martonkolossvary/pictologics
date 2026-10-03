@@ -5,8 +5,8 @@ PET SUV
 The factor from the activity concentration of a DICOM PET series to its standardized
 uptake value (SUV), by the QIBA vendor-neutral pseudo-code (D. Clunie, 2018-06-26):
 https://qibawiki.rsna.org/index.php/Standardized_Uptake_Value_(SUV). The SUV can be
-normalised by the body weight (bw), the lean body mass (lbm, the Janmahasatian formula)
-or the body surface area (bsa, the Du Bois formula).
+normalised by the body weight (bw), the lean body mass (lbm by the Janmahasatian formula;
+lbm_james by the James formula) or the body surface area (bsa, the Du Bois formula).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from pydicom.valuerep import DA, DT, TM
 
-_SUV_TYPES = ("bw", "lbm", "bsa")
+_SUV_TYPES = ("bw", "lbm", "lbm_james", "bsa")
 
 
 def _suv_factor(datasets: Sequence[Any], suv: str) -> float:
@@ -85,9 +85,18 @@ def _suv_factor(datasets: Sequence[Any], suv: str) -> float:
         return factor * area / (1000.0 * weight)
     sex = str(getattr(ref, "PatientSex", "")).upper()
     if sex not in ("M", "F"):
-        raise ValueError(f"SUV lbm needs PatientSex M or F, not {sex!r}.")
-    bmi = weight / height**2
-    lean = 9270.0 * weight / ((6680.0 + 216.0 * bmi) if sex == "M" else (8780.0 + 244.0 * bmi))
+        raise ValueError(f"SUV {suv} needs PatientSex M or F, not {sex!r}.")
+    if suv == "lbm":  # Janmahasatian
+        bmi = weight / height**2
+        lean = 9270.0 * weight / ((6680.0 + 216.0 * bmi) if sex == "M" else (8780.0 + 244.0 * bmi))
+    else:  # James, with the height in cm
+        scale, offset = (1.10, 128.0) if sex == "M" else (1.07, 148.0)
+        lean = scale * weight - offset * (weight / (100.0 * height)) ** 2
+        if lean <= 0:
+            raise ValueError(
+                f"The James formula gives no lean body mass ({lean:.1f} kg) for "
+                f"{weight:g} kg and {height:g} m: use suv='lbm' (Janmahasatian)."
+            )
     return factor * lean / weight
 
 

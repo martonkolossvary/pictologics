@@ -2070,11 +2070,13 @@ class RadiomicsPipeline:
 
         Each case is a mapping, or a row of a DataFrame, with the `run()` arguments of one
         image: `subject_id` and `image` (required), `mask`, the mask settings and
-        `image_options` (for example a cardiac phase or SUV). When a case ends,
-        `run_batch` writes its result to `output_dir/cases/<subject_id>.json`. A later
-        call with the same output folder skips each case whose file holds the same image,
-        image options, mask and configurations, so a stopped batch goes on where it
-        stopped.
+        `image_options` (for example a cardiac phase or SUV). A case with a label map
+        gives `rois` (and optionally `labels`) in place of `mask`: it runs `run_rois()`,
+        so each ROI gets its results (and `grow_mask` steps with `nearest_roi` share the
+        rings). When a case ends, `run_batch` writes its result to
+        `output_dir/cases/<subject_id>.json`. A later call with the same output folder
+        skips each case whose file holds the same image, image options, mask or label map
+        and labels, and configurations, so a stopped batch goes on where it stopped.
         A failed case runs again. To run a case again, delete its file.
 
         With `workers` above 1, the cases run in that many processes, and each process
@@ -2089,7 +2091,8 @@ class RadiomicsPipeline:
             show_progress: Whether to show a progress bar.
 
         Returns:
-            A DataFrame with one row for each case, in the order of `cases`:
+            A DataFrame with one row for each case, in the order of `cases` (for a case
+            with a label map, one row for each ROI, with its name in `roi`):
             `subject_id`; `status` (`"completed"`; `"incomplete"` when a configuration
             ended with an empty ROI or an error; `"failed"` when the case did not run, for
             example because its image did not load); `error`; `warnings`; `seconds`; and
@@ -2122,7 +2125,10 @@ class RadiomicsPipeline:
         hashes = {name: self._hash_of(name) for name in names}
         folder = Path(output_dir) / "cases"
         folder.mkdir(parents=True, exist_ok=True)
-        keys = set(inspect.signature(self.run).parameters) - {"config_names"}
+        keys = (
+            set(inspect.signature(self.run).parameters)
+            | set(inspect.signature(self.run_rois).parameters)
+        ) - {"config_names"}
         paths: list[Path] = []
         stems: dict[str, str] = {}
         for index, case in enumerate(records):
@@ -2133,6 +2139,8 @@ class RadiomicsPipeline:
                     case[key] = None
             if case.get("subject_id") is None or case.get("image") is None:
                 raise ValueError(f"Case {index} needs a subject_id and an image.")
+            if case.get("mask") is not None and case.get("rois") is not None:
+                raise ValueError(f"Case {index} gives a mask and rois: give one of them.")
             case["subject_id"] = str(case["subject_id"])
             stem = re.sub(r"[^A-Za-z0-9._-]", "_", case["subject_id"])
             if stem in stems:
@@ -2147,12 +2155,10 @@ class RadiomicsPipeline:
         for index, (case, path) in enumerate(zip(records, paths, strict=True)):
             if path.exists():
                 record = json.loads(path.read_text(encoding="utf-8"))
-                sources = [_case_source(case["image"]), _case_source(case.get("mask"))]
                 if (
                     record["status"] != "failed"
                     and record["config_hashes"] == hashes
-                    and [record["image"], record["mask"]] == sources
-                    and record.get("image_options") == _case_options(case)
+                    and all(record.get(k) == v for k, v in _case_identity(case).items())
                 ):
                     outcomes[index] = record
         todo = [index for index in range(len(records)) if index not in outcomes]
@@ -2207,10 +2213,14 @@ class RadiomicsPipeline:
                 "warnings": " | ".join(record["warnings"]) or None,
                 "seconds": record["seconds"],
             }
-            results = {
-                name: pd.Series(values, dtype=float) for name, values in record["results"].items()
-            }
-            rows.append(format_results(results, fmt="wide", meta=meta))
+            # A label map case: one row for each ROI (one row without ROIs when it failed)
+            by_roi = record["results"] if record.get("rois") else {None: record["results"]}
+            for roi, values in (by_roi or {None: {}}).items():
+                results = {
+                    name: pd.Series(features, dtype=float) for name, features in values.items()
+                }
+                extra = {"roi": roi} if record.get("rois") else {}
+                rows.append(format_results(results, fmt="wide", meta={**meta, **extra}))
         return pd.DataFrame(rows)
 
     def _run_case(
@@ -2225,34 +2235,47 @@ class RadiomicsPipeline:
         started = time.perf_counter()
         record: dict[str, Any] = {
             "subject_id": case["subject_id"],
-            "image": _case_source(case["image"]),
-            "image_options": _case_options(case),
-            "mask": _case_source(case.get("mask")),
+            **_case_identity(case),
             "config_hashes": hashes,
         }
+        label_map = case.get("rois") is not None
+        arguments = {k: v for k, v in case.items() if k not in _OTHER_CASE_KEYS[label_map]}
+
+        def plain(results: dict[str, pd.Series]) -> dict[str, dict[str, float]]:
+            return {
+                name: {key: float(value) for key, value in series.items()}
+                for name, series in results.items()
+            }
+
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             try:
-                results = self.run(config_names=names, **case)
+                if label_map:
+                    by_roi = self.run_rois(config_names=names, **arguments)
+                    values: dict[str, Any] = {roi: plain(res) for roi, res in by_roi.items()}
+                else:
+                    values = plain(self.run(config_names=names, **arguments))
             except Exception as e:
                 record.update(status="failed", error=f"{type(e).__name__}: {e}", results={})
             else:
+
+                def where(entry: dict[str, Any]) -> str:
+                    roi = f"ROI {entry['roi']}, " if "roi" in entry else ""
+                    return f"{roi}{entry['config_name']}"
+
                 problems = [
-                    f"{entry['config_name']}: {entry['error']}"
+                    f"{where(entry)}: {entry['error']}"
                     for entry in self._log
                     if entry["status"] != "completed"
                 ] + [
-                    f"{entry['config_name']} ({family}): {error}"
+                    f"{where(entry)} ({family}): {error}"
                     for entry in self._log
                     for family, error in entry.get("family_errors", {}).items()
                 ]
                 record.update(
                     status="incomplete" if problems else "completed",
                     error="; ".join(problems) or None,
-                    results={
-                        name: {key: float(value) for key, value in series.items()}
-                        for name, series in results.items()
-                    },
+                    results=values,
                 )
         record["warnings"] = list(dict.fromkeys(str(warning.message) for warning in caught))
         record["seconds"] = time.perf_counter() - started
@@ -4493,10 +4516,28 @@ class RadiomicsPipeline:
 # ---------------------------------------------------------------------------
 
 
-def _case_options(case: Mapping[str, Any]) -> Optional[dict[str, Any]]:
-    """The image_options of a run_batch case as its record holds them (JSON), or None."""
-    options = case.get("image_options")
-    return None if not options else json.loads(json.dumps(_json_safe(dict(options)), default=str))
+# The case keys that a run_batch case does not pass on: those of run_rois for a case
+# with a mask, the mask for a case with a label map (by "label_map")
+_OTHER_CASE_KEYS = {False: ("rois", "labels"), True: ("mask",)}
+
+
+def _case_identity(case: Mapping[str, Any]) -> dict[str, Any]:
+    """What the record of a run_batch case holds of its inputs (JSON): its sources and
+    options, which a later batch compares to skip the case."""
+
+    def plain(value: Any) -> Any:  # None for no value
+        if value is None or len(value) == 0:
+            return None
+        value = dict(value) if isinstance(value, Mapping) else np.asarray(value).tolist()
+        return json.loads(json.dumps(_json_safe(value), default=str))
+
+    return {
+        "image": _case_source(case["image"]),
+        "image_options": plain(case.get("image_options")),
+        "mask": _case_source(case.get("mask")),
+        "rois": _case_source(case.get("rois")),
+        "labels": plain(case.get("labels")),
+    }
 
 
 def _case_source(value: Any) -> Optional[str]:

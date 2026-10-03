@@ -859,11 +859,13 @@ def load_image(
             Only used for DICOM folders.
         suv (str | None): Convert a DICOM PET image (Modality PT) to its standardized
             uptake value: ``"bw"`` (body weight, g/ml), ``"lbm"`` (lean body mass by the
-            Janmahasatian formula, g/ml) or ``"bsa"`` (body surface area by the Du Bois
-            formula, cm2/ml). The factor follows the QIBA vendor-neutral pseudo-code: it
-            needs attenuation and decay corrected images, and the dose, its half-life
-            and the injection and scan times from the header; ``"lbm"`` and ``"bsa"``
-            also need the height (and ``"lbm"`` the sex). None (default): no conversion.
+            Janmahasatian formula, g/ml), ``"lbm_james"`` (lean body mass by the James
+            formula, g/ml) or ``"bsa"`` (body surface area by the Du Bois formula,
+            cm2/ml). The factor follows the QIBA vendor-neutral pseudo-code: it needs
+            attenuation and decay corrected images, and the dose, its half-life and the
+            injection and scan times from the header; the lean body mass and the body
+            surface area also need the height (and the lean body mass the sex). None
+            (default): no conversion.
 
     Returns:
         Image: An `Image` object containing the 3D numpy array and metadata (spacing, origin, etc.).

@@ -60,6 +60,10 @@ def test_suv_factors_of_the_three_types() -> None:
         _bw() * female / WEIGHT, rel=1e-12
     )
     assert _suv_factor(series, "bsa") == pytest.approx(_bw() * area / (WEIGHT * 1000.0), rel=1e-12)
+    james = 1.10 * WEIGHT - 128.0 * (WEIGHT / (100.0 * HEIGHT)) ** 2  # male
+    assert _suv_factor(series, "lbm_james") == pytest.approx(_bw() * james / WEIGHT, rel=1e-12)
+    with pytest.raises(ValueError, match="James formula gives no lean body mass"):
+        _suv_factor([_pet(PatientWeight=200.0, PatientSize=1.5, PatientSex="F")], "lbm_james")
 
 
 def test_suv_injection_and_scan_times() -> None:
@@ -123,6 +127,30 @@ def test_suv_of_other_units() -> None:
     assert _suv_factor([gml], "lbm") == pytest.approx(
         _suv_factor([_pet()], "lbm") / _bw(), rel=1e-12
     )
+
+
+def test_suv_of_the_qiba_digital_reference_object() -> None:
+    # The header numbers of the QIBA FDG-PET/CT digital reference object (University of
+    # Washington, 2013; female and male, slice 40): its stored test voxels 32767 and -877
+    # are SUVbw 4.11 and -0.11, the values of the object. (The PET files themselves give
+    # 0.00, 1.00, 4.00, 0.10, 0.90, 4.11 and -0.11 to within 6.4e-5.)
+    for weight, slope in ((59.94, 0.530081816975547), (70.0, 0.453901487278775)):
+        ds = _pet(PatientWeight=weight, SeriesDate="20130529", SeriesTime="140100.000000")
+        ds.AcquisitionDate, ds.AcquisitionTime = "20130529", "140100.000000"
+        info = ds.RadiopharmaceuticalInformationSequence[0]
+        info.RadionuclideTotalDose, info.RadionuclideHalfLife = 370000000, 6586
+        info.RadiopharmaceuticalStartTime = "130100.000000"
+        factor = _suv_factor([ds], "bw")
+        assert 32767 * slope * factor == pytest.approx(4.11, abs=1e-4)
+        assert -877 * slope * factor == pytest.approx(-0.11, abs=1e-4)
+    # Its SUVlbm (James): exactly 0.75 x SUVbw for the female object, 0.7709 for the male
+    for weight, height, sex, ratio, tolerance in (
+        (59.94, 1.665, "F", 0.75, 1e-6),
+        (70.0, 1.65, "M", 0.7709, 1e-4),
+    ):
+        ds = _pet(PatientWeight=weight, PatientSize=height, PatientSex=sex)
+        lean = _suv_factor([ds], "lbm_james") / _suv_factor([ds], "bw")
+        assert lean == pytest.approx(ratio, abs=tolerance)
 
 
 @pytest.mark.parametrize(
