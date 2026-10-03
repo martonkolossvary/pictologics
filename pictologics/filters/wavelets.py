@@ -1,7 +1,6 @@
 # pictologics/filters/wavelets.py
 """Wavelet transform implementations (separable and non-separable)."""
 
-import math
 from typing import Any, List, Optional, Tuple, Union, cast
 
 import numpy as np
@@ -16,7 +15,6 @@ from .base import (
     BoundaryCondition,
     _apply_with_boundary_padding,
     _float32_cut,
-    _kept_rows,
     _ordered_map,
     _prepare_masked_image,
     _slab_pass,
@@ -275,16 +273,18 @@ def _get_rotation_perms() -> List[Tuple[Tuple[int, int, int], Tuple[bool, bool, 
 
 @cache_by_bytes(_TRANSFER_CACHE_BYTES)
 def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.floating[Any]]:
-    """Frequency-domain Simoncelli band-pass transfer function (IBSI 2 Eq. 27).
+    """Frequency-domain Simoncelli band-pass transfer function (IBSI 2 Eq. 27), in the
+    rfftn layout (the last axis keeps its s // 2 + 1 non-negative frequencies).
 
     Depends only on ``shape`` and ``level`` (never on image values or the source
     mask), so the result is cached and reused across calls with identical geometry.
     The returned array is marked read-only; callers must not mutate it.
 
-    The table mirrors on every axis (row k equals row s - 1 - k for an even size s,
-    row s - k for an odd one), so a large table keeps only its first (s + 1) // 2 rows
-    on axis 0, half of the table (see _kept_rows and _times_mirrored; a mirror on a
-    later axis would make the products slower).
+    The table holds the even part (g(k) + g(-k)) / 2 of the band g: the filter keeps the
+    real part of its response, and for a real image that is the response of the even
+    part. The response of an even table is real, so one rfftn/irfftn round trip (half
+    the work of a complex FFT) gives it, and riesz_simoncelli applies its Riesz table in
+    the same round trip. The table keeps every row: on an even axis g(-k) is not g(k).
     """
     # IBSI level N corresponds to j = N-1; level 1 = j=0 → max_freq = 1.0 (Nyquist).
     j = level - 1
@@ -293,50 +293,44 @@ def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.f
     # Build frequency grid using centered [-1, 1] coordinates (IBSI 2 convention).
     # NOTE: This grid differs from np.fft.fftfreq by a factor of (N-1)/N.
     # The IBSI 2 reference values were validated with this specific grid, so
-    # it must be preserved exactly. The non-symmetric grid for even N also
-    # means rfftn/irfftn cannot be used (they assume conjugate symmetry).
-    center = (np.array(shape) - 1.0) / 2.0
-
-    grids = []
+    # it must be preserved exactly. The grid is not symmetric for an even N.
+    grids, negatives = [], []
     for i, s in enumerate(shape):
-        dim_grid = np.arange(s)
-        # Normalize to [-1, 1] relative to center
-        grid_norm = (dim_grid - center[i]) / center[i]
-        # Shift to move DC to array start (index 0), matching fftn layout
-        grid_shifted = np.fft.ifftshift(grid_norm)
-        kept = _kept_rows(s, (s + 1) // 2, math.prod(shape)) if i == 0 else s
-        grids.append(grid_shifted[:kept])
-    mesh_vectors = np.meshgrid(*grids, indexing="ij", sparse=True)
-    half_shape = tuple(len(g) for g in grids)
+        center = (s - 1.0) / 2.0
+        # Normalize to [-1, 1] relative to center, then shift DC to index 0 (fftn layout)
+        grid = np.fft.ifftshift((np.arange(s) - center) / center)
+        index = np.arange(s // 2 + 1 if i == len(shape) - 1 else s)
+        grids.append(grid[index])
+        negatives.append(grid[-index])  # the frequency -k: index s - k (and 0 for 0)
+    vectors = [np.meshgrid(*v, indexing="ij", sparse=True) for v in (grids, negatives)]
+    table_shape = tuple(len(g) for g in grids)
 
-    # A large table is built slab by slab along the first axis, with the same element-wise
-    # operations (so the same values) and temporaries of one slab instead of six full
-    # volumes; the values outside the band stay 0.0, as np.where(mask, g, 0.0) gives.
-    slabs = _slabs(half_shape)
-    table = None if len(slabs) == 1 else np.zeros(half_shape, dtype=np.float64)
-    for start, stop in slabs:
-        dist_sq = np.asarray(
-            sum((g[start:stop] if i == 0 else g) ** 2 for i, g in enumerate(mesh_vectors)),
+    # A large table is built slab by slab along the first axis, with temporaries of one
+    # slab instead of several full volumes.
+    table = np.empty(table_shape, dtype=np.float64)
+    for start, stop in _slabs(table_shape):
+        g_sim, g_neg = (_simoncelli_values(v, start, stop, max_freq) for v in vectors)
+        np.multiply(g_sim + g_neg, 0.5, out=table[start:stop])
+    table.flags.writeable = False  # cached array must not be mutated by callers
+    return table
+
+
+def _simoncelli_values(
+    vectors: Tuple[npt.NDArray[Any], ...], start: int, stop: int, max_freq: float
+) -> npt.NDArray[np.float64]:
+    """The Simoncelli band (IBSI 2 Eq. 27) on rows start:stop of the sparse grid
+    `vectors`: cos(pi / 2 * log2(2 * dist / max_freq)) for a distance in
+    [max_freq / 4, max_freq], else 0. The cosine runs only on the band."""
+    dist = np.sqrt(
+        np.asarray(
+            sum((v[start:stop] if i == 0 else v) ** 2 for i, v in enumerate(vectors)),
             dtype=np.float64,
         )
-        dist = np.sqrt(dist_sq)
-
-        # Calculate transfer function (Simoncelli band-pass, IBSI 2 Eq. 27)
-        val = 2.0 * dist / max_freq
-        log_arg = np.where(val > 0, val, 1.0)
-
-        with np.errstate(all="ignore"):
-            g_sim = np.cos(np.pi / 2.0 * np.log2(log_arg))
-
-        # Apply band-pass mask
-        mask = (dist >= max_freq / 4.0) & (dist <= max_freq)
-        if table is None:
-            g_sim = np.where(mask, g_sim, 0.0)  # the whole table, as one slab
-        else:
-            np.copyto(table[start:stop], g_sim, where=mask)
-    g_sim = g_sim if table is None else table
-    g_sim.flags.writeable = False  # cached array must not be mutated by callers
-    return cast(npt.NDArray[np.floating[Any]], g_sim)
+    )
+    band = (dist >= max_freq / 4.0) & (dist <= max_freq)
+    values = np.zeros(dist.shape)
+    values[band] = np.cos(np.pi / 2.0 * np.log2(2.0 * dist[band] / max_freq))
+    return values
 
 
 def _simoncelli_pad_width(level: int) -> int:
@@ -426,16 +420,14 @@ def simoncelli_wavelet(
         # the source mask — so it is built once and cached (see _simoncelli_transfer).
         g_sim = _simoncelli_transfer(shape, level)
 
-        # Apply filter in frequency domain using full FFT (full FFT required because
-        # the centered grid is non-symmetric for even N). scipy.fft with numba's thread
-        # count is multithreaded and matches np.fft to float32 precision.
+        # Apply filter in frequency domain using Real FFT (the table is the even part of
+        # the band, see _simoncelli_transfer). scipy.fft with numba's thread count is
+        # multithreaded and matches np.fft to float32 precision.
         axes = tuple(range(ndim))
         workers = get_num_threads()
-        # Row k of the table mirrors row s - 1 - k (even size s) or s - k (odd s)
-        offset = shape[0] - 1 + shape[0] % 2
-        spectrum = _times_mirrored(scipy.fft.fftn(arr, workers=workers), g_sim, offset, 1)
-        response = scipy.fft.ifftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
+        spectrum = _times_mirrored(scipy.fft.rfftn(arr, workers=workers), g_sim, shape[0], 1)
+        response = scipy.fft.irfftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
 
-        return _float32_cut(np.real(response), crop)
+        return _float32_cut(response, crop)
 
     return _apply_with_boundary_padding(_core, image, boundary, _simoncelli_pad_width(level))

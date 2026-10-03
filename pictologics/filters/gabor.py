@@ -1,6 +1,7 @@
 # pictologics/filters/gabor.py
 """Gabor filter implementation (IBSI code: Q88H)."""
 
+import math
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional, Tuple, Union, cast
 
@@ -159,13 +160,18 @@ def gabor_filter(
         thetas = [theta]
 
     def _plane(plane_axis: int) -> npt.NDArray[np.floating[Any]]:
-        """The response of one plane; with a region, of the slices through it."""
+        """The response of one plane; with a region, of the region only (each slice
+        through it is cut to the region, grown by the kernel radius)."""
         part = image
+        window = None
+        size = image.size
         if region is not None:
             part = image[tuple(region[a] if a == plane_axis else slice(None) for a in range(3))]
+            window = (region[0], region[1], region[2])
+            size = math.prod(r.stop - r.start for r in window)
         # Auto-detect parallel mode based on the size of the part filtered
-        parallel = part.size > _PARALLEL_THRESHOLD if use_parallel is None else use_parallel
-        response = _apply_gabor_to_plane(
+        parallel = size > _PARALLEL_THRESHOLD if use_parallel is None else use_parallel
+        return _apply_gabor_to_plane(
             part,
             sigma_mm,
             lambda_mm,
@@ -176,12 +182,10 @@ def gabor_filter(
             mode=mode,
             pooling=pooling,
             use_parallel=parallel,
+            window=None
+            if window is None
+            else tuple(window[a] for a in range(3) if a != plane_axis),
         )
-        if region is not None:
-            response = response[
-                tuple(slice(None) if a == plane_axis else region[a] for a in range(3))
-            ]
-        return response
 
     if average_over_planes:
         # Apply to all 3 orthogonal planes and average with in-place aggregation
@@ -213,12 +217,18 @@ def _apply_gabor_to_plane(
     mode: str,
     pooling: str,
     use_parallel: bool = True,
+    window: Optional[Tuple[slice, ...]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """Apply Gabor filter to slices along a given axis.
 
     Args:
         use_parallel: If True, process slices in parallel using ThreadPoolExecutor.
             For small images, sequential may be faster due to thread overhead.
+        window: The part of each slice to return (two slices of the in-plane axes, in
+            their order); None: the whole slices. Each slice is cut to the window grown
+            by the kernel radius: the padding of a cut edge inside the image then reaches
+            only the grown part, so the window keeps the values of the whole slices (to
+            the FFT rounding), and a cut edge at the image edge keeps its boundary.
     """
     # This plane's two in-plane axes (the axes the 2D kernel actually acts on;
     # plane_axis itself is only sliced over, see moveaxis below) and their spacings.
@@ -258,6 +268,14 @@ def _apply_gabor_to_plane(
     kernel_shape = kernels[0].shape
     pad_h = kernel_shape[0] // 2
     pad_w = kernel_shape[1] // 2
+    keep_h, keep_w = (0, slice_h), (0, slice_w)  # the rows and columns of the cut kept
+    if window is not None:
+        h_lo, h_hi = max(window[0].start - pad_h, 0), min(window[0].stop + pad_h, slice_h)
+        w_lo, w_hi = max(window[1].start - pad_w, 0), min(window[1].stop + pad_w, slice_w)
+        image_reordered = image_reordered[:, h_lo:h_hi, w_lo:w_hi]
+        slice_h, slice_w = h_hi - h_lo, w_hi - w_lo
+        keep_h = (window[0].start - h_lo, window[0].stop - h_lo)
+        keep_w = (window[1].start - w_lo, window[1].stop - w_lo)
 
     # Map scipy.ndimage mode to numpy.pad mode
     pad_mode_map = {
@@ -291,7 +309,10 @@ def _apply_gabor_to_plane(
             # Full convolution via FFT; the "same"+unpad crop reduces to a fixed
             # offset of 2*pad because the kernel half-width equals pad.
             full = scipy.fft.ifftn(f_padded * k_fft)
-            cropped = full[2 * pad_h : 2 * pad_h + slice_h, 2 * pad_w : 2 * pad_w + slice_w]
+            cropped = full[
+                2 * pad_h + keep_h[0] : 2 * pad_h + keep_h[1],
+                2 * pad_w + keep_w[0] : 2 * pad_w + keep_w[1],
+            ]
             return cast(npt.NDArray[np.floating[Any]], np.abs(cropped))
 
         if len(kernel_ffts) == 1:

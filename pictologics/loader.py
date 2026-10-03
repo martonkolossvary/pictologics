@@ -11,6 +11,8 @@ Key Features:
 - **Unified Image Class**: Stores 3D data, spacing, origin, direction, and modality.
 - **Format Support**:
     - NIfTI (.nii, .nii.gz) via `nibabel`.
+    - NRRD (.nrrd, .nhdr, .seg.nrrd) and MetaImage (.mha, .mhd), with the readers of
+      `pictologics.loaders`.
     - DICOM Series (directory of DICOM files) via `pydicom`.
     - Single DICOM files.
 - **Automatic Detection**: `load_image` automatically detects format and dimensionality.
@@ -33,24 +35,20 @@ The loaders handle the necessary axis transformations automatically. When using
 visualization utilities like `visualize_mask_overlay()`, slices are internally
 transposed for correct display.
 
-World Coordinate Frames:
-------------------------
-Origin and direction metadata are reported in the **native world frame of the
-source format** and are *not* converted between frames:
+World Coordinate Frame:
+-----------------------
+Origin and direction metadata are in the **LPS+** world frame (Left, Posterior,
+Superior) for every format, as in DICOM and ITK/SimpleITK:
 
-- **DICOM** (series, single files, SEG): LPS+ (Left, Posterior, Superior), as
-  defined by ``ImagePositionPatient`` / ``ImageOrientationPatient``.
-- **NIfTI**: RAS+ (Right, Anterior, Superior), as defined by the NIfTI affine
-  read via nibabel. (Note: SimpleITK converts NIfTI to LPS+ on load; this
-  library does not.)
+- **DICOM** (series, single files, SEG): as defined by ``ImagePositionPatient`` /
+  ``ImageOrientationPatient``.
+- **NIfTI**: the affine of the file is in RAS+ (Right, Anterior, Superior), so the
+  loader changes the sign of its X and Y rows, as SimpleITK does.
 
-The X and Y axes of the two frames point in opposite directions, so origins and
-direction matrices from different formats are **not directly comparable**. Do
-not mix formats within a single geometric operation (e.g., a DICOM-derived
-``reference_image`` with a NIfTI mask): geometry validation will fail or, worse,
-repositioning may silently misalign. Keep an image and its masks in the same
-format, or convert one externally beforehand. A ``UserWarning`` is emitted when
-such mixing is detected.
+So an image and its masks can come from different formats. A mask that holds the
+grid of its ``reference_image`` in another voxel order (axes flipped or swapped,
+as some converters write NIfTI files) is turned to the voxel order of the
+reference image when it loads.
 """
 
 from __future__ import annotations
@@ -83,36 +81,43 @@ def _direction_matrix(direction: Any) -> npt.NDArray[np.float64]:
     return matrix
 
 
-# Modalities that do not tell the source format: in-memory images and merged masks
-_UNKNOWN_FRAME_MODALITIES = frozenset({"Unknown", "MergedImage", "Image", ""})
+# Largest difference of two direction cosines that still counts as the same axis
+_DIRECTION_TOLERANCE = 0.01
 
 
-def _world_frame(image: Image) -> Optional[str]:
-    """ "RAS" for an image from NIfTI, "LPS" from DICOM, None when the source is unknown."""
-    if image.modality == "Nifti":
-        return "RAS"
-    return None if image.modality in _UNKNOWN_FRAME_MODALITIES else "LPS"
+def _reoriented(image: Image, reference: Image) -> Image:
+    """`image` with its axes swapped and flipped to the axis directions of `reference`,
+    when its direction matrix is that of `reference` up to the order and the signs of
+    the axes (the same grid in another voxel order); else `image` itself."""
+    own = _direction_matrix(image.direction)
+    target = _direction_matrix(reference.direction)
+    if np.max(np.abs(own - target)) <= _DIRECTION_TOLERANCE:
+        return image
+    # For each reference axis, the axis of `image` along the same line, and its sign
+    axes = [int(b) for b in np.argmax(np.abs(own.T @ target), axis=0)]
+    signs = np.sign(np.sum(own[:, axes] * target, axis=0))
+    direction = own[:, axes] * signs
+    if np.max(np.abs(direction - target)) > _DIRECTION_TOLERANCE:  # also a repeated axis
+        return image
+    flipped = tuple(a for a in range(3) if signs[a] < 0)
+    shape, spacing = image.array.shape, image.spacing
+    # The new first voxel is the last voxel of each flipped axis
+    origin = np.asarray(image.origin, dtype=np.float64) + sum(
+        (own[:, axes[a]] * (shape[axes[a]] - 1) * spacing[axes[a]] for a in flipped),
+        np.zeros(3),
+    )
 
+    def turned(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
+        return np.ascontiguousarray(np.flip(np.transpose(array, axes), flipped))
 
-def _warn_if_mixed_coordinate_frames(image: Image, reference: Image) -> None:
-    """Warn when NIfTI- and DICOM-sourced images are combined geometrically.
-
-    NIfTI geometry is in the RAS+ world frame while DICOM geometry is in LPS+
-    (see module docstring). Detection is heuristic: images loaded from NIfTI
-    carry ``modality == "Nifti"``, and DICOM images their DICOM modality. In-memory
-    images (modality "Unknown") and merged masks have no known frame, so they do
-    not warn.
-    """
-    if {_world_frame(image), _world_frame(reference)} == {"RAS", "LPS"}:
-        warnings.warn(
-            "Mixing NIfTI- and DICOM-sourced images: NIfTI geometry is in the "
-            "RAS+ world frame while DICOM geometry is in LPS+, and no conversion "
-            "is performed. Geometry validation/repositioning may fail or silently "
-            "misalign. Use the same source format for an image and its masks, or "
-            "convert one externally.",
-            UserWarning,
-            stacklevel=3,
-        )
+    return Image(
+        array=turned(image.array),
+        spacing=(float(spacing[axes[0]]), float(spacing[axes[1]]), float(spacing[axes[2]])),
+        origin=(float(origin[0]), float(origin[1]), float(origin[2])),
+        direction=direction,
+        modality=image.modality,
+        source_mask=None if image.source_mask is None else turned(image.source_mask),
+    )
 
 
 def _validate_geometry(
@@ -285,9 +290,9 @@ class Image:
     DICOM and NIfTI.
 
     Note:
-        ``origin`` and ``direction`` are expressed in the native world frame of
-        the source format (LPS+ for DICOM, RAS+ for NIfTI) — see the module
-        docstring ("World Coordinate Frames"). Equality (``==``) compares object
+        ``origin`` and ``direction`` are in the LPS+ world frame for every source
+        format (the NIfTI loader converts the RAS+ affine) — see the module
+        docstring ("World Coordinate Frame"). Equality (``==``) compares object
         identity: element-wise comparison of the array fields would be ambiguous,
         so dataclass-generated equality is disabled.
 
@@ -518,8 +523,6 @@ def _placement(
     with `min_overlap_fraction=0`, after a warning). The checks are those of
     `_position_in_reference`.
     """
-    _warn_if_mixed_coordinate_frames(image, reference)
-
     # 0. Validate parameters
     if not 0.0 <= min_overlap_fraction <= 1.0:
         raise ValueError(f"min_overlap_fraction must be in [0.0, 1.0], got {min_overlap_fraction}.")
@@ -538,18 +541,24 @@ def _placement(
         )
 
     # 1. Apply optional axis transposition and keep voxel-axis metadata in sync.
-    data = image.array
-    img_spacing = np.asarray(image.spacing, dtype=np.float64)
-    img_direction_arr = _direction_matrix(image.direction)
     if transpose_axes is not None:
         axes = tuple(transpose_axes)
         if sorted(axes) != [0, 1, 2]:
             raise ValueError(
                 f"transpose_axes must be a permutation of (0, 1, 2), got {transpose_axes}."
             )
-        data = np.transpose(data, axes)
-        img_spacing = img_spacing[list(axes)]
-        img_direction_arr = img_direction_arr[:, list(axes)]
+        image = Image(
+            array=np.transpose(image.array, axes),
+            spacing=(image.spacing[axes[0]], image.spacing[axes[1]], image.spacing[axes[2]]),
+            origin=image.origin,
+            direction=_direction_matrix(image.direction)[:, list(axes)],
+            modality=image.modality,
+        )
+    # Then the axes of the reference, when the image holds them in another order
+    image = _reoriented(image, reference)
+    data = image.array
+    img_spacing = np.asarray(image.spacing, dtype=np.float64)
+    img_direction_arr = _direction_matrix(image.direction)
 
     # 2. Validate spacing compatibility (allow 1% tolerance)
     ref_spacing = np.asarray(reference.spacing, dtype=np.float64)
@@ -568,11 +577,11 @@ def _placement(
     # 4. Check orientation compatibility
     # Use np.max(np.abs(...)) for robustness
     orientation_diff = np.max(np.abs(img_direction_arr - ref_direction_arr))
-    if orientation_diff > 0.01:
+    if orientation_diff > _DIRECTION_TOLERANCE:
         raise ValueError(
-            f"Orientation mismatch detected (max diff={orientation_diff:.4f}). "
-            "Reorientation or nearest-neighbor resampling is required before "
-            "translation-only repositioning."
+            f"Orientation mismatch detected (max diff={orientation_diff:.4f}). The image "
+            "axes are not the reference axes in another order or with other signs, so "
+            "the image needs resampling to the reference grid."
         )
 
     # 5. Calculate voxel offset
@@ -705,6 +714,15 @@ def _find_best_dicom_series_dir(root: Path) -> Path:
 
 # Segmentation Storage and Label Map Segmentation Storage
 _SEG_SOP_CLASSES = ("1.2.840.10008.5.1.4.1.1.66.4", "1.2.840.10008.5.1.4.1.1.66.7")
+_RTSTRUCT_SOP_CLASS = "1.2.840.10008.5.1.4.1.1.481.3"  # RT Structure Set Storage
+
+
+def _dicom_sop_class(path: str) -> str:
+    """The SOPClassUID of a DICOM file, or "" for a file that pydicom cannot read."""
+    try:
+        return str(getattr(pydicom.dcmread(path, stop_before_pixels=True), "SOPClassUID", ""))
+    except Exception:
+        return ""
 
 
 def _is_dicom_seg(path: str) -> bool:
@@ -719,11 +737,7 @@ def _is_dicom_seg(path: str) -> bool:
     Returns:
         True if the file is a DICOM SEG object, False otherwise.
     """
-    try:
-        dcm = pydicom.dcmread(path, stop_before_pixels=True)
-        return str(getattr(dcm, "SOPClassUID", "")) in _SEG_SOP_CLASSES
-    except Exception:
-        return False
+    return _dicom_sop_class(path) in _SEG_SOP_CLASSES
 
 
 def load_image(
@@ -755,11 +769,10 @@ def load_image(
         ``dataset_index`` and ``fill_value`` do not apply to SEG files and are
         ignored with a ``UserWarning`` if set to non-default values.
 
-    Warning:
-        NIfTI and DICOM geometry live in different world coordinate frames
-        (RAS+ vs LPS+) and are not converted — do not mix formats between an
-        image and its ``reference_image``/masks. See the module docstring
-        ("World Coordinate Frames").
+    Note:
+        Every format gives its geometry in the LPS+ world frame (the NIfTI loader
+        converts the RAS+ affine), so an image and its masks can come from different
+        formats. See the module docstring ("World Coordinate Frame").
 
     Args:
         path (str | Path | list | DicomPhaseInfo): The absolute or relative path to the
@@ -770,7 +783,8 @@ def load_image(
         dataset_index (int, optional): For multi-volume datasets, specifies which
             volume to extract (0-indexed). This works for:
 
-            - **4D NIfTI files**: Selects which time point/volume to load.
+            - **4D NIfTI, NRRD and MetaImage files**: Selects which time point/volume to
+              load (for a 3D Slicer ``.seg.nrrd`` file: the layer of segments).
             - **Multi-phase DICOM series**: Selects which phase to load (e.g., cardiac
               phases, temporal positions, echo numbers). Use
               ``pictologics.utilities.get_dicom_phases()`` to discover available phases.
@@ -784,7 +798,10 @@ def load_image(
         reference_image (Optional[Image]): If provided and the loaded image has different
             dimensions than the reference, it will be repositioned into the reference
             coordinate space using spatial metadata (origin, spacing). This is useful for
-            loading cropped segmentation masks that need to match a full-sized image.
+            loading cropped segmentation masks that need to match a full-sized image. A
+            loaded image whose axes are the reference axes in another order or with other
+            signs (the same grid in another voxel order) is first turned to the voxel
+            order of the reference.
         transpose_axes (tuple[int, int, int] | None): Optional axis transposition to apply
             before repositioning. Use this if the mask's axis order differs from the reference.
             E.g., (0, 2, 1) swaps Y and Z axes. Only used when reference_image is provided;
@@ -895,7 +912,6 @@ def load_image(
             series_uid,
         )
         if reference_image is not None:
-            _warn_if_mixed_coordinate_frames(loaded_image, reference_image)
             _validate_geometry(loaded_image, reference_image, "loaded image", "reference image")
         return loaded_image
 
@@ -912,6 +928,14 @@ def load_image(
             loaded_image = _load_dicom_series(target_path, dataset_index, apply_rescale, series_uid)
         elif path.lower().endswith((".nii", ".nii.gz")):
             loaded_image = _load_nifti(path, dataset_index)
+        elif path.lower().endswith((".nrrd", ".nhdr")):
+            from pictologics.loaders.nrrd_loader import _load_nrrd
+
+            loaded_image = _load_nrrd(path, dataset_index)
+        elif path.lower().endswith((".mha", ".mhd")):
+            from pictologics.loaders.metaimage_loader import _load_metaimage
+
+            loaded_image = _load_metaimage(path, dataset_index)
         else:
             # Attempt to load as a single DICOM file if extension is not NIfTI
             # Check if it's a DICOM SEG file first
@@ -939,6 +963,23 @@ def load_image(
                     return next(iter(seg_result.values()))
                 # Return early since reference alignment is handled by load_seg
                 return seg_result
+            if _dicom_sop_class(path) == _RTSTRUCT_SOP_CLASS:
+                from pictologics.loaders.rtstruct_loader import load_rtstruct
+
+                if reference_image is None:
+                    raise ValueError(
+                        f"'{path}' is an RTSTRUCT file: its contours need reference_image "
+                        "(the image grid to fill)."
+                    )
+                return cast(
+                    Image,
+                    load_rtstruct(
+                        path,
+                        reference_image,
+                        subvoxel_tolerance=subvoxel_tolerance,
+                        subvoxel_warning_threshold=subvoxel_warning_threshold,
+                    ),
+                )
 
             try:
                 loaded_image = _load_dicom_file(path, apply_rescale, dataset_index)
@@ -946,7 +987,10 @@ def load_image(
                 raise
             except Exception as read_error:
                 raise ValueError(
-                    f"Unsupported file format or unable to read file: {path}"
+                    f"Unsupported file format or unable to read file: {path}. Supported: "
+                    "NIfTI (.nii, .nii.gz), NRRD (.nrrd, .nhdr, .seg.nrrd), MetaImage (.mha, "
+                    ".mhd), and DICOM files and folders (also SEG, and RTSTRUCT with "
+                    "reference_image)."
                 ) from read_error
     except Exception as e:
         # Re-raise ValueErrors directly, wrap others
@@ -958,6 +1002,8 @@ def load_image(
     # or if an explicit axis transposition was requested (a transposed mask may
     # coincidentally have the same shape as the reference, e.g. cubic volumes).
     if reference_image is not None:
+        if transpose_axes is None:
+            loaded_image = _reoriented(loaded_image, reference_image)
         if loaded_image.array.shape != reference_image.array.shape or transpose_axes is not None:
             loaded_image = _position_in_reference(
                 loaded_image,
@@ -969,7 +1015,6 @@ def load_image(
                 min_overlap_fraction,
             )
         else:
-            _warn_if_mixed_coordinate_frames(loaded_image, reference_image)
             _validate_geometry(loaded_image, reference_image, "loaded image", "reference image")
 
     return loaded_image
@@ -1025,7 +1070,8 @@ def load_and_merge_images(
         dataset_index (int, optional): For multi-volume datasets, specifies which
             volume to extract for all images (0-indexed). This works for:
 
-            - **4D NIfTI files**: Selects which time point/volume to load.
+            - **4D NIfTI, NRRD and MetaImage files**: Selects which time point/volume to
+              load (for a 3D Slicer ``.seg.nrrd`` file: the layer of segments).
             - **Multi-phase DICOM series**: Selects which phase to load (e.g., cardiac
               phases, temporal positions, echo numbers). Use
               ``pictologics.utilities.get_dicom_phases()`` to discover available phases.
@@ -1418,6 +1464,39 @@ def _nifti_float64(nii_img: Any, dataset_index: int) -> npt.NDArray[Any]:
     return _row_order(_ensure_3d(nii_img.get_fdata(), dataset_index))
 
 
+def _float64_volume(
+    values: npt.NDArray[Any], sizes: Sequence[int], spatial: Sequence[int], dataset_index: int
+) -> npt.NDArray[np.float64]:
+    """The float64 (x, y, z) volume of the flat `values` of an array of `sizes`, whose first
+    axis varies fastest (as in NRRD and MetaImage files): the three `spatial` axes in their
+    order, from the volume `dataset_index` of the one other axis, if there is one. In row
+    order for a large volume, in one pass for a column-order volume of a native type of
+    the fused NIfTI load."""
+    array = values.reshape(tuple(reversed(sizes))).transpose()
+    others = [axis for axis in range(len(sizes)) if axis not in spatial]
+    if len(others) > 1:
+        raise ValueError(
+            f"The image has {len(others)} axes that are not spatial; one is the limit."
+        )
+    if others:
+        count = sizes[others[0]]
+        if not 0 <= dataset_index < count:
+            raise ValueError(
+                f"Dataset index {dataset_index} is out of bounds for 4D image with {count} volumes."
+            )
+        array = array[(slice(None),) * others[0] + (dataset_index,)]
+    if (
+        array.flags.f_contiguous
+        and array.size >= _ROW_ORDER_MIN_SIZE
+        and array.dtype.isnative
+        and array.dtype in _NIFTI_FUSED_DTYPES
+    ):
+        unscaled = np.zeros(array.shape[2], dtype=bool)
+        ones, zeros = np.ones(array.shape[2]), np.zeros(array.shape[2])
+        return _float_row_order(array, ones, zeros, unscaled, unscaled)
+    return cast(npt.NDArray[np.float64], _row_order(array.astype(np.float64)))
+
+
 def _load_nifti(path: str, dataset_index: int = 0) -> Image:
     """
     Load a NIfTI file (.nii or .nii.gz) using the nibabel library.
@@ -1453,10 +1532,11 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
         spacing_list.append(1.0)
     spacing = (spacing_list[0], spacing_list[1], spacing_list[2])
 
-    # Extract affine for origin and direction
-    affine = nii_img.affine  # type: ignore
+    # Extract affine for origin and direction. The affine maps voxels to RAS+; the
+    # package works in LPS+ (as DICOM and ITK), so the X and Y rows change sign.
+    affine = np.asarray(nii_img.affine)[:3] * [[-1.0], [-1.0], [1.0]]  # type: ignore
     origin = (float(affine[0, 3]), float(affine[1, 3]), float(affine[2, 3]))
-    direction = _normalize_direction_columns(affine[:3, :3])
+    direction = _normalize_direction_columns(affine[:, :3])
 
     return Image(
         array=array,

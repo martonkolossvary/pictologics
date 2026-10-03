@@ -13,3 +13,8 @@
       members:
         - load_seg
         - get_segment_info
+
+::: pictologics.loaders.rtstruct_loader
+    options:
+      members:
+        - load_rtstruct

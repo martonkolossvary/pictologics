@@ -1213,7 +1213,8 @@ def test_run_rois_gives_the_results_of_one_run_per_label(tmp_path: Any) -> None:
     labels[7:12, 3:9, 4:10] = 3
     labels[1:3, 9:13, 9:13] = 2
     label_map = Image(labels, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
-    nib.save(nib.Nifti1Image(labels, np.eye(4)), tmp_path / "labels.nii.gz")
+    # The NIfTI affine of the LPS+ grid of `image` (RAS+: X and Y change sign)
+    nib.save(nib.Nifti1Image(labels, np.diag([-1.0, -1.0, 1.0, 1.0])), tmp_path / "labels.nii.gz")
     pipeline = RadiomicsPipeline(load_standard=False)
     pipeline.add_config(
         "c",
@@ -4729,9 +4730,9 @@ def test_configurations_share_identical_preprocessing() -> None:
 def test_filters_of_the_roi_region_keep_every_feature() -> None:
     # A filter that no later step needs outside the ROI filters only the ROI region plus
     # its reach (LoG, wavelets, the Laws response), or for running sums (mean, Laws
-    # energy) from the image start to the region end plus the reach. Gabor filters only
-    # the slices through the region, in each of its planes. Every feature stays bit for
-    # bit.
+    # energy) from the image start to the region end plus the reach. Gabor cuts each
+    # slice through the region to the region grown by its kernel radius, in each of its
+    # planes (here the grown region is the whole slice). Every feature stays bit for bit.
     from pictologics import pipeline as pipeline_module
     from pictologics.filters import laplacian_of_gaussian
     from pictologics.filters.gabor import _apply_gabor_to_plane

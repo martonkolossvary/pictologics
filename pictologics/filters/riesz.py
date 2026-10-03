@@ -68,34 +68,39 @@ def _riesz_transfer(
 
     # Broadcast (sparse) grid to avoid a full meshgrid the size of the input.
     nu_vectors = np.meshgrid(*freqs, indexing="ij", sparse=True)
-    norm_factor = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
-    phase = np.exp(-1j * np.pi * L / 2)
 
     # A large table is built slab by slab along the first axis, with the same element-wise
     # operations (so the same values) and temporaries of one slab instead of four full
-    # volumes; the DC value stays 0, as np.where(nu_norm > 0, transfer, 0) gives.
+    # volumes.
     out_shape = np.broadcast_shapes(*(n.shape for n in nu_vectors))
     slabs = _slabs(out_shape)
-    table = None if len(slabs) == 1 else np.zeros(out_shape, dtype=np.complex128)
+    table = None if len(slabs) == 1 else np.empty(out_shape, dtype=np.complex128)
     for start, stop in slabs:
         nu = [n[start:stop] if i == 0 else n for i, n in enumerate(nu_vectors)]
-        nu_sq_norm = np.asarray(sum(n**2 for n in nu), dtype=np.float64)
-        nu_norm = np.sqrt(nu_sq_norm)
-        nu_norm_safe = np.where(nu_norm > 0, nu_norm, 1.0)  # avoid /0 at DC
-
-        numerator = np.ones(nu_norm.shape, dtype=np.float64)
-        for i, ord_val in enumerate(order):
-            if ord_val > 0:
-                numerator *= nu[i] ** ord_val
-
-        transfer = phase * norm_factor * numerator / (nu_norm_safe**L)
-        if table is None:
-            transfer = np.where(nu_norm > 0, transfer, 0)  # DC = 0; the whole table
-        else:
-            np.copyto(table[start:stop], transfer, where=nu_norm > 0)
+        transfer = _riesz_values(nu, order, L)
+        if table is not None:
+            table[start:stop] = transfer
     transfer = transfer if table is None else table
     transfer.flags.writeable = False  # cached array must not be mutated by callers
     return cast(npt.NDArray[np.complexfloating[Any, Any]], transfer)
+
+
+def _riesz_values(
+    nu: list[npt.NDArray[np.float64]], order: Tuple[int, ...], L: int
+) -> npt.NDArray[np.complex128]:
+    """The Riesz transfer values (IBSI 2 Eq. 34) at the broadcast frequency vectors `nu`
+    of each axis (radians), for the total order L; 0 at DC."""
+    norm_factor = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
+    phase = np.exp(-1j * np.pi * L / 2)
+    nu_sq_norm = np.asarray(sum(n**2 for n in nu), dtype=np.float64)
+    nu_norm = np.sqrt(nu_sq_norm)
+    nu_norm_safe = np.where(nu_norm > 0, nu_norm, 1.0)  # avoid /0 at DC
+    numerator = np.ones(nu_norm.shape, dtype=np.float64)
+    for i, ord_val in enumerate(order):
+        if ord_val > 0:
+            numerator *= nu[i] ** ord_val
+    transfer = phase * norm_factor * numerator / (nu_norm_safe**L)
+    return cast(npt.NDArray[np.complex128], np.where(nu_norm > 0, transfer, 0))
 
 
 def riesz_transform(
@@ -192,9 +197,11 @@ def _riesz_response(
     arr: npt.NDArray[np.floating[Any]],
     crop: Optional[Tuple[slice, ...]],
     order: Tuple[int, ...],
+    band: Optional[npt.NDArray[np.floating[Any]]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """The (periodic) Riesz transform of `arr` as float32, cut to `crop` (None: the
-    whole array)."""
+    whole array). A `band` table (rfftn layout, every row) filters the spectrum first,
+    in the same FFT round trip."""
     shape = tuple(arr.shape)
 
     # Transfer function depends only on (shape, order) — never on image values
@@ -207,8 +214,11 @@ def _riesz_response(
     axes = tuple(range(arr.ndim))
     workers = get_num_threads()
     # The spectrum has shape (N1, N2, N3//2 + 1), the shape of the transfer.
+    spectrum = scipy.fft.rfftn(arr, workers=workers)
+    if band is not None:
+        spectrum = _times_mirrored(spectrum, band, shape[0], 1)
     sign = (-1) ** order[0]
-    spectrum = _times_mirrored(scipy.fft.rfftn(arr, workers=workers), transfer, shape[0], sign)
+    spectrum = _times_mirrored(spectrum, transfer, shape[0], sign)
     response = scipy.fft.irfftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
     return _float32_cut(response, crop)
 
@@ -411,7 +421,7 @@ def riesz_simoncelli(
         )
         ```
     """
-    from .wavelets import _simoncelli_pad_width, simoncelli_wavelet
+    from .wavelets import _simoncelli_pad_width, _simoncelli_transfer, simoncelli_wavelet
 
     boundary = resolve_boundary(boundary)
     order = _riesz_order(order, image.ndim)
@@ -424,15 +434,15 @@ def riesz_simoncelli(
     def _core(
         arr: npt.NDArray[np.floating[Any]], crop: Optional[Tuple[slice, ...]]
     ) -> npt.NDArray[np.floating[Any]]:
-        # Apply Simoncelli wavelet (already preprocessed, skip redundant work)
-        sim_response = simoncelli_wavelet(arr, level=level)
-
         # Re-apply source_mask (PERIODIC case only, see docstring): Simoncelli's
         # global FFT spreads energy back into the invalid regions, and the Riesz
         # transform is likewise global, so re-zero before it (mirrors riesz_log).
         if source_mask is not None and boundary is BoundaryCondition.PERIODIC:
+            sim_response = simoncelli_wavelet(arr, level=level)
             sim_response = _prepare_masked_image(sim_response, source_mask)
-        return _riesz_response(sim_response, crop, order)
+            return _riesz_response(sim_response, crop, order)
+        # Else both filters in one FFT round trip (see _simoncelli_transfer)
+        return _riesz_response(arr, crop, order, _simoncelli_transfer(tuple(arr.shape), level))
 
     pad_width = _simoncelli_pad_width(level) + _RIESZ_BASE_PAD
     result = _apply_with_boundary_padding(_core, image, boundary, pad_width)

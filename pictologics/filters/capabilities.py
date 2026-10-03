@@ -207,8 +207,8 @@ FILTER_CAPABILITIES: dict[str, FilterCapability] = {
         anisotropic_spacing="not_applicable",
     ),
     # wavelets.py: simoncelli_wavelet(image, level, boundary, source_mask). Isotropic
-    # 3D band-pass transfer function applied via full FFT (scipy.fft.fftn/ifftn); no
-    # spacing_mm. The `boundary` parameter already exists on the signature
+    # 3D band-pass transfer function applied via real FFT (scipy.fft.rfftn/irfftn, with
+    # the even part of the band); no spacing_mm. The `boundary` parameter already exists on the signature
     # (default BoundaryCondition.PERIODIC). PERIODIC runs the FFT directly; any other
     # boundary is realised by the shared pad-filter-crop helper in base.py, so the
     # requested boundary is honoured approximately (the transform is still periodic on

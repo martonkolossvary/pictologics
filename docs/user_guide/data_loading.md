@@ -23,6 +23,9 @@ from pictologics import Image
 !!! note "Physical Geometry"
     `Image.direction` stores unit direction cosines, while voxel sizes are stored separately in `Image.spacing`. NIfTI affine columns are normalized on load, and DICOM row/column orientation is converted to the same `(X, Y, Z)` convention.
 
+!!! note "World Frame"
+    `Image.origin` and `Image.direction` are in the LPS+ world frame (Left, Posterior, Superior) for every format, as in DICOM and ITK/SimpleITK. A NIfTI affine is in RAS+, so the loader changes the sign of its X and Y rows. Give an in-memory `Image` its geometry in LPS+ too.
+
 ## Basic Loading with `load_image()`
 
 The `load_image()` function is the primary entry point for loading data. It automatically detects the file format and handles the appropriate loading strategy.
@@ -39,6 +42,31 @@ mask = load_image("path/to/segmentation.nii.gz")
 print(f"Shape: {image.array.shape}")
 print(f"Spacing: {image.spacing}")
 print(f"Origin: {image.origin}")
+```
+
+### Loading NRRD and MetaImage Files
+
+`load_image()` also reads NRRD files (`.nrrd`, and `.nhdr` headers with a detached data file) and MetaImage files (`.mha`, and `.mhd` headers with a `.raw` or `.zraw` data file), as 3D Slicer and ITK write them. Pictologics reads them with its own readers, so you do not need another package.
+
+```python
+image = load_image("path/to/scan.nrrd")
+mask = load_image("path/to/segmentation.seg.nrrd", reference_image=image)
+```
+
+- The geometry is in the LPS+ frame, as for every format. The loader converts a NRRD file in the RAS or LAS space.
+- A file with one more axis (a 4D image, or the layers of a `.seg.nrrd` file) gives the volume of `dataset_index`, as a 4D NIfTI file does.
+- The readers take raw, gzip, bzip2 and text data (NRRD), and raw, compressed and text data (MetaImage). They do not take data in more than one file, or images with more than one channel.
+
+A 3D Slicer `.seg.nrrd` file holds each segment as a label value in a layer. Overlapping segments need more than one layer. `get_segment_info()` lists the segments:
+
+```python
+from pictologics.loaders import get_segment_info
+
+for segment in get_segment_info("path/to/segmentation.seg.nrrd"):
+    print(segment["segment_label"], segment["label_value"], segment["layer"])
+
+# The layer of a segment: its voxels hold its label value
+layer = load_image("path/to/segmentation.seg.nrrd", reference_image=image, dataset_index=1)
 ```
 
 ### Loading DICOM Series
@@ -389,6 +417,34 @@ mask = load_seg(
 `load_and_merge_images()`, including `transpose_axes`, `subvoxel_tolerance`,
 `subvoxel_warning_threshold`, and `min_overlap_fraction`.
 
+## DICOM RTSTRUCT Files
+
+A DICOM RT Structure Set (RTSTRUCT) holds the contours of each ROI as polygons, not voxels. Pictologics fills them onto the grid of the image that the contours belong to, so the image is necessary:
+
+```python
+from pictologics import RadiomicsPipeline, load_image, load_rtstruct
+from pictologics.loaders import get_segment_info
+
+ct = load_image("path/to/ct_folder/")
+
+# The ROIs: ROI Number, name and number of closed contours
+for roi in get_segment_info("path/to/rtstruct.dcm"):
+    print(roi["segment_number"], roi["segment_label"], roi["contour_count"])
+
+# One label image: the label of each ROI is its ROI Number
+labels = load_image("path/to/rtstruct.dcm", reference_image=ct)
+
+# Binary masks by ROI name, which keep overlapping ROIs (such as a GTV in a PTV)
+masks = load_rtstruct("path/to/rtstruct.dcm", ct, roi_names=["GTV", "PTV"], combine_rois=False)
+results = RadiomicsPipeline().run(ct, masks["GTV"], config_names=["standard_fbn_32"])
+```
+
+- A voxel is in an ROI when its center lies inside an odd number of the contours of the ROI on its slice (the even-odd rule). So a contour inside another contour cuts a hole.
+- A center on an edge is inside on one side of the edge only, so two ROIs that share an edge share no voxel.
+- The plane of each contour must be a slice plane of the image. A contour up to `subvoxel_tolerance` voxels (default 0.5) away from a slice is filled on the nearest slice, with a warning above `subvoxel_warning_threshold` (default 0.01).
+- In one label image, a later ROI wins where ROIs overlap. Use `combine_rois=False` for overlapping ROIs.
+- `run(image, mask="rtstruct.dcm")` fills the RTSTRUCT onto the grid of the image, as one label image.
+
 ## Merging Multiple Images with `load_and_merge_images()`
 
 When you have multiple segmentation masks (e.g., different organs, or masks split across files), use `load_and_merge_images()` to combine them.
@@ -443,6 +499,14 @@ Medical imaging software often stores segmentation masks as **cropped volumes** 
 
 The `pictologics` loader uses the spatial metadata (`ImagePositionPatient` for DICOM, affine matrix for NIfTI) to calculate where the cropped mask belongs in the full volume.
 
+A mask can hold the grid of the image in another voxel order: axes flipped or swapped, as some converters write NIfTI files. The loader then turns the mask to the voxel order of the image first. So a DICOM image and a NIfTI mask on the same grid load together:
+
+```python
+ct = load_image("path/to/dicom_folder/")
+mask = load_image("path/to/segmentation.nii.gz", reference_image=ct)
+# mask.array has the shape and the voxel order of ct.array
+```
+
 
 ### Repositioning a Single Cropped Mask
 
@@ -475,7 +539,7 @@ combined = load_and_merge_images(
 
 ### Handling Axis Transposition
 
-If your masks have different axis ordering (e.g., from different software), specify the transformation:
+The loader turns the axes itself when the geometry of the file tells the voxel order. Use `transpose_axes` only for a file with swapped axes that its geometry does not show:
 
 ```python
 combined = load_and_merge_images(
@@ -520,7 +584,7 @@ combined = load_and_merge_images(
 | Issue | Behavior |
 |-------|----------|
 | Spacing mismatch | `ValueError` raised (resampling not yet supported) |
-| Orientation mismatch | `ValueError` raised; reorientation or nearest-neighbor resampling is required |
+| Orientation mismatch | `ValueError` raised when the mask axes are not the image axes in another order or with other signs; resample the mask to the image grid |
 | Sub-voxel drift > `subvoxel_warning_threshold` | `UserWarning` emitted, nearest-voxel snapping applied |
 | Sub-voxel drift > `subvoxel_tolerance` | `ValueError` raised |
 | Overlap fraction < `min_overlap_fraction` | `ValueError` raised to prevent wrong-patient mask loading |
@@ -553,9 +617,10 @@ full_mask = create_full_mask(image)
 
 | Function | Purpose |
 |----------|---------|
-| `load_image()` | Main entry point - loads NIfTI, DICOM series, single DICOM, or DICOM SEG |
+| `load_image()` | Main entry point - loads NIfTI, NRRD (also `.seg.nrrd`), MetaImage, DICOM series, single DICOM, DICOM SEG, or DICOM RTSTRUCT (with `reference_image`) |
 | `load_seg()` | Detailed DICOM SEG loading with segment selection and alignment |
-| `get_segment_info()` | Inspect available segments in a DICOM SEG file |
+| `load_rtstruct()` | DICOM RTSTRUCT contours filled onto a reference image, as one label image or masks by ROI name |
+| `get_segment_info()` | Inspect available segments in a DICOM SEG, RTSTRUCT or `.seg.nrrd` file |
 | `load_and_merge_images()` | Combine multiple images/masks with various strategies |
 | `create_full_mask()` | Create an all-ones mask matching image geometry |
 | `get_dicom_phases()` | Discover available phases in multi-phase DICOM |

@@ -520,20 +520,36 @@ def _align_to_reference(
 
 
 def get_segment_info(path: str | Path) -> list[dict[str, str | int]]:
-    """Get information about segments in a DICOM SEG file.
+    """Get information about the segments of a DICOM SEG file, the ROIs of a DICOM
+    RTSTRUCT file, or the segments of a 3D Slicer .seg.nrrd file.
 
     Args:
-        path: Path to the DICOM SEG file.
+        path: Path to the DICOM SEG file, the RTSTRUCT file, or the .seg.nrrd file.
 
     Returns:
-        List of dicts with segment information:
+        List of dicts with segment information. For DICOM SEG:
         - segment_number: int
         - segment_label: str
         - segment_description: str (if available)
         - algorithm_type: str (if available)
 
+        For RTSTRUCT:
+        - segment_number: int (the ROI Number, the label of ``load_rtstruct``)
+        - segment_label: str (the ROI Name)
+        - contour_count: int (closed planar contours)
+        - interpreted_type: str (RTROIInterpretedType, if available)
+
+        For .seg.nrrd (the fields ``Segment<N>_...`` of the header):
+        - segment_index: int (N)
+        - segment_label: str (the segment name)
+        - segment_id: str
+        - label_value: int (the value of the segment in its layer)
+        - layer: int (the volume that ``load_image(path, dataset_index=layer)`` gives,
+          when overlapping segments need more than one layer)
+
     Raises:
-        ValueError: If the file is not a valid DICOM SEG object.
+        ValueError: If the file is not a valid DICOM SEG or RTSTRUCT object, or a NRRD
+            file without segments.
 
     Example:
         ```python
@@ -544,6 +560,16 @@ def get_segment_info(path: str | Path) -> list[dict[str, str | int]]:
             print(f"{seg['segment_number']}: {seg['segment_label']}")
         ```
     """
+    if str(path).lower().endswith((".nrrd", ".nhdr")):
+        from pictologics.loaders.nrrd_loader import _nrrd_segment_info
+
+        return _nrrd_segment_info(path)
+    from pictologics.loader import _RTSTRUCT_SOP_CLASS, _dicom_sop_class
+
+    if _dicom_sop_class(str(path)) == _RTSTRUCT_SOP_CLASS:
+        from pictologics.loaders.rtstruct_loader import _rtstruct_info
+
+        return _rtstruct_info(path)
     seg = _read_seg(path, stop_before_pixels=True)  # the header only
 
     segments = []

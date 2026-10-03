@@ -1819,8 +1819,9 @@ class RadiomicsPipeline:
 
         Args:
             image: Path to the image, or an Image.
-            rois: Path to the label map (for example a NIfTI file or a DICOM SEG), or an
-                Image, on the grid of the image.
+            rois: Path to the label map (for example a NIfTI file, a DICOM SEG, or an
+                RTSTRUCT, whose labels are its ROI Numbers), or an Image, on the grid of the
+                image.
             labels: The ROIs to run: the labels, or a mapping from ROI names to labels.
                 Default: every label in the map.
             subject_id: The subject, for the processing log.

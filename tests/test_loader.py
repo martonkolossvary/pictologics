@@ -18,13 +18,13 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 from pictologics.loader import (
     Image,
+    _direction_matrix,
     _ensure_3d,
     _find_best_dicom_series_dir,
     _load_dicom_file,
     _load_dicom_series,
     _load_nifti,
     _row_order,
-    _warn_if_mixed_coordinate_frames,
     create_full_mask,
     load_and_merge_images,
     load_image,
@@ -322,7 +322,8 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(img.array.shape, (10, 10, 5))
         self.assertEqual(img.spacing, (1.0, 1.0, 2.0))
         self.assertEqual(img.origin, (0.0, 0.0, 0.0))
-        np.testing.assert_array_equal(img.direction, np.eye(3))
+        # The RAS+ axes of the affine in the LPS+ frame of the package
+        np.testing.assert_array_equal(img.direction, np.diag([-1.0, -1.0, 1.0]))
         self.assertEqual(img.modality, "Nifti")
 
     @patch("pictologics.loader.nib.load")
@@ -339,13 +340,16 @@ class TestLoader(unittest.TestCase):
         )
         affine = np.eye(4)
         affine[:3, :3] = direction @ np.diag([2.0, 3.0, 4.0])
+        affine[:3, 3] = (10.0, -20.0, 30.0)
         mock_img.affine = affine
         mock_nib_load.return_value = mock_img
 
         img = _load_nifti("test.nii")
 
         self.assertEqual(img.spacing, (2.0, 3.0, 4.0))
-        np.testing.assert_allclose(img.direction, direction)
+        # RAS+ to LPS+: the X and Y rows change sign
+        np.testing.assert_allclose(img.direction, np.diag([-1.0, -1.0, 1.0]) @ direction)
+        self.assertEqual(img.origin, (-10.0, 20.0, 30.0))
 
     @patch("pictologics.loader.nib.load")
     def test_load_nifti_2d_zooms(self, mock_nib_load: MagicMock) -> None:
@@ -838,21 +842,6 @@ class TestLoader(unittest.TestCase):
 
         img = _load_dicom_file("seg2d.dcm")
         self.assertEqual(img.origin, (3.0, 4.0, 5.0))
-
-    def test_warn_if_mixed_coordinate_frames(self) -> None:
-        # NIfTI with DICOM warns; an in-memory image or a merged mask has no known frame.
-        import warnings
-
-        nifti = Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0), modality="Nifti")
-        dicom = Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0), modality="CT")
-        with self.assertWarns(UserWarning):
-            _warn_if_mixed_coordinate_frames(nifti, dicom)
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            for other in ("Unknown", "MergedImage"):
-                unknown = Image(np.zeros((2, 2, 2)), (1, 1, 1), (0, 0, 0), modality=other)
-                _warn_if_mixed_coordinate_frames(nifti, unknown)
-                _warn_if_mixed_coordinate_frames(unknown, dicom)
 
     @patch("pictologics.loader._is_dicom_seg")
     @patch("pictologics.loader.Path")
@@ -1765,7 +1754,7 @@ class TestRepositioning(unittest.TestCase):
             _position_in_reference(cropped, reference, transpose_axes=(0, 0, 1))
 
     def test_position_in_reference_orientation_mismatch_error(self) -> None:
-        """Mismatched orientations require real reorientation/resampling."""
+        """Axes that are not the reference axes in another order need resampling."""
         from pictologics.loader import _position_in_reference
 
         reference = Image(
@@ -1776,7 +1765,8 @@ class TestRepositioning(unittest.TestCase):
             modality="CT",
         )
 
-        rotated = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
+        c, s = np.cos(np.pi / 6), np.sin(np.pi / 6)
+        rotated = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=float)
         cropped = Image(
             array=np.ones((3, 3, 3)),
             spacing=(1.0, 1.0, 1.0),
@@ -2491,6 +2481,11 @@ if __name__ == "__main__":
 # --- Series choice, phases and geometry checks (synthetic files, no patient data) ---
 
 
+def _ras(lps: np.ndarray) -> np.ndarray:
+    """The NIfTI (RAS+) affine of an LPS+ voxel-to-world matrix."""
+    return np.diag([-1.0, -1.0, 1.0, 1.0]) @ lps
+
+
 def _write_slice(
     path: "os.PathLike[str]",
     *,
@@ -2532,6 +2527,102 @@ def _write_slice(
     for key, value in tags.items():
         setattr(ds, key, value)
     ds.save_as(Path(path), enforce_file_format=True)
+
+
+def test_reoriented_turns_the_axes_to_the_reference() -> None:
+    # Axes that are the reference axes in another order and with other signs are turned:
+    # the array, the spacing, the origin (the new first voxel) and the source mask. The
+    # same axes, or axes at 30 degrees, keep the image as it is.
+    from numpy.testing import assert_array_equal
+
+    from pictologics.loader import _reoriented
+
+    reference = Image(np.zeros((4, 3, 2)), (1.0, 2.0, 3.0), (5.0, 6.0, 7.0))
+    values = np.arange(24.0).reshape(4, 3, 2)
+    stored = np.transpose(values, (2, 0, 1))[:, ::-1, :]  # (z, x flipped, y)
+    direction = np.eye(3)[:, [2, 0, 1]] * [1.0, -1.0, 1.0]
+    image = Image(stored, (3.0, 1.0, 2.0), (8.0, 6.0, 7.0), direction, source_mask=stored > 5)
+    turned = _reoriented(image, reference)
+    assert_array_equal(turned.array, values)
+    assert turned.array.flags.c_contiguous
+    assert turned.spacing == (1.0, 2.0, 3.0) and turned.origin == (5.0, 6.0, 7.0)
+    assert_array_equal(turned.direction, np.eye(3))
+    assert_array_equal(turned.source_mask, values > 5)
+    assert _reoriented(reference, reference) is reference
+    c, s = np.cos(np.pi / 6), np.sin(np.pi / 6)
+    oblique = Image(
+        values, (1.0, 2.0, 3.0), (5.0, 6.0, 7.0), np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+    )
+    assert _reoriented(oblique, reference) is oblique
+
+
+def test_dicom_image_with_nifti_masks_in_other_voxel_orders(tmp_path: "os.PathLike[str]") -> None:
+    # A NIfTI mask on the grid of a DICOM series loads onto it without a warning: in the
+    # same voxel order (as ITK and 3D Slicer write), with flipped rows (as dcm2niix
+    # writes), with swapped and flipped axes, and cropped. The pipeline then gives the
+    # features of the same mask in memory.
+    import warnings
+    from pathlib import Path
+
+    import nibabel as nib
+
+    from pictologics import RadiomicsPipeline
+
+    folder = Path(tmp_path) / "ct"
+    folder.mkdir()
+    rng = np.random.default_rng(6)
+    for k in range(6):
+        _write_slice(
+            folder / f"{k}.dcm", number=k + 1, position=(10.0 + 1.5 * k, -20.0, 30.0),
+            pixels=rng.integers(0, 100, (8, 7)).astype(np.int16),
+            orientation=(0.0, 1.0, 0.0, 0.0, 0.0, -1.0),
+        )  # fmt: skip
+    image = load_image(folder)
+    pattern = np.zeros(image.array.shape)
+    pattern[1:5, 2:6, 1:4] = 1.0
+    pattern[2, 3, 2] = 2.0
+    d, s, o = (
+        _direction_matrix(image.direction),
+        np.asarray(image.spacing),
+        np.asarray(image.origin),
+    )
+
+    def affine(direction: np.ndarray, spacing: np.ndarray, origin: np.ndarray) -> np.ndarray:
+        lps = np.eye(4)
+        lps[:3, :3], lps[:3, 3] = direction * spacing, origin
+        return _ras(lps)
+
+    flipped = d * [1.0, -1.0, 1.0]
+    swapped = d[:, [2, 0, 1]] * [-1.0, 1.0, 1.0]
+    last_row = d[:, 1] * s[1] * (pattern.shape[1] - 1)
+    cases = {
+        "same": (pattern, affine(d, s, o)),
+        "rows": (pattern[:, ::-1], affine(flipped, s, o + last_row)),
+        "axes": (
+            np.transpose(pattern, (2, 0, 1))[::-1],
+            affine(swapped, s[[2, 0, 1]], o + d[:, 2] * s[2] * (pattern.shape[2] - 1)),
+        ),
+        "crop": (
+            pattern[1:5, 2:6, 1:4][:, ::-1],
+            affine(flipped, s, o + d @ (np.array([1, 2, 1]) * s) + d[:, 1] * s[1] * 3),
+        ),
+    }
+    for name, (array, matrix) in cases.items():
+        path = Path(tmp_path) / f"{name}.nii.gz"
+        nib.save(nib.Nifti1Image(array.astype(np.uint8), matrix), path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            mask = load_image(path, reference_image=image)
+        np.testing.assert_array_equal(mask.array, pattern)
+        np.testing.assert_allclose(mask.origin, image.origin, atol=1e-9)
+    pipeline = RadiomicsPipeline()
+    pipeline.add_config(
+        "first_order", [{"step": "extract_features", "params": {"families": ["intensity"]}}]
+    )
+    in_memory = Image(pattern.astype(np.uint8), image.spacing, image.origin, image.direction)
+    from_file = pipeline.run(folder, Path(tmp_path) / "rows.nii.gz", config_names=["first_order"])
+    expected = pipeline.run(image, in_memory, config_names=["first_order"])
+    assert from_file["first_order"].equals(expected["first_order"])
 
 
 def test_dicom_folder_with_two_series_needs_a_series_uid(tmp_path: "os.PathLike[str]") -> None:
@@ -2831,15 +2922,15 @@ def test_merging_masks_in_their_boxes_equals_the_full_size_merge(
         affine[:3, 3] = np.array(offset) * (1.0, 1.0, 2.0)
         data = rng.integers(0, 4, shape).astype(np.float64) * (k + 1)
         paths.append(Path(tmp_path) / f"box{k}.nii.gz")
-        nib.save(nib.Nifti1Image(data, affine), paths[-1])
+        nib.save(nib.Nifti1Image(data, _ras(affine)), paths[-1])
         full = np.zeros(reference.array.shape)
         full[2 + k : 10 + k, 3:9, 1:6] = data[:8, :6, :5] if k < 2 else 0.0
         full_paths.append(Path(tmp_path) / f"full{k}.nii.gz")
-        nib.save(nib.Nifti1Image(full, np.diag([1.0, 1.0, 2.0, 1.0])), full_paths[-1])
+        nib.save(nib.Nifti1Image(full, _ras(np.diag([1.0, 1.0, 2.0, 1.0]))), full_paths[-1])
     outside = Path(tmp_path) / "outside.nii.gz"
     away = np.diag([1.0, 1.0, 2.0, 1.0])
     away[:3, 3] = (40.0, 40.0, 80.0)
-    nib.save(nib.Nifti1Image(np.ones((4, 4, 4)), away), outside)
+    nib.save(nib.Nifti1Image(np.ones((4, 4, 4)), _ras(away)), outside)
     for fill in (0.0, 7.0):
         for rule in ("max", "min", "first", "last"):
             for relabel in (False, True):

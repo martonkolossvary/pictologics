@@ -1338,8 +1338,8 @@ def test_wavelet_passes_in_place_give_the_new_array_result() -> None:
     assert_array_equal(image, before)
 
 
-def _simoncelli_whole(shape: tuple[int, ...], level: int) -> np.ndarray:
-    """The whole Simoncelli table, in one volume."""
+def _simoncelli_band(shape: tuple[int, ...], level: int) -> np.ndarray:
+    """The Simoncelli band on the whole fftn grid, in one volume."""
     max_freq = 1.0 / (2 ** (level - 1))
     center = (np.array(shape) - 1.0) / 2.0
     grids = [np.fft.ifftshift((np.arange(s) - center[i]) / center[i]) for i, s in enumerate(shape)]
@@ -1348,6 +1348,14 @@ def _simoncelli_whole(shape: tuple[int, ...], level: int) -> np.ndarray:
     with np.errstate(all="ignore"):
         g_sim = np.cos(np.pi / 2.0 * np.log2(np.where(val > 0, val, 1.0)))
     return np.where((dist >= max_freq / 4.0) & (dist <= max_freq), g_sim, 0.0)
+
+
+def _simoncelli_whole(shape: tuple[int, ...], level: int) -> np.ndarray:
+    """The whole Simoncelli table (rfftn layout), in one volume: the even part of the
+    band, (g(k) + g(-k)) / 2."""
+    band = _simoncelli_band(shape, level)
+    negative = band[np.ix_(*[(-np.arange(s)) % s for s in shape])]  # g(-k)
+    return (0.5 * (band + negative))[..., : shape[-1] // 2 + 1]
 
 
 def _riesz_whole(shape: tuple[int, ...], order: tuple[int, ...]) -> np.ndarray:
@@ -1401,8 +1409,8 @@ def test_fft_filters_match_the_out_of_place_product() -> None:
     for shape in ((12, 11, 10), (9, 8, 7)):
         for dtype in (np.float64, np.float32):
             image = rng.normal(size=shape).astype(dtype)
-            spectrum = scipy.fft.fftn(image, workers=-1) * _simoncelli_whole(shape, 2)
-            simoncelli = np.real(scipy.fft.ifftn(spectrum, s=shape, workers=-1)).astype(np.float32)
+            spectrum = scipy.fft.rfftn(image, workers=-1) * _simoncelli_whole(shape, 2)
+            simoncelli = scipy.fft.irfftn(spectrum, s=shape, workers=-1).astype(np.float32)
             spectrum = scipy.fft.rfftn(image, workers=-1) * _riesz_whole(shape, (1, 1, 0))
             riesz = scipy.fft.irfftn(spectrum, s=shape, workers=-1).astype(np.float32)
             settings = (
@@ -1422,9 +1430,36 @@ def test_fft_filters_match_the_out_of_place_product() -> None:
                     assert_array_equal(riesz_transform(image, order=(1, 1, 0)), riesz)
 
 
+def test_simoncelli_filters_in_one_real_round_trip() -> None:
+    """The even part of the band gives the real part of the complex response, so the
+    Simoncelli filter runs in one rfft round trip. Riesz-Simoncelli applies both tables in
+    the same round trip: the values of the two filters one after the other, without the
+    float32 rounding between them, so closer to a float64 reference."""
+    import scipy.fft
+
+    rng = np.random.default_rng(5)
+    for shape in ((12, 11, 10), (9, 8, 7)):
+        image = rng.normal(size=shape).astype(np.float32)
+        for level in (1, 2):
+            spectrum = scipy.fft.fftn(image.astype(np.float64)) * _simoncelli_band(shape, level)
+            complex_response = np.real(scipy.fft.ifftn(spectrum))
+            peak = np.abs(complex_response).max()
+            response = simoncelli_wavelet(image, level=level)
+            assert np.abs(response - complex_response).max() < 1e-6 * peak
+            for order in ((1, 0, 0), (0, 1, 1), (2, 0, 0)):
+                table = _simoncelli_whole(shape, level) * _riesz_whole(shape, order)
+                spectrum = scipy.fft.rfftn(image.astype(np.float64)) * table
+                reference = scipy.fft.irfftn(spectrum, s=shape)
+                peak = np.abs(reference).max()
+                one_trip = riesz_simoncelli(image, level=level, order=order)
+                two_filters = riesz_transform(response, order=order)
+                assert np.abs(one_trip - reference).max() < 1e-6 * peak
+                assert np.abs(two_filters - reference).max() < 1e-4 * peak
+
+
 def test_transfer_functions_built_in_slabs_match_one_volume() -> None:
-    """The slab-by-slab transfer tables equal the kept rows of the whole-volume tables,
-    bit for bit (a small table keeps all its rows)."""
+    """The slab-by-slab transfer tables equal the whole-volume tables (the Riesz table:
+    its kept rows), bit for bit (a small Riesz table keeps all its rows)."""
     from pictologics.filters import base, riesz, wavelets
 
     def small_slabs(shape: tuple[int, ...]) -> list[tuple[int, int]]:
@@ -1432,17 +1467,16 @@ def test_transfer_functions_built_in_slabs_match_one_volume() -> None:
 
     assert base._slabs((5, 3, 2), elements=6, minimum=0) == [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)]
     assert base._slabs((5, 3, 2)) == [(0, 5)]  # a small table is one slab
-    assert wavelets._simoncelli_transfer.__wrapped__((9, 8, 7), 1).shape == (9, 8, 7)
+    assert wavelets._simoncelli_transfer.__wrapped__((9, 8, 7), 1).shape == (9, 8, 4)
     with (
         patch.object(wavelets, "_slabs", small_slabs),
         patch.object(riesz, "_slabs", small_slabs),
         patch.object(base, "_HALF_TABLE_MIN", 0),
     ):
         for shape in ((9, 8, 7), (6, 10, 5)):
-            kept = slice((shape[0] + 1) // 2)
             for level in (1, 2):
                 built = wavelets._simoncelli_transfer.__wrapped__(shape, level)
-                assert_array_equal(built, _simoncelli_whole(shape, level)[kept])
+                assert_array_equal(built, _simoncelli_whole(shape, level))
                 assert not built.flags.writeable
             kept = slice(shape[0] // 2 + 1)
             for order in ((1, 0, 0), (0, 1, 1), (0, 0, 2)):
@@ -1541,7 +1575,7 @@ def test_filter_threads_follow_the_numba_thread_count() -> None:
             stack.enter_context(patch.object(module, "get_num_threads", return_value=2))
         ffts = [
             stack.enter_context(patch.object(scipy.fft, name, wraps=getattr(scipy.fft, name)))
-            for name in ("fftn", "ifftn", "rfftn", "irfftn")
+            for name in ("rfftn", "irfftn")
         ]
         for name, run in fft_runs.items():
             assert_array_equal(run(), expected[name])
@@ -1710,3 +1744,28 @@ def test_slab_ufunc_gives_the_values_of_one_call() -> None:
             assert_array_equal(in_place, -(a / 24))
     finally:
         numba.set_num_threads(threads)
+
+
+def test_gabor_region_cuts_each_slice_to_the_region() -> None:
+    """With a region, each slice is cut to the region grown by the kernel radius. The
+    region keeps the values of the whole image (to float32 rounding), at a region inside
+    the image, at an image edge, with anisotropic spacing and over three planes."""
+    from unittest.mock import patch
+
+    import pictologics.filters.gabor as gabor
+
+    rng = np.random.default_rng(6)
+    image = rng.normal(0.0, 50.0, (70, 64, 20))
+    cases = (
+        ((slice(30, 40), slice(28, 36), slice(5, 15)), {}),
+        ((slice(0, 9), slice(55, 64), slice(0, 20)), {"spacing_mm": (0.8, 1.2, 2.0)}),
+        ((slice(30, 40), slice(28, 36), slice(5, 15)), {"average_over_planes": True}),
+    )
+    for region, extra in cases:
+        kwargs = {"sigma_mm": 2.0, "lambda_mm": 3.0, "theta": 0.4, **extra}
+        with patch.object(gabor, "_apply_gabor_to_plane", wraps=gabor._apply_gabor_to_plane) as spy:
+            part = gabor_filter(image, **kwargs, region=region)
+        assert all(call.kwargs["window"] is not None for call in spy.call_args_list)
+        whole = gabor_filter(image, **kwargs)[region]
+        assert part.shape == whole.shape and part.dtype == np.float32
+        np.testing.assert_allclose(part, whole, rtol=0, atol=1e-6 * np.abs(whole).max())
