@@ -1139,7 +1139,11 @@ def test_get_log_copies_the_entries_with_their_run_time() -> None:
         "empty", [{"step": "resegment", "params": {"range_min": -5, "range_max": -1}}, extract]
     )
     pipeline.add_config(
-        "error", [{"step": "filter", "params": {"type": "gabor", "sigma_mm": -1.0}}, extract]
+        "error",
+        [
+            {"step": "filter", "params": {"type": "gabor", "sigma_mm": -1.0, "lambda_mm": 2.0}},
+            extract,
+        ],
     )
     pipeline.run(image, mask, config_names=["ok", "empty", "error"])
     log = pipeline.get_log()
@@ -2740,7 +2744,12 @@ def test_step_filter_params_provenance_full_log_json_roundtrip(
         [
             {
                 "step": "filter",
-                "params": {"type": "riesz", "variant": "log", "boundary": BoundaryCondition.ZERO},
+                "params": {
+                    "type": "riesz",
+                    "variant": "log",
+                    "sigma_mm": 1.0,
+                    "boundary": BoundaryCondition.ZERO,
+                },
             }
         ],
         source_mode="roi_only",
@@ -4989,13 +4998,36 @@ def test_merge_configs_marks_the_plan_out_of_date(pipeline: RadiomicsPipeline) -
 # --- Config checks, input types and small fixes ---
 
 
+def test_add_config_finds_missing_filter_parameters() -> None:
+    # A filter parameter without a default is a config problem when the step leaves it
+    # out (the Laws kernels have the step default; an unknown Riesz variant is the
+    # problem itself).
+    for params, missing in (
+        ({"type": "gaussian"}, ["sigma_mm"]),
+        ({"type": "log", "truncate": 3.0}, ["sigma_mm"]),
+        ({"type": "gabor", "sigma_mm": 2.0}, ["lambda_mm"]),
+        ({"type": "riesz"}, ["order"]),
+        ({"type": "riesz", "variant": "log", "order": (1, 0, 0)}, ["sigma_mm"]),
+        ({"type": "riesz", "variant": "simoncelli"}, []),
+        ({"type": "laws"}, []),
+        ({"type": "mean"}, []),
+    ):
+        problems = _steps_problems([{"step": "filter", "params": params}])
+        assert problems == [f"step 0 (filter): missing parameter '{name}'" for name in missing]
+    problems = _steps_problems([{"step": "filter", "params": {"type": "riesz", "variant": "logg"}}])
+    assert problems == ["step 0 (filter): unknown riesz variant 'logg' (did you mean 'log'?)"]
+
+
 def test_add_config_checks_the_filter_values() -> None:
     for params, message in (
         ({"type": "wavelet", "level": 0}, "level must be a whole number of 1 or more, not 0"),
         ({"type": "wavelet", "decomposition": "LH"}, "decomposition must be 3 letters L or H"),
         ({"type": "simoncelli", "level": -1}, "level must be a whole number of 1 or more, not -1"),
         ({"type": "riesz", "order": (1, 0)}, "order must be 3 whole numbers of 0 or more"),
-        ({"type": "riesz", "variant": "log", "order": (0, 0, 0)}, "At least one order component"),
+        (
+            {"type": "riesz", "variant": "log", "sigma_mm": 1.0, "order": (0, 0, 0)},
+            "At least one order component",
+        ),
     ):
         problems = _steps_problems([{"step": "filter", "params": params}])
         assert len(problems) == 1 and problems[0].startswith(f"step 0 (filter): {message}")
@@ -5141,7 +5173,7 @@ def test_add_config_lists_every_problem_with_a_hint() -> None:
         {"step": "resample", "params": {}},
     ]
     pipeline = RadiomicsPipeline(load_standard=False)
-    with pytest.raises(ValueError, match="Configuration 'bad' has 22 problem") as error:
+    with pytest.raises(ValueError, match="Configuration 'bad' has 23 problem") as error:
         pipeline.add_config("bad", bad)
     message = str(error.value)
     for expected in (
@@ -5157,6 +5189,7 @@ def test_add_config_lists_every_problem_with_a_hint() -> None:
         "step 7 (discretise): FIXED_CUTOFFS needs cutoffs",
         "step 8 (filter): unknown filter type 'gausian' (did you mean 'gaussian'?)",
         "step 9 (filter): unknown parameter 'sigma' (did you mean 'sigma_mm'?)",
+        "step 9 (filter): missing parameter 'sigma_mm'",
         "step 10 (filter): unknown riesz variant 'logg' (did you mean 'log'?)",
         "step 11 (filter): unknown parameter 'kernels' (did you mean 'kernel'?)",
         "step 12 (extract_features): unknown parameter 'familes' (did you mean 'families'?)",

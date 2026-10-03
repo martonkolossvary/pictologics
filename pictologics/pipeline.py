@@ -676,13 +676,32 @@ def _hint(word: Any, options: Any) -> str:
     return f" (did you mean '{by_lower[match[0]]}'?)" if match else ""
 
 
+def _filter_function(params: dict[str, Any]) -> Any:
+    """The filter function of a filter step (for a Riesz step, that of its variant)."""
+    filter_type = str(params["type"])
+    if filter_type == "riesz":
+        return _RIESZ_FUNCTIONS.get(params.get("variant", "base"), riesz_transform)
+    return _FILTER_FUNCTIONS[filter_type]
+
+
+def _missing_filter_parameters(params: dict[str, Any]) -> list[str]:
+    """The parameters without a default that the filter of a filter step needs and that the
+    step does not give (the image aside; the Laws kernels have the step default)."""
+    if params["type"] == "riesz" and params.get("variant", "base") not in _RIESZ_FUNCTIONS:
+        return []  # the unknown variant is the problem
+    signature = list(inspect.signature(_filter_function(params)).parameters.values())[1:]
+    return [
+        p.name
+        for p in signature
+        if p.default is inspect.Parameter.empty and p.name != "kernels" and p.name not in params
+    ]
+
+
 def _filter_parameters(params: dict[str, Any]) -> set[str]:
     """The step parameters that the filter of a filter step takes (its keyword arguments)."""
     filter_type = str(params["type"])
-    function = _FILTER_FUNCTIONS[filter_type]
-    if filter_type == "riesz":
-        function = _RIESZ_FUNCTIONS.get(params.get("variant", "base"), riesz_transform)
-    names = set(list(inspect.signature(function).parameters)[1:]) - {"source_mask", "region"}
+    names = set(list(inspect.signature(_filter_function(params)).parameters)[1:])
+    names -= {"source_mask", "region"}
     if filter_type == "laws":
         names = (names - {"kernels"}) | {"kernel"}  # the step's 'kernel' is the first argument
     if filter_type == "riesz":
@@ -841,6 +860,9 @@ def _config_problems(steps: Any, source_mode: Any = "full_image") -> list[str]:
         for key in params:
             if key not in allowed:
                 problems.append(f"{where}: unknown parameter '{key}'{_hint(key, allowed)}")
+        if name == "filter":
+            for key in _missing_filter_parameters(params):
+                problems.append(f"{where}: missing parameter '{key}'")
         problems.extend(
             f"{where}: {problem}"
             for problem in _step_problems(name, params, discretised, fbs_start)
