@@ -274,6 +274,18 @@ class TestExportMethods:
         assert "standard_fbs_16" in data["configs"]
         assert "standard_fbn_8" not in data["configs"]
 
+    def test_to_dict_names_as_in_run(self, pipeline: RadiomicsPipeline, tmp_path: Path) -> None:
+        """The export takes the names of run(): an unknown name is an error (with the
+        closest name), "all_standard" gives the standard configs, and one name is a list."""
+        with pytest.raises(
+            ValueError, match="'standard_fbn_23' not found.*did you mean 'standard_fbn_32'"
+        ):
+            pipeline.save_configs(tmp_path / "c.yaml", config_names=["standard_fbn_23"])
+        assert not (tmp_path / "c.yaml").exists()
+        assert len(pipeline.to_dict(config_names=["all_standard"])["configs"]) == 6
+        one = pipeline.to_dict(config_names="standard_fbn_8")  # type: ignore[arg-type]
+        assert list(one["configs"]) == ["standard_fbn_8"]
+
     def test_to_dict_without_metadata(self, pipeline: RadiomicsPipeline) -> None:
         """Test exporting without metadata."""
         data = pipeline.to_dict(include_metadata=False)

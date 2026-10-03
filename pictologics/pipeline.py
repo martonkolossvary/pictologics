@@ -642,11 +642,37 @@ def _finite_intensity_mask(state: PipelineState, config_name: str) -> PipelineSt
         f"Left out {n_bad:,} ROI voxels with a NaN or infinite intensity from the "
         f"intensity mask of config '{config_name}'."
     )
-    logging.warning(msg)
     warnings.warn(msg, UserWarning, stacklevel=3)
     if not _has_roi(finite):
         raise EmptyROIMaskError(f"No ROI voxel of config '{config_name}' has a finite intensity.")
     return replace(state, intensity_mask=replace(state.intensity_mask, array=finite))
+
+
+def _sentinel_warning(found: Optional[float], count: int, total: int, names: list[str]) -> str:
+    """The warning of the sentinel search of a run: the value `found` in `count` of `total`
+    voxels (or no value), for the configurations `names` that share the search."""
+    shown = ", ".join(f"'{name}'" for name in names[:3])
+    more = f" and {len(names) - 3} more" if len(names) > 3 else ""
+    which = f"config {shown}" if len(names) == 1 else f"{len(names)} configs ({shown}{more})"
+    if found is None:
+        # The configurations go on with the whole image, so that a batch does not stop at
+        # an image without padding
+        return (
+            f"No sentinel value auto-detected for {which} (no candidate reached the "
+            "presence threshold). Proceeding with the full image; set sentinel_value "
+            "explicitly if the image is pre-masked with a padding value."
+        )
+    # "100.0%" only when every voxel is the sentinel: rounding gives "100.0%" for 99.999%,
+    # as if no voxel remained, so the count of the voxels that remain is given too
+    percent = count / total * 100.0
+    shown_percent = f"{percent:.1f}%" if count == total or percent < 99.95 else ">99.9%"
+    # The search is a heuristic: the user must confirm that the value is padding
+    return (
+        f"Auto-detected sentinel value {found} ({shown_percent} of voxels; "
+        f"{total - count:,} of {total:,} voxels remain valid) for {which}; these voxels "
+        "will be excluded from resampling/filtering. Verify this is a padding value and "
+        "not real image data, or set sentinel_value explicitly."
+    )
 
 
 def _intersect_mask(mask: Image, valid_mask: npt.NDArray[Any]) -> Image:
@@ -1638,6 +1664,15 @@ class RadiomicsPipeline:
         # until the last configuration that uses it.
         roi_checked = False
         detection: Optional[tuple[Optional[float], int]] = None
+        # The configurations that search for their sentinel value (source mode "auto"
+        # without a sentinel value) share one search and one warning
+        searching = [
+            name
+            for name in target_configs
+            if SourceMode(self._config_metadata.get(name, {}).get("source_mode", "full_image"))
+            is SourceMode.AUTO
+            and self._config_metadata.get(name, {}).get("sentinel_value") is None
+        ]
         source_masks: dict[tuple[Any, Any], Image] = {}
         source_users = Counter(
             (metadata.get("source_mode", "full_image"), metadata.get("sentinel_value"))
@@ -1693,52 +1728,16 @@ class RadiomicsPipeline:
                             0 if found is None else int(np.count_nonzero(orig_img.array == found))
                         )
                         detection = (found, count)
+                        total = int(orig_img.array.size)
+                        warnings.warn(
+                            _sentinel_warning(found, count, total, searching), stacklevel=2
+                        )
                     detected, n_sentinel = detection
                     if detected is not None:
                         detected_sentinel_value = detected
                         sentinel_detected = True
                         sentinel_auto_detected = True
-                        n_total = int(orig_img.array.size)
-                        sentinel_proportion = n_sentinel / n_total
-
-                        # Only ever print "100.0%" when literally every voxel is the
-                        # sentinel. Plain rounding turns e.g. 99.999% into "100.0%",
-                        # which wrongly implies no voxels remain for feature
-                        # extraction. Report the surviving voxel count too, so the
-                        # amount of usable data is unambiguous.
-                        percent = sentinel_proportion * 100.0
-                        percent_str = (
-                            f"{percent:.1f}%"
-                            if n_sentinel == n_total or percent < 99.95
-                            else ">99.9%"
-                        )
-
-                        # Prominent warning: auto-detection is a heuristic. The user
-                        # should confirm the value is a genuine fill/padding value and
-                        # not real image data.
-                        msg = (
-                            f"Auto-detected sentinel value {detected} "
-                            f"({percent_str} of voxels; {n_total - n_sentinel:,} of "
-                            f"{n_total:,} voxels remain valid) for config "
-                            f"'{config_name}'; these voxels will be excluded from "
-                            f"resampling/filtering. Verify this is a padding value and "
-                            f"not real image data, or set sentinel_value explicitly."
-                        )
-                        logging.warning(msg)
-                        warnings.warn(msg, stacklevel=2)
-                    else:
-                        # Nothing crossed the threshold. Warn and continue treating
-                        # the whole image as valid (no source mask), so batch runs do
-                        # not break on images that simply have no sentinel.
-                        msg = (
-                            f"No sentinel value auto-detected for config "
-                            f"'{config_name}' (no candidate reached the presence "
-                            f"threshold). Proceeding with the full image; set "
-                            f"sentinel_value explicitly if the image is pre-masked "
-                            f"with a padding value."
-                        )
-                        logging.warning(msg)
-                        warnings.warn(msg, stacklevel=2)
+                        sentinel_proportion = n_sentinel / int(orig_img.array.size)
 
                 if sentinel_detected and detected_sentinel_value is not None:
                     if source_key not in source_masks:
@@ -3984,19 +3983,21 @@ class RadiomicsPipeline:
         Export configurations to a dictionary.
 
         Args:
-            config_names: Specific configs to export. If None, exports all.
+            config_names: The configurations to export, as in `run()` (also
+                "all_standard"). If None, exports all.
             include_metadata: Whether to include schema version and metadata.
             include_deduplication: Whether to include deduplication settings.
 
         Returns:
             Dictionary with configs and optional metadata.
+
+        Raises:
+            ValueError: If `config_names` holds a name that is not registered.
         """
-        if config_names is None:
-            configs_to_export = self._configs
-        else:
-            configs_to_export = {
-                name: self._configs[name] for name in config_names if name in self._configs
-            }
+        if isinstance(config_names, str):
+            config_names = [config_names]
+        names = list(self._configs) if config_names is None else self._target_configs(config_names)
+        configs_to_export = {name: self._configs[name] for name in names}
 
         # Convert tuples to lists for serialization
         serializable_configs: dict[str, Any] = {}
@@ -4085,7 +4086,8 @@ class RadiomicsPipeline:
         Export configurations to a JSON string.
 
         Args:
-            config_names: Specific configs to export. If None, exports all.
+            config_names: The configurations to export, as in `to_dict()`. If None,
+                exports all.
             indent: JSON indentation level.
 
         Returns:
@@ -4102,7 +4104,8 @@ class RadiomicsPipeline:
         Export configurations to a YAML string.
 
         Args:
-            config_names: Specific configs to export. If None, exports all.
+            config_names: The configurations to export, as in `to_dict()`. If None,
+                exports all.
 
         Returns:
             YAML string representation.
@@ -4121,10 +4124,12 @@ class RadiomicsPipeline:
 
         Args:
             output_path: Path to output file. Extension determines format.
-            config_names: Specific configs to export. If None, exports all.
+            config_names: The configurations to export, as in `to_dict()`. If None,
+                exports all.
 
         Raises:
-            ValueError: If file extension is not .json, .yaml, or .yml.
+            ValueError: If file extension is not .json, .yaml, or .yml, or if
+                `config_names` holds a name that is not registered.
         """
         path = Path(output_path)
         suffix = path.suffix.lower()

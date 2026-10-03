@@ -172,7 +172,7 @@ pipeline.add_config("padded_ct", steps, source_mode="auto", sentinel_value=-2048
 ```
 
 - **A known padding value**: use `"auto"` with `sentinel_value`. This is the safest choice.
-- **An unknown padding value**: `"auto"` alone looks for -2048, -3024, -1024, -1000, 0 and -32768. A value is a sentinel when it fills at least 5 % of the image, and when it is more than 2 times as frequent outside the ROI as inside. A warning gives the value that the pipeline found, or tells that it found none: the pipeline then uses all voxels. Check the warning, because a real tissue value can pass the test.
+- **An unknown padding value**: `"auto"` alone looks for -2048, -3024, -1024, -1000, 0 and -32768. A value is a sentinel when it fills at least 5 % of the image, and when it is more than 2 times as frequent outside the ROI as inside. A warning gives the value that the pipeline found, or tells that it found none: the pipeline then uses all voxels. The configurations of a run that search for the value share one search and one warning. Check the warning, because a real tissue value can pass the test.
 - **`"roi_only"`**: for an image with data in the ROI only, for example an export of a lesion. The voxels outside the ROI do not go into the resampling or the filters.
 - **The effect**: the resampling and the mean, Gaussian, LoG and Laws filters leave out the voxels without data (normalized interpolation and convolution); the other filters fill them with 0 (see [Source Masks for Sentinel Values](image_filtering.md#source-masks-for-sentinel-values)). After a `resample` step and after a `grow_mask` step, the masks also lose the voxels without data. With region `"image"`, a `normalise` step reads only the voxels with data.
 
@@ -224,7 +224,7 @@ if __name__ == "__main__":  # the worker processes import this script again
 - **Resume**: a second call with the same folder skips each case whose file holds the same image, image options, mask (or label map and labels) and configurations (by their `config_hash`). A failed case runs again. To run a case again, delete its file.
 - **Workers**: with `workers=4`, four processes run the cases, and each process uses a quarter of the numba threads. Each process holds one case at a time, so the memory need grows with the number of workers. Keep the call inside `if __name__ == "__main__":`, because the workers start with spawn on every platform.
 - **The table**: one row for each case (one for each ROI of a label map case), in the order of the cases: `subject_id`, `status`, `error`, `warnings`, `seconds` and the features in the wide format of `format_results()`. The status is `"completed"`; `"incomplete"` when a configuration ended with an empty ROI or an error; or `"failed"` when the case did not run, for example because its image did not load.
-- **Errors**: an error of one case does not stop the batch. The warnings of a case go to its `warnings` column. The sentinel and NaN warnings also go to the `logging` module (see [Warnings](#warnings)).
+- **Errors**: an error of one case does not stop the batch. The warnings of a case go to its `warnings` column, not to the screen.
 - **Mistakes in the cases**: a case without `subject_id` or `image`, with an unknown key, with both `mask` and `rois`, or with the file name of another case raises a `ValueError` before the batch starts.
 
 The [Many ROIs and Batch Studies](../tutorials/batch.md) tutorial shows a full study.
@@ -269,23 +269,21 @@ The pipeline tells you about a problem with a `UserWarning`. A warning does not 
 | `run() without config_names runs all ... configurations` | `run()` without `config_names` on a pipeline with the standard configurations |
 | `The mask holds values that are not whole numbers` | A probability mask without a `binarize_mask` step |
 | `Left out ... ROI voxels with a NaN or infinite intensity` | NaN or infinite voxels in the ROI |
-| `Auto-detected sentinel value ...` or `No sentinel value auto-detected` | `source_mode="auto"` without `sentinel_value` |
+| `Auto-detected sentinel value ...` or `No sentinel value auto-detected` | `source_mode="auto"` without `sentinel_value`: one warning for all such configurations of a run |
 | `Histogram features requested but image is not discretised` | The histogram family without a `discretise` step |
 | A warning that names a feature family | An error in that family (see [Result Guarantees](#result-guarantees)) |
 
-The NaN and sentinel warnings also go to the `logging` module, which prints them to the screen (stderr) when your script does not set up logging, also in `run_batch`. To hide them, raise the level of the logger:
+To hide the warnings of a run, use `warnings.catch_warnings()`:
 
 ```python
-import logging
 import warnings
 
-logging.getLogger().setLevel(logging.ERROR)  # no WARNING lines of the logging module
 with warnings.catch_warnings():
-    warnings.simplefilter("ignore")           # no UserWarnings of this run
+    warnings.simplefilter("ignore")
     results = pipeline.run(image, mask, config_names=["ct_fbs_25"])
 ```
 
-Put the `setLevel` line at the top of the script, outside `if __name__ == "__main__":`, so that the workers of `run_batch` run it too. The log entries keep the sentinel value and the status of each configuration.
+The log entries keep the sentinel value and the status of each configuration.
 
 ## Troubleshooting
 

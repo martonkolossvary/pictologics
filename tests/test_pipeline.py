@@ -4472,6 +4472,25 @@ def test_pipeline_auto_sentinel_percentage_reports_exact_value_below_threshold()
     assert "6,400 of 64,000 voxels remain valid" in message
 
 
+def test_sentinel_search_warns_once_per_run(sm_image: Image, sm_mask: Image, caplog: Any) -> None:
+    # One warning names the configurations that share the search (the first three and
+    # a count), and the logging module gets no copy of it
+    import logging
+
+    pipeline = RadiomicsPipeline(load_standard=False)
+    steps = [{"step": "extract_features", "params": {"families": ["intensity"]}}]
+    for name in ("a", "b", "c", "d"):
+        pipeline.add_config(name, copy.deepcopy(steps), source_mode="auto")
+    with caplog.at_level(logging.DEBUG), warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        pipeline.run(sm_image, sm_mask, config_names=["a", "b", "c", "d"])
+    assert [str(w.message)[:80] for w in caught] == [
+        "No sentinel value auto-detected for 4 configs ('a', 'b', 'c' and 1 more) (no can"
+    ]
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert all(entry["sentinel_detected"] is False for entry in pipeline.get_log())
+
+
 def test_pipeline_auto_no_sentinel_warns_and_continues(sm_image: Image, sm_mask: Image) -> None:
     pipeline = RadiomicsPipeline()
     config = [{"step": "extract_features", "params": {"families": ["intensity"]}}]
@@ -4867,8 +4886,8 @@ def test_roi_region_filters_with_periodic_edges_and_source_masks() -> None:
 
 def test_run_does_the_start_up_once_per_run(sm_mask: Image) -> None:
     # The first ROI check, the sentinel search and the source mask of each source setup
-    # (source mode, sentinel value) are made once per run; each configuration keeps its
-    # own warning, log values and features.
+    # (source mode, sentinel value) are made once per run; the configurations of one
+    # search share one warning, and each keeps its own log values and features.
     from pictologics import pipeline as pipeline_module
 
     image = _sentinel_image()
@@ -4900,7 +4919,7 @@ def test_run_does_the_start_up_once_per_run(sm_mask: Image) -> None:
     contexts = [call.kwargs["context"] for call in roi_check.call_args_list]
     assert contexts.count("initialization") == 1
     messages = [str(w.message) for w in record if "Auto-detected" in str(w.message)]
-    assert len(messages) == 2 and "'auto_a'" in messages[0] and "'auto_b'" in messages[1]
+    assert len(messages) == 1 and "for 2 configs ('auto_a', 'auto_b');" in messages[0]
     logs = {entry["config_name"]: entry for entry in pipeline._log}
     for name in names:
         with warnings.catch_warnings():
