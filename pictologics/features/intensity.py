@@ -547,6 +547,54 @@ def _counts_order_statistics(
     return p10, p25, p75, p90, (float(low) + float(high)) / 2.0
 
 
+def _range_error(n_bins: int, low: int, high: int) -> str:
+    """The error of discretised values outside [1, n_bins]."""
+    return f"discretised values must lie in [1, n_bins={n_bins}]; got range [{low}, {high}]"
+
+
+def _bin_counts(
+    disc: npt.NDArray[np.integer[Any]], n_bins: int
+) -> tuple[npt.NDArray[np.int64], int, int]:
+    """The counts of the levels 1 to n_bins of the integer values `disc` (one bincount, with
+    no int64 copy), and the minimum and the maximum value. A value outside [1, n_bins]
+    raises the ValueError of the values. The largest value is checked first, so a stray
+    value cannot make bincount allocate a table of its size."""
+    high = int(np.max(disc))
+    try:
+        counts: Optional[npt.NDArray[np.int64]] = (
+            np.bincount(disc, minlength=n_bins + 1) if high <= n_bins else None
+        )
+    except ValueError:  # a negative value
+        counts = None
+    if counts is None or counts[0]:
+        raise ValueError(_range_error(n_bins, int(np.min(disc)), high))
+    occupied = np.flatnonzero(counts)
+    return counts[1:], int(occupied[0]), high
+
+
+def _counted_deviations(
+    levels: npt.NDArray[np.int64],
+    counts: npt.NDArray[np.int64],
+    n: int,
+    mean: float,
+    median: float,
+    lower: float,
+    upper: float,
+) -> tuple[float, float, float]:
+    """The mean, the robust mean and the median absolute deviations of integer values, from
+    their bin counts: the terms of _mean_abs_dev and _robust_mean_abs_dev, each level once
+    with its count. The robust one reads the levels from lower to upper (inclusive): P10 and
+    P90 are values, so at least one level is there."""
+    mad = float(np.sum(counts * np.abs(levels - mean))) / n
+    median_ad = float(np.sum(counts * np.abs(levels - median))) / n
+    inside = (levels >= lower) & (levels <= upper)
+    sub_levels, sub_counts = levels[inside], counts[inside]
+    sub_n = int(sub_counts.sum())
+    sub_mean = int(sub_levels @ sub_counts) / sub_n
+    robust = float(np.sum(sub_counts * np.abs(sub_levels - sub_mean))) / sub_n
+    return mad, robust, median_ad
+
+
 def calculate_intensity_features(
     values: npt.NDArray[np.floating[Any]],
 ) -> dict[str, float]:
@@ -723,38 +771,46 @@ def calculate_intensity_histogram_features(
 
     disc = np.asarray(discretised_values)
     n = disc.size
-    # The moment kernels read int32 (the discretised values of the pipeline) or float64, the
-    # types that the import compiles; values of another type go as a float64 copy.
-    kernel_disc = disc if disc.dtype in (np.int32, np.float64) else disc.astype(np.float64)
+    # Integer values (but uint64, which bincount does not read) take the moments and the
+    # deviations from their bin counts; other types read every value with the kernels.
+    counted = disc.dtype.kind in "iu" and disc.dtype != np.uint64
 
-    min_val_i = int(np.min(disc))
-    max_val_i = int(np.max(disc))
-
-    if n_bins is not None:
+    if counted and n_bins is not None:
         # IBSI: histogram over the full discretisation range [1, N_g].
-        if min_val_i < 1 or max_val_i > n_bins:
-            raise ValueError(
-                f"discretised values must lie in [1, n_bins={n_bins}]; "
-                f"got range [{min_val_i}, {max_val_i}]"
-            )
         hist_origin = 1
-        counts_full = np.bincount(disc.astype(np.int64) - 1, minlength=n_bins)
+        counts_full, min_val_i, max_val_i = _bin_counts(disc, n_bins)
     else:
-        # Observed value range; shifting also supports negative values
-        # for bincount compatibility.
-        hist_origin = min_val_i
-        counts_full = np.bincount(
-            disc.astype(np.int64) - min_val_i, minlength=(max_val_i - min_val_i + 1)
-        )
+        min_val_i = int(np.min(disc))
+        max_val_i = int(np.max(disc))
+        if n_bins is not None:
+            if min_val_i < 1 or max_val_i > n_bins:
+                raise ValueError(_range_error(n_bins, min_val_i, max_val_i))
+            hist_origin = 1
+            counts_full = np.bincount(disc.astype(np.int64) - 1, minlength=n_bins)
+        else:
+            # Observed value range; shifting also supports negative values
+            # for bincount compatibility.
+            hist_origin = min_val_i
+            counts_full = np.bincount(
+                disc.astype(np.int64) - min_val_i, minlength=(max_val_i - min_val_i + 1)
+            )
     total = float(n)
     p = counts_full[counts_full > 0].astype(np.float64) / total
+    levels = np.arange(hist_origin, hist_origin + len(counts_full), dtype=np.int64)
 
-    # 4.2.1 Mean discretised intensity (X6K6)
-    mean_disc = float(np.mean(disc))
+    # 4.2.1 Mean discretised intensity (X6K6) and 4.2.2 variance (CH89). From the counts,
+    # the sum of the values is exact in int64; np.mean of integers sums them in float64,
+    # which is exact while the sums stay below 2**53, so the two means are the same bits.
+    if counted:
+        mean_disc = int(levels @ counts_full) / n
+        d = levels - mean_disc
+        d2 = d * d
+        var_disc = float(np.sum(counts_full * d2)) / n
+    else:
+        kernel_disc = disc if disc.dtype == np.float64 else disc.astype(np.float64)
+        mean_disc = float(np.mean(disc))
+        var_disc = float(np.var(disc, ddof=0))
     features["mean_discretised_intensity_X6K6"] = float(mean_disc)
-
-    # 4.2.2 Discretised intensity variance (CH89)
-    var_disc = float(np.var(disc, ddof=0))
     features["discretised_intensity_variance_CH89"] = float(var_disc)
 
     # 4.2.3 Discretised intensity skewness (88K1) and 4.2.4 kurtosis (C3I7): 0 when the
@@ -763,7 +819,13 @@ def calculate_intensity_histogram_features(
         features["discretised_intensity_skewness_88K1"] = 0.0
         features["discretised_intensity_kurtosis_C3I7"] = 0.0
     else:
-        m2, m3, m4 = _central_moments_2_3_4(kernel_disc, float(mean_disc))
+        if counted:  # the central moments of _central_moments_2_3_4, from the counts
+            inv_n = 1.0 / n
+            m2 = var_disc
+            m3 = float(np.sum(counts_full * (d2 * d))) * inv_n
+            m4 = float(np.sum(counts_full * (d2 * d2))) * inv_n
+        else:
+            m2, m3, m4 = _central_moments_2_3_4(kernel_disc, float(mean_disc))
         denom = m2**1.5
         if denom != 0.0:
             features["discretised_intensity_skewness_88K1"] = float(m3 / denom)
@@ -802,17 +864,17 @@ def calculate_intensity_histogram_features(
         - features["minimum_discretised_intensity_1PR8"]
     )
 
-    features["intensity_histogram_mean_absolute_deviation_D2ZX"] = float(
-        _mean_abs_dev(kernel_disc, float(mean_disc))
-    )
-
-    features["intensity_histogram_robust_mean_absolute_deviation_WRZB"] = float(
-        _robust_mean_abs_dev(kernel_disc, float(p10), float(p90))
-    )
-
-    features["intensity_histogram_median_absolute_deviation_4RNL"] = float(
-        _mean_abs_dev(kernel_disc, float(median_val))
-    )
+    if counted:
+        mad, robust_mad, median_ad = _counted_deviations(
+            levels, counts_full, n, mean_disc, float(median_val), float(p10), float(p90)
+        )
+    else:
+        mad = _mean_abs_dev(kernel_disc, float(mean_disc))
+        robust_mad = _robust_mean_abs_dev(kernel_disc, float(p10), float(p90))
+        median_ad = _mean_abs_dev(kernel_disc, float(median_val))
+    features["intensity_histogram_mean_absolute_deviation_D2ZX"] = float(mad)
+    features["intensity_histogram_robust_mean_absolute_deviation_WRZB"] = float(robust_mad)
+    features["intensity_histogram_median_absolute_deviation_4RNL"] = float(median_ad)
 
     if mean_disc != 0:
         features["intensity_histogram_coefficient_of_variation_CWYJ"] = float(

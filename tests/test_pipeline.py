@@ -6573,6 +6573,26 @@ def test_a_failing_morphology_part_gives_the_outcome_of_one_thread() -> None:
         assert threaded == outcome(target, empty, False, True) and threaded[2] == "empty_roi"
 
 
+def test_the_histogram_reads_int32_values_with_their_levels() -> None:
+    # The pipeline gives the histogram features the int32 values of the discretised image
+    # and its number of levels, so they come from the bin counts (one bincount)
+    from pictologics import pipeline as pipeline_module
+
+    image, mask = _morphology_case()
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("h", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["histogram"]}},
+    ])  # fmt: skip
+    real = pipeline_module.calculate_intensity_histogram_features
+    with patch.object(
+        pipeline_module, "calculate_intensity_histogram_features", wraps=real
+    ) as histogram:
+        pipeline.run(image, mask, config_names=["h"])
+    values = histogram.call_args.args[0]
+    assert values.dtype == np.int32 and histogram.call_args.kwargs["n_bins"] == 8
+
+
 def test_other_families_use_one_thread_less_next_to_the_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

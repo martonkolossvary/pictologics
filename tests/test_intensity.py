@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from pictologics.features.intensity import (
     calculate_intensity_features,
@@ -818,18 +819,21 @@ class TestFastPaths(unittest.TestCase):
             with patch.object(intensity_module, "_TWO_STAGE_MIN_WORK", 1):
                 self.assertEqual(calculate_local_intensity_features(image, roi), expected)
 
-    def test_histogram_moment_kernels_read_int32_or_float64(self) -> None:
-        # The moment kernels read int32 (the pipeline) or float64, the types that the import
-        # compiles: values of another type go as a float64 copy.
+    def test_histogram_kernels_read_float64_values_only(self) -> None:
+        # Integer values take their histogram features from the bin counts, with no kernel
+        # call (also uint64, which bincount does not read, goes to the kernels); the
+        # kernels read float64 (the type that the import compiles): another float type goes
+        # as a float64 copy.
         from pictologics.features import intensity as intensity_module
 
         values = np.array([1, 2, 2, 3, 5, 5, 5, 4])
         kernel = intensity_module._mean_abs_dev
         with patch.object(intensity_module, "_mean_abs_dev", wraps=kernel) as spy:
-            for kind in (np.uint8, np.int16, np.int32, np.float32, np.float64):
+            for kind in (np.uint8, np.int16, np.int32, np.int64, np.float32, np.float64):
                 calculate_intensity_histogram_features(values.astype(kind))
-        kinds = [call.args[0].dtype for call in spy.call_args_list]
-        self.assertEqual(kinds, [np.float64] * 4 + [np.int32] * 2 + [np.float64] * 4)
+            self.assertEqual([call.args[0].dtype for call in spy.call_args_list], [np.float64] * 4)
+            calculate_intensity_histogram_features(values.astype(np.uint64))
+        self.assertEqual(spy.call_count, 6)
 
     def test_local_kernels_read_float64_or_float32_images(self) -> None:
         # The local kernels read float64 or float32, the types that the import compiles: an
@@ -850,6 +854,59 @@ class TestFastPaths(unittest.TestCase):
             calculate_local_intensity_features(Image(data.astype(np.float32), spacing, origin), roi)
         kinds = [call.args[0].dtype for call in spy.call_args_list]
         self.assertEqual(kinds, [np.float64, np.float32])
+
+
+# The histogram features that add the same terms in another order from the bin counts
+_NEAR_HISTOGRAM = ("_CH89", "_88K1", "_C3I7", "_CWYJ", "_D2ZX", "_WRZB", "_4RNL")
+
+
+def test_histogram_features_of_integers_come_from_the_counts() -> None:
+    # Integer values take the histogram features from their bin counts. They equal those of
+    # the same values as float64 (read by the kernels) bit for bit, but for the variance,
+    # skewness, kurtosis, coefficient of variation and the three absolute deviations: these
+    # add the same terms in another order (relative difference 1e-12 or less; skewness and
+    # kurtosis near 0 within 1e-12).
+    rng = np.random.default_rng(21)
+    sizes = [300_000, 1, 2, 9, *np.exp(rng.uniform(0.0, np.log(20_000), 56)).astype(int)]
+    for case, n in enumerate(sizes):
+        kind = (np.int32, np.uint8, np.int64)[case % 3]
+        levels = int(rng.integers(1, 256 if kind == np.uint8 else 401))
+        values = rng.integers(1, levels + 1, n)
+        if case == 2:  # one level
+            values[:] = levels
+        if case == 3:  # levels 1, 2 and 3, three times each: the mean is the middle level
+            values, levels = np.repeat([1, 2, 3], 3), 3
+        for n_bins in (levels, None):
+            got = calculate_intensity_histogram_features(values.astype(kind), n_bins=n_bins)
+            expected = calculate_intensity_histogram_features(values.astype(np.float64), n_bins)
+            assert got.keys() == expected.keys()
+            for key, value in expected.items():
+                if key.endswith(_NEAR_HISTOGRAM):
+                    assert np.isclose(got[key], value, rtol=1e-12, atol=1e-12, equal_nan=True)
+                else:
+                    assert np.float64(got[key]).tobytes() == np.float64(value).tobytes(), key
+
+
+def test_histogram_values_outside_the_levels_raise() -> None:
+    # Integer values outside [1, n_bins] raise the error of the float path, with their range.
+    # A stray large value raises before the bin counts, so no table of its size is made.
+    from pictologics.features import intensity as intensity_module
+
+    cases = (
+        ([0, 2], r"\[0, 2\]"),
+        ([-3, 2], r"\[-3, 2\]"),
+        ([1, 9], r"\[1, 9\]"),
+        ([1, 50_000_000], r"\[1, 50000000\]"),
+    )
+    for values, text in cases:
+        for kind in (np.int32, np.float64):
+            with (
+                patch.object(intensity_module.np, "bincount", wraps=np.bincount) as counts,
+                pytest.raises(ValueError, match=f"must lie in \\[1, n_bins=8\\]; got range {text}"),
+            ):
+                calculate_intensity_histogram_features(np.array(values, dtype=kind), n_bins=8)
+            if kind == np.int32 and values[1] > 8:
+                assert counts.call_count == 0
 
 
 if __name__ == "__main__":

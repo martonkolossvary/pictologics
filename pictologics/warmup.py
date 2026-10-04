@@ -148,13 +148,8 @@ def _warmup_intensity() -> None:
             np.array([1, 2, 2], dtype=dtype), 0, np.zeros((1, 3), np.int64)
         )
 
-    # Discretised images are int32 (see discretise_image) and apply_mask preserves
-    # dtype, so the histogram feature path calls these helpers with int32 arrays;
-    # compile that specialization too.
-    values_i32: npt.NDArray[Any] = np.array([0, 1, 2, 10, 10], dtype=np.int32)
-    intensity._central_moments_2_3_4(values_i32, mean_val)
-    intensity._mean_abs_dev(values_i32, mean_val)
-    intensity._robust_mean_abs_dev(values_i32, lower=0.0, upper=10.0)
+    # The histogram features of integer values come from their bin counts, so these
+    # helpers read float64 values only.
 
     # 2. Spatial Features
     # Minimal 3-voxel structure. int32 to match the production caller in
