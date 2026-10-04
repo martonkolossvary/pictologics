@@ -60,7 +60,39 @@ from ._utils import PRANGE_ONLY, compute_nonzero_bbox
 def _accumulate_moments_from_mask_numba(
     mask: npt.NDArray[np.floating[Any]],
 ) -> tuple[int, float, float, float, float, float, float, float, float, float]:
-    """Accumulate first/second moments of voxel indices for mask != 0."""
+    """Accumulate first/second moments of voxel indices for mask != 0.
+
+    Each slice has its own sums, and the slice sums add in order, so the result does
+    not depend on the number of threads. The sums are whole numbers, so they are exact
+    below 2^53."""
+    d0, d1, d2 = mask.shape
+    counts = np.empty(d0, dtype=np.int64)
+    sums = np.empty((d0, 5), dtype=np.float64)  # sums of j, k, j * j, k * k and j * k
+    for i in prange(d0):
+        count = 0
+        sj = 0.0
+        sk = 0.0
+        sjj = 0.0
+        skk = 0.0
+        sjk = 0.0
+        for j in range(d1):
+            for k in range(d2):
+                if mask[i, j, k] != 0:
+                    fj = float(j)
+                    fk = float(k)
+                    count += 1
+                    sj += fj
+                    sk += fk
+                    sjj += fj * fj
+                    skk += fk * fk
+                    sjk += fj * fk
+        counts[i] = count
+        sums[i, 0] = sj
+        sums[i, 1] = sk
+        sums[i, 2] = sjj
+        sums[i, 3] = skk
+        sums[i, 4] = sjk
+
     n = 0
     s0 = 0.0
     s1 = 0.0
@@ -71,27 +103,18 @@ def _accumulate_moments_from_mask_numba(
     s01 = 0.0
     s02 = 0.0
     s12 = 0.0
-
-    d0, d1, d2 = mask.shape
-    # Flatten loops for better parallelization or just parallelize outer
-    for i in prange(d0):
-        for j in range(d1):
-            for k in range(d2):
-                if mask[i, j, k] != 0:
-                    n += 1
-                    fi = float(i)
-                    fj = float(j)
-                    fk = float(k)
-                    s0 += fi
-                    s1 += fj
-                    s2 += fk
-                    s00 += fi * fi
-                    s11 += fj * fj
-                    s22 += fk * fk
-                    s01 += fi * fj
-                    s02 += fi * fk
-                    s12 += fj * fk
-
+    for i in range(d0):
+        fi = float(i)
+        n += counts[i]
+        s0 += fi * counts[i]
+        s00 += fi * fi * counts[i]
+        s1 += sums[i, 0]
+        s2 += sums[i, 1]
+        s11 += sums[i, 2]
+        s22 += sums[i, 3]
+        s12 += sums[i, 4]
+        s01 += fi * sums[i, 0]
+        s02 += fi * sums[i, 1]
     return n, s0, s1, s2, s00, s11, s22, s01, s02, s12
 
 

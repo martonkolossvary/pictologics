@@ -1,0 +1,1 @@
+Moran's I and Geary's C of a small ROI (the loop over the voxel pairs) changed in their last digits with the number of threads. The kernel now adds its sums in one fixed order, so the values do not depend on the number of threads; they can change once in the last digits.

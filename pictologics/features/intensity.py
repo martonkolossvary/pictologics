@@ -114,7 +114,7 @@ def _robust_mean_abs_dev(
     return dev_total / count
 
 
-@jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
+@jit(nopython=True, parallel=PRANGE_ONLY, fastmath=True, cache=True)  # type: ignore
 def _calculate_spatial_features_numba(
     x_idx: npt.NDArray[np.integer[Any]],
     y_idx: npt.NDArray[np.integer[Any]],
@@ -213,7 +213,9 @@ def _calculate_spatial_features_numba(
         local_geary_arr[i] = local_geary
         local_w_sum_arr[i] = local_w_sum
 
-    # Full sums: each unordered pair contributes twice to the ordered-pair sums.
+    # Full sums: each unordered pair contributes twice to the ordered-pair sums. The rows
+    # add in one pass (PRANGE_ONLY: numba does not split these sums between the threads),
+    # so the sums do not depend on the number of threads.
     numer_moran = 2.0 * np.sum(local_moran_arr)
     numer_geary = 2.0 * np.sum(local_geary_arr)
     sum_weights = 2.0 * np.sum(local_w_sum_arr)
