@@ -33,6 +33,11 @@ from .base import (
 # 14,000 voxels (db2) or 4,000 voxels (coif3), and run 4-8x faster from 30,000 voxels.
 _PARALLEL_THRESHOLD = 15_000
 
+# From this size (voxels), half as many rotations run at once, each pass in two threads.
+# Measured (db2, 10 threads): as fast at 96^3, faster from 128^3 on (256^3: 649 against
+# 712 ms), with half the responses in memory; slower at 64^3. Both pass a slab threshold.
+_PAIRED_PASSES_MIN = 1 << 20
+
 
 def wavelet_transform(
     image: npt.NDArray[np.floating[Any]],
@@ -65,8 +70,9 @@ def wavelet_transform(
         boundary: Boundary condition for padding
         rotation_invariant: If True, average over 24 rotations
         pooling: Pooling method for rotation invariance
-        use_parallel: If True, use parallel processing for rotation_invariant mode.
-            If None (default), auto-enables for images > 15,000 voxels.
+        use_parallel: If True, the 24 rotations of rotation_invariant mode and their passes
+            run in numba's threads; False runs them in one thread. If None (default),
+            True for images of more than 15,000 voxels.
         source_mask: Optional boolean mask where True = valid voxel.
             When provided, zeros out invalid (sentinel) voxels before
             wavelet decomposition to prevent contamination.
@@ -143,31 +149,6 @@ def wavelet_transform(
         if pooling not in ("max", "average", "min"):
             raise ValueError(f"Unknown pooling: {pooling}")
 
-        rotations = _get_rotation_perms()
-
-        def apply_rotated_wavelet(
-            rotation: Tuple[Tuple[int, int, int], Tuple[bool, bool, bool]],
-        ) -> npt.NDArray[np.floating[Any]]:
-            """Apply wavelet transform with rotated image."""
-            perm, flips = rotation
-            # Permute and flip image
-            rotated = np.transpose(image, perm)
-            for axis, flip in enumerate(flips):
-                if flip:
-                    rotated = np.flip(rotated, axis=axis)
-
-            # Apply wavelet (one thread per rotation: the rotations run in a pool)
-            response = _apply_undecimated_wavelet_3d(
-                rotated, lo, hi, level, decomposition, mode, threads=1
-            )
-
-            # Undo rotation for response
-            for axis, flip in enumerate(flips):
-                if flip:
-                    response = np.flip(response, axis=axis)
-            inv_perm = tuple(np.argsort(perm))
-            return np.transpose(response, inv_perm)
-
         result: npt.NDArray[np.floating[Any]] | None = None
 
         def _pool(response: npt.NDArray[np.floating[Any]]) -> None:
@@ -181,20 +162,35 @@ def wavelet_transform(
             else:  # "min"
                 np.minimum(result, response, out=result)
 
+        def rotated_response(
+            rotation: Tuple[Tuple[int, int, int], Tuple[bool, bool, bool]],
+        ) -> npt.NDArray[np.floating[Any]]:
+            """The response of one rotation, computed on the image itself (no rotated copy)."""
+            return _apply_undecimated_wavelet_3d(
+                image, lo, hi, level, decomposition, mode, threads, rotation=rotation
+            )
+
+        # Rotations run in a pool: one rotation after another, each pass in all threads,
+        # was up to 4.5x slower up to 128^3 (a pass splits into threads from 2^18 voxels).
         # Pool the responses in rotation order, so the result does not depend on thread
-        # timing. At most `workers` rotations are in flight (and at most about 2 GB of
-        # float64 responses), and each response is dropped once pooled. Small images
-        # take one rotation at a time.
-        workers = 1
+        # timing. Each response is dropped once pooled. `workers` rotations are in flight,
+        # each pass in `threads` threads: one rotation per thread for a small image, two
+        # threads per pass from _PAIRED_PASSES_MIN voxels on (half the responses in
+        # memory). At most about 2 GB of float64 responses are in flight.
+        rotations = _get_rotation_perms()
+        workers, threads = 1, 1
         if use_parallel:
-            workers = min(len(rotations), get_num_threads(), max(2, (2 << 30) // (8 * image.size)))
-        for response in _ordered_map(apply_rotated_wavelet, rotations, workers):
+            n = get_num_threads()
+            workers = n if image.size < _PAIRED_PASSES_MIN else max(1, n // 2)
+            workers = min(len(rotations), workers, max(2, (2 << 30) // (8 * image.size)))
+            threads = max(1, n // workers)
+        for response in _ordered_map(rotated_response, rotations, workers):
             _pool(response)
             del response  # freed before the next rotation starts
 
         # Finalize average pooling
         if pooling == "average" and result is not None:
-            result /= len(rotations)
+            result /= 24
         return result.astype(np.float32)  # type: ignore[union-attr]
     else:
         return _apply_undecimated_wavelet_3d(
@@ -227,6 +223,7 @@ def _apply_undecimated_wavelet_3d(
     mode: str,
     threads: Optional[int] = None,
     last_dtype: Any = None,
+    rotation: Tuple[Tuple[int, int, int], Tuple[bool, bool, bool]] = ((0, 1, 2), (False,) * 3),
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply undecimated 3D wavelet decomposition using à trous algorithm. The passes run
@@ -234,6 +231,13 @@ def _apply_undecimated_wavelet_3d(
     new array of that type (scipy computes in double: the values of a cast after it).
 
     For level j, filters are upsampled by inserting 2^(j-1) - 1 zeros.
+
+    With `rotation` (perm, flips; one of `_get_rotation_perms`), the response of that
+    rotation of the image, in the orientation of the image itself: the pass along axis a
+    of the rotated image is the pass along axis perm[a] of the image, with the reversed
+    kernel when axis a is flipped (origin -1 for an even length, 0 for an odd one; the
+    boundary modes are symmetric under a flip). The reversed kernel adds its taps in the
+    other order, so a value can differ in the last float32 digit.
     """
     # The first pass writes a new array; the later passes write into it. convolve1d
     # copies each line before it writes that line, so the in-place result is the same.
@@ -250,18 +254,23 @@ def _apply_undecimated_wavelet_3d(
         # The low-pass (LLL) result feeds the next level; the final level applies the
         # requested decomposition.
         filters = {"L": lo_j, "H": hi_j}
+        perm, flips = rotation
         for axis, char in enumerate("LLL" if j < level else decomposition):
             weights = filters[char]
+            origin = 0
+            if flips[axis]:
+                weights = weights[::-1]
+                origin = -1 if weights.size % 2 == 0 else 0
             if result is None:
-                result = _slab_pass(
-                    convolve1d, image, axis, None, threads, weights=weights, mode=mode
-                )
+                source, target = image, None
+            elif j == level and axis == 2 and last_dtype is not None:
+                source, target = result, np.empty(result.shape, dtype=last_dtype)
             else:
-                last = j == level and axis == 2 and last_dtype is not None
-                target = np.empty(result.shape, dtype=last_dtype) if last else result
-                result = _slab_pass(
-                    convolve1d, result, axis, target, threads, weights=weights, mode=mode
-                )
+                source, target = result, result
+            result = _slab_pass(
+                convolve1d, source, perm[axis], target, threads,
+                weights=weights, mode=mode, origin=origin,
+            )  # fmt: skip
     return cast(npt.NDArray[np.floating[Any]], result)
 
 

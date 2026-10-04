@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_allclose, assert_array_equal
 
 from pictologics.filters import (
     LAWS_KERNELS,
@@ -1565,8 +1565,9 @@ def test_laws_rotations_pool_as_the_rotation_loop() -> None:
 
 
 def test_filter_threads_follow_the_numba_thread_count() -> None:
-    """The FFT filters, the rotation threads of the wavelet and Laws filters and the slice
-    threads of the Gabor filter use numba's thread count, with the same values."""
+    """The FFT filters, the rotation threads of the wavelet and Laws filters (and the pass
+    threads of a large wavelet image) and the slice threads of the Gabor filter use numba's
+    thread count, with the same values."""
     from concurrent.futures import ThreadPoolExecutor
     from contextlib import ExitStack
     from unittest.mock import patch
@@ -1589,7 +1590,7 @@ def test_filter_threads_follow_the_numba_thread_count() -> None:
     }
     expected = {name: run() for name, run in {**fft_runs, **pool_runs}.items()}
     with ExitStack() as stack:
-        for module in (gabor, laws, riesz, wavelets):
+        for module in (base, gabor, laws, riesz, wavelets):
             stack.enter_context(patch.object(module, "get_num_threads", return_value=2))
         ffts = [
             stack.enter_context(patch.object(scipy.fft, name, wraps=getattr(scipy.fft, name)))
@@ -1607,10 +1608,15 @@ def test_filter_threads_follow_the_numba_thread_count() -> None:
         ]
         for name, run in pool_runs.items():
             assert_array_equal(run(), expected[name])
-    assert [[c.kwargs["max_workers"] for c in pool.call_args_list] for pool in pools] == [
-        [2, 2],
-        [2],
-    ]
+        assert [[c.kwargs["max_workers"] for c in pool.call_args_list] for pool in pools] == [
+            [2, 2],
+            [2],
+        ]
+        # A large wavelet image: one rotation at a time with 2 threads, each pass in slabs
+        large = np.random.default_rng(8).normal(size=(128, 128, 64)).astype(np.float32)
+        slabs = stack.enter_context(patch.object(base, "_slab_pool", wraps=base._slab_pool))
+        wavelet_transform(large, wavelet="haar", rotation_invariant=True, use_parallel=True)
+        assert slabs.call_count == 24 * 3  # 3 passes of each of the 24 rotations
 
 
 def test_filter_inputs_are_checked() -> None:
@@ -1922,3 +1928,92 @@ def test_filters_name_unknown_boundaries() -> None:
             ValueError, match="Valid values: zero, nearest, periodic, mirror, constant"
         ):
             call()
+
+
+def _old_rotated_wavelet(
+    image: np.ndarray, lo: np.ndarray, hi: np.ndarray, level: int, decomposition: str,
+    mode: str, rotation: tuple,
+) -> np.ndarray:  # fmt: skip
+    """One rotation of the wavelet response by the old method: the plain passes on a
+    rotated (transposed and flipped) view of the image, and the rotation undone."""
+    from pictologics.filters import wavelets
+
+    perm, flips = rotation
+    rotated = np.transpose(image, perm)
+    for axis, flip in enumerate(flips):
+        if flip:
+            rotated = np.flip(rotated, axis=axis)
+    response = wavelets._apply_undecimated_wavelet_3d(
+        rotated, lo, hi, level, decomposition, mode, 1
+    )
+    for axis, flip in enumerate(flips):
+        if flip:
+            response = np.flip(response, axis=axis)
+    return np.transpose(response, tuple(np.argsort(perm)))
+
+
+def _old_pooled(responses: list, pooling: str) -> np.ndarray:
+    """The responses pooled in rotation order, as the old code pooled them."""
+    result = responses[0].astype(np.float64) if pooling == "average" else responses[0].copy()
+    for response in responses[1:]:
+        if pooling == "average":
+            result += response
+        else:
+            (np.maximum if pooling == "max" else np.minimum)(result, response, out=result)
+    return (result / 24 if pooling == "average" else result).astype(np.float32)
+
+
+def test_wavelet_rotations_need_no_rotated_copies() -> None:
+    # Each of the 24 rotations of the rotation-invariant wavelet is computed on the image
+    # itself: passes along the rotated axes, with reversed kernels on the flipped axes.
+    # Every rotation equals the old rotated-copy response within a few float32 units (the
+    # identity bit for bit), for 4 wavelets, levels 1 and 2, every boundary and 3
+    # decompositions; so do the pooled responses, with and without threads, and with a
+    # source mask.
+    import pywt
+
+    from pictologics.filters import wavelets
+    from pictologics.filters.base import _prepare_masked_image
+
+    image = np.random.default_rng(41).normal(size=(24, 24, 24)).astype(np.float32)
+    rotations = wavelets._get_rotation_perms()
+    names = {"constant": "zero", "nearest": "nearest", "wrap": "periodic", "reflect": "mirror"}
+    for wavelet in ("db2", "db3", "coif1", "haar"):
+        lo = np.array(pywt.Wavelet(wavelet).dec_lo, dtype=np.float32)
+        hi = np.array(pywt.Wavelet(wavelet).dec_hi, dtype=np.float32)
+        for level in (1, 2):
+            for mode, name in names.items():
+                for decomposition in ("LHL", "HHH", "LLL"):
+                    old = [_old_rotated_wavelet(image, lo, hi, level, decomposition, mode, r) for r in rotations]  # fmt: skip
+                    for rotation, expected in zip(rotations, old, strict=True):
+                        got = wavelets._apply_undecimated_wavelet_3d(
+                            image, lo, hi, level, decomposition, mode, 1, rotation=rotation
+                        )
+                        if rotation == ((0, 1, 2), (False, False, False)):
+                            assert got.tobytes() == expected.tobytes()
+                        tolerance = 1e-6 * np.max(np.abs(expected))
+                        assert_allclose(got, expected, rtol=1e-6, atol=tolerance)
+                    for pooling in ("average", "max", "min"):
+                        calls = [
+                            wavelet_transform(
+                                image,
+                                wavelet,
+                                level,
+                                decomposition,
+                                name,
+                                rotation_invariant=True,
+                                pooling=pooling,
+                                use_parallel=parallel,
+                            )  # fmt: skip
+                            for parallel in (False, True)
+                        ]
+                        assert calls[0].tobytes() == calls[1].tobytes()
+                        expected = _old_pooled(old, pooling)
+                        assert_allclose(calls[0], expected, rtol=1e-6, atol=1e-6 * np.max(np.abs(expected)))  # fmt: skip
+    mask = np.random.default_rng(42).random(image.shape) > 0.2
+    lo = np.array(pywt.Wavelet("db2").dec_lo, dtype=np.float32)
+    hi = np.array(pywt.Wavelet("db2").dec_hi, dtype=np.float32)
+    masked = _prepare_masked_image(image, mask)
+    old = [_old_rotated_wavelet(masked, lo, hi, 1, "LHL", "constant", r) for r in rotations]
+    got = wavelet_transform(image, "db2", 1, "LHL", rotation_invariant=True, source_mask=mask)
+    assert_allclose(got, _old_pooled(old, "average"), rtol=1e-6, atol=1e-6 * np.max(np.abs(got)))
