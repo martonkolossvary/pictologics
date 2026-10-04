@@ -689,6 +689,21 @@ def _placement(
     return data, source, target
 
 
+def _merge_type(dtype: Any, fill_value: float) -> np.dtype[Any]:
+    """`dtype` when it holds `fill_value` exactly (a whole number in the range of an integer
+    type), else float64: the type of a merge that starts as the fill value."""
+    with np.errstate(invalid="ignore", over="ignore"):
+        holds = bool(np.array(fill_value).astype(dtype) == fill_value)
+    return np.dtype(dtype) if holds else np.dtype(np.float64)
+
+
+def _widened(merged: npt.NDArray[Any], current: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """`merged` in the common type of `merged` and `current`: a copy only when the type of
+    `current` is wider."""
+    kind = np.result_type(merged, current)
+    return merged if kind == merged.dtype else merged.astype(kind)
+
+
 def _merge_into(
     merged: npt.NDArray[Any], current: npt.NDArray[Any], fill_value: float, rule: str
 ) -> None:
@@ -1245,7 +1260,13 @@ def load_and_merge_images(
         radiomics pipeline configuration instead.
 
     Returns:
-        Image: A new `Image` object containing the merged data.
+        Image: A new `Image` object containing the merged data. Its array has the common
+            type of the loaded arrays (float64 for NIfTI, NRRD and MetaImage files and
+            rescaled DICOM; the stored type of SEG files and of DICOM with
+            ``apply_rescale=False``). With `binarize`, it is uint8; with `relabel_masks`,
+            the smallest unsigned type of the labels. With `reposition_to_reference`, the
+            merge starts as `fill_value` in the type of the first image, or float64 when
+            that type does not hold `fill_value` exactly.
 
     Raises:
         ValueError: If `image_paths` is empty, if an invalid `conflict_resolution` is provided,
@@ -1279,12 +1300,13 @@ def load_and_merge_images(
     if reposition_to_reference and reference_image is None:
         raise ValueError("reference_image must be provided when reposition_to_reference=True.")
 
+    # The labels of relabel_masks: the smallest unsigned type that holds the count of files
+    label_type = np.min_scalar_type(len(image_paths))
+    merged_array: Optional[npt.NDArray[Any]] = None
+
     if reposition_to_reference:
         # Mode: Reposition each image to reference space, then merge
         assert reference_image is not None  # Already validated above
-
-        # Initialize merged array with reference geometry
-        merged_array = np.full(reference_image.array.shape, fill_value, dtype=np.float64)
 
         for i, path in enumerate(image_paths):
             try:
@@ -1307,17 +1329,24 @@ def load_and_merge_images(
                 subvoxel_warning_threshold,
                 min_overlap_fraction,
             )
+            if merged_array is None:  # the merge, in reference geometry and the first type
+                kind = _merge_type(label_type if relabel_masks else data.dtype, fill_value)
+                merged_array = np.full(reference_image.array.shape, fill_value, dtype=kind)
             if source is None or target is None:
                 continue
             current_array = data[source]
 
             # Apply relabeling: replace all non-zero values with mask index + 1
             if relabel_masks:
-                label_value = i + 1  # 1-indexed labels
-                current_array = np.where(current_array != fill_value, label_value, fill_value)
+                label_value = label_type.type(i + 1)  # 1-indexed labels
+                fill = merged_array.dtype.type(fill_value)
+                current_array = np.where(current_array != fill_value, label_value, fill)
 
-            # Merge with conflict resolution
+            # Merge with conflict resolution, in the common type
+            merged_array = _widened(merged_array, current_array)
             _merge_into(merged_array[target], current_array, fill_value, conflict_resolution)
+            del current_image, data, current_array  # free the image before the next load
+        assert merged_array is not None  # image_paths is not empty
 
         # Use reference geometry for output
         consensus_spacing = reference_image.spacing
@@ -1337,11 +1366,12 @@ def load_and_merge_images(
         except Exception as e:
             raise ValueError(f"Failed to load first image '{image_paths[0]}': {e}") from e
 
-        merged_array = consensus_image.array.astype(np.float64, copy=False)
+        # The merge goes into the array of the first image, which this function loaded
+        merged_array = consensus_image.array
 
         # Apply relabeling for the first image
         if relabel_masks:
-            merged_array = np.where(merged_array != 0, 1, 0).astype(merged_array.dtype)
+            merged_array = (merged_array != 0).astype(label_type)
 
         # Iterate through remaining images
         for idx, path in enumerate(image_paths[1:], start=2):
@@ -1361,13 +1391,13 @@ def load_and_merge_images(
 
             # Apply relabeling: replace all non-zero values with mask index
             if relabel_masks:
-                label_value = idx  # idx starts at 2 for second file
-                current_array = np.where(current_array != 0, label_value, 0).astype(
-                    current_array.dtype
-                )
+                label_value = label_type.type(idx)  # idx starts at 2 for second file
+                current_array = np.where(current_array != 0, label_value, label_type.type(0))
 
-            # Merge with conflict resolution
+            # Merge with conflict resolution, in the common type
+            merged_array = _widened(merged_array, current_array)
             _merge_into(merged_array, current_array, 0, conflict_resolution)
+            del current_image, current_array  # free the image before the next load
 
         consensus_spacing = consensus_image.spacing
         consensus_origin = consensus_image.origin
@@ -1388,7 +1418,7 @@ def load_and_merge_images(
 
     # Apply binarization if requested
     if binarize is not None:
-        mask_out: npt.NDArray[np.floating[Any]] = np.zeros_like(merged_array, dtype=np.uint8)
+        mask_out: npt.NDArray[Any] = np.zeros_like(merged_array, dtype=np.uint8)
         if isinstance(binarize, bool) and binarize is True:
             mask_out[merged_array > 0] = 1
         elif isinstance(binarize, int) and not isinstance(binarize, bool):
@@ -1403,7 +1433,7 @@ def load_and_merge_images(
             mask_out = merged_array
 
         if binarize is not False:
-            merged_array = mask_out.astype(np.float64)
+            merged_array = mask_out
 
     return Image(
         array=merged_array,

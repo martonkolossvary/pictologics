@@ -1115,37 +1115,19 @@ class TestLoader(unittest.TestCase):
 
     @patch("pictologics.loader.load_image")
     def test_load_and_merge_conflict_resolution(self, mock_load_image: MagicMock) -> None:
-        mask1 = MagicMock()
-        mask1.array = np.array([[[10]]])
-        mask1.spacing = (1.0, 1.0, 1.0)
-        mask1.origin = (0.0, 0.0, 0.0)
-        mask1.direction = np.eye(3)
+        # The merge writes into the first loaded array, so each call loads new arrays
+        def mask(value: int) -> MagicMock:
+            image = MagicMock()
+            image.array = np.array([[[value]]])
+            image.spacing = (1.0, 1.0, 1.0)
+            image.origin = (0.0, 0.0, 0.0)
+            image.direction = np.eye(3)
+            return image
 
-        mask2 = MagicMock()
-        mask2.array = np.array([[[20]]])
-        mask2.spacing = (1.0, 1.0, 1.0)
-        mask2.origin = (0.0, 0.0, 0.0)
-        mask2.direction = np.eye(3)
-
-        # 'max'
-        mock_load_image.side_effect = [mask1, mask2]
-        merged = load_and_merge_images(["p1", "p2"], conflict_resolution="max")
-        self.assertEqual(merged.array[0, 0, 0], 20)
-
-        # 'min'
-        mock_load_image.side_effect = [mask1, mask2]
-        merged = load_and_merge_images(["p1", "p2"], conflict_resolution="min")
-        self.assertEqual(merged.array[0, 0, 0], 10)
-
-        # 'first'
-        mock_load_image.side_effect = [mask1, mask2]
-        merged = load_and_merge_images(["p1", "p2"], conflict_resolution="first")
-        self.assertEqual(merged.array[0, 0, 0], 10)
-
-        # 'last'
-        mock_load_image.side_effect = [mask1, mask2]
-        merged = load_and_merge_images(["p1", "p2"], conflict_resolution="last")
-        self.assertEqual(merged.array[0, 0, 0], 20)
+        for rule, expected in (("max", 20), ("min", 10), ("first", 10), ("last", 20)):
+            mock_load_image.side_effect = [mask(10), mask(20)]
+            merged = load_and_merge_images(["p1", "p2"], conflict_resolution=rule)
+            self.assertEqual(merged.array[0, 0, 0], expected)
 
     @patch("pictologics.loader.load_image")
     def test_load_and_merge_geometry_mismatch_spacing(self, mock_load: MagicMock) -> None:
@@ -3354,3 +3336,90 @@ def test_a_folder_with_one_multiframe_file_loads_its_frames(tmp_path: "os.PathLi
     assert np.array_equal(from_folder.direction, from_file.direction)
     with pytest.raises(ValueError, match="holds 2 multi-frame file"):
         load_image(str(two))
+
+
+def test_merged_masks_keep_the_type_of_their_inputs() -> None:
+    # The merge keeps the common type of the loaded arrays (float64 for NIfTI loads) and
+    # the values of the old float64 merge; binarize gives uint8, relabel_masks the smallest
+    # unsigned type of the labels. With reposition_to_reference, the merge starts in the
+    # type of the first image when it holds the fill value exactly, else in float64.
+    from pictologics import RadiomicsPipeline
+
+    rng = np.random.default_rng(9)
+    shape, geometry = (3, 4, 2), ((1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    arrays = {
+        "u8": (rng.random(shape) > 0.5).astype(np.uint8) * 2,
+        "i16": rng.integers(0, 3, shape).astype(np.int16),
+        "f64": rng.integers(0, 4, shape).astype(np.float64),
+    }
+    arrays.update(
+        {f"one{k}": np.eye(1, 300, k, dtype=np.uint8).reshape(300, 1, 1) for k in range(300)}
+    )
+
+    def merge(names: list, **kwargs: object) -> Image:
+        with patch(
+            "pictologics.loader.load_image", lambda path, **_: Image(arrays[path].copy(), *geometry)
+        ):
+            return load_and_merge_images(names, **kwargs)
+
+    def old_max(names: list) -> np.ndarray:  # the float64 merge of nonnegative values
+        return np.maximum.reduce([arrays[name].astype(np.float64) for name in names])
+
+    for names, kind in ((["f64", "f64"], np.float64), (["u8", "u8"], np.uint8), (["u8", "i16"], np.int16), (["i16", "f64"], np.float64)):  # fmt: skip
+        merged = merge(names)
+        assert merged.array.dtype == kind
+        assert merged.array.astype(np.float64).tobytes() == old_max(names).tobytes()
+    for rule, chosen in ((True, lambda m: m > 0), (2, lambda m: m == 2), ([1, 2], lambda m: np.isin(m, [1, 2])), ((1, 2), lambda m: (m >= 1) & (m <= 2))):  # fmt: skip
+        merged = merge(["u8", "i16"], binarize=rule)
+        assert merged.array.dtype == np.uint8
+        assert np.array_equal(merged.array, chosen(old_max(["u8", "i16"])))
+    three = merge(["u8", "i16", "f64"], relabel_masks=True, conflict_resolution="last")
+    expected = np.zeros(shape)
+    for label, name in enumerate(["u8", "i16", "f64"], start=1):
+        expected[arrays[name] != 0] = label
+    assert three.array.dtype == np.uint8 and np.array_equal(three.array, expected)
+    many = merge([f"one{k}" for k in range(300)], relabel_masks=True)
+    assert many.array.dtype == np.uint16 and np.array_equal(many.array.ravel(), np.arange(1, 301))
+    reference = Image(np.zeros(shape), *geometry)
+    for fill, kind in ((0.0, np.uint8), (0.5, np.float64)):
+        merged = merge(
+            ["u8", "u8"], reference_image=reference, reposition_to_reference=True, fill_value=fill
+        )
+        assert merged.array.dtype == kind
+        assert np.array_equal(merged.array, np.where(arrays["u8"] != fill, arrays["u8"], fill))
+    labels = merge(
+        ["u8", "i16"], reference_image=reference, reposition_to_reference=True, relabel_masks=True
+    )
+    assert labels.array.dtype == np.uint8 and labels.array.max() == 2
+    # The pipeline reads a mask as "not 0": the features of the uint8 mask are those of float64
+    image = Image(rng.normal(50.0, 10.0, shape), *geometry)
+    mask = merge(["u8", "i16"], binarize=True)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [{"step": "extract_features", "params": {"families": ["intensity"]}}])
+    as_uint8 = pipeline.run(image, mask, config_names=["c"])["c"]
+    as_float = pipeline.run(
+        image, Image(mask.array.astype(np.float64), *geometry), config_names=["c"]
+    )["c"]
+    assert as_uint8.to_numpy().tobytes() == as_float.to_numpy().tobytes()
+
+
+def test_a_merge_frees_each_image_before_the_next_load() -> None:
+    # A merge holds the merged array and the image that loads, not the images before it
+    # (the first image of the standard mode is the merged array)
+    import weakref
+
+    shape, geometry = (3, 4, 2), ((1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    loaded: list = []
+    reference = Image(np.zeros(shape), *geometry)
+    for kwargs, kept in (({}, 1), ({"reference_image": reference, "reposition_to_reference": True}, 0)):  # fmt: skip
+
+        def load(path: str, kept: int = kept, **_: object) -> Image:
+            assert all(ref() is None for ref in loaded[kept:]), "an earlier image is in memory"
+            image = Image(np.full(shape, float(len(loaded) + 1)), *geometry)
+            loaded.append(weakref.ref(image.array))
+            return image
+
+        loaded.clear()
+        with patch("pictologics.loader.load_image", load):
+            merged = load_and_merge_images(["a", "b", "c", "d"], **kwargs)
+        assert len(loaded) == 4 and np.all(merged.array == 4.0)

@@ -295,7 +295,7 @@ merged = load_and_merge_images(paths, reference_image=ct, reposition_to_referenc
 | `conflict_resolution` | Where files overlap: `"max"` (default), `"min"`, `"first"` or `"last"` |
 | `reposition_to_reference=True` | Place each file on the grid of `reference_image`, with the alignment settings above. Without it, every file must have the exact grid of the first, and nothing is turned or placed |
 
-- The result is float64, with the modality `"MergedImage"`.
+- The result has the common type of the loaded arrays: float64 for NIfTI, NRRD and MetaImage files and rescaled DICOM, the stored type for SEG files and DICOM with `apply_rescale=False`. `binarize` gives uint8, and `relabel_masks` gives the smallest unsigned type that holds the labels. The modality is `"MergedImage"`.
 - The files load with `load_image()` without a reference image, so RTSTRUCT paths do not work here (use `load_rtstruct()`), and `series_uid` and `suv` do not apply.
 
 ## Sentinel Values
