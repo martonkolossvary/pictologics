@@ -155,7 +155,7 @@ def _roi_voxel_count(mask: npt.NDArray[np.floating[Any]]) -> int:
     return int(np.count_nonzero(mask))
 
 
-@jit(nopython=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _chamfer_distance_taxicab_numba(
     mask_bool: npt.NDArray[np.floating[Any]],
     planar0: bool = False,
@@ -291,7 +291,7 @@ DIRECTIONS_13_WITH_ID = tuple(enumerate(DIRECTIONS_13_TUPLE))
 _MAX_TEXTURE_LEVELS = 65535
 
 
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
 def _texture_volume_numba(
     data: npt.NDArray[Any],
     roi: npt.NDArray[np.bool_],
@@ -318,7 +318,7 @@ def _texture_volume_numba(
         counts[z, 1] = inside
 
 
-@jit(nopython=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _texture_volume_serial_numba(
     data: npt.NDArray[Any],
     roi: npt.NDArray[np.bool_],
@@ -407,7 +407,7 @@ def _flat_offsets(shape: tuple[int, ...], offsets: npt.NDArray[Any]) -> npt.NDAr
     return cast(npt.NDArray[np.int64], steps.astype(np.int64))
 
 
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
 def _local_tables_numba(
     vol: npt.NDArray[np.uint16],
     counts: npt.NDArray[np.int64],
@@ -493,7 +493,7 @@ def _local_tables_numba(
                                 glrlm[tid, t, i, length] += 1
 
 
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
 def _levels_seen_numba(vol: npt.NDArray[np.uint16], seen: npt.NDArray[np.bool_]) -> None:
     """seen[z, g] = True for each grey level g in slice z of `vol` (one row per slice, so
     the threads write their own rows)."""
@@ -530,7 +530,7 @@ _NO_TABLE_4D = np.zeros((1, 1, 1, 1), dtype=np.uint32)
 _PARALLEL_ZERO_MIN = 1 << 20
 
 
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
 def _zero_fill_numba(flat: npt.NDArray[np.uint32]) -> None:
     """flat[:] = 0, in parallel blocks."""
     n = flat.size
@@ -554,7 +554,7 @@ def _thread_tables(shape: tuple[int, ...]) -> npt.NDArray[np.uint32]:
 _PARALLEL_SUM_MIN_CELLS = 1 << 15
 
 
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
 def _thread_sum_numba(tables: npt.NDArray[np.uint32], out: npt.NDArray[np.uint64]) -> None:
     """out[k] = the sum over the threads t of tables[t, k], for (n_threads, n) tables, in
     blocks of the cells so that each thread reads contiguous rows."""
@@ -1333,7 +1333,7 @@ def calculate_glrlm_features(
 _GLSZM_DENSE_CELLS = 1 << 18
 
 
-@jit(nopython=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _glszm_cells(
     zone_gl: npt.NDArray[np.int32],
     zone_size: npt.NDArray[np.int32],
@@ -1400,7 +1400,7 @@ def _glszm_cells(
     return cells
 
 
-@jit(nopython=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _uf_find(parent: npt.NDArray[np.floating[Any]], a: int) -> int:
     """Union-find root lookup with full path compression."""
     root = a
@@ -1419,7 +1419,7 @@ def _zone_offsets(shape: tuple[int, int, int]) -> npt.NDArray[np.int64]:
     return cast(npt.NDArray[np.int64], _zone_offsets_numba(shape))
 
 
-@jit(nopython=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _zone_offsets_numba(shape: tuple[int, int, int]) -> npt.NDArray[np.int64]:
     """The 26 neighbour steps in the flat index of an array of `shape`."""
     offsets = np.empty(26, dtype=np.int64)
@@ -1433,7 +1433,7 @@ def _zone_offsets_numba(shape: tuple[int, int, int]) -> npt.NDArray[np.int64]:
     return offsets
 
 
-@jit(nopython=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _fill_zones_numba(
     flat: npt.NDArray[np.uint16],
     flat_dist: npt.NDArray[np.int32],
@@ -1571,7 +1571,7 @@ def _label_zones_numba(
                     res_dist[r] = res_dist[zid]
 
 
-@jit(nopython=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _zone_tables_numba(
     res_gl: npt.NDArray[np.int32],
     res_size: npt.NDArray[np.int32],

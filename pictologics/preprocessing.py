@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 import warnings
+import weakref
 from dataclasses import replace
 from typing import Any, Literal, Optional, cast
 
@@ -95,19 +96,34 @@ def _nonfinite_blocks_numba(flat: npt.NDArray[np.float64], found: npt.NDArray[np
 # for roi_min_max: below ~2^19 values, starting the threads costs more than the pass.
 _FINITE_PARALLEL_MIN = 1 << 19
 
+# The result of _all_finite for each array that lives (key: the id of the array). A weak
+# finalizer removes the result when the array dies, so an id names one array.
+_FINITE_RESULTS: dict[int, bool] = {}
+
 
 def _all_finite(array: npt.NDArray[Any]) -> bool:
     """Whether every value of a float array is finite: one parallel pass for a large
     contiguous float64 array, else numpy (the sum of an array with a NaN or an infinite
     value is not finite; a sum too large for float64 only costs the caller one more
-    check)."""
+    check).
+
+    The result stays while the array lives, so the next run on the same image does not read
+    it again. This memo assumes that the caller does not change the array in place between
+    runs. The package itself never changes an array in place."""
+    key = id(array)
+    if key in _FINITE_RESULTS:
+        return _FINITE_RESULTS[key]
     contiguous = array.flags.c_contiguous or array.flags.f_contiguous
     if array.dtype == np.float64 and array.size >= _FINITE_PARALLEL_MIN and contiguous:
         flat = array.ravel(order="K")
         found = np.zeros((flat.size + 65535) // 65536, dtype=np.uint8)
         _nonfinite_blocks_numba(flat, found)
-        return not found.any()
-    return math.isfinite(float(np.sum(array)))
+        finite = not found.any()
+    else:
+        finite = math.isfinite(float(np.sum(array)))
+    _FINITE_RESULTS[key] = finite
+    weakref.finalize(array, _FINITE_RESULTS.pop, key, None)
+    return finite
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore

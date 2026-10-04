@@ -379,6 +379,52 @@ def test_json_output_writes_nan_as_null(tmp_path: Path) -> None:
         assert _strict_json(path.read_text()) == [{"c__a": 1.0, "c__b": None, "c__c": None}]
 
 
+def test_json_of_a_frame_with_nan_encodes_once(tmp_path: Path) -> None:
+    # A frame with a NaN or infinite float encodes once, with the bytes of the encode
+    # after a failed first try (0.6.0); a NaN in an object column (two encodes, as
+    # before), a missing value in a nullable float column and a frame without floats
+    # give the bytes of 0.6.0 too.
+    from unittest.mock import patch
+
+    import numpy as np
+
+    from pictologics import results as results_module
+
+    frames = {
+        "finite": pd.DataFrame({"id": ["x", "y"], "a": [1.0, 2.5], "n": [1, 2]}),
+        "nan last": pd.DataFrame({"id": ["x", "y"], "a": [1.0, np.nan], "b": [np.inf, 3.0]}),
+        "object nan": pd.DataFrame({"id": ["x", "y"], "o": pd.Series([1.0, np.nan], dtype=object)}),
+        "nullable": pd.DataFrame({"a": pd.array([1.5, None], dtype="Float64"), "b": [2.0, 3.0]}),
+        "no floats": pd.DataFrame({"id": ["x"], "n": [3]}),
+    }
+    for name, frame in frames.items():
+        path = tmp_path / f"{name}.json"
+        with patch.object(results_module.json, "dumps", wraps=json.dumps) as dumps:
+            save_results(frame, path)
+        expected = results_module._json_text(frame.to_dict(orient="records"), indent=2)
+        assert path.read_text() == expected
+        assert dumps.call_count == (2 if name == "object nan" else 1)
+
+
+def test_format_results_takes_dictionaries_of_features() -> None:
+    # Dictionaries of features give the output of Series, in the wide and the long format
+    # and every output type.
+    series = {
+        "c": pd.Series({"a": 1.0, "b": float("nan"), "c": float("inf")}),
+        "d": pd.Series({"a": 2.0}),
+    }
+    dicts = {name: values.to_dict() for name, values in series.items()}
+    for fmt in ("wide", "long"):
+        for output_type in ("dict", "json"):
+            expected = format_results(series, fmt=fmt, output_type=output_type, meta={"id": 7})
+            got = format_results(dicts, fmt=fmt, output_type=output_type, meta={"id": 7})
+            assert repr(got) == repr(expected)
+        pd.testing.assert_frame_equal(
+            format_results(dicts, fmt=fmt, output_type="pandas"),
+            format_results(series, fmt=fmt, output_type="pandas"),
+        )
+
+
 def test_save_results_file_types_and_folders(tmp_path: Path) -> None:
     # Known extensions only (a .parquet file got CSV text before); .tsv separates by
     # tabs; no extension means CSV; a missing folder is created.

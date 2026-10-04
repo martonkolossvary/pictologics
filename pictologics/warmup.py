@@ -245,6 +245,8 @@ def _warmup_morphology() -> None:
     evecs = np.asfortranarray(np.eye(3, dtype=np.float64))
     morphology._ombb_extents_numba(verts, center, evecs)
     morphology._max_pairwise_distance_numba(verts)
+    # The serial twin of the morphology worker thread (see pipeline._MorphologyAhead)
+    morphology._max_pairwise_distance_serial_numba(verts)
     morphology._hull_candidates_numba(verts, np.ones(3, dtype=np.float64))
 
     tet_verts = verts[:4]  # First 4 verts form a tet

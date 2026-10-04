@@ -1,0 +1,1 @@
+`run_batch()` builds its table without a pandas Series for each configuration of a case: a resumed batch of 150 cases with 6 configurations takes 64 ms instead of 95 ms. `format_results()` now also takes dictionaries of features.

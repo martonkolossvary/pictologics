@@ -1100,13 +1100,43 @@ def test_all_finite() -> None:
     arr = np.arange(60, dtype=np.float64).reshape(3, 4, 5)
     for minimum in (0, 1 << 19):  # the parallel pass, then numpy for a small array
         with patch("pictologics.preprocessing._FINITE_PARALLEL_MIN", minimum):
-            for layout in (arr, np.asfortranarray(arr), arr[:, ::2], arr.astype(np.float32)):
+            # New arrays: the check keeps its result for each array (see the next test)
+            for layout in (arr.copy(), np.asfortranarray(arr), arr[:, ::2], arr.astype(np.float32)):
                 assert _all_finite(layout)
             for bad in (np.nan, np.inf, -np.inf):
                 broken = arr.copy()
                 broken[2, 3, 4] = bad
                 assert not _all_finite(broken)
                 assert not _all_finite(broken.astype(np.float32))
+
+
+def test_all_finite_reads_each_array_once() -> None:
+    # The finite check keeps its result while the array lives: a second check of the same
+    # array (the next run on the same image) does not read it again; another array is read,
+    # and the result goes when its array goes.
+    import gc
+
+    from pictologics import preprocessing
+
+    arr = np.arange(60, dtype=np.float64).reshape(3, 4, 5)
+    broken = arr.copy()
+    broken[1, 2, 3] = np.nan
+    with (
+        patch.object(preprocessing, "_FINITE_PARALLEL_MIN", 0),
+        patch.object(
+            preprocessing, "_nonfinite_blocks_numba", wraps=preprocessing._nonfinite_blocks_numba
+        ) as kernel,
+    ):
+        assert preprocessing._all_finite(arr) and preprocessing._all_finite(arr)
+        assert kernel.call_count == 1
+        assert not preprocessing._all_finite(broken) and not preprocessing._all_finite(broken)
+        assert kernel.call_count == 2
+    key = id(broken)
+    assert preprocessing._FINITE_RESULTS[key] is False
+    kernel.reset_mock()  # the mock keeps its arguments, a view of the array
+    del broken
+    gc.collect()
+    assert key not in preprocessing._FINITE_RESULTS
 
 
 def _grown_by_definition(

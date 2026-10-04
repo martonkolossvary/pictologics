@@ -304,6 +304,49 @@ class TestMorphologyFeatures(unittest.TestCase):
         points = np.array([], dtype=float).reshape(0, 3)
         self.assertEqual(_max_pairwise_distance_numba(points), 0.0)
 
+    def test_max_pairwise_distance_serial_equals_parallel(self):
+        # The serial twin (for the morphology worker thread) gives the bits of the
+        # parallel kernel, also for one point and for points on a lattice (equal distances)
+        from pictologics.features.morphology import _max_pairwise_distance_serial_numba
+
+        rng = np.random.default_rng(5)
+        for n in (0, 1, 2, 3, 17, 120):
+            for points in (rng.normal(size=(n, 3)) * 40.0, np.round(rng.normal(size=(n, 3)) * 3)):
+                a = _max_pairwise_distance_numba(points)
+                b = _max_pairwise_distance_serial_numba(points)
+                self.assertEqual(np.float64(a).tobytes(), np.float64(b).tobytes())
+
+    def test_morphology_parts_raise_the_first_error_in_feature_order(self):
+        # Part 1 (with the bounding box and intensity-weighted features) and part 2 (convex
+        # hull and MVEE, here with the serial diameter) give the features of one call, in
+        # its order. With two failing parts, the error of the first in the order of the
+        # features (hull, bounding box, MVEE, intensity) is raised, as in one call.
+        from pictologics.features import morphology as morphology_module
+
+        arr = np.zeros((7, 8, 9), dtype=np.uint8)
+        arr[1:5, 2:7, 2:8] = 1
+        arr[5, 4, 4] = 1
+        mask = self._create_image(arr, spacing=(1.0, 0.8, 1.2))
+        image = self._create_image(np.random.default_rng(6).normal(9.0, 2.0, arr.shape))
+        whole = calculate_morphology_features(mask, image)
+        first, rest = morphology_module._morphology_first(mask, image)
+        second = morphology_module._morphology_second(rest, serial=True)
+        merged = morphology_module._morphology_merge(first, rest, second)
+        self.assertEqual(list(merged.items()), list(whole.items()))
+        self.assertIn("maximum_3d_diameter_L0JK", merged)
+        pairs = [
+            ("_get_convex_hull_features", "_get_bounding_box_features"),
+            ("_get_bounding_box_features", "_get_mvee_features"),
+            ("_get_mvee_features", "_get_intensity_morphology_features"),
+        ]
+        for earlier, later in pairs:
+            with (
+                patch.object(morphology_module, earlier, side_effect=ValueError(earlier)),
+                patch.object(morphology_module, later, side_effect=KeyError(later)),
+            ):
+                with self.assertRaisesRegex(ValueError, earlier):
+                    calculate_morphology_features(mask, image)
+
     def test_mesh_area_volume(self):
         # Simple Tet
         verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)

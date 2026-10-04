@@ -43,7 +43,8 @@ Example:
 from __future__ import annotations
 
 import math
-from typing import Any, Optional, cast
+from collections.abc import Callable
+from typing import Any, NamedTuple, Optional, cast
 
 import numpy as np
 from numba import jit, prange
@@ -260,7 +261,38 @@ def _max_pairwise_distance_numba(points: npt.NDArray[np.floating[Any]]) -> float
     return float(math.sqrt(np.max(max_d2_arr)))
 
 
-@jit(nopython=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, fastmath=True, cache=True)  # type: ignore
+def _max_pairwise_distance_serial_numba(points: npt.NDArray[np.floating[Any]]) -> float:
+    """`_max_pairwise_distance_numba` in one thread, with the same arithmetic: the maximum
+    of each row, then the maximum of the rows, so the same result. It has no parallel
+    region, so it can run in a thread next to the parallel kernels."""
+    n = points.shape[0]
+    if n < 2:
+        return 0.0
+
+    max_d2_arr = np.zeros(n - 1, dtype=np.float64)
+
+    for i in range(n - 1):
+        x0 = points[i, 0]
+        y0 = points[i, 1]
+        z0 = points[i, 2]
+
+        local_max = 0.0
+
+        for j in range(i + 1, n):
+            dx = points[j, 0] - x0
+            dy = points[j, 1] - y0
+            dz = points[j, 2] - z0
+            d2 = dx * dx + dy * dy + dz * dz
+            if d2 > local_max:
+                local_max = d2
+
+        max_d2_arr[i] = local_max
+
+    return float(math.sqrt(np.max(max_d2_arr)))
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _hull_candidates_numba(
     verts: npt.NDArray[np.floating[Any]], spacing: npt.NDArray[np.floating[Any]]
 ) -> npt.NDArray[np.int64]:
@@ -539,7 +571,7 @@ def _mesh_block_sums(
     return area, vol6
 
 
-@jit(nopython=True, fastmath=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, fastmath=True, cache=True)  # type: ignore
 def _mvee_khachiyan_numba(
     points: npt.NDArray[np.floating[Any]], tol: float = 0.001
 ) -> tuple[Optional[npt.NDArray[np.floating[Any]]], Optional[npt.NDArray[np.floating[Any]]]]:
@@ -901,12 +933,14 @@ def _get_convex_hull_features(
     mesh_volume: float,
     surface_area: float,
     spacing: tuple[float, float, float],
+    serial: bool = False,
 ) -> tuple[dict[str, float], Optional[ConvexHull]]:
     """Calculate Convex Hull features.
 
     `verts` are the marching cubes vertices of `_get_mesh_features`. Qhull gets only the
     vertices that can be hull vertices (see `_hull_candidates_numba`). It finds the same
-    hull vertices in the same order, and the same volume and area to about 1e-15.
+    hull vertices in the same order, and the same volume and area to about 1e-15. With
+    `serial`, the maximum diameter comes from the serial kernel (the same value).
     """
     features: dict[str, float] = {}
     if len(verts) <= 3:
@@ -926,8 +960,11 @@ def _get_convex_hull_features(
         # Max 3D Diameter
         hull_points = hull.points[hull.vertices]
         if hull_points.shape[0] > 1:
+            diameter = (
+                _max_pairwise_distance_serial_numba if serial else _max_pairwise_distance_numba
+            )
             features["maximum_3d_diameter_L0JK"] = float(
-                _max_pairwise_distance_numba(np.asarray(hull_points, dtype=np.float64))
+                diameter(np.asarray(hull_points, dtype=np.float64))
             )
 
         return features, hull
@@ -1084,6 +1121,133 @@ def _get_intensity_morphology_features(
     return features
 
 
+class _Rest(NamedTuple):
+    """The morphology features after the PCA features (see _morphology_first): the input of
+    part 2, and the bounding box and intensity-weighted features of part 1 (or their
+    errors)."""
+
+    verts: npt.NDArray[np.floating[Any]]
+    mesh_volume: float
+    surface_area: float
+    spacing: tuple[float, float, float]
+    box: dict[str, float] | Exception
+    intensity: dict[str, float] | Exception
+
+
+def _section(
+    function: Callable[..., dict[str, float]], *args: Any, **kwargs: Any
+) -> dict[str, float] | Exception:
+    """The features `function(*args, **kwargs)`, or the error that it raises."""
+    try:
+        return function(*args, **kwargs)
+    except Exception as e:
+        return e
+
+
+def _morphology_first(
+    mask: Image,
+    image: Optional[Image] = None,
+    intensity_mask: Optional[Image] = None,
+    roi_bbox: Optional[tuple[slice, slice, slice]] = None,
+    grid_offset: Optional[tuple[int, int, int]] = None,
+) -> tuple[dict[str, float], Optional[_Rest]]:
+    """Part 1 of calculate_morphology_features, with all its parallel kernels: the voxel,
+    mesh, shape and PCA features, and the rest. The rest is None when these are all the
+    features (no ROI voxel, or no mesh). It holds the bounding box and intensity-weighted
+    features, or their errors: _morphology_merge raises them in the order of the features.
+    """
+    features: dict[str, float] = {}
+    i_mask = intensity_mask if intensity_mask is not None else mask
+
+    voxel_volume = np.prod(mask.spacing)
+
+    # Compute the ROI bounding box once; the scans below run on the cropped region
+    # instead of the full volume, which dominates runtime for sparse ROIs.
+    bbox = roi_bbox if roi_bbox is not None else compute_nonzero_bbox(mask.array)
+    if bbox is None:
+        # Empty mask: no ROI voxels.
+        features["volume_voxel_counting_YEKZ"] = 0.0
+        return features, None
+
+    # 1. Voxel Based Features + mask moments (shared by PCA and intensity
+    # morphology features). The moments are computed in cropped index space: the
+    # PCA covariance is translation-invariant, and the center-of-mass consumer
+    # adds the bbox offset back. The kernel's voxel count doubles as the count
+    # for the voxel-counting volume.
+    mask_moments = _accumulate_moments_from_mask_numba(_uint8_roi(mask.array[bbox], keep=True))
+    n_voxels = mask_moments[0]
+    features["volume_voxel_counting_YEKZ"] = float(n_voxels * voxel_volume)
+
+    # 2. Mesh Based Features
+    mesh_feats, verts, faces = _get_mesh_features(mask, roi_bbox=bbox, grid_offset=grid_offset)
+    features.update(mesh_feats)
+
+    if verts is None or faces is None:
+        return features, None
+
+    mesh_volume = features.get("volume_RNU0", 0.0)
+    surface_area = features.get("surface_area_C0JK", 0.0)
+
+    # 3. Shape Features
+    features.update(_get_shape_features(surface_area, mesh_volume))
+
+    # 4. PCA Based Features
+    pca_feats, evals, evecs = _get_pca_features(
+        mask, mesh_volume, surface_area, mask_moments=mask_moments
+    )
+    features.update(pca_feats)
+
+    # 6. Bounding Box Features (5, the convex hull, is in part 2)
+    box = _section(_get_bounding_box_features, verts, evecs, mesh_volume, surface_area)
+
+    # 8. Intensity Based Features (7, the MVEE, is in part 2)
+    intensity = (
+        {}
+        if image is None
+        else _section(
+            _get_intensity_morphology_features,
+            mask,
+            image,
+            i_mask,
+            mesh_volume,
+            mask_moments=mask_moments,
+            mask_bbox=bbox,
+        )
+    )
+    return features, _Rest(verts, mesh_volume, surface_area, mask.spacing, box, intensity)
+
+
+def _morphology_second(
+    rest: _Rest, serial: bool = False
+) -> tuple[dict[str, float] | Exception, dict[str, float] | Exception]:
+    """Part 2 of calculate_morphology_features: the convex hull features and the MVEE
+    features, or the error of each. With `serial`, part 2 runs no parallel kernel, so it can
+    run in a thread next to them (numba's workqueue layer stops at two parallel regions at
+    once). Its kernels and Qhull release the GIL."""
+    try:
+        hull_features, hull = _get_convex_hull_features(
+            rest.verts, rest.mesh_volume, rest.surface_area, rest.spacing, serial
+        )
+    except Exception as e:
+        return e, {}
+    return hull_features, _section(_get_mvee_features, hull, rest.mesh_volume, rest.surface_area)
+
+
+def _morphology_merge(
+    features: dict[str, float],
+    rest: _Rest,
+    second: tuple[dict[str, float] | Exception, dict[str, float] | Exception],
+) -> dict[str, float]:
+    """The part 1 `features` with the convex hull, bounding box, MVEE and intensity-weighted
+    features, in this order. The first error in this order is raised, as in one pass."""
+    hull, mvee = second
+    for section in (hull, rest.box, mvee, rest.intensity):
+        if isinstance(section, Exception):
+            raise section
+        features.update(section)
+    return features
+
+
 def calculate_morphology_features(
     mask: Image,
     image: Optional[Image] = None,
@@ -1130,63 +1294,7 @@ def calculate_morphology_features(
         # 0.82
         ```
     """
-    features: dict[str, float] = {}
-    i_mask = intensity_mask if intensity_mask is not None else mask
-
-    voxel_volume = np.prod(mask.spacing)
-
-    # Compute the ROI bounding box once; the scans below run on the cropped region
-    # instead of the full volume, which dominates runtime for sparse ROIs.
-    bbox = roi_bbox if roi_bbox is not None else compute_nonzero_bbox(mask.array)
-    if bbox is None:
-        # Empty mask: no ROI voxels.
-        features["volume_voxel_counting_YEKZ"] = 0.0
+    features, rest = _morphology_first(mask, image, intensity_mask, roi_bbox, grid_offset)
+    if rest is None:
         return features
-
-    # 1. Voxel Based Features + mask moments (shared by PCA and intensity
-    # morphology features). The moments are computed in cropped index space: the
-    # PCA covariance is translation-invariant, and the center-of-mass consumer
-    # adds the bbox offset back. The kernel's voxel count doubles as the count
-    # for the voxel-counting volume.
-    mask_moments = _accumulate_moments_from_mask_numba(_uint8_roi(mask.array[bbox], keep=True))
-    n_voxels = mask_moments[0]
-    features["volume_voxel_counting_YEKZ"] = float(n_voxels * voxel_volume)
-
-    # 2. Mesh Based Features
-    mesh_feats, verts, faces = _get_mesh_features(mask, roi_bbox=bbox, grid_offset=grid_offset)
-    features.update(mesh_feats)
-
-    if verts is None or faces is None:
-        return features
-
-    mesh_volume = features.get("volume_RNU0", 0.0)
-    surface_area = features.get("surface_area_C0JK", 0.0)
-
-    # 3. Shape Features
-    features.update(_get_shape_features(surface_area, mesh_volume))
-
-    # 4. PCA Based Features
-    pca_feats, evals, evecs = _get_pca_features(
-        mask, mesh_volume, surface_area, mask_moments=mask_moments
-    )
-    features.update(pca_feats)
-
-    # 5. Convex Hull Features
-    hull_feats, hull = _get_convex_hull_features(verts, mesh_volume, surface_area, mask.spacing)
-    features.update(hull_feats)
-
-    # 6. Bounding Box Features
-    features.update(_get_bounding_box_features(verts, evecs, mesh_volume, surface_area))
-
-    # 7. MVEE Features
-    features.update(_get_mvee_features(hull, mesh_volume, surface_area))
-
-    # 8. Intensity Based Features
-    if image is not None:
-        features.update(
-            _get_intensity_morphology_features(
-                mask, image, i_mask, mesh_volume, mask_moments=mask_moments, mask_bbox=bbox
-            )
-        )
-
-    return features
+    return _morphology_merge(features, rest, _morphology_second(rest))

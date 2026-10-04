@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 # Wide-format column names of recent configurations, {config: {feature: column}}, so the
@@ -30,7 +32,7 @@ _WIDE_CACHE_CONFIGS = 64
 
 
 def format_results(
-    results: dict[str, pd.Series],
+    results: Mapping[str, pd.Series | Mapping[str, Any]],
     fmt: str = "wide",
     meta: dict[str, Any] | None = None,
     output_type: str = "dict",
@@ -47,7 +49,8 @@ def format_results(
 
     Args:
         results: Dictionary mapping configuration names to pandas Series of features
-                 (the standard output of RadiomicsPipeline.run).
+                 (the standard output of RadiomicsPipeline.run), or to dictionaries of
+                 the features.
         fmt: "wide" or "long".
              - "wide": Flattens keys to '{config}__{feature}'. Returns 1 row (dict/df).
              - "long": Tidy format with columns for config, feature_key, and value.
@@ -123,8 +126,8 @@ def format_results(
         values: list[Any] = []
         for config_name, series in results.items():
             names.extend([config_name] * len(series))
-            keys.extend(series.index)
-            values.extend(series.tolist())
+            keys.extend(series.keys())
+            values.extend(series.tolist() if isinstance(series, pd.Series) else series.values())
         standard = {config_col: names, "feature_key": keys, "value": values}
         table = {
             col: standard[col] if col in standard else [meta[col]] * len(values)
@@ -230,8 +233,13 @@ def save_results(
         final_df.to_csv(path, index=False, sep="\t")
     elif file_format == "json":
         # Use standard json library to avoid potential pandas C-extension issues during coverage
+        records = final_df.to_dict(orient="records")
+        # A NaN or infinite value becomes null before the encode, so the encode runs once
+        floats = final_df.select_dtypes(include="floating").to_numpy(dtype=float, na_value=np.nan)
+        if not np.isfinite(floats).all():
+            records = _json_safe(records)
         with open(path, "w") as f:
-            f.write(_json_text(final_df.to_dict(orient="records"), indent=2))
+            f.write(_json_text(records, indent=2))
     else:
         raise ValueError(f"Unsupported export format: {file_format}")
 

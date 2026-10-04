@@ -1356,6 +1356,14 @@ def test_run_batch_writes_a_file_per_case_and_resumes(tmp_path: Any) -> None:
             pd.DataFrame(cases), out, config_names=["first", "empty"], show_progress=False
         )
         assert len(calls.call_args_list) == 3
+    # the two cases from their files: a NaN feature (null in the file) stays a float NaN,
+    # also in a column of NaN only
+    resumed = pipeline.run_batch(
+        pd.DataFrame(cases[:2]), out, config_names=["first", "empty"], show_progress=False
+    )
+    expected = both.drop(columns="seconds").iloc[:2]
+    pd.testing.assert_frame_equal(resumed.drop(columns="seconds"), expected)
+    assert resumed["empty__mean_intensity_Q4LE"].dtype == np.float64
     # an empty ROI in one configuration; a warning of a run
     assert both["status"].tolist() == ["incomplete", "incomplete", "failed"]
     assert both["error"][0].startswith("empty: ROI is empty after preprocessing (resegment)")
@@ -5375,13 +5383,17 @@ def test_numpy_numbers_in_params_with_deduplication(sm_image: Image, sm_mask: Im
 
 
 def test_roi_check_and_background_selection_helpers() -> None:
-    from pictologics.pipeline import _has_roi, _selects_background, _spacing_problem
+    from pictologics.pipeline import _ArrayMemo, _has_roi, _selects_background, _spacing_problem
 
     for shape in ((8, 8, 8), (128, 128, 64)):  # small: ndarray.any; large: the box scan
         mask = np.zeros(shape, np.uint8)
-        assert not _has_roi(mask)
+        assert not _has_roi(mask, _ArrayMemo())
         mask[3, 4, 5] = 1
-        assert _has_roi(mask)
+        boxes: _ArrayMemo[int, Any] = _ArrayMemo()
+        assert _has_roi(mask, boxes)
+        # The box scan keeps the box of a large mask for the other checks of the run
+        box = (slice(3, 4), slice(4, 5), slice(5, 6))
+        assert boxes == ({} if mask.size < 1 << 20 else {id(mask): box})
     cases = [
         ({}, False), ({"threshold": 0.0}, True), ({"threshold": 0.5}, False),
         ({"threshold": None}, False), ({"mask_values": (0, 2)}, True),
@@ -5644,23 +5656,25 @@ def test_roi_cuts_are_copies_kept_while_their_array_lives() -> None:
     # array goes.
     import gc
 
-    from pictologics.pipeline import PipelineState, _cut_to_roi
+    from pictologics.pipeline import PipelineState, _ArrayMemo, _cut_to_roi
 
     labels = np.zeros((8, 4, 5), dtype=np.uint8)
     labels[2:5] = 1  # whole planes
     grid = Image(np.arange(160.0).reshape(8, 4, 5), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
     mask = Image(labels, grid.spacing, grid.origin)
-    cuts: dict[Any, Any] = {}
+    cuts: _ArrayMemo[Any, Any] = _ArrayMemo()
+    boxes: _ArrayMemo[int, Any] = _ArrayMemo()
     states = [PipelineState(grid, grid, mask, mask, roi_reach=0.0) for _ in range(2)]
     for state in states:
-        _cut_to_roi(state, cuts)
+        _cut_to_roi(state, cuts, boxes)
     first, second = states
     assert first.image.array.base is None and first.image.array.shape == (3, 4, 5)
     assert second.image.array is first.image.array and len(cuts) == 2  # image and mask
     assert first.grid_offset == (2, 0, 0) and first.grid_shape == (8, 4, 5)
+    assert len(boxes) == 1  # the box of the mask, found once
     del grid, mask, states, first, second, labels
     gc.collect()
-    assert not cuts
+    assert not cuts and not boxes
 
 
 def test_small_images_are_not_cut_before_binning(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -6236,3 +6250,403 @@ def test_saved_configs_keep_numpy_numbers_of_tuples(tmp_path: Any) -> None:
         loaded = RadiomicsPipeline.load_configs(tmp_path / f"c.{suffix}", load_standard=False)
         spacing = loaded.get_config("c")[0]["params"]["new_spacing"]
         assert list(spacing) == [1.0, 1, 1] and all(type(v) in (int, float) for v in spacing)
+
+
+def _scan_spy(scanned: list[Any]) -> Any:
+    """A stand-in for the box scan of the pipeline that keeps each array it scans (alive,
+    so that no other array gets its id)."""
+    from pictologics import pipeline as pipeline_module
+
+    scan = pipeline_module.compute_nonzero_bbox
+
+    def counted(array: np.ndarray) -> Any:
+        scanned.append(array)
+        return scan(array)
+
+    return counted
+
+
+def test_a_run_scans_each_mask_once() -> None:
+    # A run scans each mask array once for its nonzero box: the fraction check, the ROI
+    # checks, the resample and filter regions, the box cut, the finite intensity mask and
+    # the extraction share the box. The results are those of a scan at each use.
+    from pictologics import pipeline as pipeline_module
+
+    rng = np.random.default_rng(31)
+    values = rng.normal(40.0, 15.0, (48, 48, 40))
+    values[20, 20, 20] = np.nan  # an ROI voxel: the finite intensity mask
+    image = Image(values, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    roi = np.zeros(values.shape)  # a float mask: the fraction check reads its box
+    roi[12:30, 14:34, 10:28] = 1.0
+    mask = Image(roi, image.spacing, image.origin)
+    discretise = {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}}
+    families = ["intensity", "morphology", "texture", "histogram"]
+    extract = {"step": "extract_features", "params": {"families": families}}
+    configs = {
+        "resampled": [{"step": "resample", "params": {"new_spacing": (1.2, 1.2, 1.2)}}],
+        "filtered": [{"step": "filter", "params": {"type": "mean", "support": 3}}],
+        "resegmented": [
+            {"step": "resegment", "params": {"range_min": 20.0, "apply_to": "intensity"}}
+        ],
+    }
+    pipeline = RadiomicsPipeline(load_standard=False)
+    for name, steps in configs.items():
+        pipeline.add_config(name, [*steps, discretise, extract])
+    once: list[Any] = []
+    each: list[Any] = []
+    with pytest.warns(UserWarning, match="NaN or infinite"):
+        with patch.object(pipeline_module, "compute_nonzero_bbox", _scan_spy(once)):
+            memo = pipeline.run(image, mask, config_names=list(configs))
+        assert not pipeline._mask_boxes  # a run keeps no box after it ends
+        scan = _scan_spy(each)
+        with patch.object(pipeline_module, "_mask_box", lambda array, boxes: scan(array)):
+            scans = pipeline.run(image, mask, config_names=list(configs))
+    assert len({id(array) for array in once}) == len(once) < len(each)
+    for name in configs:
+        assert list(memo[name].index) == list(scans[name].index)
+        assert memo[name].to_numpy().tobytes() == scans[name].to_numpy().tobytes()
+
+
+def test_runs_do_not_collect_finalizers_on_their_arrays() -> None:
+    # A run drops the weak finalizers of its mask boxes and ROI cuts when it ends, so the
+    # arrays of many runs do not collect one finalizer for each run.
+    import weakref
+
+    registry = weakref.finalize._registry
+
+    def finalizers(array: np.ndarray) -> int:
+        return sum(1 for f in list(registry) if (info := f.peek()) and info[0] is array)
+
+    rng = np.random.default_rng(35)
+    image = Image(rng.normal(40.0, 15.0, (30, 32, 28)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    roi = np.zeros(image.array.shape)  # a float mask: the fraction check reads its box
+    roi[8:20, 10:24, 6:18] = 1.0
+    mask = Image(roi, image.spacing, image.origin)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},  # cuts the arrays
+        {"step": "extract_features", "params": {"families": ["intensity", "glcm"]}},
+    ])  # fmt: skip
+    counts = []
+    for _ in range(3):
+        pipeline.run(image, mask, config_names=["c"])
+        counts.append((finalizers(image.array), finalizers(mask.array)))
+    assert counts == [(1, 0)] * 3  # the image keeps the finalizer of its NaN check
+
+
+def test_run_rois_scans_the_map_once_and_no_label_buffer() -> None:
+    # run_rois finds the box of each label with one scan of the map and gives each run the
+    # box of its label, so no run scans the label buffer, and each run scans each of its
+    # masks once. The results are those of a scan at each use.
+    from pictologics import pipeline as pipeline_module
+
+    rng = np.random.default_rng(32)
+    image = Image(rng.normal(40.0, 15.0, (30, 32, 28)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    labels = np.zeros(image.array.shape, dtype=np.uint16)
+    labels[3:9, 4:12, 5:10] = 2
+    labels[15:24, 18:30, 12:25] = 5
+    label_map = Image(labels, image.spacing, image.origin)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [
+        {"step": "resample", "params": {"new_spacing": (0.9, 0.9, 0.9)}},
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["intensity", "morphology", "glcm"]}},
+    ])  # fmt: skip
+    scanned: list[Any] = []
+    runs: list[tuple[Any, int]] = []  # the mask buffer of each run, and the scans before it
+    run_loaded = RadiomicsPipeline._run_loaded
+
+    def spy(self: RadiomicsPipeline, image: Image, mask: Image, *args: Any) -> Any:
+        runs.append((mask.array, len(scanned)))
+        return run_loaded(self, image, mask, *args)
+
+    with (
+        patch.object(pipeline_module, "compute_nonzero_bbox", _scan_spy(scanned)),
+        patch.object(RadiomicsPipeline, "_run_loaded", spy),
+    ):
+        memo = pipeline.run_rois(image, label_map, labels=[5, 2, 9], config_names=["c"])
+    assert scanned[0] is labels and all(array is not labels for array in scanned[1:])
+    stops = [start for _, start in runs[1:]] + [len(scanned)]
+    for (buffer, start), stop in zip(runs, stops, strict=True):
+        assert all(array is not buffer for array in scanned[start:stop])
+        assert len({id(array) for array in scanned[start:stop]}) == stop - start
+    scan = pipeline_module.compute_nonzero_bbox
+    with patch.object(pipeline_module, "_mask_box", lambda array, boxes: scan(array)):
+        scans = pipeline.run_rois(image, label_map, labels=[5, 2, 9], config_names=["c"])
+    assert list(memo) == ["5", "2", "9"] and memo["9"]["c"].isna().all()
+    for name in memo:
+        assert list(memo[name]["c"].index) == list(scans[name]["c"].index)
+        assert memo[name]["c"].to_numpy().tobytes() == scans[name]["c"].to_numpy().tobytes()
+
+
+def test_label_boxes_are_those_of_find_objects() -> None:
+    # The label boxes come from find_objects on the nonzero box of the map only, shifted
+    # back: the same boxes (slices of Python ints) for gaps in the label numbers, an absent
+    # label, labels on the edges, every label type, one voxel, an empty map and a 2D map.
+    from scipy import ndimage
+
+    from pictologics.pipeline import _label_boxes
+
+    labels = np.zeros((9, 10, 11), dtype=np.int64)
+    labels[0, 0, 0] = 1  # a corner; label 2 is absent
+    labels[3:5, 2:9, 4:6] = 3
+    labels[4:9, 0, 3] = 4  # on a face
+    labels[2:4, 5:7, 6:9] = 4
+    labels[8, 9, 10] = 7  # the other corner
+    inside = np.zeros((9, 10, 11), dtype=np.uint8)
+    inside[2:5, 3:7, 4:6] = 3  # a label away from the edges
+    one = np.zeros((4, 5, 6), dtype=np.uint8)
+    one[2, 3, 4] = 9
+    maps = [labels.astype(dtype) for dtype in (np.uint8, np.uint16, np.int32)]
+    maps += [labels.astype(np.float64).astype(np.int64), inside, one]
+    maps += [np.zeros((4, 5, 6), dtype=np.uint8), labels[:, :, 0]]
+    for array in maps:
+        boxes = _label_boxes(array)
+        assert boxes == ndimage.find_objects(array)
+        assert all(type(s.start) is int for box in boxes if box is not None for s in box)
+    # An empty map stops at the label check, as before
+    pipeline = RadiomicsPipeline(load_standard=False)
+    empty = Image(np.zeros((0, 4, 4)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    with pytest.raises(ValueError, match="zero-size array"):
+        pipeline.run_rois(empty, Image(np.zeros((0, 4, 4), np.uint8), empty.spacing, empty.origin))
+
+
+def test_a_second_run_on_an_image_does_not_check_it_for_nan_again(sm_mask: Image) -> None:
+    # The NaN check of an image array runs once while the array lives: a second run on the
+    # same image does not read it again, with the same results; another image is read.
+    from pictologics import preprocessing
+
+    image = Image(np.random.default_rng(34).normal(5.0, 2.0, (20, 20, 20)), (1.0,) * 3, (0.0,) * 3)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [{"step": "extract_features", "params": {"families": ["intensity"]}}])
+    with (
+        patch.object(preprocessing, "_FINITE_PARALLEL_MIN", 0),
+        patch.object(
+            preprocessing, "_nonfinite_blocks_numba", wraps=preprocessing._nonfinite_blocks_numba
+        ) as kernel,
+    ):
+        first = pipeline.run(image, sm_mask, config_names=["c"])["c"]
+        second = pipeline.run(image, sm_mask, config_names=["c"])["c"]
+        assert kernel.call_count == 1
+        copied = Image(image.array.copy(), image.spacing, image.origin)
+        assert pipeline.run(copied, sm_mask, config_names=["c"])["c"].equals(first)
+        assert kernel.call_count == 2
+    assert second.equals(first)
+
+
+def _morphology_case() -> tuple[Image, Image]:
+    """A 16^3 image and an irregular ROI with many convex hull vertices."""
+    rng = np.random.default_rng(33)
+    image = Image(rng.normal(50.0, 20.0, (16, 16, 16)), (1.0, 0.9, 1.1), (0.0, 0.0, 0.0))
+    index = np.indices(image.array.shape)
+    roi = sum(((index[k] - 7.5) / (4.0 + k)) ** 2 for k in range(3)) <= 1.0
+    roi[3, 7, 7] = roi[12, 8, 6] = True
+    return image, Image(roi.astype(np.uint8), image.spacing, image.origin)
+
+
+def test_morphology_worker_gives_the_results_of_one_thread() -> None:
+    # With other families in the pass, the convex hull and the MVEE run in the worker
+    # thread while the other families compute. The features, their values and their order
+    # are those of the pass in one thread, also with texture before morphology and with
+    # morphology reused by deduplication.
+    from pictologics import pipeline as pipeline_module
+
+    image, mask = _morphology_case()
+    discretise = {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}}
+    orders = {
+        "default": {},
+        "texture_first": {"families": ["texture", "histogram", "morphology", "intensity"]},
+        "two": {"families": ["morphology", "glcm"]},
+    }
+    for deduplicate in (False, True):
+        pipeline = RadiomicsPipeline(load_standard=False, deduplicate=deduplicate)
+        for name, params in orders.items():
+            pipeline.add_config(name, [discretise, {"step": "extract_features", "params": params}])
+        with patch.object(
+            pipeline_module, "_morphology_worker", wraps=pipeline_module._morphology_worker
+        ) as worker:
+            threaded = pipeline.run(image, mask, config_names=list(orders))
+        assert worker.call_count == (1 if deduplicate else 3)  # deduplication reuses it
+        with patch.object(RadiomicsPipeline, "_morphology_ahead", return_value=None):
+            alone = pipeline.run(image, mask, config_names=list(orders))
+        for name in orders:
+            assert list(threaded[name].index) == list(alone[name].index)
+            assert threaded[name].to_numpy().tobytes() == alone[name].to_numpy().tobytes()
+            assert threaded[name]["maximum_3d_diameter_L0JK"] > 0
+
+
+def test_morphology_only_passes_use_no_worker() -> None:
+    # A pass with morphology alone, or with morphology reused, computes it in its turn. A
+    # part 1 without a rest (no mesh) gives all the features in the turn of morphology.
+    from pictologics import pipeline as pipeline_module
+
+    image, mask = _morphology_case()
+    pipeline = RadiomicsPipeline(load_standard=False)
+    for name, families in (("m", ["morphology"]), ("mi", ["morphology", "intensity"])):
+        pipeline.add_config(name, [{"step": "extract_features", "params": {"families": families}}])
+    with patch.object(pipeline_module, "_morphology_worker") as worker:
+        pipeline.run(image, mask, config_names=["m"])
+        pipeline.run(image, mask, config_names=["m", "mi"])  # mi reuses the morphology
+        with patch.object(pipeline_module, "_morphology_first", return_value=({"a": 1.0}, None)):
+            assert pipeline.run(image, mask, config_names=["mi"])["mi"]["a"] == 1.0
+    worker.assert_not_called()
+
+
+def test_a_worker_that_cannot_start_leaves_the_pass_in_one_thread() -> None:
+    # Without a new thread (for example at interpreter exit), part 2 runs in this thread at
+    # once, with the results of one thread.
+    from pictologics import pipeline as pipeline_module
+
+    image, mask = _morphology_case()
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [
+        {"step": "extract_features", "params": {"families": ["morphology", "intensity"]}},
+    ])  # fmt: skip
+    expected = pipeline.run(image, mask, config_names=["c"])["c"]
+    worker = MagicMock()
+    worker.submit.side_effect = RuntimeError("cannot schedule new futures after shutdown")
+    with patch.object(pipeline_module, "_morphology_worker", return_value=worker):
+        out = pipeline.run(image, mask, config_names=["c"])["c"]
+    assert worker.submit.call_count == 1
+    assert list(out.index) == list(expected.index)
+    assert out.to_numpy().tobytes() == expected.to_numpy().tobytes()
+
+
+def test_a_failing_morphology_part_gives_the_outcome_of_one_thread() -> None:
+    # An error in the worker part (convex hull, MVEE) or in part 1 (mesh, bounding box)
+    # leaves the morphology features NaN, with the warning and the family errors of the
+    # pass in one thread; the family errors keep the order of the families. An empty ROI
+    # in either part ends the configuration, as before.
+    import contextlib
+
+    from pictologics.features import morphology as morphology_module
+
+    image, mask = _morphology_case()
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["intensity", "morphology", "glcm"]}},
+    ])  # fmt: skip
+
+    def outcome(target: str, error: Exception, glcm: bool, one_thread: bool) -> tuple[Any, ...]:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(morphology_module, target, side_effect=error))
+            if glcm:  # a family after morphology fails too
+                glcm_error = RuntimeError("no glcm")
+                stack.enter_context(
+                    patch("pictologics.pipeline.calculate_glcm_features", side_effect=glcm_error)
+                )
+            if one_thread:
+                ahead = patch.object(RadiomicsPipeline, "_morphology_ahead", return_value=None)
+                stack.enter_context(ahead)
+            caught = stack.enter_context(warnings.catch_warnings(record=True))
+            warnings.simplefilter("always")
+            series = pipeline.run(image, mask, config_names=["c"])["c"]
+        entry = pipeline.get_log()[-1]
+        return (
+            list(series.index),
+            series.to_numpy().tobytes(),
+            entry["status"],
+            list(entry.get("family_errors", {}).items()),
+            [str(w.message) for w in caught],
+        )
+
+    for target in (
+        "_get_convex_hull_features",
+        "_get_mvee_features",
+        "_get_mesh_features",
+        "_get_bounding_box_features",
+    ):
+        for glcm in (False, True):
+            error = RuntimeError(f"no {target}")
+            threaded = outcome(target, error, glcm, False)
+            assert threaded[:4] == outcome(target, error, glcm, True)[:4]
+            assert threaded[2] == "completed" and threaded[3][0] == (
+                "morphology",
+                f"RuntimeError: no {target}",
+            )
+            # The warning of an error after part 1 comes when the worker part ends
+            assert sorted(threaded[4]) == sorted(outcome(target, error, glcm, True)[4])
+            assert len(threaded[4]) == 1 + glcm
+        empty = EmptyROIMaskError("none")
+        threaded = outcome(target, empty, False, False)
+        assert threaded == outcome(target, empty, False, True) and threaded[2] == "empty_roi"
+
+
+def test_other_families_use_one_thread_less_next_to_the_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Next to part 2 of morphology in the worker thread, the other families of the pass use
+    # one numba thread less when the threads fill the fast cores (threads._make_room). The
+    # pass sets the number again at its end, also when a family ends the configuration (an
+    # empty ROI), with and without deduplication. With a free fast core, nothing changes.
+    import numba
+
+    from pictologics import pipeline as pipeline_module
+    from pictologics import threads
+
+    state = {"n": 6}
+    monkeypatch.setattr(threads, "_cores", 6)
+    monkeypatch.setattr(numba, "get_num_threads", lambda: state["n"])
+    monkeypatch.setattr(numba, "set_num_threads", lambda n: state.update(n=n))
+    seen = []
+    intensity = pipeline_module.calculate_intensity_features
+
+    def counted(*args: Any) -> dict[str, float]:
+        seen.append(state["n"])
+        return intensity(*args)
+
+    monkeypatch.setattr(pipeline_module, "calculate_intensity_features", counted)
+    image, mask = _morphology_case()
+    for deduplicate in (False, True):
+        pipeline = RadiomicsPipeline(load_standard=False, deduplicate=deduplicate)
+        pipeline.add_config("c", [
+            {"step": "extract_features", "params": {"families": ["morphology", "intensity"]}},
+        ])  # fmt: skip
+        seen.clear()
+        pipeline.run(image, mask, config_names=["c"])
+        assert seen == [5] and state["n"] == 6
+        empty = EmptyROIMaskError("none")
+        with patch.object(pipeline_module, "calculate_intensity_features", side_effect=empty):
+            pipeline.run(image, mask, config_names=["c"])
+        assert pipeline.get_log()[-1]["status"] == "empty_roi" and state["n"] == 6
+    monkeypatch.setattr(threads, "_cores", 8)
+    seen.clear()
+    pipeline.run(image, mask, config_names=["c"])
+    assert seen == [6] and state["n"] == 6
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork")
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
+def test_morphology_worker_is_new_after_fork() -> None:
+    # A forked process drops the morphology worker of its parent, whose thread it does not
+    # have, so its passes make a new worker instead of waiting forever.
+    import signal
+    import time
+
+    from pictologics import pipeline as pipeline_module
+
+    image, mask = _morphology_case()
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("c", [
+        {"step": "extract_features", "params": {"families": ["morphology", "intensity"]}},
+    ])  # fmt: skip
+    expected = pipeline.run(image, mask, config_names=["c"])["c"]
+    assert pipeline_module._MORPHOLOGY_WORKER
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover  (coverage does not follow the child)
+        code = 1
+        try:
+            if not pipeline_module._MORPHOLOGY_WORKER:
+                same = pipeline.run(image, mask, config_names=["c"])["c"].equals(expected)
+                code = 0 if same else 2
+        finally:
+            os._exit(code)
+    deadline = time.monotonic() + 120
+    while (done := os.waitpid(pid, os.WNOHANG))[0] == 0 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if done[0] == 0:  # pragma: no cover  (only when the child waits forever)
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        pytest.fail("the forked process waited for the morphology worker of its parent")
+    assert os.waitstatus_to_exitcode(done[1]) == 0

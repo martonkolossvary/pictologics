@@ -37,13 +37,13 @@ import time
 import warnings
 import weakref
 from collections import Counter
-from collections.abc import Iterable, Mapping
-from concurrent.futures import as_completed
+from collections.abc import Iterable, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional, TypeVar, cast
 
 import numba
 import numpy as np
@@ -68,7 +68,13 @@ from .features.intensity import (
     calculate_local_intensity_features,
     calculate_spatial_intensity_features,
 )
-from .features.morphology import calculate_morphology_features
+from .features.morphology import (
+    _morphology_first,
+    _morphology_merge,
+    _morphology_second,
+    _Rest,
+    calculate_morphology_features,
+)
 from .features.texture import (
     _TEXTURE_FAMILIES,
     _directions,
@@ -121,6 +127,7 @@ from .preprocessing import (
 )
 from .results import _json_safe, format_results
 from .templates import _load_yaml, get_standard_templates, list_template_files, load_template_file
+from .threads import _make_room
 
 # Schema version for config serialization - increment when format changes
 CONFIG_SCHEMA_VERSION = "1.0"
@@ -293,6 +300,42 @@ def _texture_cache(families: list[str]) -> dict[str, Optional[dict[str, Any]]]:
     )
 
 
+# The worker thread of the morphology convex hull and MVEE (see _MorphologyAhead), made on
+# first use. A forked process makes its own: the thread of the parent is not in it.
+_MORPHOLOGY_WORKER: list[ThreadPoolExecutor] = []
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_MORPHOLOGY_WORKER.clear)
+
+
+def _morphology_worker() -> ThreadPoolExecutor:
+    """The one worker thread of the morphology convex hull and MVEE."""
+    if not _MORPHOLOGY_WORKER:
+        _MORPHOLOGY_WORKER.append(ThreadPoolExecutor(max_workers=1))
+    return _MORPHOLOGY_WORKER[0]
+
+
+@dataclass
+class _MorphologyAhead:
+    """The morphology family of an extraction pass with other families (see
+    RadiomicsPipeline._morphology_ahead). `first`: the part 1 features, or the error that
+    the turn of morphology reports. `second`: the rest of part 1 and the future of part 2 in
+    the worker thread, or None when `first` holds all the features. `place`: the number of
+    family errors before the turn of morphology. `threads`: the numba threads of this thread
+    to set again when the other families end (see _make_room), or 0."""
+
+    first: dict[str, float] | Exception
+    second: Optional[tuple[_Rest, Future[Any]]] = None
+    place: int = 0
+    threads: int = 0
+
+
+def _threads_back(ahead: Optional[_MorphologyAhead]) -> None:
+    """Set the numba threads of this thread again after the other families of a pass with
+    morphology part 2 in the worker thread (see _MorphologyAhead)."""
+    if ahead is not None and ahead.threads:
+        numba.set_num_threads(ahead.threads)
+
+
 def _mask_values_file_form(value: Any) -> Any:
     """Keep a binarize_mask range apart from a list of label values in files.
 
@@ -304,12 +347,72 @@ def _mask_values_file_form(value: Any) -> Any:
     return value
 
 
-def _has_roi(array: npt.NDArray[Any]) -> bool:
-    """Whether a mask has a nonzero voxel. A large mask takes the parallel box scan;
-    `ndarray.any` reads it in one thread (22 % of a 1 mm CT run)."""
+_Key = TypeVar("_Key")
+_Value = TypeVar("_Value")
+
+
+class _ArrayMemo(dict[_Key, _Value]):
+    """A memo of a run whose entries stay while their arrays live: a weak finalizer
+    removes the entry of an array that dies, so an id names one array. `clear` also drops
+    the finalizers, so an array of many runs does not collect one for each run."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._finalizers: list[weakref.finalize[Any, Any]] = []
+
+    def keep(self, array: npt.NDArray[Any], key: _Key, value: _Value) -> None:
+        """Keep `value` under `key` while `array` lives."""
+        self[key] = value
+        self._finalizers.append(weakref.finalize(array, self.pop, key, None))
+
+    def clear(self) -> None:
+        for finalizer in self._finalizers:
+            finalizer.detach()
+        self._finalizers.clear()
+        super().clear()
+
+
+# The nonzero box of each mask array of a run (key: the id of the array; None: an empty
+# mask), so that a run scans each mask once.
+_Boxes = _ArrayMemo[int, Optional[tuple[slice, slice, slice]]]
+
+
+def _mask_box(array: npt.NDArray[Any], boxes: _Boxes) -> Optional[tuple[slice, slice, slice]]:
+    """`compute_nonzero_bbox(array)`, with one scan per array: `boxes` keeps the box."""
+    if id(array) not in boxes:
+        boxes.keep(array, id(array), compute_nonzero_bbox(array))
+    return boxes[id(array)]
+
+
+def _has_roi(array: npt.NDArray[Any], boxes: _Boxes) -> bool:
+    """Whether a mask has a nonzero voxel. A large mask takes the parallel box scan, and
+    `boxes` keeps its box; `ndarray.any` reads it in one thread (22 % of a 1 mm CT run)."""
     if array.size < 1 << 20:
         return bool(array.any())
-    return compute_nonzero_bbox(array) is not None
+    return _mask_box(array, boxes) is not None
+
+
+def _label_boxes(labels: npt.NDArray[Any]) -> list[Optional[tuple[slice, slice, slice]]]:
+    """The box of each label 1, 2, ... of a label map (None for a label that is not in the
+    map), as `scipy.ndimage.find_objects` gives them. For a 3D map, find_objects (one
+    serial pass) reads only the nonzero box of the map, which one parallel scan finds."""
+    from scipy import ndimage
+
+    if labels.ndim != 3:
+        return cast(list[Optional[tuple[slice, slice, slice]]], ndimage.find_objects(labels))
+    box = compute_nonzero_bbox(labels)
+    if box is None:
+        return []
+    return [
+        None
+        if found is None
+        else (
+            slice(found[0].start + box[0].start, found[0].stop + box[0].start),
+            slice(found[1].start + box[1].start, found[1].stop + box[1].start),
+            slice(found[2].start + box[2].start, found[2].stop + box[2].start),
+        )
+        for found in ndimage.find_objects(labels[box])
+    ]
 
 
 # IBSI: "to maintain consistency between samples, we strongly recommend to always set the
@@ -556,18 +659,21 @@ def _filter_crop(
     return crop[0], crop[1], crop[2]
 
 
-def _cut_to_roi(state: "PipelineState", cuts: dict[tuple[int, Any], npt.NDArray[Any]]) -> None:
+def _cut_to_roi(
+    state: "PipelineState", cuts: _ArrayMemo[tuple[int, Any], npt.NDArray[Any]], boxes: _Boxes
+) -> None:
     """Cut the images and masks of `state` to the ROI box, grown by `state.roi_reach` (mm),
     when the box is smaller than the arrays. grid_shape and grid_offset keep the place of
     the box in the whole grid. `cuts` keeps each cut while its array lives, so states that
-    share an array (and the memos that compare arrays by identity) share its cut."""
+    share an array (and the memos that compare arrays by identity) share its cut. `boxes`
+    keeps the mask boxes of the run (see _mask_box)."""
     shape = state.image.array.shape
     margin_mm = cast(float, state.roi_reach)
     bbox = cast(
         tuple[slice, slice, slice],
         merge_bboxes(
-            compute_nonzero_bbox(state.morph_mask.array),
-            compute_nonzero_bbox(state.intensity_mask.array),
+            _mask_box(state.morph_mask.array, boxes),
+            _mask_box(state.intensity_mask.array, boxes),
         ),
     )  # the ROI checks keep the masks non-empty
     grow = [math.ceil(margin_mm / s) + 1 if margin_mm else 0 for s in state.image.spacing]
@@ -583,8 +689,7 @@ def _cut_to_roi(state: "PipelineState", cuts: dict[tuple[int, Any], npt.NDArray[
     def piece(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
         key = (id(array), bounds)
         if key not in cuts:  # a copy: a view would keep the whole array alive
-            cuts[key] = np.array(array[region], order="C")
-            weakref.finalize(array, cuts.pop, key, None)
+            cuts.keep(array, key, np.array(array[region], order="C"))
         return cuts[key]
 
     def part(image: Image) -> Image:
@@ -621,17 +726,18 @@ def _source_mask(valid: npt.NDArray[Any], grid: Image) -> Image:
     )
 
 
-def _finite_intensity_mask(state: PipelineState, config_name: str) -> PipelineState:
+def _finite_intensity_mask(state: PipelineState, config_name: str, boxes: _Boxes) -> PipelineState:
     """`state` with the ROI voxels of non-finite intensity (NaN or infinite) left out of
     the intensity mask, with a warning. IBSI marks voxels outside the ROI with NaN, and
     such a voxel has no intensity for any feature. The morphological mask stays as it is.
+    `boxes` keeps the mask boxes of the run (see _mask_box).
 
     Raises:
         EmptyROIMaskError: If no ROI voxel has a finite intensity.
     """
     mask = state.intensity_mask.array
     # The ROI checks of the steps keep the intensity mask non-empty
-    box = cast(tuple[slice, slice, slice], compute_nonzero_bbox(mask))
+    box = cast(tuple[slice, slice, slice], _mask_box(mask, boxes))
     bad = (mask[box] != 0) & ~np.isfinite(state.raw_image.array[box])
     n_bad = int(np.count_nonzero(bad))
     if n_bad == 0:
@@ -643,7 +749,7 @@ def _finite_intensity_mask(state: PipelineState, config_name: str) -> PipelineSt
         f"intensity mask of config '{config_name}'."
     )
     warnings.warn(msg, UserWarning, stacklevel=3)
-    if not _has_roi(finite):
+    if not _has_roi(finite, boxes):
         raise EmptyROIMaskError(f"No ROI voxel of config '{config_name}' has a finite intensity.")
     return replace(state, intensity_mask=replace(state.intensity_mask, array=finite))
 
@@ -1149,7 +1255,9 @@ class RadiomicsPipeline:
         # (morph mask, intensity mask, GLDZM distance map) of the last texture pass in run()
         self._last_distance_map: Optional[tuple[Any, Any, npt.NDArray[Any]]] = None
         # The ROI box cuts of run() (see _cut_to_roi), each kept while its array lives
-        self._roi_cuts: dict[tuple[int, Any], npt.NDArray[Any]] = {}
+        self._roi_cuts: _ArrayMemo[tuple[int, Any], npt.NDArray[Any]] = _ArrayMemo()
+        # The mask boxes of run() (see _mask_box), each kept while its array lives
+        self._mask_boxes: _Boxes = _ArrayMemo()
         # (steps, config hash) of each configuration: a configuration changes only with a
         # new steps list (add_config, merge_configs), so its hash is made once
         self._config_hashes: dict[str, tuple[Any, str]] = {}
@@ -1570,15 +1678,21 @@ class RadiomicsPipeline:
         nonfinite: Optional[bool] = None,
         roi_nearest: Optional[tuple[Image, int]] = None,
         image_options: Optional[Mapping[str, Any]] = None,
+        known_boxes: Iterable[tuple[npt.NDArray[Any], Optional[tuple[slice, slice, slice]]]] = (),
     ) -> dict[str, pd.Series]:
         """The part of `run()` after the loading: `target_configs` run (see
         `_target_configs`), and the log records the requested `config_names` and the
         `image_options` of the image load. `nonfinite` (whether the image has NaN or
         infinite values) is found when it is None. `roi_nearest`: see
-        PipelineState.roi_nearest."""
+        PipelineState.roi_nearest. `known_boxes`: (mask array, its nonzero box) pairs that
+        the caller knows, so that the run does not scan these arrays."""
         mask_subvoxel_tolerance, mask_subvoxel_warning_threshold, mask_min_overlap_fraction = (
             mask_settings
         )
+        # The mask boxes of this run (see _mask_box)
+        self._mask_boxes.clear()
+        for array, box in known_boxes:
+            self._mask_boxes.keep(array, id(array), box)
         all_results = {}
         # Every voxel that is not 0 is ROI, also a voxel of 0.05 in a probability map. The
         # box scan of this check also serves as the first ROI check of the run.
@@ -1595,7 +1709,7 @@ class RadiomicsPipeline:
             if orig_mask.array.size < _FRACTION_SAMPLE:  # a small mask: read it all
                 fractions = not np.array_equal(orig_mask.array, np.round(orig_mask.array))
             else:
-                roi_box = compute_nonzero_bbox(orig_mask.array)
+                roi_box = _mask_box(orig_mask.array, self._mask_boxes)
                 fractions = roi_box is not None and _has_fractions(orig_mask.array, roi_box)
         if fractions:
             warnings.warn(
@@ -1855,7 +1969,9 @@ class RadiomicsPipeline:
                     # Execute Step
                     if step_name == "extract_features":
                         extract_state = (
-                            _finite_intensity_mask(state, config_name) if nonfinite else state
+                            _finite_intensity_mask(state, config_name, self._mask_boxes)
+                            if nonfinite
+                            else state
                         )
                         # Use deduplication if plan exists
                         if dedup_plan is not None:
@@ -1949,6 +2065,7 @@ class RadiomicsPipeline:
 
         self._last_distance_map = None
         self._roi_cuts.clear()
+        self._mask_boxes.clear()
         return all_results
 
     def run_rois(
@@ -2007,8 +2124,6 @@ class RadiomicsPipeline:
             save_results(rows, "p001_rois.csv")
             ```
         """
-        from scipy import ndimage
-
         mask_settings = (
             mask_subvoxel_tolerance,
             mask_subvoxel_warning_threshold,
@@ -2019,9 +2134,13 @@ class RadiomicsPipeline:
         _validate_geometry(label_map, orig_img, "mask", "image")
         values = label_map.array
         whole = values if values.dtype.kind in "ui" else values.astype(np.int64)
-        if (whole is not values and not np.array_equal(whole, values)) or whole.min() < 0:
+        # An unsigned map has no label below 0, so it skips min, a pass over the whole map
+        # (an empty map still goes to min, which raises as before)
+        if (whole is not values and not np.array_equal(whole, values)) or (
+            (whole.dtype.kind != "u" or whole.size == 0) and whole.min() < 0
+        ):
             raise ValueError("The labels of an ROI map must be whole numbers of 0 or above.")
-        boxes = ndimage.find_objects(whole)  # the box of each label 1, 2, ..., in one pass
+        boxes = _label_boxes(whole)  # the box of each label 1, 2, ...
         chosen: dict[str, float]
         if labels is None:
             chosen = {str(k + 1): k + 1 for k, box in enumerate(boxes) if box is not None}
@@ -2066,6 +2185,8 @@ class RadiomicsPipeline:
                 nonfinite,
                 None if nearest is None else (nearest, int(label)),
                 image_options,
+                # The buffer holds this label alone, so its nonzero box is the label box
+                [(buffer, box)] if buffer.ndim == 3 else (),
             )
             for entry in self._log[start:]:
                 entry["roi"] = name
@@ -2232,8 +2353,12 @@ class RadiomicsPipeline:
             # A label map case: one row for each ROI (one row without ROIs when it failed)
             by_roi = record["results"] if record.get("rois") else {None: record["results"]}
             for roi, values in (by_roi or {None: {}}).items():
+                # A case file holds a NaN feature as null (None)
                 results = {
-                    name: pd.Series(features, dtype=float) for name, features in values.items()
+                    name: {
+                        key: math.nan if value is None else value for key, value in features.items()
+                    }
+                    for name, features in values.items()
                 }
                 extra = {"roi": roi} if record.get("rois") else {}
                 rows.append(format_results(results, fmt="wide", meta={**meta, **extra}))
@@ -2388,7 +2513,7 @@ class RadiomicsPipeline:
         step explicitly binarizes/selects labels first. Each check reads the whole
         mask, so a morph mask that is the intensity mask's array is not read again.
         """
-        has_intensity_roi = _has_roi(state.intensity_mask.array)
+        has_intensity_roi = _has_roi(state.intensity_mask.array, self._mask_boxes)
         if not has_intensity_roi:
             raise EmptyROIMaskError(
                 "ROI is empty after preprocessing "
@@ -2397,7 +2522,7 @@ class RadiomicsPipeline:
             )
         if state.morph_mask.array is state.intensity_mask.array:
             return
-        has_morph_roi = _has_roi(state.morph_mask.array)
+        has_morph_roi = _has_roi(state.morph_mask.array, self._mask_boxes)
         if not has_morph_roi:
             raise EmptyROIMaskError(
                 "ROI is empty after preprocessing "
@@ -2438,8 +2563,8 @@ class RadiomicsPipeline:
                     cast(
                         tuple[slice, slice, slice],
                         merge_bboxes(
-                            compute_nonzero_bbox(state.morph_mask.array),
-                            compute_nonzero_bbox(state.intensity_mask.array),
+                            _mask_box(state.morph_mask.array, self._mask_boxes),
+                            _mask_box(state.intensity_mask.array, self._mask_boxes),
                         ),
                     ),  # the ROI checks keep the masks non-empty
                     state.image.array.shape,
@@ -2677,7 +2802,7 @@ class RadiomicsPipeline:
             # the ROI box (grown by the local intensity sphere when a later step reads it),
             # so that the binning and the features work on the box only.
             if state.roi_reach is not None:
-                _cut_to_roi(state, self._roi_cuts)
+                _cut_to_roi(state, self._roi_cuts, self._mask_boxes)
 
             state.image = cast(
                 Image,
@@ -2758,8 +2883,8 @@ class RadiomicsPipeline:
                 and img_arr.size >= _FILTER_REGION_MIN
             ):
                 bbox = merge_bboxes(
-                    compute_nonzero_bbox(state.morph_mask.array),
-                    compute_nonzero_bbox(state.intensity_mask.array),
+                    _mask_box(state.morph_mask.array, self._mask_boxes),
+                    _mask_box(state.intensity_mask.array, self._mask_boxes),
                 )
                 if bbox is not None:
                     shape = img_arr.shape
@@ -3003,8 +3128,22 @@ class RadiomicsPipeline:
         # repeated (single-family) texture calls don't rescan the full volume.
         bbox_cache: _PassCache = {}
         texture_cache = _texture_cache(families)
-        for family in families:
-            results.update(self._guarded_family(state, family, params, bbox_cache, texture_cache))
+        ahead = self._morphology_ahead(state, families, bbox_cache)
+        parts = []
+        try:
+            for family in families:
+                if ahead is not None and family == "morphology":
+                    parts.append(self._morphology_turn(ahead))
+                else:
+                    parts.append(
+                        self._guarded_family(state, family, params, bbox_cache, texture_cache)
+                    )
+        finally:
+            _threads_back(ahead)
+        if ahead is not None and ahead.second is not None:
+            parts[families.index("morphology")] = self._morphology_join(ahead)
+        for part in parts:
+            results.update(part)
 
         # Ensure every expected feature key is present (NaN for partial failures)
         self._fill_missing_features(results, families, params)
@@ -3050,41 +3189,61 @@ class RadiomicsPipeline:
             sig = plan.signatures.get((config_name, sig_family))
             cache_keys[family] = (sig_family, sig.hash) if sig else None
         # The texture families still to compute share one matrix pass
-        texture_cache = _texture_cache(
-            [family for family in families if cache_keys[family] not in family_cache]
-        )
-        for family in families:
-            cache_key = cache_keys[family]
-            if cache_key is not None and cache_key in family_cache:
-                # Reuse cached results
-                cached = family_cache[cache_key]
-                results.update(cached)
-                self._dedup_reused_count += 1
-            else:
-                # Compute this family
-                family_results = self._guarded_family(
-                    state, family, params, bbox_cache, texture_cache
-                )
-                results.update(family_results)
+        todo = [family for family in families if cache_keys[family] not in family_cache]
+        texture_cache = _texture_cache(todo)
+        ahead = self._morphology_ahead(state, todo, bbox_cache)
+        parts = []
+        try:
+            for family in families:
+                cache_key = cache_keys[family]
+                if cache_key is not None and cache_key in family_cache:
+                    # Reuse cached results
+                    parts.append(family_cache[cache_key])
+                    self._dedup_reused_count += 1
+                else:
+                    # Compute this family
+                    if ahead is not None and family == "morphology":
+                        family_results = self._morphology_turn(ahead)
+                    else:
+                        family_results = self._guarded_family(
+                            state, family, params, bbox_cache, texture_cache
+                        )
+                    parts.append(family_results)
 
-                # Cache if we have a signature (a failed family is computed again)
-                if cache_key is not None and family not in self._family_errors:
-                    family_cache[cache_key] = family_results
-                self._dedup_computed_count += 1
+                    # Cache if we have a signature (a failed family is computed again); the
+                    # morphology of the worker thread is complete after the join
+                    if (
+                        cache_key is not None
+                        and family not in self._family_errors
+                        and (ahead is None or ahead.second is None or family != "morphology")
+                    ):
+                        family_cache[cache_key] = family_results
+                    self._dedup_computed_count += 1
+        finally:
+            _threads_back(ahead)
+        if ahead is not None and ahead.second is not None:
+            index = families.index("morphology")
+            parts[index] = self._morphology_join(ahead)
+            cache_key = cache_keys["morphology"]
+            if cache_key is not None and "morphology" not in self._family_errors:
+                family_cache[cache_key] = parts[index]
+        for part in parts:
+            results.update(part)
 
         # Ensure every expected feature key is present (NaN for partial failures)
         self._fill_missing_features(results, families, params)
         return results
 
-    @staticmethod
     def _cached_nonzero_bbox(
+        self,
         arr: npt.NDArray[np.floating[Any]],
         cache: _PassCache,
     ) -> Optional[tuple[slice, slice, slice]]:
-        """Nonzero bbox of `arr`, memoised by array identity for one extraction pass."""
+        """Nonzero bbox of `arr`, memoised by array identity for one extraction pass. It
+        comes from the mask boxes of the run (see _mask_box), so a run scans a mask once."""
         key = id(arr)
         if key not in cache:
-            cache[key] = compute_nonzero_bbox(arr)
+            cache[key] = _mask_box(arr, self._mask_boxes)
         return cast(Optional[tuple[slice, slice, slice]], cache[key])
 
     def _masked_values(
@@ -3131,13 +3290,75 @@ class RadiomicsPipeline:
         except EmptyROIMaskError:
             raise
         except Exception as e:
-            self._family_errors[family] = f"{type(e).__name__}: {e}"
-            warnings.warn(
-                f"The {family} features failed ({type(e).__name__}: {e}); they are NaN.",
-                UserWarning,
-                stacklevel=2,
+            return self._family_failed(family, e)
+
+    def _family_failed(
+        self, family: str, error: Exception, place: Optional[int] = None
+    ) -> dict[str, Any]:
+        """No values (NaN) for a family that failed: its error goes to `_family_errors` and
+        to a warning (on the line of the extraction method). `place`: the place of a new
+        error in `_family_errors` (default: the end), so the errors keep the family order."""
+        text = f"{type(error).__name__}: {error}"
+        if place is None or family in self._family_errors:
+            self._family_errors[family] = text
+        else:
+            errors = list(self._family_errors.items())
+            self._family_errors = dict([*errors[:place], (family, text), *errors[place:]])
+        warnings.warn(
+            f"The {family} features failed ({text}); they are NaN.", UserWarning, stacklevel=3
+        )
+        return {}
+
+    def _morphology_ahead(
+        self, state: PipelineState, families: Sequence[str], bbox_cache: _PassCache
+    ) -> Optional[_MorphologyAhead]:
+        """With morphology and other families to compute, morphology part 1 (all its
+        parallel kernels) runs now, and part 2 (the serial convex hull and MVEE) runs in
+        the worker thread next to the parallel kernels of the other families. These use one
+        thread less when their threads fill the fast cores (see _make_room). None: the
+        morphology family runs in its turn, in this thread."""
+        if list(families).count("morphology") != 1 or len(families) < 2:
+            return None
+        try:
+            first, rest = _morphology_first(
+                state.morph_mask,
+                state.raw_image,
+                state.intensity_mask,
+                self._cached_nonzero_bbox(state.morph_mask.array, bbox_cache),
+                state.grid_offset,
             )
-            return {}
+            if rest is None:
+                return _MorphologyAhead(first)
+            try:
+                second = _morphology_worker().submit(_morphology_second, rest, True)
+            except RuntimeError:  # no new thread (at interpreter exit): part 2 in this thread
+                return _MorphologyAhead(_morphology_merge(first, rest, _morphology_second(rest)))
+        except Exception as e:  # reported in the turn of morphology
+            return _MorphologyAhead(e)
+        return _MorphologyAhead(first, (rest, second), threads=_make_room())
+
+    def _morphology_turn(self, ahead: _MorphologyAhead) -> dict[str, Any]:
+        """The morphology results in the turn of morphology, as `_guarded_family` gives
+        them: an error of part 1 is reported now. With part 2 in the worker thread, these
+        are the part 1 results; `_morphology_join` gives all of them."""
+        if isinstance(ahead.first, EmptyROIMaskError):
+            raise ahead.first
+        if isinstance(ahead.first, Exception):
+            return self._family_failed("morphology", ahead.first)
+        ahead.place = len(self._family_errors)
+        return dict(ahead.first)
+
+    def _morphology_join(self, ahead: _MorphologyAhead) -> dict[str, Any]:
+        """All the morphology results when part 2 ends. An error goes to `_family_errors`
+        at the place of morphology, and to a warning, as `_guarded_family` reports it."""
+        features = cast(dict[str, float], ahead.first)
+        rest, future = cast(tuple[_Rest, Future[Any]], ahead.second)
+        try:
+            return dict(_morphology_merge(features, rest, future.result()))
+        except EmptyROIMaskError:
+            raise
+        except Exception as e:
+            return self._family_failed("morphology", e, ahead.place)
 
     def _extract_single_family(
         self,

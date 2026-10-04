@@ -1,0 +1,1 @@
+A run now scans each mask once for its nonzero box, and `run_rois()` gives each run the box of its label. On a 512×512×200 CT, a run takes 0.8 ms less and `run_rois()` with 20 ROIs 21 ms less, with the same features, bit for bit.
