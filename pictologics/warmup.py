@@ -222,8 +222,9 @@ def _warmup_morphology() -> None:
     morphology._accumulate_intensity_weighted_moments_numba(row_mask, img[1:, 1:, 1:])
     morphology._accumulate_intensity_weighted_moments_numba(row_mask, img32[1:, 1:, 1:])
 
-    # Marching cubes (the mask with its zero border)
-    morphology._mesh(np.pad(mask, 1), np.zeros(3), np.ones(3))
+    # Marching cubes (the mask with its zero border), also the parallel form of large volumes
+    for parallel in (False, True):
+        morphology._mesh(np.pad(mask, 1), np.zeros(3), np.ones(3), parallel)
     morphology._column_stats_numba(np.ones((4, 3), dtype=np.float64))
 
     # 2. Point Cloud / Mesh Operations

@@ -47,7 +47,7 @@ from collections.abc import Callable
 from typing import Any, NamedTuple, Optional, cast
 
 import numpy as np
-from numba import jit, prange
+from numba import get_num_threads, jit, prange
 from numpy import typing as npt
 from scipy.spatial import ConvexHull
 from scipy.special import eval_legendre
@@ -468,16 +468,130 @@ def _marching_cubes_numba(
     return verts, faces.reshape(-1, 3)
 
 
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _marching_cubes_parallel_numba(
+    vol: npt.NDArray[np.uint8],
+    edge_table: npt.NDArray[np.int32],
+    tri_table: npt.NDArray[np.int8],
+    tri_count: npt.NDArray[np.int32],
+    v_start: npt.NDArray[np.int64],
+    f_start: npt.NDArray[np.int64],
+    offset: npt.NDArray[np.float64],
+    spacing: npt.NDArray[np.float64],
+    verts: npt.NDArray[np.float64],
+    faces: npt.NDArray[np.int64],
+) -> None:
+    """`_marching_cubes_numba` with the x planes of cubes in parallel: the same vertices
+    and faces in the same order. Plane i writes its vertices from v_start[i] and its face
+    corners from f_start[i] (the counts of `_mc_counts_numba` before plane i). It counts
+    plane i - 1 again for the numbers of the vertices on the edges of their common face."""
+    nx, ny, nz = vol.shape[0] - 1, vol.shape[1] - 1, vol.shape[2] - 1
+    o0, o1, o2 = offset[0], offset[1], offset[2]
+    s0, s1, s2 = spacing[0], spacing[1], spacing[2]
+    for i in prange(nx):
+        # The vertex numbers of the y and z edges at x = i, made by plane i - 1
+        sy_prev = np.zeros((ny + 1, nz + 1), dtype=np.int64)
+        sz_prev = np.zeros((ny + 1, nz + 1), dtype=np.int64)
+        if i > 0:
+            nv = v_start[i - 1]
+            for j in range(ny):
+                c = _mc_corners(vol, i - 1, j, 0) << 4
+                for k in range(nz):
+                    c = (c >> 4) | (_mc_corners(vol, i - 1, j, k + 1) << 4)
+                    e = edge_table[c]
+                    if e & 0x040:
+                        nv += 1
+                    if e & 0x020:
+                        sy_prev[j + 1, k + 1] = nv
+                        nv += 1
+                    if e & 0x400:
+                        sz_prev[j + 1, k + 1] = nv
+                        nv += 1
+        sx = np.zeros((ny + 1, nz + 1), dtype=np.int64)
+        sy = np.zeros((ny + 1, nz + 1), dtype=np.int64)
+        sz = np.zeros((ny + 1, nz + 1), dtype=np.int64)
+        idx = np.zeros(12, dtype=np.int64)
+        nv = v_start[i]
+        nf = f_start[i]
+        for j in range(ny):
+            c = _mc_corners(vol, i, j, 0) << 4
+            for k in range(nz):
+                c = (c >> 4) | (_mc_corners(vol, i, j, k + 1) << 4)
+                e = edge_table[c]
+                if e == 0:
+                    continue
+                if e & 0x040:
+                    verts[nv, 0] = (i + 0.5 - 1.0 + o0) * s0
+                    verts[nv, 1] = (j + 1.0 - 1.0 + o1) * s1
+                    verts[nv, 2] = (k + 1.0 - 1.0 + o2) * s2
+                    idx[6] = nv
+                    sx[j + 1, k + 1] = nv
+                    nv += 1
+                if e & 0x020:
+                    verts[nv, 0] = (i + 1.0 - 1.0 + o0) * s0
+                    verts[nv, 1] = (j + 0.5 - 1.0 + o1) * s1
+                    verts[nv, 2] = (k + 1.0 - 1.0 + o2) * s2
+                    idx[5] = nv
+                    sy[j + 1, k + 1] = nv
+                    nv += 1
+                if e & 0x400:
+                    verts[nv, 0] = (i + 1.0 - 1.0 + o0) * s0
+                    verts[nv, 1] = (j + 1.0 - 1.0 + o1) * s1
+                    verts[nv, 2] = (k + 0.5 - 1.0 + o2) * s2
+                    idx[10] = nv
+                    sz[j + 1, k + 1] = nv
+                    nv += 1
+                idx[0] = sx[j, k]
+                idx[1] = sy[j + 1, k]
+                idx[2] = sx[j + 1, k]
+                idx[3] = sy_prev[j + 1, k]
+                idx[4] = sx[j, k + 1]
+                idx[7] = sy_prev[j + 1, k + 1]
+                idx[8] = sz_prev[j, k + 1]
+                idx[9] = sz[j, k + 1]
+                idx[11] = sz_prev[j + 1, k + 1]
+                for m in range(tri_count[c]):
+                    faces[nf] = idx[tri_table[c, m]]
+                    nf += 1
+
+
+# From this many voxels of the padded volume on (and with more than one thread), the x
+# planes of the marching cubes run in parallel. Measured on 10 threads: 0.57 times the
+# serial time on a 52^3 volume, 0.30 on 152^3; slower on 27^3 and with one thread.
+_MESH_PARALLEL_MIN = 1 << 17
+
+
 def _mesh(
     padded: npt.NDArray[np.uint8],
     offset: npt.NDArray[np.float64],
     spacing: npt.NDArray[np.float64],
+    parallel: Optional[bool] = None,
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]]:
     """The marching cubes mesh of a 0/1 volume with a zero border: a parallel count pass,
-    then `_marching_cubes_numba` (vertices as (v - 1 + offset) * spacing)."""
+    then `_marching_cubes_numba` (vertices as (v - 1 + offset) * spacing). `parallel` picks
+    its parallel form (default: from _MESH_PARALLEL_MIN voxels on, with more than one
+    thread; the warm-up asks for it on a small volume)."""
     n_verts = np.empty(padded.shape[0] - 1, dtype=np.int64)
     n_faces = np.empty(padded.shape[0] - 1, dtype=np.int64)
     _mc_counts_numba(padded, EDGE_TABLE, TRIANGLE_COUNT, n_verts, n_faces)
+    if parallel is None:
+        parallel = padded.size >= _MESH_PARALLEL_MIN and get_num_threads() > 1
+    if parallel:
+        verts = np.empty((int(n_verts.sum()), 3), dtype=np.float64)
+        faces = np.empty(int(n_faces.sum()), dtype=np.int64)
+        _marching_cubes_parallel_numba(
+            padded,
+            EDGE_TABLE,
+            TRIANGLE_TABLE,
+            TRIANGLE_COUNT,
+            np.cumsum(n_verts) - n_verts,
+            np.cumsum(n_faces) - n_faces,
+            offset,
+            spacing,
+            verts,
+            faces,
+        )
+        return verts, faces.reshape(-1, 3)
     return cast(
         tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]],
         _marching_cubes_numba(

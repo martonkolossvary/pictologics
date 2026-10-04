@@ -253,8 +253,9 @@ class TestMorphologyFeatures(unittest.TestCase):
         self.assertEqual(features, {})
 
     def test_marching_cubes_matches_pymcubes(self):
-        # The kernel gives the PyMCubes 0.1.6 mesh: the same vertices and faces, in the same
-        # order. The file holds 32 masks and their PyMCubes meshes, made once with PyMCubes.
+        # The kernel and its parallel form give the PyMCubes 0.1.6 mesh: the same vertices
+        # and faces, in the same order. The file holds 32 masks and their PyMCubes meshes,
+        # made once with PyMCubes.
         from pictologics.features.morphology import _mesh
 
         path = os.path.join(os.path.dirname(__file__), "data", "marching_cubes_pymcubes.npz")
@@ -262,10 +263,34 @@ class TestMorphologyFeatures(unittest.TestCase):
             count = sum(key.startswith("mask_") for key in ref.files)
             self.assertEqual(count, 32)
             for i in range(count):
-                # offset 1 and spacing 1: the vertices in padded voxel units, as PyMCubes
-                verts, faces = _mesh(np.pad(ref[f"mask_{i}"], 1), np.ones(3), np.ones(3))
-                np.testing.assert_array_equal(verts, ref[f"verts_{i}"])
-                np.testing.assert_array_equal(faces, ref[f"faces_{i}"])
+                for parallel in (False, True):
+                    # offset 1 and spacing 1: the vertices in padded voxel units, as PyMCubes
+                    padded = np.pad(ref[f"mask_{i}"], 1)
+                    verts, faces = _mesh(padded, np.ones(3), np.ones(3), parallel)
+                    np.testing.assert_array_equal(verts, ref[f"verts_{i}"])
+                    np.testing.assert_array_equal(faces, ref[f"faces_{i}"])
+
+    def test_large_volumes_take_the_parallel_marching_cubes(self):
+        # From _MESH_PARALLEL_MIN voxels on, with more than one thread, the x planes of
+        # cubes run in parallel: the mesh of the serial kernel (random masks).
+        from pictologics.features import morphology as morphology_module
+
+        rng = np.random.default_rng(17)
+        padded = np.pad((rng.random((7, 8, 6)) < 0.5).astype(np.uint8), 1)
+        serial = morphology_module._mesh(padded, np.full(3, 0.5), np.array([0.7, 0.8, 1.5]))
+        kernel = morphology_module._marching_cubes_parallel_numba
+        for threads, calls in ((2, 1), (1, 0)):
+            with (
+                patch.object(morphology_module, "_MESH_PARALLEL_MIN", padded.size),
+                patch.object(morphology_module, "get_num_threads", return_value=threads),
+                patch.object(
+                    morphology_module, "_marching_cubes_parallel_numba", wraps=kernel
+                ) as parallel,
+            ):
+                mesh = morphology_module._mesh(padded, np.full(3, 0.5), np.array([0.7, 0.8, 1.5]))
+            self.assertEqual(parallel.call_count, calls)
+            for got, expected in zip(mesh, serial, strict=True):
+                np.testing.assert_array_equal(got, expected)
 
     def test_mesh_features_empty_bbox(self):
         # A given bbox with no ROI voxel gives no mesh features.
