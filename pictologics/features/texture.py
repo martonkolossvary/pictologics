@@ -230,6 +230,73 @@ def _chamfer_distance_taxicab_numba(
     return dist  # type: ignore[return-value]
 
 
+@jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
+def _distance_map_parallel_numba(
+    mask_bool: npt.NDArray[np.bool_], planar0: bool, planar1: bool, planar2: bool
+) -> npt.NDArray[np.int32]:
+    """`_chamfer_distance_taxicab_numba` in threads, with the same int32 map. The taxicab
+    distance is separable: one pass forward and one pass backward along each axis give
+    the same integers as the two raster passes. The passes along x and y run in each
+    slice (the slices in parallel), then the passes along z (the rows in parallel)."""
+    depth, height, width = mask_bool.shape
+    dist = np.zeros((depth + 2, height + 2, width + 2), dtype=np.int32)
+    inf = np.int32(depth + height + width + 1)
+    for z in prange(1, depth + 1):
+        for y in range(1, height + 1):
+            for x in range(1, width + 1):
+                if mask_bool[z - 1, y - 1, x - 1]:
+                    dist[z, y, x] = inf
+            if not planar2:
+                for x in range(1, width + 1):
+                    cand = dist[z, y, x - 1] + 1
+                    if cand < dist[z, y, x]:
+                        dist[z, y, x] = cand
+                for x in range(width, 0, -1):
+                    cand = dist[z, y, x + 1] + 1
+                    if cand < dist[z, y, x]:
+                        dist[z, y, x] = cand
+        if not planar1:
+            for y in range(1, height + 1):
+                for x in range(1, width + 1):
+                    cand = dist[z, y - 1, x] + 1
+                    if cand < dist[z, y, x]:
+                        dist[z, y, x] = cand
+            for y in range(height, 0, -1):
+                for x in range(1, width + 1):
+                    cand = dist[z, y + 1, x] + 1
+                    if cand < dist[z, y, x]:
+                        dist[z, y, x] = cand
+    if not planar0:
+        for y in prange(1, height + 1):
+            for z in range(1, depth + 1):
+                for x in range(1, width + 1):
+                    cand = dist[z - 1, y, x] + 1
+                    if cand < dist[z, y, x]:
+                        dist[z, y, x] = cand
+            for z in range(depth, 0, -1):
+                for x in range(1, width + 1):
+                    cand = dist[z + 1, y, x] + 1
+                    if cand < dist[z, y, x]:
+                        dist[z, y, x] = cand
+    return dist
+
+
+# From this many voxels on (and two slices), the distance map runs in threads. Measured on
+# 10 threads: 0.4 to 0.6 times the serial time from 2^18 voxels on; the two parallel
+# regions cost about 0.2 ms, so below about 190,000 voxels the serial passes win.
+_DISTANCE_PARALLEL_MIN = 1 << 18
+
+
+def _distance_map(
+    mask_bool: npt.NDArray[np.bool_], planar: tuple[bool, bool, bool]
+) -> npt.NDArray[np.int32]:
+    """The padded GLDZM distance map of a row-order bool mask (see
+    `_chamfer_distance_taxicab_numba`), in threads for a large mask."""
+    if mask_bool.size >= _DISTANCE_PARALLEL_MIN and mask_bool.shape[0] > 1:
+        return cast(npt.NDArray[np.int32], _distance_map_parallel_numba(mask_bool, *planar))
+    return cast(npt.NDArray[np.int32], _chamfer_distance_taxicab_numba(mask_bool, *planar))
+
+
 def _gldzm_distance_map(
     mask_bool: npt.NDArray[Any],
 ) -> npt.NDArray[Any]:
@@ -241,13 +308,15 @@ def _gldzm_distance_map(
     voxels get distance 0, foreground voxels get the taxicab (cityblock) distance to the
     nearest background voxel, and voxels outside the array are treated as background.
 
-    3D masks (the only shape the texture pipeline produces) use the exact numba chamfer
-    kernel `_chamfer_distance_taxicab_numba`. Any other dimensionality falls back to the
-    original scipy-based implementation.
+    3D masks (the only shape the texture pipeline produces) use the exact numba kernels of
+    `_distance_map`. Any other dimensionality falls back to the original scipy-based
+    implementation.
     """
     if mask_bool.ndim == 3:
-        dist_padded = _chamfer_distance_taxicab_numba(mask_bool)
-        return cast(npt.NDArray[Any], dist_padded[1:-1, 1:-1, 1:-1])
+        padded = _distance_map(
+            np.ascontiguousarray(mask_bool, dtype=np.bool_), (False, False, False)
+        )
+        return cast(npt.NDArray[Any], padded[1:-1, 1:-1, 1:-1])
 
     mask_padded = np.pad(mask_bool, 1, mode="constant", constant_values=0)
     dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.int32)
@@ -899,7 +968,7 @@ def _texture_matrices(
                 # Distance-to-border map of distance_mask, else of the ROI, with the image
                 # border treated as an edge (padded like `vol`).
                 d_roi = roi if distmask_c is None else np.not_equal(distmask_c, 0, order="C")
-                distance_map = _chamfer_distance_taxicab_numba(d_roi, *planar)
+                distance_map = _distance_map(d_roi, planar)
             dist = distance_map
             if compact:
                 extra["distance_map"] = dist
@@ -1492,7 +1561,45 @@ def _fill_zones_numba(
     return n_zones
 
 
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _face_pairs_numba(
+    hi: npt.NDArray[np.int32],
+    lo: npt.NDArray[np.int32],
+    res_gl: npt.NDArray[np.int32],
+    height: int,
+    width: int,
+    pairs: npt.NDArray[np.int32],
+    start: int,
+) -> int:
+    """Write the pairs (zone a, zone b) of one grey level that touch across a chunk face
+    into the rows of `pairs` from `start`, and return their number. Zone a has a voxel in
+    the last slice of the chunk (labels `hi`), zone b one of the 9 voxels around it in the
+    first slice of the next chunk (labels `lo`). The pairs come in the order y, x, dy, dx.
+    A pair that repeats the pair before it is left out: its union changes nothing."""
+    n = 0
+    last_a = -1
+    last_b = -1
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            la = hi[y * width + x]
+            if la == 0:
+                continue
+            gl = res_gl[la - 1]
+            for dy in range(-1, 2):
+                row = (y + dy) * width + x
+                for dx in range(-1, 2):
+                    lb = lo[row + dx]
+                    if lb == 0 or res_gl[lb - 1] != gl or (la == last_a and lb == last_b):
+                        continue
+                    last_a = la
+                    last_b = lb
+                    pairs[start + n, 0] = la - 1
+                    pairs[start + n, 1] = lb - 1
+                    n += 1
+    return n
+
+
+@jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
 def _label_zones_numba(
     vol: npt.NDArray[np.uint16],
     dist: npt.NDArray[np.int32],
@@ -1507,6 +1614,7 @@ def _label_zones_numba(
     lab_lo: npt.NDArray[np.int32],
     lab_hi: npt.NDArray[np.int32],
     zone_counts: npt.NDArray[np.int64],
+    slots: npt.NDArray[np.int64],
 ) -> None:
     """Find the zones (26-connected voxels of one grey level) of the padded volume `vol`,
     with one flood fill (`_fill_zones_numba`) per chunk of padded slices bounds[c] to
@@ -1515,11 +1623,12 @@ def _label_zones_numba(
     The chunks run in parallel. Zone t of chunk c gets the id roi_base[c] + t (roi_base
     counts the texture voxels of the earlier chunks, so the ids and the stacks of the
     chunks never overlap). Zones that touch across a chunk face are then joined
-    (union-find, serial): the size of the root is the sum and its distance the minimum, so
-    the result is the same for every chunk split. `vol` is all 0 afterwards.
+    (union-find): the size of the root is the sum and its distance the minimum, so the
+    result is the same for every chunk split. The faces find their pairs of zones in
+    parallel: face c writes them into the rows slots[c] to slots[c + 1] (9 rows for each
+    texture voxel of the last slice of chunk c). `vol` is all 0 afterwards.
     """
     stride_z = vol.shape[1] * vol.shape[2]
-    stride_y = vol.shape[2]
     flat = vol.ravel()
     flat_dist = dist.ravel()
     offsets = _zone_offsets_numba(vol.shape)
@@ -1544,23 +1653,22 @@ def _label_zones_numba(
         )
 
     # Join the zones that touch across each chunk face (26-connected: the 9 voxels of
-    # the next slice around each voxel of the last slice).
+    # the next slice around each voxel of the last slice). The faces find their pairs in
+    # parallel; the unions then run in the order of one walk over the faces.
+    found = np.zeros(n_chunks, dtype=np.int64)
+    pairs = np.empty((slots[-1], 2), dtype=np.int32)
+    for c in prange(n_chunks - 1):
+        found[c] = _face_pairs_numba(
+            lab_hi[c], lab_lo[c + 1], res_gl, vol.shape[1], vol.shape[2], pairs, slots[c]
+        )
     for c in range(n_chunks - 1):
-        for y in range(1, vol.shape[1] - 1):
-            for x in range(1, vol.shape[2] - 1):
-                la = lab_hi[c, y * stride_y + x]
-                if la == 0:
-                    continue
-                for dy in range(-1, 2):
-                    for dx in range(-1, 2):
-                        lb = lab_lo[c + 1, (y + dy) * stride_y + (x + dx)]
-                        if lb != 0 and res_gl[lb - 1] == res_gl[la - 1]:
-                            ra = _uf_find(parent, la - 1)
-                            rb = _uf_find(parent, lb - 1)
-                            if ra < rb:
-                                parent[rb] = ra
-                            elif rb < ra:
-                                parent[ra] = rb
+        for k in range(slots[c], slots[c] + found[c]):
+            ra = _uf_find(parent, pairs[k, 0])
+            rb = _uf_find(parent, pairs[k, 1])
+            if ra < rb:
+                parent[rb] = ra
+            elif rb < ra:
+                parent[ra] = rb
     for c in range(n_chunks):
         for t in range(zone_counts[c]):
             zid = roi_base[c] + t
@@ -1691,6 +1799,9 @@ def _zone_matrices(
         )
     bounds = _z_blocks(per_slice, n_chunks)
     roi_base = np.concatenate(([0], np.cumsum(per_slice)))[bounds[:-1]].astype(np.int64)
+    # The rows of the zone pairs of each chunk face: 9 for each texture voxel of the last
+    # slice of the chunk
+    slots = np.concatenate(([0], np.cumsum(9 * per_slice[bounds[1:-1] - 1]))).astype(np.int64)
     slice_size = vol.shape[1] * vol.shape[2]
     lab_lo = np.zeros((bounds.size - 1, slice_size), dtype=np.int32)
     lab_hi = np.zeros((bounds.size - 1, slice_size), dtype=np.int32)
@@ -1709,6 +1820,7 @@ def _zone_matrices(
         lab_lo,
         lab_hi,
         zone_counts,
+        slots,
     )
     return cast(
         tuple[npt.NDArray[Any], npt.NDArray[Any]],

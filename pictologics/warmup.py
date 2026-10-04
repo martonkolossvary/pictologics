@@ -104,8 +104,10 @@ def _warmup_texture() -> None:
     # The levels that occur, for the compact tables of many grey levels
     texture._levels_seen_numba(np.zeros((3, 3, 3), dtype=np.uint16), np.zeros((3, 2), np.bool_))
     # GLDZM distance-transform kernel: its input is always a fresh bool array from a
-    # comparison, so a C-contiguous array.
-    dist = texture._chamfer_distance_taxicab_numba(mask.astype(np.bool_))
+    # comparison, so a C-contiguous array, with the three planar flags.
+    dist = texture._chamfer_distance_taxicab_numba(mask.astype(np.bool_), False, False, False)
+    # The distance map of large masks, in threads
+    texture._distance_map_parallel_numba(mask.astype(np.bool_), False, False, False)
     # The parallel zone kernels of large volumes, on this small one (with and without the
     # distance map)
     for distance in (dist, texture._NO_DISTANCE):

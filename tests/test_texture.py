@@ -483,6 +483,24 @@ class TestTextureFeatures(unittest.TestCase):
         glszm_bad, _ = self._run_parallel_zone_kernel(data_bad, mask, dist, n_chunks=2)
         self.assertEqual(int(glszm_bad.sum()), 0)
 
+    def test_parallel_zone_join_gives_the_zones_of_one_fill(self):
+        # The chunk faces find their zone pairs in parallel, each face in its slot, and the
+        # unions run in face order: the GLSZM cells and the GLDZM are those of one serial
+        # fill, for 2, 8 and 32 grey levels and 2 to 7 chunks.
+        rng = np.random.default_rng(41)
+        for levels in (2, 8, 32):
+            data = rng.integers(1, levels + 1, (9, 7, 8)).astype(np.int32)
+            roi = rng.random(data.shape) < 0.7
+            vol, counts = texture_module._texture_volume(data, roi, levels)
+            dist = texture_module._chamfer_distance_taxicab_numba(roi, False, False, False)
+            args = (counts, dist, levels, True, True, False)
+            serial = texture_module._zone_matrices(vol.copy(), *args, parallel=False)
+            for n_chunks in (2, 3, 7):
+                with patch.object(texture_module.numba, "get_num_threads", return_value=n_chunks):
+                    joined = texture_module._zone_matrices(vol.copy(), *args, parallel=True)
+                for got, expected in zip(joined, serial, strict=True):
+                    np.testing.assert_array_equal(got, expected)
+
     def test_parallel_zone_merge_attach_higher_root(self):
         """Two chunk-0 zones both touching one chunk-1 zone force the union to attach a
         higher-id root onto a lower one (the `ra > rb` branch of the boundary merge)."""
@@ -683,6 +701,48 @@ class TestGldzmDistanceMap(unittest.TestCase):
             expected = self._scipy_reference(mask_bool)
             actual = texture_module._gldzm_distance_map(mask_bool)
             np.testing.assert_array_equal(actual, expected)
+
+    def test_parallel_distance_map_equals_the_raster_passes(self) -> None:
+        # The separable passes (in threads) give the int32 map of the two raster passes:
+        # sparse, dense, empty and full masks, one voxel, thin slabs, and every set of
+        # planar axes.
+        import itertools
+
+        rng = np.random.default_rng(12)
+        masks = [rng.random((6, 7, 5)) < p for p in (0.1, 0.5, 0.9)]
+        one = np.zeros((5, 6, 7), dtype=bool)
+        one[2, 3, 4] = True
+        masks += [one, np.zeros((3, 4, 5), dtype=bool), np.ones((3, 4, 5), dtype=bool)]
+        masks += [rng.random(shape) < 0.7 for shape in ((1, 9, 8), (7, 1, 6), (6, 8, 1))]
+        masks.append(np.ones((1, 1, 1), dtype=bool))
+        for mask in masks:
+            for planar in itertools.product((False, True), repeat=3):
+                expected = texture_module._chamfer_distance_taxicab_numba(mask, *planar)
+                got = texture_module._distance_map_parallel_numba(mask, *planar)
+                np.testing.assert_array_equal(got, expected)
+                self.assertEqual(got.dtype, expected.dtype)
+
+    def test_large_masks_take_the_distance_map_in_threads(self) -> None:
+        # From _DISTANCE_PARALLEL_MIN voxels on, a mask of two slices or more takes the
+        # distance map in threads, with the same GLDZM features; one slice stays serial.
+        rng = np.random.default_rng(13)
+        data = rng.integers(1, 5, (4, 6, 7))
+        mask = (rng.random(data.shape) < 0.8).astype(np.uint8)
+        serial = texture_module.calculate_all_texture_features(data, mask, 4, families=["gldzm"])
+        with (
+            patch.object(texture_module, "_DISTANCE_PARALLEL_MIN", mask.size),
+            patch.object(
+                texture_module,
+                "_distance_map_parallel_numba",
+                wraps=texture_module._distance_map_parallel_numba,
+            ) as threads,
+        ):
+            got = texture_module.calculate_all_texture_features(data, mask, 4, families=["gldzm"])
+            self.assertEqual(threads.call_count, 1)
+            texture_module._distance_map(mask[:1] != 0, (False, False, False))  # one slice
+            texture_module._distance_map(mask[:, :-1] != 0, (False, False, False))  # fewer
+            self.assertEqual(threads.call_count, 1)
+        self.assertEqual(got, serial)
 
     def test_non_3d_falls_back_to_scipy(self) -> None:
         """Non-3D masks (never produced by the texture pipeline) hit the defensive
