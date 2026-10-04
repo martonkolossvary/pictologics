@@ -11,6 +11,7 @@ Tests cover all functionality including:
 
 import os
 import tempfile
+import warnings
 from pathlib import Path
 
 # Disable JIT warmup for tests to prevent NumPy reload warning and speed up collection
@@ -29,6 +30,7 @@ from pictologics.utilities.visualization import (
     _get_colormap_colors,
     _get_reference_array,
     _gray_range,
+    _label_colors,
     _normalize_image,
     _parse_slice_selection,
     save_slices,
@@ -782,3 +784,30 @@ class TestSaveSlicesAdditional:
                 axis=1,
             )
             assert len(files) == 2
+
+
+@pytest.mark.parametrize("width", [0, -400])
+def test_a_window_width_of_0_or_less_raises(tmp_path: Path, width: float) -> None:
+    # A width of 0 divides by zero and a negative width makes every pixel white: both
+    # raise before a file is written or a window opens
+    rng = np.random.default_rng(1)
+    image = Image(rng.normal(40.0, 100.0, (8, 8, 4)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    text = f"window_width must be more than 0, not {width}"
+    with pytest.raises(ValueError, match=text):
+        save_slices(tmp_path / "out", image=image, window_center=40, window_width=width)
+    assert not (tmp_path / "out").exists()
+    with patch("matplotlib.pyplot.subplots") as subplots, pytest.raises(ValueError, match=text):
+        visualize_slices(image=image, window_center=40, window_width=width)
+    subplots.assert_not_called()
+
+
+def test_a_nan_in_a_float_mask_is_background() -> None:
+    # A NaN pixel of a float mask gets the background color, without a RuntimeWarning
+    # from its cast; the labels keep their colors
+    mask = np.array([[0.0, 1.0], [2.0, np.nan]])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        labelled, index = _label_colors(mask, 3)
+    assert caught == []
+    assert labelled.tolist() == [[False, True], [True, False]]
+    assert index.tolist() == [[3, 0], [1, 3]]

@@ -167,6 +167,12 @@ def _apply_window_level(
     return arr.astype(np.uint8)
 
 
+def _check_window_width(window_width: Optional[float]) -> None:
+    """A window width of 0 divides by zero, and a negative width makes every pixel white."""
+    if window_width is not None and window_width <= 0:
+        raise ValueError(f"window_width must be more than 0, not {window_width}")
+
+
 def _normalize_image(
     image_array: npt.NDArray[np.floating[Any]],
     window_center: Optional[float] = None,
@@ -333,8 +339,12 @@ def _label_colors(
     mask_slice: npt.NDArray[Any], num_colors: int
 ) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.int64]]:
     """The labelled pixels, and per pixel the color index: (label - 1) mod the colors,
-    with the label truncated to an integer, or `num_colors` (black) for background 0."""
+    with the label truncated to an integer, or `num_colors` (black) for background 0. A
+    NaN in a float mask is background."""
     labelled = mask_slice != 0
+    if mask_slice.dtype.kind == "f":
+        labelled &= ~np.isnan(mask_slice)
+        mask_slice = np.nan_to_num(mask_slice, nan=0.0)
     index = np.where(labelled, (mask_slice.astype(np.int64) - 1) % num_colors, num_colors)
     return labelled, index
 
@@ -498,7 +508,8 @@ def save_slices(
 
     Raises:
         ValueError: If neither image nor mask is provided, if shapes don't match
-            when both are provided, or if a single slice index is out of range.
+            when both are provided, if a single slice index is out of range, or if
+            window_width is 0 or less.
 
     Example:
         Save image slices with and without mask overlay:
@@ -521,6 +532,7 @@ def save_slices(
     """
     if image is None and mask is None:
         raise ValueError("At least one of image or mask must be provided.")
+    _check_window_width(window_width)
 
     # Validate shapes if both provided
     if image is not None and mask is not None:
@@ -662,7 +674,8 @@ def visualize_slices(
 
     Raises:
         ValueError: If neither image nor mask is provided, if shapes don't match
-            when both are provided, or if initial_slice is out of range.
+            when both are provided, if initial_slice is out of range, or if
+            window_width is 0 or less.
 
     Example:
         Visualise slices interactively:
@@ -688,6 +701,7 @@ def visualize_slices(
 
     if image is None and mask is None:
         raise ValueError("At least one of image or mask must be provided.")
+    _check_window_width(window_width)
 
     # Validate shapes if both provided
     if image is not None and mask is not None:

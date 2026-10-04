@@ -1,0 +1,1 @@
+`save_slices()` and `visualize_slices()` raise ValueError for a window_width of 0 or less, before they write a file or open a window. Before, a width of 0 divided by zero, and a negative width made every pixel white.
