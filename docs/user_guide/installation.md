@@ -74,7 +74,13 @@ The first call of each function then compiles its code.
 
 ## Threads
 
-Pictologics computes in parallel on all cores. Set the number of threads with the environment variable `NUMBA_NUM_THREADS`, or with `numba.set_num_threads()` in your script. One setting limits all parallel parts, also the filters. See [Tips for Speed and Memory](../tutorials/performance.md).
+Pictologics computes in parallel on the fast cores of the computer. On a Mac with Apple silicon, these are the performance cores (for example, 10 of the 14 cores of an M4 Pro). On Windows, Pictologics uses all cores. For another number of threads, set an environment variable before the import:
+
+```bash
+export PICTOLOGICS_NUM_THREADS=4
+```
+
+You can also call `pictologics.set_num_threads(4)` in your script. One setting limits all parallel parts, also the filters. See [Tips for Speed and Memory](../tutorials/performance.md).
 
 ## Check the Installation
 

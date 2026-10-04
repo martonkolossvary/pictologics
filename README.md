@@ -20,7 +20,7 @@ Documentation (user guide, tutorials, API, benchmarks): https://martonkolossvary
 
 ## Why Pictologics?
 
-*   **🚀 Fast**: Numba compiles the computations for your computer, and they run on all cores. The [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page gives the time of each part.
+*   **🚀 Fast**: Numba compiles the computations for your computer, and they run on its fast cores. The [Benchmarks](https://martonkolossvary.github.io/pictologics/benchmarks/) page gives the time of each part.
 *   **✅ IBSI compliant**: checked against the IBSI phantoms and data sets:
     *   **IBSI 1** (features): 675 feature values pass; 21 more have a reference value without a tolerance ([report](https://martonkolossvary.github.io/pictologics/ibsi1_compliance/)).
     *   **IBSI 2 Phase 1** (filters): 28 of 28 compared tests pass ([report](https://martonkolossvary.github.io/pictologics/ibsi2_compliance/)).

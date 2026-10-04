@@ -19,7 +19,7 @@ See the [NOTICE](NOTICE.md) file for the attribution and the third-party librari
 
 ## Why Pictologics?
 
-*   **🚀 Fast**: Numba compiles the computations for your computer, and they run on all cores. The [Benchmarks](benchmarks.md) page gives the time of each part.
+*   **🚀 Fast**: Numba compiles the computations for your computer, and they run on its fast cores. The [Benchmarks](benchmarks.md) page gives the time of each part.
 *   **✅ IBSI compliant**: checked against the IBSI phantoms and data sets:
     *   **IBSI 1** (features): 675 feature values pass; 21 more have a reference value without a tolerance ([report](ibsi1_compliance.md)).
     *   **IBSI 2 Phase 1** (filters): 28 of 28 compared tests pass ([report](ibsi2_compliance.md)).

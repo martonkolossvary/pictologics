@@ -101,6 +101,7 @@ nav:
     - Filters: api/filters.md
     - Results: api/results.md
     - Utilities: api/utilities.md
+    - Threads: api/threads.md
     - Features:
       - Feature Names: api/features/names.md
       - Intensity: api/features/intensity.md

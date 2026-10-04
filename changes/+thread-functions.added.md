@@ -1,0 +1,1 @@
+`pictologics.set_num_threads()` and `pictologics.get_num_threads()` set and give the number of threads of all parallel parts. The environment variable `PICTOLOGICS_NUM_THREADS` sets the number before the import, also above the default.

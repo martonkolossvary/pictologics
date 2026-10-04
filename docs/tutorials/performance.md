@@ -4,7 +4,10 @@ Pictologics computes in parallel and only where it must. These tips help it do s
 
 ## Threads
 
-- Pictologics uses the numba thread count for all its parallel parts: the numba kernels, the FFT filters and the thread pools of the filters. One setting limits them all: the environment variable `NUMBA_NUM_THREADS`, or `numba.set_num_threads()` in your script.
+- Pictologics uses one number of threads for all its parallel parts: the numba kernels, the FFT filters and the thread pools of the filters.
+- By default, it uses the fast cores of the computer. numba gives each thread an equal part of a loop, so one slow core makes the whole loop wait. On a Mac with Apple silicon, the default is the performance cores. On Windows, it is all cores: the slow cores of an Intel chip are many and fairly fast, so they help. On Linux, it is the CPUs of the process, at most the CPU limit of a container.
+- For another number, set the environment variable `PICTOLOGICS_NUM_THREADS` before the import, or call `pictologics.set_num_threads()` in your script. The function sets the number for the thread that calls it, at most the number of the import. Without a number, it sets the default again. `NUMBA_NUM_THREADS` works too.
+- The features do not depend on the number of threads.
 - `run_batch(..., workers=4)` gives each worker process a quarter of the threads.
 - See the [benchmark page](../benchmarks.md#threads) for the speed-up by threads.
 
