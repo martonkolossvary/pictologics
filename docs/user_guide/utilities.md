@@ -75,13 +75,13 @@ visualize_slices(image=image, mask=mask, alpha=0.4, colormap="tab20")  # scroll 
 save_slices("qc/", image=image, mask=mask, slice_selection="10%")      # 10 % of the slices
 save_slices("qc/", image=image, slice_selection="every_10")            # every 10th slice
 save_slices("qc/", image=image, slice_selection=[0, 50, 100])          # these slices
-save_slices("qc/", image=image, mask=mask, format="tiff", dpi=300)     # png (default), jpeg or tiff
+save_slices("qc/", image=image, mask=mask, format="tiff", dpi=300)     # png (default), jpeg or tiff; dpi: the tag in the file
 ```
 
 - **Gray scale**: without `window_center` and `window_width`, all slices share one gray scale: the minimum and the maximum of the volume (without NaN values). For CT, give a window: soft tissue 40 / 400, bone 400 / 1800, lung -600 / 1500.
 - **Colormaps**: `tab20` (default, 20 colours), `tab10`, `Set1`, `Set2`, `Paired`.
 - **Slices**: a single slice index outside the image raises a `ValueError`; in a list, indices outside the image are skipped.
-- **Files**: `save_slices` writes up to 8 slices at a time, in threads, as RGB files (the overlay is mixed into the colours). PNG files use compression level 3, 2.5 times faster than the default level 6.
+- **Files**: `save_slices` writes the slices in threads (numba's thread count), as RGB files (the overlay is mixed into the colours). Each file has one pixel per voxel. `dpi` (default 300) is only the resolution tag in the file: viewers and printers use it to scale the image. PNG files use compression level 3, 2 times faster than the default level 6, for files 4 % larger.
 
 ### Quality Images of Many Cases
 

@@ -424,16 +424,16 @@ class TestSaveSlices:
     def test_save_writes_the_display_pixels_as_rgb(
         self, synthetic_image: Image, synthetic_mask: Image, tmp_path: Path, fmt: str
     ) -> None:
-        """Slices are saved in threads as RGB: at 72 dpi the pixels of the RGBA display, at
-        another dpi those of the RGBA display resized with LANCZOS (as the RGBA files were);
-        the paths come back in slice order."""
+        """Slices are saved in threads as RGB with one pixel per voxel, at every dpi and on
+        every axis: the pixels of the RGBA display, with dpi as the resolution tag of the
+        file; the paths come back in slice order."""
         from PIL import Image as PILImage
 
         from pictologics.utilities import visualization
 
         value_range = visualization._gray_range(synthetic_image, synthetic_mask, None, None, True)
-        for dpi in (72, 144):
-            out = tmp_path / f"dpi{dpi}"
+        for dpi, axis in ((72, 2), (300, 2), (300, 0), (300, 1)):
+            out = tmp_path / f"dpi{dpi}_axis{axis}"
             files = save_slices(
                 str(out),
                 image=synthetic_image,
@@ -441,32 +441,31 @@ class TestSaveSlices:
                 slice_selection=[9, 3, 6],
                 format=fmt,
                 dpi=dpi,
+                axis=axis,
             )
             assert [Path(f).name[:10] for f in files] == ["slice_0009", "slice_0003", "slice_0006"]
             for f, idx in zip(files, (9, 3, 6), strict=True):
-                rgba = _create_display_rgba(
-                    synthetic_image.array[:, :, idx],
-                    synthetic_mask.array[:, :, idx],
-                    value_range=value_range,
-                )
-                expected = PILImage.fromarray(rgba)
-                if dpi != 72:
-                    expected = expected.resize((128, 128), PILImage.Resampling.LANCZOS)
+                index = tuple(idx if k == axis else slice(None) for k in range(3))
+                image_slice = synthetic_image.array[index]
+                rgb = _create_display_rgba(
+                    image_slice, synthetic_mask.array[index], value_range=value_range
+                )[..., :3]
                 saved = PILImage.open(f)
+                assert saved.size == image_slice.shape  # (width, height): the slice, turned
+                assert [round(float(v)) for v in saved.info["dpi"]] == [dpi, dpi]  # PNG: per metre
                 if fmt == "jpeg":  # lossy: the JPEG of the same RGB pixels
-                    expected.convert("RGB").save(tmp_path / "expected.jpg", dpi=(dpi, dpi))
-                    assert Path(f).read_bytes() == (tmp_path / "expected.jpg").read_bytes()
+                    expected = tmp_path / "expected.jpg"
+                    PILImage.fromarray(np.ascontiguousarray(rgb)).save(expected, dpi=(dpi, dpi))
+                    assert Path(f).read_bytes() == expected.read_bytes()
                 else:
                     assert saved.mode == "RGB"
-                    np.testing.assert_array_equal(
-                        np.asarray(saved), np.asarray(expected.convert("RGB"))
-                    )
+                    np.testing.assert_array_equal(np.asarray(saved), rgb)
 
     def test_save_uses_threads_and_png_level_3(
         self, synthetic_image: Image, tmp_path: Path
     ) -> None:
-        """At most 8 threads (and not more than numba's threads or the slices), and PNG
-        compression level 3."""
+        """Numba's thread count (and not more threads than slices), and PNG compression
+        level 3."""
         from concurrent.futures import ThreadPoolExecutor
 
         from PIL import Image as PILImage
@@ -484,7 +483,7 @@ class TestSaveSlices:
             save_slices(
                 tmp_path, image=synthetic_image, slice_selection=[1, 2, 3, 4], format="tiff"
             )
-        assert [c.kwargs["max_workers"] for c in pool.call_args_list] == [8, 2, 3]
+        assert [c.kwargs["max_workers"] for c in pool.call_args_list] == [16, 2, 3]
         options = [c.kwargs for c in saved.call_args_list]
         assert all(o.get("compress_level") == 3 for o in options[:20])
         assert all("compress_level" not in o for o in options[20:])
@@ -494,18 +493,6 @@ class TestSaveSlices:
     ) -> None:
         with pytest.raises(ValueError, match="out of range"):
             save_slices(str(tmp_path), image=synthetic_image, slice_selection=20)
-
-    def test_save_with_dpi_72(self, synthetic_image: Image, synthetic_mask: Image) -> None:
-        """Test saving with 72 DPI (scale_factor=1.0)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            files = save_slices(
-                output_dir=tmpdir,
-                image=synthetic_image,
-                mask=synthetic_mask,
-                slice_selection=[0],
-                dpi=72,
-            )
-            assert len(files) == 1
 
 
 class TestVisualizeSlices:

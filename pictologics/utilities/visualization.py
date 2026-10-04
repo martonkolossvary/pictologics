@@ -486,7 +486,8 @@ def save_slices(
             - int: Single slice index (0 to the number of slices - 1)
             - list[int]: Specific slice indices (indices out of range are skipped)
         format: Output format ("png", "jpeg", "tiff").
-        dpi: Output resolution in dots per inch.
+        dpi: The resolution tag written into the file, in dots per inch. The image has
+            one pixel per voxel; viewers and printers use the tag to scale it.
         alpha: Transparency of mask overlay (0-1). Only used in overlay mode.
         colormap: Colormap for mask labels. Options:
             - "tab10": 10 distinct colors
@@ -562,11 +563,9 @@ def save_slices(
     if format not in ("png", "jpeg", "tiff"):
         format = "png"
 
-    # Calculate pixel size based on DPI
-    scale_factor = dpi / 72.0
     ext = {"png": ".png", "jpeg": ".jpg", "tiff": ".tiff"}[format]
-    # PNG compression level 3: 2.5x faster than the default 6, and the files stay as
-    # small as the RGBA files at level 6 were.
+    # PNG compression level 3: 2.1x faster than the default 6, for files 4 % larger
+    # (40 slices of a CT with a mask).
     save_options: dict[str, Any] = {"compress_level": 3} if format == "png" else {}
 
     def save_slice(idx: int) -> str:
@@ -606,22 +605,15 @@ def save_slices(
         # the files are RGB (the same pixels as RGBA, a quarter less data to encode).
         pil_img = PILImage.fromarray(np.ascontiguousarray(rgba[..., :3]))
 
-        # Scale if needed for DPI
-        if scale_factor != 1.0:
-            h, w = rgba.shape[:2]
-            new_h = int(h * scale_factor)
-            new_w = int(w * scale_factor)
-            pil_img = pil_img.resize((new_w, new_h), PILImage.Resampling.LANCZOS)
-
-        # Save
+        # Save: one pixel per voxel, with dpi as the resolution tag of the file
         filename = f"{filename_prefix}_{idx:04d}{ext}"
         filepath = out_path / filename
         pil_img.save(filepath, dpi=(dpi, dpi), **save_options)
         return str(filepath)
 
-    # Slices in threads: PIL releases the GIL while it resizes and encodes. At most 8
-    # threads, as each holds one resized slice (about 20 MB at 300 dpi for 512 x 512).
-    workers = min(8, get_num_threads(), max(1, len(slice_indices)))
+    # Slices in threads: PIL releases the GIL while it encodes. Numba's thread count, and
+    # not more threads than slices.
+    workers = min(get_num_threads(), max(1, len(slice_indices)))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         return list(executor.map(save_slice, slice_indices))
 
