@@ -19,6 +19,7 @@ import numpy as np
 import pydicom
 from numpy import typing as npt
 
+from pictologics.features._utils import compute_nonzero_bbox
 from pictologics.loader import _RTSTRUCT_SOP_CLASS, Image, _direction_matrix, _warn_if_other_frame
 
 # The contour types that bound an area (CLOSEDPLANAR_XOR names the even-odd rule)
@@ -114,12 +115,18 @@ def load_rtstruct(
     for uid in sorted({frames[n] for n in chosen if n in frames}):
         names = ", ".join(repr(rois[n][0]) for n in chosen if frames.get(n) == uid)
         _warn_if_other_frame(uid, reference_image, f"The RTSTRUCT ROI {names}")
-    masks = {
-        number: _filled(rois[number], reference_image, subvoxel_tolerance, subvoxel_warning_threshold)
-        for number in chosen
-    }  # fmt: skip
-    for number, mask in masks.items():
-        if not mask.any():
+    # Each mask and its nonzero box; the label map needs only the part in the box, so a
+    # mask leaves memory once its box is cut out
+    masks: dict[int, npt.NDArray[np.bool_]] = {}
+    boxes = {}
+    for number in chosen:
+        mask = _filled(
+            rois[number], reference_image, subvoxel_tolerance, subvoxel_warning_threshold
+        )
+        boxes[number] = box = compute_nonzero_bbox(mask)
+        masks[number] = mask[box].copy() if combine_rois and box is not None else mask
+    for number in chosen:
+        if boxes[number] is None:
             warnings.warn(
                 f"ROI {rois[number][0]!r} covers no voxel center of the reference image.",
                 UserWarning,
@@ -140,7 +147,9 @@ def load_rtstruct(
         return {rois[number][0]: image(mask.view(np.uint8)) for number, mask in masks.items()}
     labels = np.zeros(reference_image.array.shape, np.uint8 if max(masks, default=0) <= 255 else np.uint16)  # fmt: skip
     for number, mask in masks.items():
-        labels[mask] = number
+        box = boxes[number]
+        if box is not None:
+            labels[box][mask] = number
     return image(labels)
 
 
@@ -262,9 +271,13 @@ def _fill_even_odd(plane: npt.NDArray[np.bool_], polygons: list[npt.NDArray[np.f
     rows, cols = rows[order], cols[order]
     # The crossings of a row pair up: in at crossing 2i, out at crossing 2i + 1
     low = rows[0]
-    steps = np.zeros((rows[-1] - low + 1, cols_n + 1), dtype=np.int32)
     begin = np.clip(np.ceil(cols[0::2]), 0, cols_n).astype(np.intp)
     end = np.clip(np.ceil(cols[1::2]), 0, cols_n).astype(np.intp)
-    np.add.at(steps, (rows[0::2] - low, begin), 1)
-    np.add.at(steps, (rows[0::2] - low, end), -1)
-    plane[low : rows[-1] + 1] |= np.cumsum(steps[:, :-1], axis=1) > 0
+    # Only the columns from the first crossing to the last can be inside
+    left = int(begin.min())
+    steps = np.zeros((rows[-1] - low + 1, int(end.max()) - left + 1), dtype=np.int32)
+    np.add.at(steps, (rows[0::2] - low, begin - left), 1)
+    np.add.at(steps, (rows[0::2] - low, end - left), -1)
+    plane[low : rows[-1] + 1, left : left + steps.shape[1] - 1] |= (
+        np.cumsum(steps[:, :-1], axis=1) > 0
+    )

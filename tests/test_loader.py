@@ -2424,6 +2424,23 @@ def test_dicom_series_reads_each_file_once_and_rescales_in_one_pass(
     np.testing.assert_array_equal(raw.array, expected)
 
 
+def test_dicom_series_converts_a_slab_at_a_time(tmp_path: "os.PathLike[str]") -> None:
+    # The one-pass load converts the slices a slab at a time: the volume of the whole
+    # stack when the slice count is above, at and below the slab size, also with a
+    # rescale that differs between the slabs.
+    expected = _write_series(
+        tmp_path, [(1.0, 0.0), (2.5, -1024.0), (1.0, -1024.0), (0.5, 0.0), (3.0, 7.0)]
+    )
+    for slab in (2, 5, 32):
+        with (
+            patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8),
+            patch("pictologics.loader._SLAB", slab),
+        ):
+            image = _load_dicom_series(tmp_path)
+        assert image.array.flags.c_contiguous and image.array.dtype == np.float64
+        np.testing.assert_array_equal(image.array.view(np.uint64), expected.view(np.uint64))
+
+
 def test_nifti_loads_the_values_of_get_fdata_in_one_pass(tmp_path: "os.PathLike[str]") -> None:
     # A large 3D NIfTI image goes from its stored values to the row-order float64 output in
     # one pass, scaled as nibabel scales for get_fdata; the values are the same, bit for bit.
@@ -2457,6 +2474,58 @@ def test_nifti_loads_the_values_of_get_fdata_in_one_pass(tmp_path: "os.PathLike[
         np.testing.assert_array_equal(array.view(np.uint64), expected.view(np.uint64))
     assert nib.load(str(Path(tmp_path) / "scaled.nii")).dataobj.slope != 1.0
     assert nib.load(str(Path(tmp_path) / "offset.nii")).dataobj.inter == 5.0
+
+
+def test_gzip_nifti_inflates_in_one_pass(tmp_path: "os.PathLike[str]") -> None:
+    # A gzip NIfTI file inflates in one pass into its stored values (no nibabel read),
+    # with the values of get_fdata, bit for bit. A file that is not one gzip member of the
+    # expected size goes to nibabel, which reads it, or reports the error, as before.
+    import gzip
+    from pathlib import Path
+
+    import nibabel as nib
+    from nibabel.arrayproxy import ArrayProxy
+
+    from pictologics import loader
+
+    rng = np.random.default_rng(14)
+    folder = Path(tmp_path)
+    nib.save(nib.Nifti1Image(rng.normal(size=(7, 6, 5)), np.eye(4)), folder / "float64.nii.gz")
+    scaled = nib.Nifti1Image(rng.normal(0.0, 500.0, (40, 30, 20)), np.eye(4))
+    scaled.set_data_dtype(np.int16)  # nibabel picks a slope and an intercept on save
+    nib.save(scaled, folder / "scaled.nii.gz")
+    raw = (folder / "scaled.nii.gz").read_bytes()
+    plain = gzip.decompress(raw)
+    crc = bytearray(raw)
+    crc[-8] ^= 0xFF  # the CRC of the gzip trailer
+    odd = {
+        "two.nii.gz": gzip.compress(plain[:400]) + gzip.compress(plain[400:]),
+        "long.nii.gz": gzip.compress(plain + bytes(8)),
+        "crc.nii.gz": bytes(crc),
+        "cut.nii.gz": raw[: len(raw) * 9 // 10],
+    }
+    for name, content in odd.items():
+        (folder / name).write_bytes(content)
+    proxy = nib.load(str(folder / "scaled.nii.gz")).dataobj
+    stored = (int(proxy.offset), proxy.shape, np.dtype(proxy.dtype))
+    with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
+        for name in ("float64.nii.gz", "scaled.nii.gz"):
+            path = str(folder / name)
+            with patch.object(ArrayProxy, "get_unscaled") as nibabel_read:
+                array = loader._load_nifti(path).array
+            nibabel_read.assert_not_called()
+            expected = nib.load(path).get_fdata()
+            np.testing.assert_array_equal(array.view(np.uint64), expected.view(np.uint64))
+        for name in odd:
+            path = str(folder / name)
+            assert loader._gzip_values(path, *stored) is None
+            if name in ("two.nii.gz", "long.nii.gz"):
+                array = loader._load_nifti(path).array
+                expected = nib.load(path).get_fdata()
+                np.testing.assert_array_equal(array.view(np.uint64), expected.view(np.uint64))
+        with pytest.raises(EOFError):  # nibabel's error of a cut file
+            loader._load_nifti(str(folder / "cut.nii.gz"))
+    assert loader._gzip_values(str(folder / "none.nii.gz"), *stored) is None
 
 
 def test_load_image_accepts_path_objects(tmp_path: "os.PathLike[str]") -> None:
@@ -2530,6 +2599,61 @@ def _write_slice(
     for key, value in tags.items():
         setattr(ds, key, value)
     ds.save_as(Path(path), enforce_file_format=True)
+
+
+def test_dicom_series_reads_plain_pixel_data_directly(tmp_path: "os.PathLike[str]") -> None:
+    # In the one-pass load, slices that pydicom would read as their bytes are read so
+    # directly: the volume and the warnings of pydicom for each slice, also with junk
+    # above Bits Stored (signed and unsigned). A slice with another photometric
+    # interpretation or byte count goes to pydicom; extra bytes in the first slice send
+    # every slice to pydicom.
+    import warnings
+    from pathlib import Path
+
+    import pydicom
+
+    from pictologics import loader
+
+    rng = np.random.default_rng(16)
+    read_native = loader._native_pixels
+    cases = {
+        "signed": ({"BitsStored": 12, "HighBit": 11}, {}, 5),
+        "unsigned": ({"BitsStored": 12, "HighBit": 11, "PixelRepresentation": 0}, {}, 5),
+        "photometric": ({}, {2: "MONOCHROME1"}, 4),
+        "extra": ({}, {3: "extra"}, 4),
+        "extra first": ({}, {0: "extra"}, 0),
+    }
+    for name, (tags, odd, direct) in cases.items():
+        folder = Path(tmp_path) / name.replace(" ", "_")
+        folder.mkdir()
+        for k in range(5):
+            path = folder / f"{k}.dcm"
+            pixels = rng.integers(-2000, 2000, (6, 5), dtype=np.int16) | np.int16(-4096)
+            more = {"PhotometricInterpretation": odd[k]} if odd.get(k, "extra") != "extra" else {}
+            _write_slice(path, number=k + 1, position=(0.0, 0.0, 2.0 * k), pixels=pixels, **tags, **more)  # fmt: skip
+            if odd.get(k) == "extra":
+                ds = pydicom.dcmread(path)
+                ds.PixelData += bytes(2)
+                ds.save_as(path, enforce_file_format=True)
+        outcomes = []
+        for skip in (False, True):
+            reads: list[bool] = []
+
+            def native(*args: object, skip: bool = skip, reads: list[bool] = reads) -> object:
+                pixels = None if skip else read_native(*args)
+                reads.append(pixels is not None)
+                return pixels
+
+            with (
+                patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8),
+                patch.object(loader, "_native_pixels", side_effect=native),
+                warnings.catch_warnings(record=True) as caught,
+            ):
+                warnings.simplefilter("always")
+                image = loader._load_dicom_series(folder)
+            outcomes.append((image.array.tobytes(), sorted(str(w.message) for w in caught)))
+            assert sum(reads) == (0 if skip else direct), name
+        assert outcomes[0] == outcomes[1], name
 
 
 def test_reoriented_turns_the_axes_to_the_reference() -> None:
@@ -2659,6 +2783,41 @@ def test_save_image_writes_nifti_that_loads_back(tmp_path: "os.PathLike[str]") -
         np.testing.assert_allclose(stored.affine[:3, 3], (12.5, -33.0, 7.25), atol=1e-5)
     with pytest.raises(ValueError, match="save_image writes NIfTI files"):
         save_image(image, Path(tmp_path) / "image.nrrd")
+
+
+def test_save_image_writes_the_bytes_of_a_column_order_copy(tmp_path: "os.PathLike[str]") -> None:
+    # A large row-order array goes to nibabel as a column-order copy (whole slices), with
+    # the file bytes of the row-order array: float64, float32, uint8, bool and int64
+    # (saved as int32) arrays, .nii and .nii.gz; another type keeps the row-order array.
+    from pathlib import Path
+
+    from pictologics import loader, save_image
+
+    rng = np.random.default_rng(15)
+    values = rng.normal(0.0, 100.0, (6, 5, 4))
+    arrays = (
+        values,
+        values.astype(np.float32),
+        (values > 0).astype(np.uint8),
+        values > 0,
+        np.round(values).astype(np.int64),
+        np.round(values).astype(np.int16),
+    )
+    folder = Path(tmp_path)
+    for array in arrays:
+        image = Image(array, (0.7, 1.3, 2.5), (-12.5, 33.0, 7.25))
+        for suffix in (".nii", ".nii.gz"):
+            save_image(image, folder / f"rows{suffix}")  # small: no copy
+            with (
+                patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8),
+                patch.object(
+                    loader, "_to_row_order_numba", wraps=loader._to_row_order_numba
+                ) as copy,
+            ):
+                save_image(image, folder / f"columns{suffix}")
+            assert copy.call_count == (0 if array.dtype == np.int16 else 1)
+            rows = (folder / f"rows{suffix}").read_bytes()
+            assert (folder / f"columns{suffix}").read_bytes() == rows
 
 
 def test_frame_of_reference_of_dicom_images(tmp_path: "os.PathLike[str]") -> None:

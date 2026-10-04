@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import math
 import warnings
+import zlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -1125,6 +1126,17 @@ def save_image(image: Image, path: str | Path) -> None:
         info = np.iinfo(np.int32)
         if info.min <= array.min() and array.max() <= info.max:
             array = array.astype(np.int32)
+    if (
+        array.ndim == 3
+        and array.flags.c_contiguous
+        and array.size >= _ROW_ORDER_MIN_SIZE
+        and array.dtype in _COLUMN_ORDER_DTYPES
+    ):
+        # nibabel writes the voxels in column order, one slice at a time. A slice of a
+        # row-order array costs a cache line per voxel; a column-order copy is fast.
+        column = np.empty(array.shape, dtype=array.dtype, order="F")
+        _to_row_order_numba(array, column)
+        array = column
     nifti = Nifti1Image(array, affine, dtype=array.dtype)  # type: ignore[no-untyped-call]
     nifti.set_qform(affine, code=1)  # type: ignore[no-untyped-call]  # scanner coordinates, as ITK writes
     nifti.set_sform(affine, code=1)  # type: ignore[no-untyped-call]
@@ -1443,7 +1455,8 @@ def _ensure_3d(
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
 def _to_row_order_numba(src: npt.NDArray[Any], out: npt.NDArray[Any]) -> None:
-    """Copy a column-order 3D array into a row-order array of the same shape and type.
+    """Copy a column-order 3D array into a row-order array of the same shape and type (or
+    a row-order array into a column-order one).
 
     32 x 32 tiles keep the reads (fast along axis 0) and the writes (fast along axis 2) in
     cache. numpy's own copy reads across the cache for this layout and is 4-15x slower.
@@ -1468,8 +1481,10 @@ def _to_float_row_order_numba(
     scale: npt.NDArray[np.bool_],
     shift: npt.NDArray[np.bool_],
     out: npt.NDArray[np.float64],
+    z0: int,
 ) -> None:
-    """float64 row-order copy of a column-order 3D array, rescaled plane by plane (k).
+    """float64 row-order copy of a column-order 3D array, rescaled plane by plane (k),
+    into the planes from z0 on of `out`.
 
     Each value becomes float64, then `* slope[k]` where `scale[k]`, then `+ intercept[k]`
     where `shift[k]`: the numpy operations of the loaders, in their order, so the values
@@ -1489,7 +1504,7 @@ def _to_float_row_order_numba(
                             value = value * slope[k]
                         if shift[k]:
                             value = value + intercept[k]
-                        out[i, j, k] = value
+                        out[i, j, z0 + k] = value
 
 
 # Below this size the copy costs more than row order saves (small NIfTI images got 7.5%
@@ -1499,6 +1514,9 @@ _ROW_ORDER_MIN_SIZE = 1 << 20
 # Types that take the tiled copy (warmed in warmup._warmup_filters): NIfTI data (float64),
 # rescaled DICOM (float64), stored DICOM pixels (int16, uint16) and SEG masks (uint8).
 _ROW_ORDER_DTYPES = (np.float64, np.int16, np.uint16, np.uint8)
+# Types that save_image copies into column order: images (float64), response maps
+# (float32), masks (uint8, also bool) and label maps (int32, also int64)
+_COLUMN_ORDER_DTYPES = (np.float64, np.float32, np.uint8, np.int32)
 
 
 def _float_row_order(
@@ -1510,7 +1528,7 @@ def _float_row_order(
 ) -> npt.NDArray[np.float64]:
     """The float64 row-order output of `_to_float_row_order_numba` for a column-order `src`."""
     out = np.empty(src.shape, dtype=np.float64)
-    _to_float_row_order_numba(src, slope, intercept, scale, shift, out)
+    _to_float_row_order_numba(src, slope, intercept, scale, shift, out, 0)
     return out
 
 
@@ -1568,13 +1586,60 @@ def _nifti_float64(nii_img: Any, dataset_index: int) -> npt.NDArray[Any]:
             s, b = float(slope), float(inter)
             nz = proxy.shape[2]
             return _float_row_order(
-                proxy.get_unscaled(),  # type: ignore[no-untyped-call]
+                _stored_values(proxy),
                 np.full(nz, s),
                 np.full(nz, b),
                 np.full(nz, s != 1.0),
                 np.full(nz, b != 0.0),
             )
     return _row_order(_ensure_3d(nii_img.get_fdata(), dataset_index))
+
+
+def _stored_values(proxy: ArrayProxy) -> npt.NDArray[Any]:
+    """`proxy.get_unscaled()`: the stored values of a NIfTI file. A gzip file is inflated
+    in one pass into the array (nibabel inflates it in 128 KB steps, with one more copy
+    and one more CRC pass). A file that is not one gzip member of the expected size goes
+    to nibabel, which reads it, or reports the error, as before."""
+    path = proxy.file_like
+    if isinstance(path, str) and path.lower().endswith(".gz") and proxy.order == "F":
+        values = _gzip_values(path, int(proxy.offset), proxy.shape, np.dtype(proxy.dtype))
+        if values is not None:
+            return values
+    return cast(npt.NDArray[Any], proxy.get_unscaled())  # type: ignore[no-untyped-call]
+
+
+def _gzip_values(
+    path: str, offset: int, shape: tuple[int, ...], dtype: np.dtype[Any]
+) -> Optional[npt.NDArray[Any]]:
+    """The column-order array of `shape` and `dtype` after `offset` bytes of the gzip file
+    `path` (zlib checks the CRC of the data), or None when the file is not one gzip member
+    of exactly that size, or zlib cannot read it."""
+    size = math.prod(shape) * dtype.itemsize
+    end = offset + size
+    data = np.empty(size, dtype=np.uint8)
+    inflate = zlib.decompressobj(wbits=31)  # the gzip format
+    position = 0  # the inflated bytes so far
+    try:
+        with open(path, "rb") as file:
+            while not inflate.eof and (chunk := file.read(1 << 24)):
+                while chunk:
+                    # At most 16 MB at a time, and one byte past the end shows a longer file
+                    piece = inflate.decompress(chunk, min(end + 1 - position, 1 << 24))
+                    if position + len(piece) > end:
+                        return None
+                    skip = max(offset - position, 0)  # the bytes of the header
+                    if skip < len(piece):
+                        start = position + skip - offset
+                        piece_values = np.frombuffer(piece, dtype=np.uint8, offset=skip)
+                        data[start : start + piece_values.size] = piece_values
+                    position += len(piece)
+                    chunk = inflate.unconsumed_tail
+            rest = file.read(1)
+    except (OSError, zlib.error):
+        return None
+    if not inflate.eof or inflate.unused_data or rest or position != end:
+        return None
+    return data.view(dtype).reshape(shape, order="F")
 
 
 def _float64_volume(
@@ -1898,18 +1963,52 @@ def _warn_on_uneven_slices(positions: list[Any], normal: npt.NDArray[Any], sourc
 _PIXEL_KEYWORDS = ("PixelData", "FloatPixelData", "DoubleFloatPixelData")
 
 
-def _decoded_pixels(ds: Any) -> npt.NDArray[Any]:
+def _decoded_pixels(
+    ds: Any, like: Optional[npt.NDArray[Any]] = None, photometric: Any = None
+) -> npt.NDArray[Any]:
     """The pixel array of one DICOM dataset (pydicom with python-gdcm and Pillow decodes
     RLE, JPEG Lossless, JPEG-LS, JPEG 2000 and baseline JPEG); an error names the file
-    and the cause."""
+    and the cause. With `like`, a slice that `_native_pixels` can read skips the set-up
+    of pydicom (0.1 ms for each slice)."""
     try:
-        pixels: npt.NDArray[Any] = ds.pixel_array
+        pixels = None if like is None else _native_pixels(ds, like, photometric)
+        if pixels is None:
+            pixels = ds.pixel_array
         return pixels
     except Exception as e:
         raise _DicomContentError(
             "Failed to extract pixel arrays from DICOM slices: cannot decode "
             f"{getattr(ds, 'filename', None) or 'a slice'} ({e})."
         ) from e
+
+
+# The uncompressed little-endian transfer syntaxes (implicit and explicit VR)
+_NATIVE_SYNTAXES = ("1.2.840.10008.1.2", "1.2.840.10008.1.2.1")
+
+
+def _native_pixels(ds: Any, like: npt.NDArray[Any], photometric: Any) -> Optional[npt.NDArray[Any]]:
+    """The pixel array of `ds` as pydicom reads uncompressed little-endian pixel data:
+    the bytes as an array of the type and shape of `like` (a slice that pydicom read this
+    way), with the bits above Bits Stored moved out and the sign kept. None for a slice
+    that pydicom may read in another way: another transfer syntax, photometric
+    interpretation (not `photometric`), Bits Stored or byte count."""
+    stored = getattr(ds, "BitsStored", None)
+    bits = 8 * like.itemsize
+    if (
+        getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None) not in _NATIVE_SYNTAXES
+        or getattr(ds, "PhotometricInterpretation", None) != photometric
+        or not isinstance(stored, int)
+        or not 1 <= stored <= bits
+        or "PixelData" not in ds
+        or len(ds.PixelData) != like.nbytes
+    ):
+        return None
+    pixels = np.frombuffer(ds.PixelData, dtype=like.dtype).reshape(like.shape)
+    if stored < bits:
+        pixels = pixels.copy()
+        np.left_shift(pixels, bits - stored, out=pixels)
+        np.right_shift(pixels, bits - stored, out=pixels)
+    return pixels
 
 
 def _check_one_sample(samples: Any, source: Any) -> None:
@@ -1920,6 +2019,10 @@ def _check_one_sample(samples: Any, source: Any) -> None:
             "needs one value per voxel; convert the image to grey values first."
         )
 
+
+# The slices of a slab of the one-pass DICOM series load: one k tile of
+# `_to_float_row_order_numba`
+_SLAB = 32
 
 # Slices with equal values of these tags decode to 2D arrays of one shape and type (when
 # SamplesPerPixel and NumberOfFrames are 1 or absent).
@@ -1968,11 +2071,30 @@ def _stack_slices(slices: list[Any], apply_rescale: bool) -> npt.NDArray[Any]:
     )
     if fused:
         first = _decoded_pixels(slices[0])
-        stack = np.empty((len(slices),) + first.shape, dtype=first.dtype)
-        for k in range(len(slices)):
-            stack[k] = first if k == 0 else _decoded_pixels(slices[k])
-            slices[k] = None
-        return _float_row_order(stack.transpose(2, 1, 0), slopes, intercepts, rescaled, rescaled)
+        # When pydicom read the first slice as its bytes, the next slices are read so too
+        photometric = getattr(slices[0], "PhotometricInterpretation", None)
+        native = _native_pixels(slices[0], first, photometric)
+        like = first if native is not None and np.array_equal(native, first) else None
+        # The slices go to the output a slab at a time: the stored values of one slab, not
+        # of the whole series, are in memory next to the output
+        out = np.empty(first.shape[::-1] + (len(slices),), dtype=np.float64)
+        slab = np.empty((min(_SLAB, len(slices)),) + first.shape, dtype=first.dtype)
+        for z0 in range(0, len(slices), _SLAB):
+            z1 = min(z0 + _SLAB, len(slices))
+            for k in range(z0, z1):
+                slab[k - z0] = first if k == 0 else _decoded_pixels(slices[k], like, photometric)
+                slices[k] = None
+            part = slice(z0, z1)
+            _to_float_row_order_numba(
+                slab[: z1 - z0].transpose(2, 1, 0),
+                slopes[part],
+                intercepts[part],
+                rescaled[part],
+                rescaled[part],
+                out,
+                z0,
+            )
+        return out
     pixel_data = []
     for k in range(len(slices)):
         pixels = _decoded_pixels(slices[k])

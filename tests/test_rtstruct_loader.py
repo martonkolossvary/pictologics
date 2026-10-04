@@ -258,3 +258,90 @@ def test_rtstruct_frame_of_reference(tmp_path: Path) -> None:
         warnings.simplefilter("error")
         load_rtstruct(path, reference, roi_names=["GTV"])
         load_rtstruct(path, REFERENCE, combine_rois=False)
+
+
+def test_rtstruct_fill_writes_only_the_columns_of_the_crossings() -> None:
+    # A fill writes only the columns from the first to the last crossing of its rows: the
+    # pixels of the full-width fill of 0.6.0 (a copy below), also for vertices on pixel
+    # centers and polygons partly outside the plane.
+    from pictologics.loaders.rtstruct_loader import _fill_even_odd
+
+    def fill_of_0_6_0(plane: np.ndarray, polygons: list[np.ndarray]) -> None:
+        rows_n, cols_n = plane.shape
+        starts = np.concatenate(polygons)
+        ends = np.concatenate([np.roll(p, -1, axis=0) for p in polygons])
+        r0, c0, r1, c1 = starts[:, 0], starts[:, 1], ends[:, 0], ends[:, 1]
+        first = np.clip(np.ceil(np.minimum(r0, r1)), 0, rows_n).astype(np.intp)
+        stop = np.clip(np.ceil(np.maximum(r0, r1)), 0, rows_n).astype(np.intp)
+        counts = stop - first
+        if not counts.any():
+            return
+        edge = np.repeat(np.arange(len(starts)), counts)
+        rows = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts - first, counts)
+        cols = c0[edge] + (rows - r0[edge]) * (c1[edge] - c0[edge]) / (r1[edge] - r0[edge])
+        order = np.lexsort((cols, rows))
+        rows, cols = rows[order], cols[order]
+        low = rows[0]
+        steps = np.zeros((rows[-1] - low + 1, cols_n + 1), dtype=np.int32)
+        begin = np.clip(np.ceil(cols[0::2]), 0, cols_n).astype(np.intp)
+        end = np.clip(np.ceil(cols[1::2]), 0, cols_n).astype(np.intp)
+        np.add.at(steps, (rows[0::2] - low, begin), 1)
+        np.add.at(steps, (rows[0::2] - low, end), -1)
+        plane[low : rows[-1] + 1] |= np.cumsum(steps[:, :-1], axis=1) > 0
+
+    rng = np.random.default_rng(5)
+    for trial in range(200):
+        shape = (int(rng.integers(4, 40)), int(rng.integers(4, 40)))
+        polygons = [
+            rng.uniform(-4.0, max(shape) + 4.0, (int(rng.integers(3, 10)), 2))
+            for _ in range(int(rng.integers(1, 4)))
+        ]
+        if trial % 2:
+            polygons = [np.round(p) for p in polygons]  # vertices on pixel centers
+        expected = np.zeros(shape, dtype=bool)
+        fill_of_0_6_0(expected, polygons)
+        got = np.zeros(shape, dtype=bool)
+        _fill_even_odd(got, polygons)
+        np.testing.assert_array_equal(got, expected)
+
+
+def test_rtstruct_labels_on_planes_of_each_axis(tmp_path: Path) -> None:
+    # Contours on the planes of each index axis of an axial grid fill the voxel centers
+    # that matplotlib finds inside; in the label map a later ROI wins where ROIs overlap,
+    # and an ROI that covers no voxel center warns and has no label.
+    reference = Image(np.zeros((30, 26, 22)), (0.8, 0.6, 1.5), (-20.0, 15.0, 7.5))
+    shape = reference.array.shape
+
+    def contour(axis: int, k: int, points: list[tuple[float, float]]) -> np.ndarray:
+        index = np.insert(np.asarray(points, dtype=float), axis, k, axis=1)
+        return np.asarray(reference.origin) + index * reference.spacing
+
+    def inside(axis: int, k: int, points: list[tuple[float, float]]) -> np.ndarray:
+        plane_shape = tuple(n for a, n in enumerate(shape) if a != axis)
+        grid = np.meshgrid(*(np.arange(n) for n in plane_shape), indexing="ij")
+        centers = np.stack(grid, -1).reshape(-1, 2)
+        mask = np.zeros(shape, dtype=bool)
+        plane = PolygonPath(points).contains_points(centers).reshape(plane_shape)
+        mask[tuple(k if a == axis else slice(None) for a in range(3))] = plane
+        return mask
+
+    shapes = {
+        "x": (0, 12, [(3.3, 2.2), (20.6, 4.1), (18.2, 17.7), (2.4, 15.3)]),
+        "y": (1, 9, [(5.1, 3.3), (25.7, 2.9), (21.4, 19.6)]),
+        "z": (2, 6, [(4.2, 3.1), (26.3, 5.5), (24.1, 21.8), (6.6, 20.2)]),
+    }
+    rois = [(n, name, [("CLOSED_PLANAR", contour(*shapes[name]))]) for n, name in ((4, "x"), (2, "y"), (9, "z"))]  # fmt: skip
+    rois.append((5, "tiny", [("CLOSED_PLANAR", contour(2, 3, [(5.2, 5.2), (5.4, 5.2), (5.3, 5.4)]))]))  # fmt: skip
+    path = _write(tmp_path / "rs.dcm", rois)
+    with pytest.warns(UserWarning, match="ROI 'tiny' covers no voxel center"):
+        masks = load_rtstruct(path, reference, combine_rois=False)
+    with pytest.warns(UserWarning, match="ROI 'tiny' covers no voxel center"):
+        labels = load_rtstruct(path, reference)
+    expected = np.zeros(shape)
+    for number, name in ((4, "x"), (2, "y"), (9, "z")):
+        mask = inside(*shapes[name])
+        np.testing.assert_array_equal(masks[name].array.astype(bool), mask)
+        expected[mask] = number
+    assert not masks["tiny"].array.any()
+    assert np.any(inside(*shapes["x"]) & inside(*shapes["z"]))  # the ROIs overlap
+    np.testing.assert_array_equal(labels.array, expected)
