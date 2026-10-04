@@ -117,6 +117,15 @@ def test_nrrd_detached_data_with_skips(tmp_path: Path) -> None:
     )
     for header in (a, b, c):
         np.testing.assert_array_equal(load_image(header).array, VALUES)
+    # A byte skip of -1 (the last bytes of the file) needs raw encoding
+    for name, encoding, pack in (("d", "gzip", gzip.compress), ("e", "bzip2", bz2.compress)):
+        (tmp_path / f"{name}.raw.x").write_bytes(pack(_raw(VALUES)))
+        header = _write(
+            tmp_path / f"{name}.nhdr",
+            [*lines, f"encoding: {encoding}", f"data file: {name}.raw.x", "byte skip: -1"],
+        )
+        with pytest.raises(ValueError, match="byte skip -1 needs raw encoding"):
+            load_image(header)
 
 
 def test_nrrd_volumes_of_a_list_axis(tmp_path: Path) -> None:

@@ -87,7 +87,7 @@ class TestWarmup(unittest.TestCase):
 # Run with the compiler on (see test_a_pipeline_run_after_the_import_compiles_no_kernel):
 # the new signatures of each kernel of the package after a pipeline workload, as JSON.
 _NEW_SIGNATURES = """
-import importlib, json, pkgutil, threading, warnings
+import importlib, json, os, pkgutil, threading, warnings
 
 import numpy as np
 
@@ -173,6 +173,28 @@ for kind in (np.uint8, np.int64, np.float32):  # direct calls with other types
 ct = Image(values.astype(np.int16), image.spacing, image.origin)
 intensity.calculate_local_intensity_features(ct, mask)
 morphology.calculate_morphology_features(mask, ct)
+import pydicom
+from pydicom.dataset import FileMetaDataset
+from pydicom.uid import CTImageStorage, ExplicitVRBigEndian, generate_uid
+
+os.mkdir("big_endian")  # a big-endian series of 2^20 voxels takes the one-pass kernel
+for k in range(64):
+    ds = pydicom.Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID = CTImageStorage
+    ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID = generate_uid()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRBigEndian
+    ds.SeriesInstanceUID, ds.Modality, ds.InstanceNumber = "1.2.3", "CT", k + 1
+    ds.Rows = ds.Columns = 128
+    ds.PixelSpacing, ds.ImagePositionPatient = [1, 1], [0, 0, k]
+    ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+    ds.RescaleSlope, ds.RescaleIntercept = 1, -1024
+    ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 1
+    ds.PixelData = np.full((128, 128), k, dtype=">i2").tobytes()
+    ds.save_as(f"big_endian/{k}.dcm", enforce_file_format=True, implicit_vr=False,
+               little_endian=False)
+pictologics.load_image("big_endian")
 texture.calculate_zone_features(levels.astype(np.uint8), np.asfortranarray(mask.array), np.zeros(shape, np.int32), 16)
 texture._gldzm_distance_map(roi)
 pipeline.run(image, Image(roi.astype(np.float16), image.spacing, image.origin), config_names=["fbs"])
@@ -202,11 +224,11 @@ def test_a_pipeline_run_after_the_import_compiles_no_kernel(tmp_path: Path) -> N
     # With the compiler on, the import warms every kernel signature that the package
     # reaches: the standard templates on a CT-like image (large enough for the parallel
     # paths), a filter with many FBS levels, 256 grey levels, masks of each type in row and
-    # column order, label maps of five types in run_rois, save_image of five types, and
-    # direct calls with other input types. One thread gives the same features as the
-    # default (also Moran's I and Geary's C), and a new thread starts with the default. The
-    # check runs in its own numba cache, so it never writes into a cache that another
-    # process builds at the same time.
+    # column order, label maps of five types in run_rois, save_image of five types, direct
+    # calls with other input types, and a big-endian DICOM series. One thread gives the
+    # same features as the default (also Moran's I and Geary's C), and a new thread starts
+    # with the default. The check runs in its own numba cache, so it never writes into a
+    # cache that another process builds at the same time.
     cache = os.environ.get("NUMBA_CACHE_DIR")
     env = {
         **os.environ,

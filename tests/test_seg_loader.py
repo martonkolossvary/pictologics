@@ -995,3 +995,36 @@ class TestSegFixes:
         assert spacing == (0.5, 0.5, 2.5)
         assert direction is not None
         np.testing.assert_array_equal(direction[:, 2], [-1.0, 0.0, 0.0])
+
+
+@pytest.mark.parametrize("spacing", [None, 2.0])
+@pytest.mark.parametrize("jitter", [0.0004, 0.0024])
+def test_jittered_frame_positions_stay_one_slice(spacing: "float | None", jitter: float) -> None:
+    # The two frames (segments 1 and 2) of each of 3 slices sit 0.0004 mm (across a
+    # micrometre) or 0.0024 mm apart: they stay one slice, 2 mm apart. Before, the
+    # micrometre levels gave a step of 0.001 mm and 4,001 slices.
+    from pydicom.dataset import Dataset
+    from pydicom.sequence import Sequence
+
+    seg = Dataset()
+    shared = Dataset()
+    shared.PlaneOrientationSequence = Sequence([Dataset()])
+    shared.PlaneOrientationSequence[0].ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+    if spacing is not None:
+        shared.PixelMeasuresSequence = Sequence([Dataset()])
+        shared.PixelMeasuresSequence[0].SpacingBetweenSlices = spacing
+    seg.SharedFunctionalGroupsSequence = Sequence([shared])
+    frames = []
+    for k in range(3):
+        for segment, offset in ((1, 0.0003), (2, 0.0003 + jitter)):
+            frame = Dataset()
+            frame.SegmentIdentificationSequence = Sequence([Dataset()])
+            frame.SegmentIdentificationSequence[0].ReferencedSegmentNumber = segment
+            frame.PlanePositionSequence = Sequence([Dataset()])
+            frame.PlanePositionSequence[0].ImagePositionPatient = [0.0, 0.0, 2.0 * k + offset]
+            frames.append(frame)
+    seg.PerFrameFunctionalGroupsSequence = Sequence(frames)
+    layout = _frame_layout(seg, 6)
+    assert (layout.n_slices, layout.slices, layout.segments) == (3, [0, 0, 1, 1, 2, 2], [1, 2] * 3)
+    assert layout.step == pytest.approx(2.0)
+    assert layout.first_position == (0.0, 0.0, 0.0003)

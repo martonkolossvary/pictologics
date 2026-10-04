@@ -3266,3 +3266,91 @@ def test_save_image_makes_a_missing_folder(tmp_path: "os.PathLike[str]") -> None
     array = np.arange(24, dtype=np.uint8).reshape(2, 3, 4)
     save_image(Image(array, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), path)
     assert np.array_equal(load_image(path).array, array)
+
+
+def _write_endian_series(folder: "os.PathLike[str]", big_endian: bool) -> None:
+    """A CT series of 4 slices of 6 x 5 seeded int16 pixels (rescale 1, -1024), in the
+    Explicit VR Big Endian or Little Endian transfer syntax."""
+    from pathlib import Path
+
+    import pydicom
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.uid import (
+        CTImageStorage,
+        ExplicitVRBigEndian,
+        ExplicitVRLittleEndian,
+        generate_uid,
+    )
+
+    rng = np.random.default_rng(31)
+    series = "1.2.826.0.1.3680043.2.1125.1.31"
+    for k in range(4):
+        pixels = rng.integers(-2000, 2000, (6, 5), dtype=np.int16)
+        meta = FileMetaDataset()
+        meta.MediaStorageSOPClassUID = CTImageStorage
+        meta.MediaStorageSOPInstanceUID = generate_uid()
+        meta.TransferSyntaxUID = ExplicitVRBigEndian if big_endian else ExplicitVRLittleEndian
+        ds = pydicom.Dataset()
+        ds.file_meta = meta
+        ds.SOPClassUID, ds.SOPInstanceUID = CTImageStorage, meta.MediaStorageSOPInstanceUID
+        ds.SeriesInstanceUID, ds.Modality, ds.InstanceNumber = series, "CT", k + 1
+        ds.Rows, ds.Columns = pixels.shape
+        ds.PixelSpacing, ds.SliceThickness = [0.5, 0.75], 2.0
+        ds.ImagePositionPatient = [0.0, 0.0, 2.0 * k]
+        ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        ds.RescaleSlope, ds.RescaleIntercept = 1.0, -1024.0
+        ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 1
+        ds.PixelData = pixels.astype(">i2" if big_endian else "<i2").tobytes()
+        ds.save_as(
+            Path(folder) / f"{k}.dcm",
+            enforce_file_format=True,
+            implicit_vr=False,
+            little_endian=not big_endian,
+        )
+
+
+def test_big_endian_series_load_as_native_values(tmp_path: "os.PathLike[str]") -> None:
+    # A big-endian series gives the image of the little-endian series of the same pixels,
+    # bit for bit. In the one-pass path the kernel reads native values (numba refuses
+    # another byte order, so a large big-endian series failed to load).
+    from pathlib import Path
+
+    from pictologics import loader
+
+    folders = {name: Path(tmp_path) / name for name in ("little", "big")}
+    for name, folder in folders.items():
+        folder.mkdir()
+        _write_endian_series(folder, big_endian=name == "big")
+    kernel = loader._to_float_row_order_numba
+    for limit in (8, 1 << 20):  # the one-pass path and the stacked path
+        with (
+            patch("pictologics.loader._ROW_ORDER_MIN_SIZE", limit),
+            patch.object(loader, "_to_float_row_order_numba", wraps=kernel) as spy,
+        ):
+            little, big = (load_image(str(folder)) for folder in folders.values())
+        assert spy.call_count == (2 if limit == 8 else 0)
+        assert all(call.args[0].dtype.isnative for call in spy.call_args_list)
+        assert big.array.tobytes() == little.array.tobytes()
+        assert (big.spacing, big.origin) == (little.spacing, little.origin)
+
+
+def test_a_folder_with_one_multiframe_file_loads_its_frames(tmp_path: "os.PathLike[str]") -> None:
+    # A folder with one multi-frame file gives the image of load_image(file), bit for bit
+    # (before, the frames stacked into a garbled volume); frames of two files in one
+    # series raise
+    from pathlib import Path
+
+    frames = [(z, None, None, 1.0, 0.0) for z in (0.0, 1.0, 2.0)]
+    one, two = Path(tmp_path) / "one", Path(tmp_path) / "two"
+    for folder, count in ((one, 1), (two, 2)):
+        folder.mkdir()
+        for k in range(count):
+            _write_multiframe(folder / f"{k}.dcm", frames)
+    from_file, from_folder = load_image(str(one / "0.dcm")), load_image(str(one))
+    assert from_folder.array.shape == from_file.array.shape == (2, 3, 3)
+    assert from_folder.array.tobytes() == from_file.array.tobytes()
+    assert (from_folder.spacing, from_folder.origin) == (from_file.spacing, from_file.origin)
+    assert np.array_equal(from_folder.direction, from_file.direction)
+    with pytest.raises(ValueError, match="holds 2 multi-frame file"):
+        load_image(str(two))

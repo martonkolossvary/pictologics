@@ -1824,8 +1824,23 @@ def _load_dicom_series(
     if not file_metadata:
         raise ValueError(f"Could not read any DICOM files with image data from: {source}")
 
-    # One image series, split into its phases
-    phases = split_dicom_phases(_select_image_series(file_metadata, series_uid, source))
+    # One image series, split into its phases. A multi-frame file holds a volume of its
+    # own: one such file loads as load_image of the file does; frames of several files
+    # do not stack.
+    series = _select_image_series(file_metadata, series_uid, source)
+    framed = [
+        m["file_path"]
+        for m in series
+        if int(getattr(datasets[m["file_path"]], "NumberOfFrames", 1) or 1) > 1
+    ]
+    if framed and len(series) == 1:
+        return _load_dicom_file(str(framed[0]), apply_rescale, dataset_index, suv)
+    if framed:
+        raise _DicomContentError(
+            f"'{source}' holds {len(framed)} multi-frame file(s) in one series; load one "
+            "file at a time"
+        )
+    phases = split_dicom_phases(series)
 
     # Validate dataset_index
     if dataset_index >= len(phases):
@@ -2071,6 +2086,8 @@ def _stack_slices(slices: list[Any], apply_rescale: bool) -> npt.NDArray[Any]:
     )
     if fused:
         first = _decoded_pixels(slices[0])
+        if not first.dtype.isnative:  # a big-endian syntax: the kernel reads native values
+            first = first.astype(first.dtype.newbyteorder("="))
         # When pydicom read the first slice as its bytes, the next slices are read so too
         photometric = getattr(slices[0], "PhotometricInterpretation", None)
         native = _native_pixels(slices[0], first, photometric)

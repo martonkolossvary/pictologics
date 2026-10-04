@@ -126,7 +126,10 @@ def _read_values(path: Path, fields: dict[str, str], offset: int, count: int) ->
         return np.array(words[:count], dtype=np.float64)
     if encoding == "raw":
         data = data[-count * dtype.itemsize :] if skip == -1 else data[skip:]
+    elif encoding in ("gzip", "gz", "bzip2", "bz2") and skip == -1:
+        raise ValueError(f"'{path}': byte skip -1 needs raw encoding.")
     elif encoding in ("gzip", "gz"):
+        # The NRRD format skips the bytes within the decompressed data of these encodings
         data = gzip.decompress(data)[skip:]
     elif encoding in ("bzip2", "bz2"):
         data = bz2.decompress(data)[skip:]

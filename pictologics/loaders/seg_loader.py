@@ -383,17 +383,20 @@ def _frame_layout(seg: pydicom.Dataset, n_frames: int) -> _FrameLayout:
         normal = np.cross(iop[:3], iop[3:])
     pos = np.array(positions)
     proj = pos @ normal
-    levels = np.unique(np.round(proj, 3))  # one level per slice, to the micrometre
+    pm = _shared_functional_group_item(seg, "PixelMeasuresSequence")
+    declared = getattr(pm, "SpacingBetweenSlices", None)
+    spacing = float(declared) if isinstance(declared, (int, float)) and declared > 0 else None
+    # One level per slice: the positions to the micrometre, with the frames of one slice
+    # in one cluster (see _slice_levels)
+    levels = _slice_levels(np.unique(np.round(proj, 3)), spacing)
     step: float | None = None
     slices_arr = np.zeros(n_frames, dtype=np.int64)
     if len(levels) > 1:
         step = float(np.min(np.diff(levels)))
-        pm = _shared_functional_group_item(seg, "PixelMeasuresSequence")
-        declared = getattr(pm, "SpacingBetweenSlices", None)
-        if isinstance(declared, (int, float)) and declared > 0:
-            ratio = step / float(declared)
+        if spacing is not None:
+            ratio = step / spacing
             if abs(ratio - round(ratio)) < 1e-3:
-                step = float(declared)
+                step = spacing
         slices_arr = np.rint((proj - proj.min()) / step).astype(np.int64)
     first = pos[int(np.argmin(proj))]
     return _FrameLayout(
@@ -403,6 +406,27 @@ def _frame_layout(seg: pydicom.Dataset, n_frames: int) -> _FrameLayout:
         step,
         (float(first[0]), float(first[1]), float(first[2])),
     )
+
+
+def _slice_levels(
+    levels: npt.NDArray[np.float64], spacing: float | None
+) -> npt.NDArray[np.float64]:
+    """The position of each slice, from the sorted positions of the frames.
+
+    A new slice starts where the gap to the next position is above half the typical step:
+    the SpacingBetweenSlices of the SEG, else the median of the gaps above a tenth of the
+    largest gap (the jitter gaps are far smaller than the slice steps). The level of a slice
+    is the mean of its positions. So frames of one slice whose positions differ by a few
+    micrometres (jitter) stay one slice, and no gap gives one slice.
+    """
+    gaps = np.diff(levels)
+    typical = spacing
+    if typical is None:
+        if gaps.size == 0:
+            return levels
+        typical = float(np.median(gaps[gaps > 0.1 * gaps.max()]))
+    starts = np.flatnonzero(gaps > typical / 2) + 1
+    return np.array([part.mean() for part in np.split(levels, starts)])
 
 
 def _extract_combined_segments(
