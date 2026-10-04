@@ -892,3 +892,32 @@ def test_texture_features_of_chosen_families() -> None:
         texture_module.calculate_all_texture_features(levels, roi, 6, families=["glmc"])
     with pytest.raises(ValueError, match="Unknown texture family 'shape'. The families"):
         texture_module.calculate_all_texture_features(levels, roi, 6, families="shape")
+
+
+def test_direct_calls_read_other_level_types_as_int64_or_float64() -> None:
+    # A direct call reads grey levels of another integer or bool type as int64 and of
+    # another float type as float64, the types that the import compiles; the features stay
+    # the same.
+    for kind, form in (
+        (np.bool_, np.int64),
+        (np.int8, np.int64),
+        (np.uint8, np.int64),
+        (np.int16, np.int64),
+        (np.uint16, np.int64),
+        (np.uint32, np.int64),
+        (np.float16, np.float64),
+        (np.float32, np.float64),
+    ):
+        assert texture_module._level_form(np.ones(3, dtype=kind)).dtype == form
+    for kind in (np.int32, np.int64, np.float64):
+        levels = np.ones(3, dtype=kind)
+        assert texture_module._level_form(levels) is levels
+    rng = np.random.default_rng(11)
+    levels = rng.integers(1, 7, (9, 8, 7)).astype(np.int32)
+    roi = (rng.random(levels.shape) > 0.2).astype(np.uint8)
+    expected = texture_module.calculate_all_texture_features(levels, roi, 6)
+    for kind in (np.uint8, np.float32):
+        found = texture_module.calculate_all_texture_features(levels.astype(kind), roi, 6)
+        assert np.array_equal(list(found.values()), list(expected.values()), equal_nan=True)
+    empty = texture_module._maybe_crop_to_bbox(levels.astype(np.uint8), roi * 0)
+    assert empty[0].dtype == np.int64

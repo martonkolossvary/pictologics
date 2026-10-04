@@ -136,12 +136,23 @@ def _maybe_crop_to_bbox(
         bbox = merge_bboxes(bbox, compute_nonzero_bbox(distance_mask))
 
     if bbox is None:
-        return data, mask, distance_mask
+        return _level_form(data), mask, distance_mask
 
-    data_c = data[bbox]
+    data_c = _level_form(data[bbox])
     mask_c = mask[bbox]
     dist_c = distance_mask[bbox] if distance_mask is not None else None
     return data_c, mask_c, dist_c
+
+
+def _level_form(data: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """The grey levels of a direct call as a type that the import compiles for the texture
+    kernels: int32 (from discretise_image), int64 or float64. Another integer or bool type
+    becomes int64, another float type float64: the same values, so the same features."""
+    if data.dtype.kind in "biu" and data.dtype not in (np.int32, np.int64):
+        return data.astype(np.int64)
+    if data.dtype.kind == "f" and data.dtype != np.float64:
+        return data.astype(np.float64)
+    return data
 
 
 def _roi_voxel_count(mask: npt.NDArray[np.floating[Any]]) -> int:
@@ -1876,7 +1887,7 @@ def calculate_zone_features(
         # 13
         ```
     """
-    vol, counts = _texture_volume(data, mask != 0, n_bins)
+    vol, counts = _texture_volume(_level_form(data), np.not_equal(mask, 0, order="C"), n_bins)
     dist = np.pad(np.asarray(dist_map, dtype=np.int32), 1) if calc_gldzm else _NO_DISTANCE
     return _zone_matrices(vol, counts, dist, n_bins, calc_glszm, calc_gldzm, dense_glszm=True)
 

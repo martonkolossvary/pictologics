@@ -65,42 +65,58 @@ def _warmup_texture() -> None:
     n_bins = 5
     mask: npt.NDArray[Any] = np.ones(shape, dtype=np.uint8)
 
-    # Bounding-box scan is specialized by mask dtype AND memory layout. The package passes
-    # row-order (C) arrays (the ROI sub-grid is a copy), so only C order is compiled; a
-    # strided view from a direct call compiles at its first use (1.7 s less cold warm-up
-    # with the min/max scans below).
-    for bbox_dtype in (np.float64, np.uint8, np.bool_):
-        _utils._bbox_scan_numba(mask.astype(bbox_dtype))
+    # The box scan, for each mask type that it reads: an integer or bool mask goes as the
+    # integer type of its size (see _utils._nonzero_form). A column-order mask goes as its
+    # row-order transpose and a strided one as a row-order copy, so row order only.
+    mask_kinds = (np.float64, np.float32, np.uint8, np.uint16, np.int32, np.int64)
+    for kind in mask_kinds:
+        _utils._bbox_scan_numba(mask.astype(kind))
 
-    # ROI min/max scan (GLCM Ng_eff, resegment and discretise ranges): the discretised
-    # image (int32) or float64 data with a uint8 mask; float64 masks cover direct API use.
+    # ROI min/max scan. The FBS bin count reads the discretised image (int32) with the mask
+    # of the run (each type of the box scan). Discretise reads float64 data with a uint8
+    # or float64 mask. The GLCM Ng_eff reads the box crop of the grey levels (int32 in the
+    # pipeline; int64 or float64 in a direct call, see texture._level_form) with the
+    # row-order texture ROI as uint8. Other layouts go as transposes or row-order copies
+    # (see _utils._row_order_pair), so row order and the strided crop only.
     data_f64 = np.ones(shape, dtype=np.float64)
     data_i32 = np.ones(shape, dtype=np.int32)
-    for mm_data, mm_mask in ((data_f64, mask.astype(np.float64)), (data_f64, mask), (data_i32, mask)):  # fmt: skip
+    roi_u8 = np.ascontiguousarray(mask[1:, 1:, 1:])
+    pairs: list[tuple[npt.NDArray[Any], npt.NDArray[Any]]] = [
+        (data_i32, mask.astype(kind)) for kind in mask_kinds
+    ]
+    pairs += [(data_f64, mask), (data_f64, mask.astype(np.float64))]
+    pairs += [(data_i32[1:, 1:, 1:], roi_u8)]
+    for kind in (np.int64, np.float64):
+        grey: npt.NDArray[Any] = np.ones(shape, dtype=kind)[1:, 1:, 1:]
+        pairs += [(grey, roi_u8), (np.ascontiguousarray(grey), roi_u8)]
+    for mm_data, mm_mask in pairs:
         _utils._roi_min_max_numba(mm_data, mm_mask)
         _utils._roi_min_max_serial_numba(mm_data, mm_mask)
-    # GLCM Ng_eff: the binned box crop with the row-order texture ROI (a uint8 view)
-    roi_u8 = np.ascontiguousarray(mask[1:, 1:, 1:])
-    _utils._roi_min_max_numba(data_i32[1:, 1:, 1:], roi_u8)
-    _utils._roi_min_max_serial_numba(data_i32[1:, 1:, 1:], roi_u8)
+
     # The texture kernels. The grey-level volume build is specialized by the type and
-    # layout of the discretised image: int32, a strided box crop in the pipeline and
-    # C-contiguous for an ROI that fills the image; the ROI is a fresh bool array. The
-    # local and zone kernels read one uint16 volume, so they compile once, with merged
-    # (compact) and per-direction tables alike. Levels are 1-based in [1, n_bins].
+    # layout of the grey levels: int32 in the pipeline (int64 and float64 too in a direct
+    # call, see texture._level_form), a strided box crop or C-contiguous for an ROI that
+    # fills the image; the ROI is a fresh bool array. The local and zone kernels read one
+    # uint16 volume, so they compile once, with merged (compact) and per-direction tables
+    # alike. Levels are 1-based in [1, n_bins].
     levels: npt.NDArray[Any] = np.zeros((5, 5, 5), dtype=np.int32)
     levels[1:, 1:, 1:] = 1
     levels[1::2, 1:, 1:] = 2  # some variation
     box = levels[1:, 1:, 1:]
     for data in (box, np.ascontiguousarray(box)):
         texture._texture_matrices(data, mask, n_bins, compact=True)
-        # Small volumes take the serial volume kernel; large ones this parallel one
-        vol = np.zeros(tuple(s + 2 for s in data.shape), dtype=np.uint16)
-        counts = np.empty((data.shape[0], 2), dtype=np.int64)
-        texture._texture_volume_numba(data, mask != 0, n_bins, vol, counts)
+    # Small volumes take the serial volume kernel; large ones the parallel one
+    for kind in (np.int32, np.int64, np.float64):
+        crop = levels.astype(kind)[1:, 1:, 1:]
+        for data in (crop, np.ascontiguousarray(crop)):
+            vol = np.zeros(tuple(s + 2 for s in data.shape), dtype=np.uint16)
+            counts = np.empty((data.shape[0], 2), dtype=np.int64)
+            texture._texture_volume_numba(data, mask != 0, n_bins, vol, counts)
+            texture._texture_volume_serial_numba(data, mask != 0, n_bins, vol, counts)
     texture.calculate_all_texture_matrices(box, mask, n_bins)
-    # The parallel zeroing of large thread tables
+    # The parallel zeroing and sum of large thread tables (from 182 grey levels on)
     texture._zero_fill_numba(np.ones(3, dtype=np.uint32))
+    texture._thread_sum_numba(np.zeros((2, 4), dtype=np.uint32), np.zeros(4, dtype=np.uint64))
     # The levels that occur, for the compact tables of many grey levels
     texture._levels_seen_numba(np.zeros((3, 3, 3), dtype=np.uint16), np.zeros((3, 2), np.bool_))
     # GLDZM distance-transform kernel: its input is always a fresh bool array from a
@@ -221,6 +237,10 @@ def _warmup_morphology() -> None:
     row_mask = np.ascontiguousarray(mask[1:, 1:, 1:])
     morphology._accumulate_intensity_weighted_moments_numba(row_mask, img[1:, 1:, 1:])
     morphology._accumulate_intensity_weighted_moments_numba(row_mask, img32[1:, 1:, 1:])
+    # An image of another type becomes a row-order float64 copy of the crop
+    morphology._accumulate_intensity_weighted_moments_numba(
+        mask[1:, 1:, 1:], np.ascontiguousarray(img[1:, 1:, 1:])
+    )
 
     # Marching cubes (the mask with its zero border), also the parallel form of large volumes
     for parallel in (False, True):
@@ -269,8 +289,6 @@ def _warmup_morphology() -> None:
 def _warmup_filters() -> None:
     """Warmup filter, preprocessing and loader operations."""
     # Import here to avoid circular dependencies
-    from scipy.ndimage import affine_transform
-
     from . import loader, preprocessing
 
     # 0. Loader: the column-order to row-order copy for NIfTI, DICOM and SEG data, and
@@ -332,10 +350,3 @@ def _warmup_filters() -> None:
     preprocessing._resample_trilinear_masked_numba(
         src, valid, scale, shift, start, 0.5, out3, out_valid
     )
-
-    # 2. Warmup affine_transform (scipy fallback for cubic / exotic boundary modes)
-    # Small 3D array
-    dummy_img = np.ones((5, 5, 5), dtype=np.float32)
-    matrix = np.array([1.1, 1.1, 1.1])  # Slight scaling
-    offset = np.array([0.0, 0.0, 0.0])
-    _ = affine_transform(dummy_img, matrix=matrix, offset=offset, output_shape=(6, 6, 6), order=1)

@@ -818,6 +818,68 @@ class TestFastPaths(unittest.TestCase):
             with patch.object(intensity_module, "_TWO_STAGE_MIN_WORK", 1):
                 self.assertEqual(calculate_local_intensity_features(image, roi), expected)
 
+    def test_histogram_moment_kernels_read_int32_or_float64(self) -> None:
+        # The moment kernels read int32 (the pipeline) or float64, the types that the import
+        # compiles: values of another type go as a float64 copy.
+        from pictologics.features import intensity as intensity_module
+
+        values = np.array([1, 2, 2, 3, 5, 5, 5, 4])
+        kernel = intensity_module._mean_abs_dev
+        with patch.object(intensity_module, "_mean_abs_dev", wraps=kernel) as spy:
+            for kind in (np.uint8, np.int16, np.int32, np.float32, np.float64):
+                calculate_intensity_histogram_features(values.astype(kind))
+        kinds = [call.args[0].dtype for call in spy.call_args_list]
+        self.assertEqual(kinds, [np.float64] * 4 + [np.int32] * 2 + [np.float64] * 4)
+
+    def test_local_kernels_read_float64_or_float32_images(self) -> None:
+        # The local kernels read float64 or float32, the types that the import compiles: an
+        # image of another type goes as a float64 copy, so with the features of float64.
+        from pictologics.features import intensity as intensity_module
+        from pictologics.loader import Image
+
+        data = np.random.default_rng(14).integers(-100, 100, (12, 13, 14))
+        mask = np.zeros(data.shape, dtype=np.uint8)
+        mask[2:10, 3:11, 2:12] = 1
+        spacing, origin = (2.0, 2.0, 2.0), (0.0, 0.0, 0.0)
+        roi = Image(mask, spacing, origin)
+        expected = calculate_local_intensity_features(Image(data * 1.0, spacing, origin), roi)
+        kernel = intensity_module._calculate_local_mean_numba
+        with patch.object(intensity_module, "_calculate_local_mean_numba", wraps=kernel) as spy:
+            image = Image(data.astype(np.int16), spacing, origin)
+            self.assertEqual(calculate_local_intensity_features(image, roi), expected)
+            calculate_local_intensity_features(Image(data.astype(np.float32), spacing, origin), roi)
+        kinds = [call.args[0].dtype for call in spy.call_args_list]
+        self.assertEqual(kinds, [np.float64, np.float32])
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_local_kernels_read_a_column_order_image_as_a_row_order_copy() -> None:
+    # A small column-order image (no crop) goes to the local kernels as a row-order copy:
+    # the same peaks, and the layout that the import compiles
+    from unittest.mock import patch
+
+    from pictologics.features import intensity as module
+    from pictologics.loader import Image
+
+    rng = np.random.default_rng(2)
+    values = rng.normal(size=(12, 13, 14))
+    mask = np.zeros(values.shape, dtype=np.uint8)
+    mask[3:9, 4:10, 5:11] = 1
+    row = Image(np.ascontiguousarray(values), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    column = Image(np.asfortranarray(values), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    roi = Image(mask, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    layouts = []
+    real = module._calculate_local_mean_numba
+
+    def spy(data, indices, offsets):
+        layouts.append(bool(data.flags.c_contiguous))
+        return real(data, indices, offsets)
+
+    with patch.object(module, "_calculate_local_mean_numba", spy):
+        assert module.calculate_local_intensity_features(column, roi) == (
+            module.calculate_local_intensity_features(row, roi)
+        )
+    assert layouts == [True, True]

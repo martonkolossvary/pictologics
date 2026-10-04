@@ -1195,9 +1195,13 @@ def _get_intensity_morphology_features(
     if i_bbox is None:
         return features
 
+    # The kernel reads a float64 or float32 image, the types that the import compiles; an
+    # image of another type goes as a float64 copy of the box (the same values).
+    values = image.array[i_bbox]
+    if values.dtype not in (np.float64, np.float32):
+        values = values.astype(np.float64)
     count_i, sum_w, sum_i0_w, sum_i1_w, sum_i2_w = _accumulate_intensity_weighted_moments_numba(
-        _uint8_roi(intensity_mask.array[i_bbox], keep=True),
-        image.array[i_bbox],
+        _uint8_roi(intensity_mask.array[i_bbox], keep=True), values
     )
     if count_i > 0:
         mean_intensity = sum_w / float(count_i)

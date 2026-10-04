@@ -546,6 +546,29 @@ class TestMorphologyFeatures(unittest.TestCase):
         )
         self.assertNotIn("integrated_intensity_99N0", features)
 
+    def test_intensity_morphology_reads_float64_or_float32_images(self):
+        """An image of another type goes as a float64 copy of the box (the kernel reads the
+        types that the import compiles), so with the features of float64."""
+        from pictologics.features import morphology as morphology_module
+
+        arr = np.zeros((6, 6, 6), dtype=np.uint8)
+        arr[1:5, 1:4, 2:5] = 1
+        mask = self._create_image(arr)
+        values = np.arange(216).reshape(6, 6, 6) % 17
+        float_image = self._create_image(values.astype(np.float64))
+        expected = _get_intensity_morphology_features(mask, float_image, mask, mesh_volume=27.0)
+        kernel = morphology_module._accumulate_intensity_weighted_moments_numba
+        with patch.object(
+            morphology_module, "_accumulate_intensity_weighted_moments_numba", wraps=kernel
+        ) as spy:
+            for kind in (np.int16, np.float32):
+                image = self._create_image(values.astype(kind))
+                found = _get_intensity_morphology_features(mask, image, mask, mesh_volume=27.0)
+                if kind == np.int16:
+                    self.assertEqual(found, expected)
+        kinds = [call.args[1].dtype for call in spy.call_args_list]
+        self.assertEqual(kinds, [np.float64, np.float32])
+
 
 if __name__ == "__main__":
     unittest.main()

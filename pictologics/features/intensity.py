@@ -723,6 +723,9 @@ def calculate_intensity_histogram_features(
 
     disc = np.asarray(discretised_values)
     n = disc.size
+    # The moment kernels read int32 (the discretised values of the pipeline) or float64, the
+    # types that the import compiles; values of another type go as a float64 copy.
+    kernel_disc = disc if disc.dtype in (np.int32, np.float64) else disc.astype(np.float64)
 
     min_val_i = int(np.min(disc))
     max_val_i = int(np.max(disc))
@@ -760,7 +763,7 @@ def calculate_intensity_histogram_features(
         features["discretised_intensity_skewness_88K1"] = 0.0
         features["discretised_intensity_kurtosis_C3I7"] = 0.0
     else:
-        m2, m3, m4 = _central_moments_2_3_4(disc, float(mean_disc))
+        m2, m3, m4 = _central_moments_2_3_4(kernel_disc, float(mean_disc))
         denom = m2**1.5
         if denom != 0.0:
             features["discretised_intensity_skewness_88K1"] = float(m3 / denom)
@@ -800,15 +803,15 @@ def calculate_intensity_histogram_features(
     )
 
     features["intensity_histogram_mean_absolute_deviation_D2ZX"] = float(
-        _mean_abs_dev(disc, float(mean_disc))
+        _mean_abs_dev(kernel_disc, float(mean_disc))
     )
 
     features["intensity_histogram_robust_mean_absolute_deviation_WRZB"] = float(
-        _robust_mean_abs_dev(disc, float(p10), float(p90))
+        _robust_mean_abs_dev(kernel_disc, float(p10), float(p90))
     )
 
     features["intensity_histogram_median_absolute_deviation_4RNL"] = float(
-        _mean_abs_dev(disc, float(median_val))
+        _mean_abs_dev(kernel_disc, float(median_val))
     )
 
     if mean_disc != 0:
@@ -1451,6 +1454,13 @@ def calculate_local_intensity_features(
         )
         data = data[crop]
         mask_array = mask_array[crop]
+    # The local kernels read float64 or float32, the types that the import compiles; an image
+    # of another type goes as a float64 copy (the same values). A column-order image (a small
+    # one, without the crop) goes as a row-order copy, the layout that the import compiles.
+    if data.dtype not in (np.float64, np.float32):
+        data = data.astype(np.float64)
+    elif data.flags.f_contiguous and not data.flags.c_contiguous:
+        data = np.ascontiguousarray(data)
 
     # Get ROI indices
     x_idx, y_idx, z_idx = np.where(mask_array != 0)

@@ -36,6 +36,23 @@ PRANGE_ONLY = ParallelOptions(
 )
 
 
+# The box and range scans read an integer or bool mask as the integer type of its size: the
+# same bits, so the same nonzero voxels. So these scans compile for six mask types (see
+# warmup.py).
+_SAME_SIZE = {1: np.uint8, 2: np.uint16, 4: np.int32, 8: np.int64}
+
+
+def _nonzero_form(mask: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """`mask` as the box and range scans read it: an integer or bool mask as the integer
+    type of its size (see _SAME_SIZE), with no copy; a float16 mask as a float32 copy (the
+    same values, so the same nonzero voxels)."""
+    if mask.dtype.kind in "biu":
+        return mask.view(_SAME_SIZE[mask.dtype.itemsize])
+    if mask.dtype == np.float16:
+        return mask.astype(np.float32)
+    return mask
+
+
 @jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
 def _bbox_scan_numba(
     mask: npt.NDArray[Any],
@@ -175,6 +192,28 @@ def _roi_min_max_serial_numba(
     return found, mins, maxs
 
 
+def _column_order(array: npt.NDArray[Any]) -> bool:
+    """Whether an array is in column order and not in row order (so not 1-D)."""
+    return bool(array.flags.f_contiguous and not array.flags.c_contiguous)
+
+
+def _row_order_pair(
+    data: npt.NDArray[Any], mask: npt.NDArray[Any]
+) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
+    """`data` and `mask` in the layouts that the range scans compile for at the import:
+    two column-order arrays as their transposes (no copy), else row-order copies of the
+    arrays that are not in row order. One exception stays as it is: a strided `data` with a
+    row-order uint8 `mask`, the grey-level crop of the texture features, which the import
+    warms. The scans read every voxel once, so the layout does not change their result."""
+    if _column_order(data) and _column_order(mask):
+        return data.T, mask.T
+    if not mask.flags.c_contiguous:
+        mask = np.ascontiguousarray(mask)
+    if not data.flags.c_contiguous and (_column_order(data) or mask.dtype != np.uint8):
+        data = np.ascontiguousarray(data)
+    return data, mask
+
+
 def roi_min_max(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[Any],
@@ -196,6 +235,7 @@ def roi_min_max(
         raise ValueError(
             f"Expected two 3D arrays of equal shape, got {data.shape!r} vs {mask.shape!r}"
         )
+    data, mask = _row_order_pair(data, _nonzero_form(mask))
     # Measured crossover: below ~2^19 voxels the parallel launch overhead dominates.
     if data.size < 1 << 19:
         found, mins, maxs = _roi_min_max_serial_numba(data, mask)
@@ -239,6 +279,12 @@ def compute_nonzero_bbox(
         x1 = int(len(x_any) - 1 - np.argmax(x_any[::-1]))
         return slice(z0, z1 + 1), slice(y0, y1 + 1), slice(x0, x1 + 1)
 
+    mask = _nonzero_form(mask)
+    if not mask.flags.c_contiguous:
+        if mask.flags.f_contiguous:  # column order: the box of the row-order transpose
+            box = compute_nonzero_bbox(mask.T)
+            return None if box is None else (box[2], box[1], box[0])
+        mask = np.ascontiguousarray(mask)
     z_any, y_min, y_max, x_min, x_max = _bbox_scan_numba(mask)
     nz = np.flatnonzero(z_any)
     if nz.size == 0:
