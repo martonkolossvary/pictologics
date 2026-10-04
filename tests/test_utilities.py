@@ -268,6 +268,23 @@ class TestDicomSeries:
         paths = series.get_file_paths()
         assert paths == ["/a.dcm", "/b.dcm"]
 
+    def test_modalities_present_are_sorted(self) -> None:
+        # The modalities of a study come in sorted order, the same in each call and each
+        # process (a set iterates in the order of the string hashes of the process)
+        kinds = ["PT", "MR", "CT", "US", "NM", "SR"]
+        study = DicomStudy(
+            study_instance_uid="study1",
+            series=[
+                DicomSeries(
+                    f"series{k}", modality=kind, instances=[DicomInstance(f"i{k}", Path("/a"))]
+                )
+                for k, kind in enumerate(kinds)
+            ],
+        )
+        db = DicomDatabase(patients=[DicomPatient(patient_id="p1", studies=[study])])
+        for _ in range(2):
+            assert db.get_studies_df()["ModalitiesPresent"].iloc[0] == sorted(kinds)
+
     def test_get_sorted_instances_by_projection(self) -> None:
         """Test sorting instances by projection score."""
         series = DicomSeries(
@@ -284,6 +301,24 @@ class TestDicomSeries:
             "uid3",
             "uid1",
         ]
+
+    def test_an_instance_without_a_score_keeps_the_score_order(self) -> None:
+        # The instances with a projection score come in score order and the others after
+        # them, so the gap check sees the scores in order. Before, one instance without a
+        # score sorted the series by instance number, and the scores showed false gaps.
+        numbers = [4, 8, 2, 10, 1, 6, 3, 9, 5, 7]  # instance numbers in shuffled order
+        instances = [
+            DicomInstance(
+                f"uid{k}", Path(f"/{k}.dcm"), instance_number=numbers[k], projection_score=2.0 * k
+            )
+            for k in range(10)
+        ]
+        instances.append(DicomInstance("none", Path("/x.dcm"), instance_number=11))
+        series = DicomSeries(series_instance_uid="1.2.3", instances=instances)
+        expected = [f"uid{k}" for k in range(10)] + ["none"]
+        assert [i.sop_instance_uid for i in series.get_sorted_instances()] == expected
+        result = series.check_completeness()
+        assert not result["has_gaps"] and result["gap_indices"] == []
 
     def test_get_sorted_instances_by_instance_number(self) -> None:
         """Test fallback sorting by instance number."""
@@ -740,7 +775,7 @@ class TestDicomDatabase:
         assert df["StudyInstanceUID"].iloc[0] == "study1"
         assert df["NumSeries"].iloc[0] == 2
         assert df["NumInstances"].iloc[0] == 2
-        assert set(df["ModalitiesPresent"].iloc[0]) == {"CT", "MR"}
+        assert df["ModalitiesPresent"].iloc[0] == ["CT", "MR"]
         assert "InstitutionName" in df.columns
         assert "ProtocolName" in df.columns
         # Default: no instance lists
@@ -1895,12 +1930,16 @@ class TestParallelProcessing:
         assert result == []
 
     def test_extract_metadata_wrapper(self) -> None:
-        """Test _extract_metadata_wrapper directly (lines 815-816)."""
+        """The wrapper gives (metadata, error text): a file that cannot be read gives no
+        metadata and no error, an error in the reader comes back as its text."""
         from pictologics.utilities.dicom_database import _extract_metadata_wrapper
 
-        # Test with a non-existent file (should return None)
-        result = _extract_metadata_wrapper((Path("/nonexistent/file.dcm"), False))
-        assert result is None
+        assert _extract_metadata_wrapper((Path("/nonexistent/file.dcm"), False)) == (None, None)
+        with patch(
+            "pictologics.utilities.dicom_database._extract_single_file_metadata",
+            side_effect=RuntimeError("broken file"),
+        ):
+            assert _extract_metadata_wrapper((Path("/a.dcm"), False)) == (None, "broken file")
 
 
 # ============================================================================
@@ -2146,3 +2185,89 @@ def test_private_binary_values_are_stored_as_their_size(tmp_path: Path) -> None:
     assert metadata["Private_0029_1010"] == "<OB, 60000 bytes>"
     assert metadata["Private_0029_1011"] == "short text"
     assert metadata["Private_0029_1012"] == "<SQ, 1 items>"
+
+
+def _write_text_position(path: Path, sop_uid: str) -> Path:
+    """A synthetic DICOM file whose ImagePositionPatient holds text: 1.5\\abc\\3.5."""
+    create_synthetic_dicom(path, sop_uid=sop_uid, image_position=(1.5, 2.5, 3.5))
+    data = path.read_bytes()
+    path.write_bytes(data.replace(b"1.5\\2.5\\3.5", b"1.5\\abc\\3.5"))
+    return path
+
+
+@pytest.mark.parametrize("num_workers", [1, 2])
+def test_a_text_position_does_not_stop_the_scan(
+    synthetic_dicom_dir: Path, num_workers: int
+) -> None:
+    # A file whose ImagePositionPatient holds text stays in the database without a
+    # position, on the serial and on the pooled path. Before, the pooled path stopped
+    # the scan, and the serial path left the file out.
+    _write_text_position(synthetic_dicom_dir / "text.dcm", "1.2.3.4.5.6.7.8.9.999")
+    with patch("pictologics.utilities.dicom_database.FILES_PER_WORKER", 1):
+        db = DicomDatabase.from_folders(
+            [str(synthetic_dicom_dir)], show_progress=False, num_workers=num_workers
+        )
+    series = db.patients[0].studies[0].series
+    instances = {i.sop_instance_uid: i for s in series for i in s.instances}
+    assert len(instances) == 6
+    assert instances["1.2.3.4.5.6.7.8.9.999"].projection_score is None
+
+
+def test_a_failing_file_is_logged_and_skipped_on_the_pooled_path(
+    synthetic_dicom_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # An error in one file skips the file with a log line, on the pooled path as on the
+    # serial path; the other files stay (worker threads here, so that the patch applies)
+    import logging
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from typing import Iterator
+
+    from pictologics.utilities import dicom_database
+
+    files = sorted(synthetic_dicom_dir.glob("*.dcm"))
+    real = dicom_database._extract_single_file_metadata
+
+    def failing(path: Path, private: bool) -> Optional[dict[str, Any]]:
+        if path == files[0]:
+            raise RuntimeError("broken file")
+        return real(path, private)
+
+    @contextmanager
+    def thread_pool(num_workers: int) -> Iterator[ThreadPoolExecutor]:
+        with ThreadPoolExecutor(num_workers) as executor:
+            yield executor
+
+    with (
+        patch.object(dicom_database, "_extract_single_file_metadata", failing),
+        patch.object(dicom_database, "worker_pool", thread_pool),
+        caplog.at_level(logging.DEBUG, logger=dicom_database.logger.name),
+    ):
+        metadata = _extract_all_metadata(
+            files, show_progress=False, extract_private_tags=False, num_workers=2
+        )
+    assert len(metadata) == 4
+    assert f"Failed to extract metadata from {files[0]}: broken file" in caplog.text
+
+
+def test_overlapping_folders_read_each_file_once(tmp_path: Path) -> None:
+    # A folder and its subfolder list the files of the subfolder twice: each file is read
+    # once, and the database is the one of the folder alone
+    from pictologics.utilities import dicom_database
+
+    (tmp_path / "sub").mkdir()
+    for k in range(4):
+        folder = tmp_path / "sub" if k < 2 else tmp_path
+        create_synthetic_dicom(
+            folder / f"{k}.dcm",
+            sop_uid=f"1.2.3.4.5.6.7.8.9.{200 + k}",
+            image_position=(0.0, 0.0, 2.0 * k),
+        )
+    real = dicom_database._extract_single_file_metadata
+    with patch.object(dicom_database, "_extract_single_file_metadata", wraps=real) as reads:
+        both = DicomDatabase.from_folders(
+            [str(tmp_path), str(tmp_path / "sub")], show_progress=False, num_workers=1
+        )
+    assert reads.call_count == 4
+    alone = DicomDatabase.from_folders([str(tmp_path)], show_progress=False, num_workers=1)
+    assert both.get_instances_df().equals(alone.get_instances_df())

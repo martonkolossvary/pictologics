@@ -1,0 +1,1 @@
+`DicomSeries.get_sorted_instances()` keeps the instances with a projection score in score order when some instances have none; those come last, by instance number. Before, one instance without a score sorted the series by instance number, and `check_completeness()` reported false gaps.

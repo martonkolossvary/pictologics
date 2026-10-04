@@ -86,12 +86,18 @@ class DicomSeries:
     def get_sorted_instances(self) -> list[DicomInstance]:
         """Return instances sorted by spatial position (projection score).
 
-        Uses the same methodology as pictologics.loader for spatial sorting.
-        Falls back to instance number if projection scores are not available.
+        Uses the same methodology as pictologics.loader for spatial sorting. The instances
+        with a projection score come first, in score order; the instances without one
+        follow, by instance number.
         """
-        if all(inst.projection_score is not None for inst in self.instances):
-            return sorted(self.instances, key=lambda x: x.projection_score or 0)
-        return sorted(self.instances, key=lambda x: x.instance_number if x.instance_number else 0)
+        return sorted(
+            self.instances,
+            key=lambda x: (
+                (False, x.projection_score, 0)
+                if x.projection_score is not None
+                else (True, 0.0, x.instance_number or 0)
+            ),
+        )
 
     def check_completeness(self, spacing_tolerance: float = 0.1) -> dict[str, Any]:
         """Check if the series has all expected slices.
@@ -456,8 +462,8 @@ class DicomDatabase:
                     row["InstanceSOPUIDs"] = study.get_instance_uids()
                     row["InstanceFilePaths"] = study.get_file_paths()
 
-                # Collect modalities present
-                modalities = list(set(s.modality for s in study.series if s.modality))
+                # The modalities present, sorted: a set has another order in each process
+                modalities = sorted(set(s.modality for s in study.series if s.modality))
                 row["ModalitiesPresent"] = modalities
 
                 # Add common metadata
@@ -881,8 +887,13 @@ def _scan_dicom_files(
             else:
                 all_candidates.extend(path.iterdir())
 
-    # Filter to files only
-    file_candidates = [p for p in all_candidates if p.is_file()]
+    # Filter to files only. A file of overlapping folders (a folder and its subfolder)
+    # counts once, with the first path that found it.
+    unique: dict[Path, Path] = {}
+    for candidate in all_candidates:
+        if candidate.is_file():
+            unique.setdefault(candidate.resolve(), candidate)
+    file_candidates = list(unique.values())
 
     if not file_candidates:
         return []
@@ -905,10 +916,17 @@ def _scan_dicom_files(
     return dicom_files
 
 
-def _extract_metadata_wrapper(args: tuple[Path, bool]) -> Optional[dict[str, Any]]:
-    """Wrapper for parallel metadata extraction (must be top-level function)."""
+def _extract_metadata_wrapper(
+    args: tuple[Path, bool],
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Wrapper for parallel metadata extraction (must be top-level function). An error in
+    one file comes back as its text: the main process logs it and skips the file, as the
+    serial path does."""
     file_path, extract_private_tags = args
-    return _extract_single_file_metadata(file_path, extract_private_tags)
+    try:
+        return _extract_single_file_metadata(file_path, extract_private_tags), None
+    except Exception as e:
+        return None, str(e)
 
 
 def _extract_all_metadata(
@@ -946,8 +964,13 @@ def _extract_all_metadata(
                     disable=not show_progress,
                 )
             )
-        # Filter out None results
-        return [m for m in results if m is not None]
+        metadata_list: list[dict[str, Any]] = []
+        for file_path, (metadata, error) in zip(dicom_files, results, strict=True):
+            if error is not None:
+                logger.debug("Failed to extract metadata from %s: %s", file_path, error)
+            elif metadata is not None:
+                metadata_list.append(metadata)
+        return metadata_list
 
     # Sequential processing
     metadata_list = []
@@ -1062,13 +1085,13 @@ def _extract_single_file_metadata(
     try:
         ipp = dcm.ImagePositionPatient
         metadata["ImagePositionPatient"] = (float(ipp[0]), float(ipp[1]), float(ipp[2]))
-    except (AttributeError, IndexError, TypeError):
+    except (AttributeError, IndexError, TypeError, ValueError):  # ValueError: text values
         metadata["ImagePositionPatient"] = None
 
     try:
         iop = dcm.ImageOrientationPatient
         metadata["ImageOrientationPatient"] = tuple(float(x) for x in iop)
-    except (AttributeError, IndexError, TypeError):
+    except (AttributeError, IndexError, TypeError, ValueError):
         metadata["ImageOrientationPatient"] = None
 
     # Calculate projection score for spatial sorting
