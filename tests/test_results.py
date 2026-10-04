@@ -277,6 +277,15 @@ class TestSaveResults:
         with pytest.raises(ValueError, match="Mixed types"):
             save_results(['{"a": 1}', {"b": 2}], tmp_path / "out.csv")
 
+    def test_mixed_dicts_and_frames_raise_value_error(self, tmp_path: Path) -> None:
+        # A list of dicts or of DataFrames with an item of another type raises ValueError
+        # for every file type (before, JSON raised TypeError and CSV AttributeError)
+        frame = pd.DataFrame({"a": [1]})
+        for data, kind in (([{"a": 1}, "x"], "str"), ([frame, {"a": 1}], "dict")):
+            for name in ("out.json", "out.csv"):
+                with pytest.raises(ValueError, match=f"Mixed types in list .*got {kind}"):
+                    save_results(data, tmp_path / name)  # type: ignore[arg-type]
+
     def test_unsupported_list_element(self, tmp_path: Path) -> None:
         """Test a list containing an unsupported type (e.g., list of lists)."""
         # Based on refactored code, list of lists is not supported.

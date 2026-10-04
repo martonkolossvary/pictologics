@@ -680,9 +680,14 @@ class DeduplicationPlan:
 
 
 def _hash_configs(configs: dict[str, list[dict[str, Any]]]) -> str:
-    """Create a hash of the configs dict for staleness detection."""
+    """Create a hash of the configs dict for staleness detection.
+
+    The steps are hashed in the normalized form of the signatures (see _normalize_params):
+    a mask_values range and a list of the same labels differ, and a numpy array equals
+    the list of its values. Another object (for example a function) hashes as its text.
+    """
     json_repr = json.dumps(
-        {k: v for k, v in sorted(configs.items())},
+        {name: [_normalize_params(step) for step in steps] for name, steps in configs.items()},
         sort_keys=True,
         default=str,
     )

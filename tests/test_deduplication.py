@@ -402,6 +402,21 @@ class TestDeduplicationPlan:
         }
         assert plan.is_stale(modified_configs) is True
 
+    def test_config_hash_tells_a_range_from_a_label_list(self):
+        # The plan hash reads the steps as the signatures do: a mask_values range and a
+        # list of the same labels differ, so the plan is stale between them; a numpy array
+        # equals the list of its values; the hash is stable
+        def configs(mask_values: Any) -> dict[str, list[dict[str, Any]]]:
+            step = {"step": "binarize_mask", "params": {"mask_values": mask_values}}
+            return {"c": [step, {"step": "extract_features", "params": {}}]}
+
+        plan = ConfigurationAnalyzer(configs((1, 10))).analyze()
+        assert plan.is_stale(configs((1, 10))) is False
+        assert plan.is_stale(configs([1, 10])) is True
+        plan = ConfigurationAnalyzer(configs([1, 10])).analyze()
+        assert plan.is_stale(configs(np.array([1, 10]))) is False
+        assert plan.is_stale(configs(np.array([1, 11]))) is True
+
     def test_serialization_roundtrip(self):
         """Plan should serialize and deserialize correctly."""
         configs = {

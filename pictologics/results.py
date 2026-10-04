@@ -212,7 +212,7 @@ def save_results(
     if file_format == "json":
         # Check if data is already in a compatible format
         is_dict = isinstance(data, dict)
-        is_list_of_dicts = isinstance(data, list) and (not data or isinstance(data[0], dict))
+        is_list_of_dicts = isinstance(data, list) and all(isinstance(item, dict) for item in data)
 
         if is_dict or is_list_of_dicts:
             with open(path, "w") as f:
@@ -311,16 +311,19 @@ def _normalize_to_dataframe(
             return pd.DataFrame()
 
         first = data[0]
-        if isinstance(first, pd.DataFrame):
+        if not isinstance(first, (pd.DataFrame, dict)):
+            raise ValueError(
+                f"List contains unsupported type: {type(first)}. Expected dict or DataFrame."
+            )
+        kind = pd.DataFrame if isinstance(first, pd.DataFrame) else dict
+        other = next((item for item in data if not isinstance(item, kind)), None)
+        if other is not None:
+            raise ValueError(
+                f"Mixed types in list (expected {kind.__name__}, got {type(other).__name__})."
+            )
+        if kind is pd.DataFrame:
             return pd.concat(data, ignore_index=True)
-
-        if isinstance(first, dict):
-            return pd.DataFrame(data)
-
-        # Fallback for unexpected list contents
-        raise ValueError(
-            f"List contains unsupported type: {type(first)}. Expected dict or DataFrame."
-        )
+        return pd.DataFrame(data)
 
     # Fallback
     raise ValueError(
