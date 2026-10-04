@@ -211,10 +211,12 @@ def test_run_all_standard_params(
 ) -> None:
     # Test "all_standard" expansion without patching get_all_standard_config_names
     # This ensures coverage hits the real method call line.
-    # We mock execution steps to avoid heavy computation.
+    # We mock execution steps to avoid heavy computation. Several configurations take the
+    # deduplicated path, so it is mocked too (else the families run on an image without bins).
     with (
         patch.object(pipeline, "_execute_preprocessing_step") as mock_exec,
         patch.object(pipeline, "_extract_features") as mock_ext,
+        patch.object(pipeline, "_extract_features_with_dedup", return_value={}),
     ):
         mock_ext.return_value = {}
         pipeline.run(mock_image, mock_mask, config_names=["all_standard"])
@@ -226,9 +228,6 @@ def test_run_all_standard_params(
         pass
 
 
-# The mocked preprocessing leaves the image without bins, so the texture family of the
-# standard configs fails in the deduplicated path
-@pytest.mark.filterwarnings("ignore:The texture features failed:UserWarning")
 def test_run_defaults_all_configs(
     pipeline: RadiomicsPipeline, mock_image: Image, mock_mask: Image
 ) -> None:
@@ -238,6 +237,7 @@ def test_run_defaults_all_configs(
     with (
         patch.object(pipeline, "_execute_preprocessing_step") as _mock_exec,
         patch.object(pipeline, "_extract_features") as mock_ext,
+        patch.object(pipeline, "_extract_features_with_dedup", return_value={}),
     ):
         mock_ext.return_value = {}
         # Call without config_names: it runs every config, and it warns because the
