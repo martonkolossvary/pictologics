@@ -338,6 +338,20 @@ class TestBaseInternalHelpers:
             np.testing.assert_array_equal(got, expected)
             assert got.dtype == expected.dtype
 
+    def test_laplace_terms_share_one_temporary(self):
+        # The terms after the first share one temporary: scipy's values bit for bit, for
+        # float64 and float32 images.
+        from scipy.ndimage import gaussian_laplace
+
+        from pictologics.filters import base
+
+        rng = np.random.default_rng(9)
+        for dtype in (np.float64, np.float32):
+            image = rng.normal(0.0, 10.0, (12, 9, 10)).astype(dtype)
+            got = base._gaussian_laplace(image, 1.2, "nearest")
+            expected = gaussian_laplace(image, sigma=1.2, mode="nearest")
+            assert got.dtype == expected.dtype and got.tobytes() == expected.tobytes()
+
     def test_ordered_map_keeps_the_item_order(self):
         # Later items end first in the pool, but the results come in item order; one
         # worker maps in this thread.

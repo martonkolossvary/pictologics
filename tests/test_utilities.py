@@ -1361,6 +1361,25 @@ class TestSyntheticDicom:
         for _level, path in result.items():
             assert Path(path).exists()
 
+    def test_export_csv_converts_only_object_columns(
+        self, synthetic_dicom_dir: Path, tmp_path: Path
+    ) -> None:
+        """Only a column of Python objects can hold a list: the files are those of a check
+        of every column (0.6.0), and list cells are JSON text."""
+        db = DicomDatabase.from_folders([str(synthetic_dicom_dir)], show_progress=False)
+        result = db.export_csv(str(tmp_path / "db"), include_instance_lists=True)
+        for level, path in result.items():
+            if level == "instances":
+                df = db.get_instances_df()
+            else:
+                df = getattr(db, f"get_{level}_df")(include_instance_lists=True)
+            for col in df.columns:  # the conversion of 0.6.0
+                if df[col].apply(lambda x: isinstance(x, list)).any():
+                    df[col] = df[col].apply(lambda x: json.dumps(x) if isinstance(x, list) else x)
+            assert Path(path).read_text() == df.to_csv(index=False)
+        uids = pd.read_csv(result["patients"])["InstanceSOPUIDs"].iloc[0]
+        assert isinstance(json.loads(uids), list)
+
     def test_export_json_synthetic(self, synthetic_dicom_dir: Path, tmp_path: Path) -> None:
         """Test JSON export with synthetic files."""
         db = DicomDatabase.from_folders(

@@ -673,8 +673,9 @@ class DicomDatabase:
                 continue
 
             file_path = f"{base_path}_{level}.csv"
-            # Convert list columns to JSON strings for CSV compatibility
-            for col in df.columns:
+            # Convert list columns to JSON strings for CSV compatibility (only a column
+            # of Python objects can hold a list)
+            for col in df.select_dtypes(include="object").columns:
                 if df[col].apply(lambda x: isinstance(x, list)).any():
                     df[col] = df[col].apply(lambda x: json.dumps(x) if isinstance(x, list) else x)
             df.to_csv(file_path, index=False)

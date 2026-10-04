@@ -527,10 +527,13 @@ def _gaussian_laplace(
 ) -> npt.NDArray[Any]:
     """`scipy.ndimage.gaussian_laplace` with the same steps (scipy's generic_laplace: the
     Gaussian second derivative along each axis, added in axis order), each 1-D pass in
-    `_slab_pass`: the same values."""
+    `_slab_pass`: the same values. One temporary holds each term after the first (the
+    passes write all of it)."""
     output = _gaussian_filter(image, sigma, mode, truncate, order=_second_on(0, image.ndim))
+    term = np.empty_like(output)
     for axis in range(1, image.ndim):
-        output += _gaussian_filter(image, sigma, mode, truncate, order=_second_on(axis, image.ndim))
+        order = _second_on(axis, image.ndim)
+        output += _gaussian_filter(image, sigma, mode, truncate, order=order, output=term)
     return output
 
 
