@@ -745,6 +745,62 @@ class TestFastPaths(unittest.TestCase):
         with_nan[7] = np.nan
         self.assertIsNone(intensity_module._radix_select(with_nan, np.array([3, 20])))
 
+    def test_radix_select_keeps_the_candidates_of_the_ranks(self) -> None:
+        # The search picks the values of np.partition, with the bits of the search of
+        # 0.6.0 (numpy copy below: the values of the buckets of the ranks, in their order),
+        # also -0.0 or +0.0 at a rank, for 1 and 3 chunks.
+        from pictologics.features import intensity as intensity_module
+
+        def search_of_0_6_0(values: np.ndarray, ranks: np.ndarray) -> np.ndarray:
+            bits = values.view(np.uint64)
+            keys = np.where(bits >> np.uint64(63) != 0, ~bits, bits ^ np.uint64(1 << 63))
+            low, high = int(keys.min()), int(keys.max())
+            shift = max(0, (high - low).bit_length() - 16)
+            bucket = ((keys >> np.uint64(shift)) - np.uint64(low >> shift)).astype(np.int64)
+            per_bucket = np.bincount(bucket, minlength=1 << 16)
+            below = np.concatenate(([0], np.cumsum(per_bucket)))
+            buckets = np.searchsorted(below[1:], ranks, side="right")
+            wanted = np.zeros(per_bucket.size, dtype=bool)
+            wanted[buckets] = True
+            kept = np.where(wanted, per_bucket, 0)
+            at = (np.cumsum(kept) - kept)[buckets] + ranks - below[buckets]
+            return np.partition(values[wanted[bucket]], np.unique(at))[at]
+
+        rng = np.random.default_rng(14)
+        crowded = np.full(2000, 3.0)
+        crowded[:40] = rng.normal(0.0, 1e6, 40)
+        for values in (
+            rng.normal(40.0, 20.0, 2001),
+            np.round(rng.normal(0.0, 3.0, 2000)),
+            rng.choice([-0.0, 0.0, 1.0, -1.0], 2000, p=[0.3, 0.3, 0.2, 0.2]),
+            rng.choice([-np.inf, np.inf, -2.5, 0.0, 7.0], 1999),
+            -rng.gamma(2.0, 30.0, 2000),
+            crowded,
+        ):
+            n = values.size
+            ranks = intensity_module._percentile_ranks(n, values.dtype)
+            ranks = np.concatenate((ranks, [n // 2 - 1 + n % 2, n // 2]))
+            expected = search_of_0_6_0(values, ranks)
+            np.testing.assert_array_equal(expected, np.partition(values, ranks)[ranks])
+            for chunks in (1, 3):
+                with patch.object(intensity_module, "get_num_threads", return_value=chunks):
+                    got = intensity_module._radix_select(values, ranks)
+                self.assertEqual(got.tobytes(), expected.tobytes())
+
+    def test_radix_select_holds_every_bucket_of_the_key_range(self) -> None:
+        # The smallest and the largest key can be 65,536 buckets apart (here a key range
+        # of 2^17 - 1 from an odd key): the table holds that bucket too, so the values are
+        # those of np.partition. 0.6.0 counted it one place past its 65,536 buckets.
+        from pictologics.features import intensity as intensity_module
+
+        first = np.array([1.0]).view(np.uint64) + np.uint64(1)  # an odd key
+        steps = np.random.default_rng(15).integers(0, 2**17 - 1, 500, dtype=np.uint64)
+        steps[[0, 250]] = 0, 2**17 - 1
+        values = (first + steps).view(np.float64)
+        ranks = np.arange(values.size)
+        got = intensity_module._radix_select(values, ranks)
+        np.testing.assert_array_equal(got, np.sort(values))
+
     def test_two_stage_local_peaks(self) -> None:
         from pictologics.features import intensity as intensity_module
         from pictologics.loader import Image

@@ -371,7 +371,7 @@ def _percentile_ranks(n: int, dtype: np.dtype[Any]) -> npt.NDArray[np.intp]:
 
 
 # From this many float64 values on, the order statistics come from a radix select: one
-# parallel pass for the key range, one parallel count of 65,536 key buckets over that
+# parallel pass for the key range, one parallel count of about 65,536 key buckets over that
 # range, then a partition of the few values in the buckets of the ranks. Below it, one
 # partition is faster (measured).
 _RADIX_SELECT_MIN = 130_000
@@ -419,11 +419,14 @@ def _key_range_numba(
 def _bucket_counts_numba(
     bits: npt.NDArray[np.uint64], shift: int, base: np.uint64, counts: npt.NDArray[np.int64]
 ) -> None:
-    """counts[t, h]: the values of chunk t in bucket h = (key >> shift) - base."""
+    """counts[t, h]: the values of chunk t in bucket h = (key >> shift) - base. Each chunk
+    sets its row to 0 first."""
     n = bits.size
     n_chunks = counts.shape[0]
     size = (n + n_chunks - 1) // n_chunks
     for t in prange(n_chunks):
+        for h in range(counts.shape[1]):
+            counts[t, h] = 0
         for i in range(t * size, min(n, (t + 1) * size)):
             counts[t, (_float_key(bits[i]) >> np.uint64(shift)) - base] += 1
 
@@ -460,10 +463,12 @@ def _radix_select(
     """The values at the sorted 0-based `ranks` (np.partition's values), or None when the
     array holds a NaN.
 
-    The 65,536 buckets split the key range of the data evenly (keys order like the
-    floats), so close values spread over many buckets. The values of the buckets of the
-    ranks are copied out and partitioned at the ranks inside them: a partition, not a
-    sort, so data that crowd into few buckets cost about one partition of all values.
+    About 65,536 buckets split the key range of the data evenly (keys order like the
+    floats), so close values spread over many buckets. The table holds every bucket from
+    the smallest key to the largest: up to 65,537 buckets, because these two keys can be
+    65,536 buckets apart. The values of the buckets of the ranks are copied out and
+    partitioned at the ranks inside them: a partition, not a sort, so data that crowd into
+    few buckets cost about one partition of all values.
     """
     values = np.ascontiguousarray(values)
     bits = values.view(np.uint64)
@@ -476,22 +481,21 @@ def _radix_select(
     low, high = int(lo.min()), int(hi.max())
     shift = max(0, (high - low).bit_length() - 16)
     base = np.uint64(low >> shift)
-    counts = np.zeros((threads, 1 << 16), dtype=np.int64)
+    counts = np.empty((threads, (high >> shift) - (low >> shift) + 1), dtype=np.int64)
     _bucket_counts_numba(bits, shift, base, counts)
     per_bucket = counts.sum(axis=0)
     below = np.concatenate(([0], np.cumsum(per_bucket)))  # values in lower buckets
     buckets = np.searchsorted(below[1:], ranks, side="right")
-    wanted = np.zeros(1 << 16, dtype=np.bool_)
-    wanted[buckets] = True
-    kept = np.where(wanted, per_bucket, 0)
+    used = np.unique(buckets)  # the buckets of the ranks
+    wanted = np.zeros(per_bucket.size, dtype=np.bool_)
+    wanted[used] = True
+    kept = per_bucket[used]
     candidates = np.empty(int(kept.sum()), dtype=np.float64)
-    _bucket_values_numba(
-        bits, values, shift, base, wanted, counts[:, wanted].sum(axis=1), candidates
-    )
-    # A rank sits in its bucket after the candidates of the lower wanted buckets
-    lower = np.cumsum(kept) - kept
-    at = lower[buckets] + ranks - below[buckets]
-    return np.partition(candidates, np.unique(at))[at]
+    _bucket_values_numba(bits, values, shift, base, wanted, counts[:, used].sum(axis=1), candidates)
+    # A rank sits in its bucket after the candidates of the lower buckets of the ranks
+    lower = (np.cumsum(kept) - kept)[np.searchsorted(used, buckets)]
+    at = lower + ranks - below[buckets]
+    return cast(npt.NDArray[np.float64], np.partition(candidates, np.unique(at))[at])
 
 
 def _order_statistics(values: npt.NDArray[Any]) -> tuple[Any, ...]:
