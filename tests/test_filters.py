@@ -1489,7 +1489,9 @@ def test_transfer_functions_built_in_slabs_match_one_volume() -> None:
 def test_laws_rotations_pool_as_the_rotation_loop() -> None:
     """The rotation-invariant Laws filter pools each base response as soon as it is ready,
     with in-place signs, passes and energy: the values of the loop over all 24 rotations
-    with signed copies, bit for bit (signed zeros too), for every pooling mode."""
+    with signed copies, bit for bit, for every pooling mode. Only the sign of a zero can
+    differ: the filter pools the rotations in another order, and on x86 CPUs the maximum
+    or minimum of -0.0 and +0.0 depends on the order (on ARM it does not)."""
     from scipy.ndimage import convolve1d, uniform_filter
 
     from pictologics.filters.laws import _get_rotation_permutations_3d, _parse_kernel_string
@@ -1544,7 +1546,8 @@ def test_laws_rotations_pool_as_the_rotation_loop() -> None:
                     )
                     assert result.dtype == expected.dtype
                     bits = np.uint32 if result.dtype == np.float32 else np.uint64
-                    assert_array_equal(result.view(bits), expected.view(bits))
+                    # + 0.0 makes -0.0 into +0.0 and keeps every other value bit for bit
+                    assert_array_equal((result + 0.0).view(bits), (expected + 0.0).view(bits))
 
 
 def test_filter_threads_follow_the_numba_thread_count() -> None:
