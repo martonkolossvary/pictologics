@@ -63,6 +63,11 @@ print(results["phase3_demo"])
 
 A value matches when its difference from the team's value is within 1, 5 or 10 % of the team's *range for that modality, filter and feature* (the maximum minus the minimum of the team's values over the 51 patients). Our value is first rounded to the team's number of decimals, as in the IBSI tolerance tests. A zero range needs an exact match.
 
+!!! note "A stricter rule than in version 0.5.1"
+    Up to version 0.5.1, this page used one range for each team and feature, over all patients, modalities and filters. That range spans the CT, PET and MR values of all filters, so it is wider, and more values matched. This page uses the range of one modality and one filter, so its shares are lower.
+
+    The values did not change. With the old rule, the 0.6.0 values give the same match counts as version 0.5.1 for all 9 teams: 91.97 % of the 205,597 values within 1 % (checked on 2026-10-04).
+
 | Team | Total Features | Within 1% | Within 5% | Within 10% | Status |
 |:-----|:--------------:|----------:|----------:|-----------:|:------:|
 | CERR | 16524 | 14776 (89.4%) | 16108 (97.5%) | 16329 (98.8%) | ✅ 95%+ |
