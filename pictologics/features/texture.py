@@ -1056,6 +1056,103 @@ def _occupied(
     return matrix, rows + 1, cols + 1
 
 
+@jit(nopython=True, cache=True)  # type: ignore
+def _glcm_sums_numba(
+    P: npt.NDArray[np.float64],
+    levels: npt.NDArray[np.int64],
+    ng_eff: float,
+    p_diff: npt.NDArray[np.float64],
+    p_sum: npt.NDArray[np.float64],
+) -> tuple[float, ...]:
+    """The GLCM sums that do not need the joint average, over the cells of P that hold
+    counts: joint maximum, joint entropy, difference average, contrast, angular second
+    moment, the four inverse differences, inverse variance and autocorrelation. Adds P to the difference bins `p_diff` (|i - j|) and the sum bins
+    `p_sum` (i + j). Each row adds into its own sums first, so the rounding error grows
+    with the row length, not with the count of cells."""
+    n = P.shape[0]
+    joint_max = 0.0
+    total = np.zeros(10)
+    for a in range(n):
+        i = levels[a]
+        r1 = r2 = r3 = r4 = r5 = r6 = r7 = r8 = r9 = r10 = 0.0
+        for b in range(n):
+            p = P[a, b]
+            if p == 0.0:
+                continue
+            j = levels[b]
+            k = abs(i - j)
+            k2 = k * k
+            joint_max = max(joint_max, p)
+            r1 -= p * math.log2(p)
+            r2 += k * p
+            r3 += k2 * p
+            r4 += p * p
+            r5 += p / (1 + k)
+            r6 += p / (1 + k / ng_eff)
+            r7 += p / (1 + k2)
+            r8 += p / (1 + k2 / (ng_eff * ng_eff))
+            if k != 0:
+                r9 += p / k2
+            r10 += j * p
+            p_diff[k] += p
+            p_sum[i + j] += p
+        total[0] += r1
+        total[1] += r2
+        total[2] += r3
+        total[3] += r4
+        total[4] += r5
+        total[5] += r6
+        total[6] += r7
+        total[7] += r8
+        total[8] += r9
+        total[9] += i * r10
+    return (
+        joint_max,
+        total[0],
+        total[1],
+        total[2],
+        total[3],
+        total[4],
+        total[5],
+        total[6],
+        total[7],
+        total[8],
+        total[9],
+    )
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _glcm_mu_sums_numba(
+    P: npt.NDArray[np.float64], levels: npt.NDArray[np.int64], mu: float
+) -> tuple[float, float, float, float, float]:
+    """The GLCM sums around the joint average `mu`, over the cells of P that hold counts:
+    joint variance, the correlation term and the cluster tendency, shade and prominence
+    (s = i + j - 2 mu). Each row adds into its own sums first (see _glcm_sums_numba)."""
+    n = P.shape[0]
+    variance = correlation = tendency = shade = prominence = 0.0
+    for a in range(n):
+        di = levels[a] - mu
+        r0 = r1 = r2 = r3 = r4 = 0.0
+        for b in range(n):
+            p = P[a, b]
+            if p == 0.0:
+                continue
+            dj = levels[b] - mu
+            s = di + dj
+            s2 = s * s
+            r0 += di * di * p
+            r1 += di * dj * p
+            r2 += s2 * p
+            r3 += s2 * s * p
+            r4 += s2 * s2 * p
+        variance += r0
+        correlation += r1
+        tendency += r2
+        shade += r3
+        prominence += r4
+    return variance, correlation, tendency, shade, prominence
+
+
 def calculate_glcm_features(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[np.floating[Any]],
@@ -1152,77 +1249,6 @@ def calculate_glcm_features(
 
     P = glcm_sym / total_sum
 
-    # The 1-based grey levels of the rows and columns that hold counts
-    I, J = np.meshgrid(levels, levels, indexing="ij")  # noqa: E741
-
-    features = {}
-
-    # Joint Maximum - GYBY
-    features["joint_maximum_GYBY"] = np.max(P)
-
-    # Joint Average - 60VM
-    features["joint_average_60VM"] = np.sum(I * P)
-
-    # Joint Variance - UR99
-    mu = features["joint_average_60VM"]
-    features["joint_variance_UR99"] = np.sum(((I - mu) ** 2) * P)
-
-    # Joint Entropy - TU9B
-    mask_p = P > 0
-    features["joint_entropy_TU9B"] = -np.sum(P[mask_p] * np.log2(P[mask_p]))
-
-    # Difference Average - TF7R
-    k_diff = np.abs(I - J)
-    features["difference_average_TF7R"] = np.sum(k_diff * P)
-
-    # Optimized using bincount
-    k_diff_flat = k_diff.ravel().astype(np.int32)
-    P_flat = P.ravel()
-    p_diff = np.bincount(k_diff_flat, weights=P_flat, minlength=n_bins)
-
-    mu_diff = features["difference_average_TF7R"]
-    k_vals = np.arange(n_bins)
-    features["difference_variance_D3YU"] = np.sum(((k_vals - mu_diff) ** 2) * p_diff)
-
-    # Difference Entropy - NTRS
-    mask_pd = p_diff > 0
-    features["difference_entropy_NTRS"] = -np.sum(p_diff[mask_pd] * np.log2(p_diff[mask_pd]))
-
-    # Sum Average - ZGXS
-    k_sum_grid = I + J
-
-    # Optimized using bincount
-    k_sum_flat = k_sum_grid.ravel().astype(np.int32)
-    # P_flat is already defined in Difference Variance block
-    p_sum_full = np.bincount(k_sum_flat, weights=P_flat, minlength=2 * n_bins + 1)
-
-    # Slice from 2.
-    p_sum = p_sum_full[2:]
-
-    k_vals_sum = np.arange(2, 2 * n_bins + 1)
-    features["sum_average_ZGXS"] = np.sum(k_vals_sum * p_sum)
-
-    # Sum Variance - OEEB
-    mu_sum = features["sum_average_ZGXS"]
-    features["sum_variance_OEEB"] = np.sum(((k_vals_sum - mu_sum) ** 2) * p_sum)
-
-    # Sum Entropy - P6QZ
-    mask_ps = p_sum > 0
-    features["sum_entropy_P6QZ"] = -np.sum(p_sum[mask_ps] * np.log2(p_sum[mask_ps]))
-
-    # Angular Second Moment (Energy) - 8ZQL
-    features["angular_second_moment_8ZQL"] = np.sum(P**2)
-
-    # Contrast - ACUI
-    sq_diff = (I - J) ** 2
-    features["contrast_ACUI"] = np.sum(sq_diff * P)
-
-    # Dissimilarity - 8S9J
-    features["dissimilarity_8S9J"] = np.sum(k_diff * P)
-
-    # Inverse Difference - IB1Z
-    features["inverse_difference_IB1Z"] = np.sum(P / (1 + k_diff))
-
     # Ng_eff is the ROI grey-level span; only ROI min/max are needed. Fused single-pass
     # kernel: no bbox rescan and no boolean-gather temporaries.
     roi_span = roi_min_max(data, mask)
@@ -1231,60 +1257,89 @@ def calculate_glcm_features(
     else:
         Ng_eff = 1  # Fallback
 
-    # Normalised Inverse Difference - NDRX
-    features["normalised_inverse_difference_NDRX"] = np.sum(P / (1 + k_diff / Ng_eff))
+    # The sums over the cells that hold counts, in two serial passes (_glcm_sums_numba,
+    # _glcm_mu_sums_numba); levels: the 1-based grey levels of the rows and columns of P
+    levels = levels.astype(np.int64, copy=False)
+    # The bins hold every level of P (a given matrix can hold more levels than n_bins)
+    n_bins = max(n_bins, int(levels[-1]))
+    p_diff = np.zeros(n_bins)
+    p_sum_full = np.zeros(2 * n_bins + 1)
+    (
+        joint_max,
+        joint_entropy,
+        difference_average,
+        contrast,
+        angular_second_moment,
+        inverse_difference,
+        normalised_inverse_difference,
+        inverse_difference_moment,
+        normalised_inverse_difference_moment,
+        inverse_variance,
+        autocorrelation,
+    ) = _glcm_sums_numba(P, levels, float(Ng_eff), p_diff, p_sum_full)
+    # The joint average from the integer counts: exact to half a unit in the last place, as
+    # the cluster shade (whose terms cancel) is sensitive to it
+    row_counts = glcm_sym.sum(axis=1)
+    joint_average = int(levels @ row_counts.astype(np.int64)) / int(total_sum)
+    mu = joint_average
+    joint_variance, correlation_term, cluster_tendency, cluster_shade, cluster_prominence = (
+        _glcm_mu_sums_numba(P, levels, mu)
+    )
 
-    # Inverse Difference Moment - WF0Z
-    features["inverse_difference_moment_WF0Z"] = np.sum(P / (1 + sq_diff))
+    features = {}
+    features["joint_maximum_GYBY"] = joint_max
+    features["joint_average_60VM"] = joint_average
+    features["joint_variance_UR99"] = joint_variance
+    features["joint_entropy_TU9B"] = joint_entropy
+    features["difference_average_TF7R"] = difference_average
 
-    # Normalised Inverse Difference Moment - 1QCO
-    features["normalised_inverse_difference_moment_1QCO"] = np.sum(P / (1 + sq_diff / (Ng_eff**2)))
+    # Difference Variance - D3YU and Difference Entropy - NTRS, from the difference bins
+    dk = np.arange(n_bins) - difference_average
+    features["difference_variance_D3YU"] = np.sum(dk * dk * p_diff)
+    mask_pd = p_diff > 0
+    features["difference_entropy_NTRS"] = -np.sum(p_diff[mask_pd] * np.log2(p_diff[mask_pd]))
 
-    # Inverse Variance - E8JP
-    mask_neq = I != J
-    features["inverse_variance_E8JP"] = np.sum(P[mask_neq] / ((I[mask_neq] - J[mask_neq]) ** 2))
+    # Sum Average - ZGXS, Sum Variance - OEEB and Sum Entropy - P6QZ, from the sum bins
+    p_sum = p_sum_full[2:]
+    k_vals_sum = np.arange(2, 2 * n_bins + 1)
+    features["sum_average_ZGXS"] = np.sum(k_vals_sum * p_sum)
+    dk = k_vals_sum - features["sum_average_ZGXS"]
+    features["sum_variance_OEEB"] = np.sum(dk * dk * p_sum)
+    mask_ps = p_sum > 0
+    features["sum_entropy_P6QZ"] = -np.sum(p_sum[mask_ps] * np.log2(p_sum[mask_ps]))
 
-    # Correlation - NI2N
-    term1 = np.sum((I - mu) * (J - mu) * P)
-    if features["joint_variance_UR99"] != 0:
-        features["correlation_NI2N"] = term1 / features["joint_variance_UR99"]
+    features["angular_second_moment_8ZQL"] = angular_second_moment
+    features["contrast_ACUI"] = contrast
+    features["dissimilarity_8S9J"] = difference_average
+    features["inverse_difference_IB1Z"] = inverse_difference
+    features["normalised_inverse_difference_NDRX"] = normalised_inverse_difference
+    features["inverse_difference_moment_WF0Z"] = inverse_difference_moment
+    features["normalised_inverse_difference_moment_1QCO"] = normalised_inverse_difference_moment
+    features["inverse_variance_E8JP"] = inverse_variance
+    if joint_variance != 0:
+        features["correlation_NI2N"] = correlation_term / joint_variance
     else:
         features["correlation_NI2N"] = 1.0  # Or NaN? IBSI doesn't specify for 0 variance.
+    features["autocorrelation_QWB0"] = autocorrelation
+    features["cluster_tendency_DG8W"] = cluster_tendency
+    features["cluster_shade_7NFM"] = cluster_shade
+    features["cluster_prominence_AE86"] = cluster_prominence
 
-    # Autocorrelation - QWB0
-    features["autocorrelation_QWB0"] = np.sum(I * J * P)
-
-    # Cluster Tendency - DG8W
-    sum_diff2mu = I + J - 2 * mu
-    features["cluster_tendency_DG8W"] = np.sum((sum_diff2mu**2) * P)
-
-    # Cluster Shade - 7NFM
-    features["cluster_shade_7NFM"] = np.sum((sum_diff2mu**3) * P)
-
-    # Cluster Prominence - AE86
-    features["cluster_prominence_AE86"] = np.sum((sum_diff2mu**4) * P)
-
-    # Information Correlation 1 - R8DG
-    HXY = features["joint_entropy_TU9B"]
+    # Information Correlation 1 - R8DG and 2 - JN9H
+    HXY = joint_entropy
     # The marginal from the counts: exact, so it does not depend on the order of the sums
-    p_x = glcm_sym.sum(axis=1) / total_sum
+    p_x = row_counts / total_sum
     mask_px = p_x > 0
     HX = -np.sum(p_x[mask_px] * np.log2(p_x[mask_px]))
-
-    rows, cols = np.nonzero(mask_p)  # in the order of P[mask_p]
-    HXY1 = -np.sum(P[mask_p] * np.log2(p_x[rows] * p_x[cols]))
-
+    # P is symmetric, so p_y = p_x, and Σ_j P_ij = p_i. The two entropies of the IBSI
+    # definitions have closed forms (the sums run over the cells that hold counts):
+    #   HXY1 = -Σ_ij P_ij log2(p_i p_j) = -Σ_i p_i log2 p_i - Σ_j p_j log2 p_j = 2 HX
+    #   HXY2 = -Σ_ij p_i p_j log2(p_i p_j) = 2 HX Σ_j p_j = 2 HX
     if HX != 0:
-        features["information_correlation_1_R8DG"] = (HXY - HXY1) / HX
+        features["information_correlation_1_R8DG"] = (HXY - 2 * HX) / HX
     else:
         features["information_correlation_1_R8DG"] = np.nan
-
-    # Information Correlation 2 - JN9H
-    P_prod = np.outer(p_x, p_x)
-    mask_prod = P_prod > 0
-    HXY2 = -np.sum(P_prod[mask_prod] * np.log2(P_prod[mask_prod]))
-
-    features["information_correlation_2_JN9H"] = np.sqrt(1 - np.exp(-2 * (HXY2 - HXY)))
+    features["information_correlation_2_JN9H"] = np.sqrt(1 - np.exp(-2 * (2 * HX - HXY)))
     return features
 
 
@@ -2138,6 +2193,24 @@ def calculate_gldzm_features(
 # --- NGTDM ---
 
 
+@jit(nopython=True, cache=True)  # type: ignore
+def _ngtdm_complexity_numba(
+    levels: npt.NDArray[np.int64], p: npt.NDArray[np.float64], s: npt.NDArray[np.float64]
+) -> float:
+    """Σ_ij |i - j| (p_i s_i + p_j s_j) / (p_i + p_j) over the pairs of non-zero grey levels
+    (the NGTDM complexity times N_vp): twice the sum over i < j, as the terms are symmetric
+    and 0 for i = j. Each row adds into its own sum first."""
+    m = len(levels)
+    total = 0.0
+    for a in range(m):
+        ps_a = p[a] * s[a]
+        row = 0.0
+        for b in range(a + 1, m):
+            row += abs(levels[a] - levels[b]) * (ps_a + p[b] * s[b]) / (p[a] + p[b])
+        total += row
+    return 2.0 * total
+
+
 def calculate_ngtdm_features(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[np.floating[Any]],
@@ -2194,11 +2267,16 @@ def calculate_ngtdm_features(
     p_nz = p[mask_p]
     s_nz = s[mask_p]
     I_nz = I[mask_p]
+    Ng_p = len(p_nz)
+    sum_s = np.sum(s)
 
-    # Pairwise grids over the non-zero grey levels, shared by Contrast/Complexity/Strength.
-    Pi, Pj = np.meshgrid(p_nz, p_nz, indexing="ij")
-    Ii, Ij = np.meshgrid(I_nz, I_nz, indexing="ij")
-    Si, Sj = np.meshgrid(s_nz, s_nz, indexing="ij")
+    # The sums over the pairs of non-zero grey levels have closed forms in sums over the
+    # levels, written without the difference of two large sums: with S0 = Σ p_i, the mean
+    # level mu = Σ p_i i / S0, the mean c and the sum V = Σ_j (j - c)^2 of the m levels,
+    #   Σ_ij p_i p_j (i - j)^2       = 2 S0 Σ_i p_i (i - mu)^2
+    #   Σ_ij (p_i + p_j) (i - j)^2   = 2 Σ_i p_i (m (i - c)^2 + V)
+    #   Σ_ij |a_i - a_j|             = 2 Σ_k k (m - k) (a_(k) - a_(k-1))  (a = i p_i, sorted)
+    # The complexity has no closed form (_ngtdm_complexity_numba).
 
     # Coarseness - QCDE
     sum_ps = np.sum(p_nz * s_nz)
@@ -2208,45 +2286,32 @@ def calculate_ngtdm_features(
         features["coarseness_QCDE"] = 1e6
 
     # Contrast - 65HE
-    Ng_p = len(p_nz)
-
     if Ng_p > 1:
         # Term 1: Dynamic range variance
-        term1_sum = np.sum(Pi * Pj * ((Ii - Ij) ** 2))
-        term1 = term1_sum / (Ng_p * (Ng_p - 1))
-
+        S0 = np.sum(p_nz)
+        dm = I_nz - np.sum(p_nz * I_nz) / S0
+        term1 = 2 * S0 * np.sum(p_nz * dm * dm) / (Ng_p * (Ng_p - 1))
         # Term 2: Intensity change
-        sum_s = np.sum(s)
-        term2 = sum_s / N_vp
-
-        features["contrast_65HE"] = term1 * term2
+        features["contrast_65HE"] = term1 * (sum_s / N_vp)
     else:
         features["contrast_65HE"] = 0.0
 
     # Busyness - NQ30
-    IPi = I_nz * p_nz
-
-    # Grid
-    IPi_grid, IPj_grid = np.meshgrid(IPi, IPi, indexing="ij")
-    denom_busyness = np.sum(np.abs(IPi_grid - IPj_grid))
-
+    a = np.sort(I_nz * p_nz)
+    k = np.arange(1, Ng_p)
+    denom_busyness = 2 * np.sum(k * (Ng_p - k) * np.diff(a))
     if denom_busyness > 1e-10:
         features["busyness_NQ30"] = sum_ps / denom_busyness
     else:
         features["busyness_NQ30"] = 0.0
 
     # Complexity - HDEZ
-    denom_comp = Pi + Pj
-    term_comp = np.abs(Ii - Ij) * (Pi * Si + Pj * Sj) / denom_comp
-
-    features["complexity_HDEZ"] = (1 / N_vp) * np.sum(term_comp)
+    complexity = _ngtdm_complexity_numba(I_nz.astype(np.int64), p_nz, s_nz.astype(np.float64))
+    features["complexity_HDEZ"] = (1 / N_vp) * complexity
 
     # Strength - 1X9X
-    sum_s = np.sum(s)
-
-    term_str = (Pi + Pj) * ((Ii - Ij) ** 2)
-    sum_term_str = np.sum(term_str)
-
+    dc = I_nz - np.mean(I_nz)
+    sum_term_str = 2 * np.sum(p_nz * (Ng_p * dc * dc + np.sum(dc * dc)))
     if sum_s > 1e-10:
         features["strength_1X9X"] = sum_term_str / sum_s
     else:

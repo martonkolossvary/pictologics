@@ -114,6 +114,13 @@ def _warmup_texture() -> None:
             texture._texture_volume_numba(data, mask != 0, n_bins, vol, counts)
             texture._texture_volume_serial_numba(data, mask != 0, n_bins, vol, counts)
     texture.calculate_all_texture_matrices(box, mask, n_bins)
+    # The GLCM feature sums: float64 probabilities and int64 grey levels
+    glcm_p = np.full((2, 2), 0.25)
+    glcm_levels = np.array([1, 2], dtype=np.int64)
+    texture._glcm_sums_numba(glcm_p, glcm_levels, 2.0, np.zeros(3), np.zeros(5))
+    texture._glcm_mu_sums_numba(glcm_p, glcm_levels, 1.5)
+    # The NGTDM complexity: int64 levels, float64 probabilities and differences
+    texture._ngtdm_complexity_numba(glcm_levels, np.full(2, 0.5), np.ones(2))
     # The parallel zeroing and sum of large thread tables (from 182 grey levels on)
     texture._zero_fill_numba(np.ones(3, dtype=np.uint32))
     texture._thread_sum_numba(np.zeros((2, 4), dtype=np.uint32), np.zeros(4, dtype=np.uint64))

@@ -921,3 +921,126 @@ def test_direct_calls_read_other_level_types_as_int64_or_float64() -> None:
         assert np.array_equal(list(found.values()), list(expected.values()), equal_nan=True)
     empty = texture_module._maybe_crop_to_bbox(levels.astype(np.uint8), roi * 0)
     assert empty[0].dtype == np.int64
+
+
+def _glcm_reference(glcm: np.ndarray, ng_eff: int) -> dict[str, float]:
+    """The GLCM features by the old numpy formulas on the dense matrix: pow for the cluster
+    features, and the double sums HXY1 and HXY2 of the information correlations."""
+    counts = glcm.sum(axis=0)
+    P = (counts + counts.T) / (counts + counts.T).sum()
+    I, J = np.meshgrid(*[np.arange(1, P.shape[0] + 1)] * 2, indexing="ij")  # noqa: E741
+    mu = np.sum(I * P)
+    s = I + J - 2 * mu
+    k = np.abs(I - J)
+    var = np.sum((I - mu) ** 2 * P)
+    nz = P > 0
+    p_x = P.sum(axis=1)
+    hx = -np.sum(p_x[p_x > 0] * np.log2(p_x[p_x > 0]))
+    hxy = -np.sum(P[nz] * np.log2(P[nz]))
+    rows, cols = np.nonzero(nz)
+    hxy1 = -np.sum(P[nz] * np.log2(p_x[rows] * p_x[cols]))
+    prod = np.outer(p_x, p_x)
+    hxy2 = -np.sum(prod[prod > 0] * np.log2(prod[prod > 0]))
+    return {
+        "joint_maximum_GYBY": np.max(P),
+        "joint_average_60VM": mu,
+        "joint_variance_UR99": var,
+        "joint_entropy_TU9B": hxy,
+        "difference_average_TF7R": np.sum(k * P),
+        "dissimilarity_8S9J": np.sum(k * P),
+        "contrast_ACUI": np.sum(k**2 * P),
+        "angular_second_moment_8ZQL": np.sum(P**2),
+        "inverse_difference_IB1Z": np.sum(P / (1 + k)),
+        "normalised_inverse_difference_NDRX": np.sum(P / (1 + k / ng_eff)),
+        "inverse_difference_moment_WF0Z": np.sum(P / (1 + k**2)),
+        "normalised_inverse_difference_moment_1QCO": np.sum(P / (1 + k**2 / ng_eff**2)),
+        "inverse_variance_E8JP": np.sum(P[k > 0] / k[k > 0] ** 2),
+        "autocorrelation_QWB0": np.sum(I * J * P),
+        "correlation_NI2N": np.sum((I - mu) * (J - mu) * P) / var if var else 1.0,
+        "cluster_tendency_DG8W": np.sum(s**2 * P),
+        "cluster_shade_7NFM": np.sum(s**3 * P),
+        "cluster_prominence_AE86": np.sum(s**4 * P),
+        "information_correlation_1_R8DG": (hxy - hxy1) / hx if hx else np.nan,
+        "1 - information_correlation_2_JN9H^2": np.exp(-2 * (hxy2 - hxy)),
+        "scale of the cluster shade": np.sum(np.abs(s) ** 3 * P),
+        "HXY1 - 2 HX": hxy1 - 2 * hx,
+        "HXY2 - 2 HX": hxy2 - 2 * hx,
+        "2 HX": 2 * hx,
+    }
+
+
+def test_glcm_features_equal_the_old_formulas() -> None:
+    # The GLCM features come from two serial passes over the cells that hold counts, the
+    # information correlations from closed forms (HXY1 = HXY2 = 2 HX) and the cluster
+    # features from products. On dense, sparse, one-level, two-level and 256-level
+    # matrices they equal the old numpy formulas within 1e-12 (the cluster shade relative
+    # to the size of its terms, as its terms cancel).
+    rng = np.random.default_rng(31)
+    sizes = [1, 2, 2, 256, 256, *rng.integers(3, 200, 35)]
+    for case, n in enumerate(sizes):
+        glcm = rng.integers(0, 1000, (2, n, n)).astype(np.uint64)
+        if case % 3 == 1:  # sparse
+            glcm *= (rng.random((2, n, n)) < 0.03).astype(np.uint64)
+        if case == 2:  # one level of the two holds counts
+            glcm[:] = 0
+            glcm[0, 1, 1] = 5
+        glcm[0, 0, 0] += 1  # at least one count
+        data = np.array([[[1, n]]], dtype=np.int32)  # Ng_eff = n
+        got = texture_module.calculate_glcm_features(data, np.ones(data.shape), n, glcm_matrix=glcm)
+        ref = _glcm_reference(glcm, n)
+        assert abs(ref["HXY1 - 2 HX"]) <= 1e-12 * max(ref["2 HX"], 1.0)
+        assert abs(ref["HXY2 - 2 HX"]) <= 1e-12 * max(ref["2 HX"], 1.0)
+        for key, value in ref.items():
+            if key == "cluster_shade_7NFM":
+                assert abs(got[key] - value) <= 1e-12 * ref["scale of the cluster shade"]
+            elif key == "1 - information_correlation_2_JN9H^2":
+                assert np.isclose(1 - got["information_correlation_2_JN9H"] ** 2, value, atol=1e-12)
+            elif key in got:
+                assert np.isclose(got[key], value, rtol=1e-12, atol=1e-12, equal_nan=True), key
+
+
+def _ngtdm_reference(s: np.ndarray, n: np.ndarray) -> dict[str, float]:
+    """The NGTDM features by the old formulas, with grids over the non-zero levels."""
+    total = np.sum(n)
+    p = n / total
+    nz = p > 0
+    p_nz, s_nz, levels = p[nz], s[nz], np.arange(1, len(n) + 1)[nz]
+    Pi, Pj = np.meshgrid(p_nz, p_nz, indexing="ij")
+    Ii, Ij = np.meshgrid(levels, levels, indexing="ij")
+    Si, Sj = np.meshgrid(s_nz, s_nz, indexing="ij")
+    sum_ps = np.sum(p_nz * s_nz)
+    m = len(p_nz)
+    ip = levels * p_nz
+    busy = np.sum(np.abs(ip[:, None] - ip[None, :]))
+    contrast = (
+        np.sum(Pi * Pj * (Ii - Ij) ** 2) / (m * (m - 1)) * np.sum(s) / total if m > 1 else 0.0
+    )
+    return {
+        "coarseness_QCDE": 1 / sum_ps if sum_ps > 1e-10 else 1e6,
+        "contrast_65HE": contrast,
+        "busyness_NQ30": sum_ps / busy if busy > 1e-10 else 0.0,
+        "complexity_HDEZ": np.sum(np.abs(Ii - Ij) * (Pi * Si + Pj * Sj) / (Pi + Pj)) / total,
+        "strength_1X9X": np.sum((Pi + Pj) * (Ii - Ij) ** 2) / np.sum(s)
+        if np.sum(s) > 1e-10
+        else 0.0,
+    }
+
+
+def test_ngtdm_features_equal_the_grid_formulas() -> None:
+    # The NGTDM sums over the pairs of non-zero levels come from closed forms and one
+    # kernel; with empty levels, one level and two levels they equal the grid formulas
+    # within 1e-12
+    rng = np.random.default_rng(32)
+    sizes = [1, 2, 2, 256, *rng.integers(3, 257, 36)]
+    for case, n_bins in enumerate(sizes):
+        n = rng.integers(0, 50, n_bins).astype(np.float64)
+        n[rng.random(n_bins) < 0.3] = 0  # empty levels
+        if case == 1:  # one level holds voxels
+            n[:] = [0, 7]
+        n[0] += 1
+        s = np.where(n > 0, rng.random(n_bins) * 20, 0.0)
+        got = texture_module.calculate_ngtdm_features(
+            np.ones((1, 1, 1)), np.ones((1, 1, 1)), n_bins, ngtdm_matrices=(s, n)
+        )
+        for key, value in _ngtdm_reference(s, n).items():
+            assert np.isclose(got[key], value, rtol=1e-12, atol=0.0), (case, key)

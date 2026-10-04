@@ -1,0 +1,1 @@
+The GLCM features come from two serial passes over the cells that hold counts, with closed forms for the information correlations: 0.98 ms instead of 3.33 ms at 256 grey levels, 0.25 ms instead of 0.30 ms at 8 levels. The values can differ in the last digits (at most 4e-13 relative on the benchmark cube).
