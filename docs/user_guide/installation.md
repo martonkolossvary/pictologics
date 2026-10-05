@@ -22,8 +22,13 @@ pip also installs the packages that Pictologics needs:
 | PyWavelets | The wavelet filters |
 | pandas | The result tables |
 | PyYAML | Configuration files |
-| Matplotlib | The slice viewer `visualize_slices` |
 | tqdm | The progress bar of `run_batch` |
+
+The slice viewer `visualize_slices` also needs Matplotlib, the optional extra `viz`:
+
+```bash
+pip install "pictologics[viz]"
+```
 
 !!! note "12-bit lossy JPEG DICOM"
     python-gdcm reads all compressed DICOM types except 12-bit lossy JPEG (JPEG Extended). For these files, also install `pylibjpeg` and `pylibjpeg-libjpeg` (GPL-3.0, so Pictologics does not install it for you).

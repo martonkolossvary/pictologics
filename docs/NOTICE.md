@@ -19,7 +19,7 @@ This product uses the following third-party libraries:
 - python-gdcm (Apache-2.0; it contains GDCM, BSD 3-Clause) - <https://github.com/tfmoraes/python-gdcm>
 - pandas (BSD 3-Clause) - <https://pandas.pydata.org/>
 - tqdm (MIT/MPL 2.0) - <https://tqdm.github.io/>
-- Matplotlib (PSF-based) - <https://matplotlib.org/>
+- Matplotlib (PSF-based; the optional extra viz) - <https://matplotlib.org/>
 - Pillow (MIT-CMU) - <https://github.com/python-pillow/Pillow>
 - PyWavelets (MIT) - <https://pywavelets.readthedocs.io/>
 - PyYAML (MIT) - <https://github.com/yaml/pyyaml>

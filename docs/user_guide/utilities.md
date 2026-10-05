@@ -54,7 +54,7 @@ for patient in db.patients:
 
 ## Image Viewers
 
-`visualize_slices()` shows the slices in a window, and `save_slices()` saves them as files. Both show an image, a mask, or a mask on an image:
+`visualize_slices()` shows the slices in a window, and `save_slices()` saves them as files. Both show an image, a mask, or a mask on an image. The window needs Matplotlib, the optional extra `viz` (`pip install "pictologics[viz]"`):
 
 | Mode | `image` | `mask` | Display |
 |:--|:--|:--|:--|

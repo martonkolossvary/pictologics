@@ -1,0 +1,1 @@
+Matplotlib is now the optional extra `viz`: `pip install "pictologics[viz]"` installs it for `visualize_slices`. A plain `pip install pictologics` no longer installs Matplotlib and its own packages (about 55 MB). Without Matplotlib, `visualize_slices` raises an ImportError that names the extra; `save_slices` needs only Pillow.

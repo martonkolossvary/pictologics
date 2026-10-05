@@ -45,13 +45,16 @@ numba = [
 ]
 pandas = ">=2.2.2"  # the first pandas that works with numpy 2
 tqdm = ">=4.66.0"
-matplotlib = ">=3.10.0"
+matplotlib = { version = ">=3.10.0", optional = true }  # the extra "viz": visualize_slices
 Pillow = ">=11.1.0"
 PyWavelets = ">=1.6.0"  # the first PyWavelets that works with numpy 2
 pyyaml = ">=6.0"
 # Decodes compressed DICOM data with pydicom: JPEG Lossless, JPEG-LS, JPEG 2000 (and
 # baseline JPEG, which Pillow also reads)
 python-gdcm = ">=3.0.10"
+
+[tool.poetry.extras]
+viz = ["matplotlib"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0.0"
@@ -62,10 +65,10 @@ tabulate = "^0.9.0"
 mkdocs = "^1.6.1"
 mkdocs-material = "^9.7.0"
 mkdocstrings = {extras = ["python"], version = "^1.0.0"}
-twine = "^6.2.0"
 pytest-xdist = "^3.8.0"
 types-pyyaml = "^6.0.12.20250915"
 towncrier = ">=24.8.0"
+matplotlib = ">=3.10.0"  # the tests of visualize_slices (the extra "viz")
 
 [tool.poetry.group.benchmark]
 optional = true

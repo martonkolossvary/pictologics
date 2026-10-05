@@ -10,6 +10,7 @@ Tests cover all functionality including:
 """
 
 import os
+import sys
 import tempfile
 import warnings
 from pathlib import Path
@@ -518,6 +519,12 @@ class TestVisualizeSlices:
             spacing=(1.0, 1.0, 2.0),
             origin=(0.0, 0.0, 0.0),
         )
+
+    def test_visualize_without_matplotlib_names_the_extra(self, synthetic_image: Image) -> None:
+        """Matplotlib is the optional extra "viz": without it, the viewer says how to get it."""
+        gone = dict.fromkeys(("matplotlib", "matplotlib.pyplot", "matplotlib.widgets"))
+        with patch.dict(sys.modules, gone), pytest.raises(ImportError, match=r"pictologics\[viz\]"):
+            visualize_slices(image=synthetic_image)
 
     def test_visualize_overlay_mode(self, synthetic_image: Image, synthetic_mask: Image) -> None:
         """Test interactive viewer with overlay."""

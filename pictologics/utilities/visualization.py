@@ -633,6 +633,8 @@ def visualize_slices(
     """
     Display interactive slice viewer with scrolling.
 
+    The viewer needs Matplotlib, the optional extra "viz": ``pip install "pictologics[viz]"``.
+
     This function supports three display modes:
 
     1. **Image + Mask (Overlay Mode)**: Both `image` and `mask` are provided.
@@ -665,6 +667,7 @@ def visualize_slices(
             If False, display as grayscale.
 
     Raises:
+        ImportError: If Matplotlib is not installed.
         ValueError: If neither image nor mask is provided, if shapes don't match
             when both are provided, if initial_slice is out of range, or if
             window_width is 0 or less.
@@ -688,8 +691,13 @@ def visualize_slices(
         visualize_slices(mask=mask)
         ```
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.widgets import Slider
+    try:
+        import matplotlib.pyplot as plt
+        from matplotlib.widgets import Slider
+    except ImportError as error:  # Matplotlib is the optional extra "viz"
+        raise ImportError(
+            'visualize_slices needs Matplotlib: pip install "pictologics[viz]"'
+        ) from error
 
     if image is None and mask is None:
         raise ValueError("At least one of image or mask must be provided.")
