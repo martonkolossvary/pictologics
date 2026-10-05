@@ -1,1 +1,0 @@
-With SciPy 1.18 or newer, the Riesz and Simoncelli filters, and Moran's I and Geary's C of large ROIs, can change in their last digits with the number of threads, because the FFT of SciPy 1.18 splits its work by thread (in a test, Moran's I changed by 2.6e-16, relative). SciPy 1.17 gives the same values for every number of threads.

@@ -2,12 +2,12 @@
 
 ## Speed of Pictologics
 
-This page gives the speed of Pictologics 0.6.0 on one computer. A later version of this page will compare more programs, data sets and computers.
+This page gives the speed of Pictologics 0.7.0 on one computer. A later version of this page will compare more programs, data sets and computers.
 
 !!! info "How we measured"
     - **Data**: synthetic and seeded. Correlated noise with blob-shaped ROIs (with holes) for the features; normal noise cubes of 1 mm voxels for the filters; a CT-like image of 512 × 512 × 200 voxels (0.7 × 0.7 × 1.25 mm: air, a body of soft tissue with noise, a lesion of 20 mm radius of 54,746 voxels) for the preprocessing, the pipeline and the loaders.
     - **Time**: the wall-clock time of one call, the median of 5 runs after one warm-up run (the warm-up compiles the numba code). The tables give the median; the list tables also give the fastest and the slowest run.
-    - **Threads**: numba uses all 14 cores, except in the thread test.
+    - **Threads**: numba uses 10 threads (the default of Pictologics on this computer), except in the thread test.
     - **Features**: the feature functions on their own, without the pipeline. The texture rows use FBN 32, except in the grey level table.
 
 ### Computer and Software
@@ -15,9 +15,9 @@ This page gives the speed of Pictologics 0.6.0 on one computer. A later version 
 - **Hardware**: Apple M4 Pro, 14 cores, 48 GB
 - **OS**: macOS 27.0.1 (arm64)
 - **Python**: 3.12.10
-- **Core deps**: pictologics 0.6.0, numpy 2.5.3, scipy 1.17.0, numba 0.67.0, pandas 2.3.3, matplotlib 3.10.7
+- **Core deps**: pictologics 0.7.0, numpy 2.5.3, scipy 1.17.0, numba 0.67.0, pandas 2.3.3, matplotlib 3.10.7
 - **BLAS/LAPACK**: Apple Accelerate (from `numpy.show_config()`)
-- **Numba threads**: 14
+- **Numba threads**: 10
 
 ### Feature Families
 
@@ -27,13 +27,13 @@ ROI cubes: 25³ (9,861 ROI voxels), 50³ (101,638 ROI voxels), 75³ (315,151 ROI
 
 | Task | 25³ | 50³ | 75³ | 100³ | 150³ |
 |:--|--:|--:|--:|--:|--:|
-| Intensity (first order) | 0.1 ms | 1.2 ms | 2.2 ms | 3.5 ms | 12.9 ms |
-| Intensity histogram | 0.1 ms | 1.2 ms | 4.2 ms | 8.6 ms | 22.8 ms |
-| Intensity-volume histogram | 0.1 ms | 0.7 ms | 2.0 ms | 5.3 ms | 14.1 ms |
-| Morphology | 1.3 ms | 2.9 ms | 4.7 ms | 7.5 ms | 19.5 ms |
-| Local intensity (peaks) | 1.4 ms | 3.6 ms | 10.1 ms | 25.2 ms | 77.6 ms |
-| Spatial intensity (Moran's I, Geary's C) | 2.0 ms | 8.7 ms | 24.3 ms | 58.0 ms | 190.5 ms |
-| Texture (all 6 families) | 1.1 ms | 4.3 ms | 9.8 ms | 20.9 ms | 54.4 ms |
+| Intensity (first order) | 0.1 ms | 1.2 ms | 1.4 ms | 2.6 ms | 12.2 ms |
+| Intensity histogram | 0.1 ms | 1.2 ms | 3.4 ms | 7.6 ms | 22.7 ms |
+| Intensity-volume histogram | 0.1 ms | 0.7 ms | 2.0 ms | 5.1 ms | 14.0 ms |
+| Morphology | 1.5 ms | 2.4 ms | 3.9 ms | 5.7 ms | 14.0 ms |
+| Local intensity (peaks) | 1.2 ms | 3.3 ms | 9.8 ms | 22.4 ms | 63.5 ms |
+| Spatial intensity (Moran's I, Geary's C) | 1.8 ms | 8.1 ms | 21.2 ms | 54.0 ms | 182.5 ms |
+| Texture (all 6 families) | 1.0 ms | 3.4 ms | 7.1 ms | 14.6 ms | 37.8 ms |
 
 ### Texture Families
 
@@ -43,12 +43,12 @@ Each family on its own (`calculate_all_texture_features(..., families=[...])`), 
 
 | Task | 25³ | 50³ | 75³ | 100³ | 150³ |
 |:--|--:|--:|--:|--:|--:|
-| GLCM | 0.4 ms | 0.7 ms | 1.5 ms | 2.5 ms | 5.6 ms |
-| GLRLM | 0.3 ms | 1.0 ms | 3.1 ms | 7.1 ms | 19.3 ms |
-| GLSZM | 0.3 ms | 1.8 ms | 3.4 ms | 6.6 ms | 14.5 ms |
-| GLDZM | 0.3 ms | 2.2 ms | 4.6 ms | 10.0 ms | 25.3 ms |
-| NGTDM | 0.3 ms | 0.6 ms | 1.3 ms | 2.8 ms | 6.8 ms |
-| NGLDM | 0.3 ms | 0.6 ms | 1.3 ms | 2.7 ms | 6.8 ms |
+| GLCM | 0.2 ms | 0.6 ms | 1.2 ms | 2.0 ms | 5.2 ms |
+| GLRLM | 0.4 ms | 1.1 ms | 3.1 ms | 6.9 ms | 19.9 ms |
+| GLSZM | 0.3 ms | 1.4 ms | 2.1 ms | 4.0 ms | 8.6 ms |
+| GLDZM | 0.3 ms | 1.5 ms | 2.4 ms | 4.6 ms | 10.6 ms |
+| NGTDM | 0.3 ms | 0.5 ms | 1.1 ms | 2.4 ms | 5.8 ms |
+| NGLDM | 0.3 ms | 0.5 ms | 1.1 ms | 2.4 ms | 5.7 ms |
 
 ### Texture and Grey Levels
 
@@ -58,7 +58,7 @@ All six texture families on the 75³ cube (315,151 ROI voxels) with FBN discreti
 
 | Task | 8 levels | 16 levels | 32 levels | 64 levels | 128 levels | 256 levels |
 |:--|--:|--:|--:|--:|--:|--:|
-| Texture (all 6 families) | 8.3 ms | 9.9 ms | 10.0 ms | 9.2 ms | 9.5 ms | 12.5 ms |
+| Texture (all 6 families) | 6.8 ms | 7.5 ms | 7.2 ms | 6.8 ms | 6.7 ms | 7.1 ms |
 
 ### Filters
 
@@ -70,19 +70,19 @@ Image cubes of 1 mm voxels. Convolution filters use the mirror boundary; the FFT
 
 | Task | 64³ | 128³ | 192³ | 256³ |
 |:--|--:|--:|--:|--:|
-| Mean (support 5) | 1.1 ms | 4.8 ms | 15.8 ms | 49.4 ms |
-| Gaussian (sigma 2 mm) | 1.6 ms | 6.5 ms | 20.3 ms | 60.1 ms |
-| LoG (sigma 2 mm) | 5.2 ms | 19.4 ms | 59.5 ms | 179.9 ms |
-| Laws L5E5E5 with energy | 2.2 ms | 8.8 ms | 28.4 ms | 92.2 ms |
-| Laws L5E5E5, rotation invariant, energy | 3.7 ms | 19.0 ms | 64.3 ms | 183.8 ms |
-| Gabor (axial, rotation invariant) | 12.0 ms | 31.8 ms | 67.1 ms | 105.8 ms |
-| Gabor (3 planes, rotation invariant) | 36.1 ms | 110.5 ms | 213.0 ms | 369.8 ms |
-| Wavelet db2 LHL, level 1 | 1.2 ms | 4.8 ms | 14.9 ms | 42.1 ms |
-| Wavelet db2 LHL, level 1, rotation invariant | 12.1 ms | 161.8 ms | 483.2 ms | 2.18 s |
-| Simoncelli, level 1 | 0.9 ms | 4.1 ms | 13.0 ms | 30.6 ms |
-| Riesz, order (1, 0, 0) | 0.8 ms | 4.1 ms | 13.4 ms | 31.1 ms |
-| Riesz-LoG (sigma 2 mm) | 5.9 ms | 24.2 ms | 77.1 ms | 199.7 ms |
-| Riesz-Simoncelli, level 1 | 0.9 ms | 4.4 ms | 14.2 ms | 32.9 ms |
+| Mean (support 5) | 1.1 ms | 5.0 ms | 14.8 ms | 47.9 ms |
+| Gaussian (sigma 2 mm) | 1.6 ms | 6.3 ms | 19.9 ms | 54.4 ms |
+| LoG (sigma 2 mm) | 4.4 ms | 16.4 ms | 50.9 ms | 144.4 ms |
+| Laws L5E5E5 with energy | 1.9 ms | 9.2 ms | 26.5 ms | 88.9 ms |
+| Laws L5E5E5, rotation invariant, energy | 4.2 ms | 21.2 ms | 62.9 ms | 194.6 ms |
+| Gabor (axial, rotation invariant) | 11.8 ms | 36.0 ms | 69.7 ms | 114.9 ms |
+| Gabor (3 planes, rotation invariant) | 35.3 ms | 119.6 ms | 234.2 ms | 395.7 ms |
+| Wavelet db2 LHL, level 1 | 1.1 ms | 4.3 ms | 11.5 ms | 38.6 ms |
+| Wavelet db2 LHL, level 1, rotation invariant | 10.8 ms | 94.6 ms | 296.9 ms | 855.2 ms |
+| Simoncelli, level 1 | 1.0 ms | 3.3 ms | 11.3 ms | 29.0 ms |
+| Riesz, order (1, 0, 0) | 0.8 ms | 3.4 ms | 11.5 ms | 29.6 ms |
+| Riesz-LoG (sigma 2 mm) | 5.7 ms | 21.4 ms | 63.2 ms | 170.6 ms |
+| Riesz-Simoncelli, level 1 | 1.0 ms | 3.8 ms | 12.4 ms | 31.2 ms |
 
 ### Preprocessing
 
@@ -92,13 +92,13 @@ The functions of `pictologics.preprocessing` on the CT-like image.
 
 | Task | Time (median) | Fastest | Slowest |
 |:--|--:|--:|--:|
-| Resample to 1 mm (linear) | 12.5 ms | 12.2 ms | 13.1 ms |
-| Resample the mask to 1 mm (nearest) | 3.0 ms | 2.9 ms | 3.7 ms |
-| Discretise, FBN 32 (ROI range) | 9.3 ms | 9.2 ms | 9.8 ms |
-| Discretise, FBS 25 HU | 6.5 ms | 6.4 ms | 6.8 ms |
-| Resegment, -100 to 400 HU | 3.5 ms | 3.5 ms | 3.5 ms |
-| Ring of 3 mm (grow_mask) | 9.4 ms | 9.2 ms | 9.7 ms |
-| Keep the largest component | 3.1 ms | 2.9 ms | 3.3 ms |
+| Resample to 1 mm (linear) | 11.6 ms | 11.3 ms | 11.7 ms |
+| Resample the mask to 1 mm (nearest) | 2.8 ms | 2.7 ms | 2.8 ms |
+| Discretise, FBN 32 (ROI range) | 9.1 ms | 8.9 ms | 9.2 ms |
+| Discretise, FBS 25 HU | 6.3 ms | 6.2 ms | 6.4 ms |
+| Resegment, -100 to 400 HU | 3.2 ms | 3.2 ms | 3.3 ms |
+| Ring of 3 mm (grow_mask) | 11.4 ms | 10.0 ms | 11.9 ms |
+| Keep the largest component | 4.7 ms | 3.2 ms | 4.7 ms |
 
 ### Pipeline
 
@@ -108,24 +108,24 @@ Whole pipeline runs on the CT-like image, from the image in memory to the featur
 
 | Task | Time (median) | Fastest | Slowest |
 |:--|--:|--:|--:|
-| run(): one standard configuration (standard_fbn_32) | 27.7 ms | 27.0 ms | 28.1 ms |
-| run(): the 6 standard configurations | 80.0 ms | 78.7 ms | 80.5 ms |
-| run(): resample to 1 mm, LoG, intensity | 32.9 ms | 32.1 ms | 34.1 ms |
-| run_rois(): 20 ROIs, intensity and morphology at 1 mm | 156.8 ms | 154.2 ms | 160.2 ms |
+| run(): one standard configuration (standard_fbn_32) | 13.8 ms | 13.4 ms | 14.8 ms |
+| run(): the 6 standard configurations | 54.5 ms | 53.5 ms | 54.7 ms |
+| run(): resample to 1 mm, LoG, intensity | 30.8 ms | 29.7 ms | 31.4 ms |
+| run_rois(): 20 ROIs, intensity and morphology at 1 mm | 62.7 ms | 62.3 ms | 63.8 ms |
 
 ### Threads
 
-`run()` of `standard_fbn_32` on the CT-like image with 1 to 14 numba threads.
+`run()` of `standard_fbn_32` on the CT-like image with 1 to 10 numba threads.
 
 [![Thread scaling](assets/benchmarks/threads.png)](assets/benchmarks/threads.png)
 
 | Task | Time (median) | Fastest | Slowest |
 |:--|--:|--:|--:|
-| 1 thread | 64.4 ms | 63.6 ms | 64.7 ms |
-| 2 threads | 42.2 ms | 41.8 ms | 42.4 ms |
-| 4 threads | 30.8 ms | 30.6 ms | 31.3 ms |
-| 8 threads | 26.1 ms | 25.6 ms | 26.4 ms |
-| 14 threads | 27.2 ms | 26.9 ms | 27.6 ms |
+| 1 thread | 38.0 ms | 37.8 ms | 39.1 ms |
+| 2 threads | 24.4 ms | 23.8 ms | 24.8 ms |
+| 4 threads | 17.0 ms | 16.7 ms | 17.3 ms |
+| 8 threads | 13.9 ms | 13.7 ms | 14.1 ms |
+| 10 threads | 13.2 ms | 13.0 ms | 13.7 ms |
 
 ### Loading
 
@@ -135,6 +135,6 @@ Whole pipeline runs on the CT-like image, from the image in memory to the featur
 
 | Task | Time (median) | Fastest | Slowest |
 |:--|--:|--:|--:|
-| NIfTI, gzip (.nii.gz) | 199.5 ms | 197.2 ms | 200.3 ms |
-| NIfTI (.nii) | 19.1 ms | 18.6 ms | 32.3 ms |
-| DICOM series (200 files) | 87.9 ms | 86.8 ms | 88.4 ms |
+| NIfTI, gzip (.nii.gz) | 177.8 ms | 176.1 ms | 182.5 ms |
+| NIfTI (.nii) | 17.7 ms | 17.3 ms | 18.0 ms |
+| DICOM series (200 files) | 75.2 ms | 74.3 ms | 75.8 ms |

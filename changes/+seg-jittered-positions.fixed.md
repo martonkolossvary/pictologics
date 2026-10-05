@@ -1,1 +1,0 @@
-DICOM SEG frames of one slice whose positions differ by a micrometre stay one slice. Before, this jitter gave a slice step of 0.001 mm and a very large volume when the SEG had no SpacingBetweenSlices.

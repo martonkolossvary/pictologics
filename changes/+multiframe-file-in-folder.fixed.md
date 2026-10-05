@@ -1,1 +1,0 @@
-A folder with one multi-frame DICOM file loads its frames as `load_image()` of the file does, and a series of several multi-frame files raises a clear error. Before, the frames stacked into a garbled volume without an error.

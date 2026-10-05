@@ -1,1 +1,0 @@
-With other feature families in a pass, the morphology convex hull and MVEE now run in a worker thread next to them. A standard configuration on a 512×512×200 CT takes 6.5 ms less, also at 1 thread; the features stay the same, bit for bit. While the worker runs, the other families use one numba thread less when the threads fill the fast cores (1 to 2 % less time).

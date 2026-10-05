@@ -1,1 +1,0 @@
-`DeduplicationPlan.is_stale()` tells a mask_values range from a list of the same labels, and reads a numpy array as the list of its values. Before, the configuration hash wrote a tuple and a list as the same text, and an array as its rounded text.

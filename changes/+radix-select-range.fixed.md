@@ -1,1 +1,0 @@
-With 130,000 values or more, the percentiles and the median could be wrong for a rare spread of the values: the largest value fell one bucket past the count table, and the count wrote past the end of the table. The table now holds every bucket.

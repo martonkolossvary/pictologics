@@ -1,1 +1,0 @@
-A DICOM file whose ImagePositionPatient holds text no longer stops `DicomDatabase.from_folders()` with worker processes (2,000 files or more); it stays in the database without a position. An error in one file skips that file with a log line in worker processes too.

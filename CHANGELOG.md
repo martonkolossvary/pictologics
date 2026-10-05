@@ -2,6 +2,72 @@
 
 <!-- towncrier release notes start -->
 
+## [0.7.0] - 2026-10-05
+
+### Added
+
+- `pictologics.set_num_threads()` and `pictologics.get_num_threads()` set and give the number of threads of all parallel parts. The environment variable `PICTOLOGICS_NUM_THREADS` sets the number before the import, also above the default.
+
+### Changed
+
+- `load_and_merge_images()` keeps the common type of the loaded arrays (float64 for NIfTI, NRRD and MetaImage files), gives uint8 with `binarize` and the smallest unsigned type of the labels with `relabel_masks`, instead of float64 every time. The values do not change. It also frees each loaded file before it loads the next one. A binarized merge of three 512×512×200 masks takes 202 ms instead of 240 ms, its array is 52 MB instead of 419 MB, and its peak memory is 996 MB instead of 1,311 MB.
+- `save_slices()` writes each slice at its own size, one pixel per voxel, and `dpi` is only the resolution tag in the file, which viewers and printers use to scale the image. Before, each slice was enlarged by dpi / 72 with LANCZOS (4.17 times per side at the default 300 dpi). The pixels are those of the display. It also writes the slices in numba's thread count of threads, not in 8 at most. At 300 dpi, 40 slices of a 512×512×200 CT with a mask take 0.07 s instead of 0.60 s, and the files are 9.5 times smaller (8.7 MB instead of 83 MB).
+
+### Fixed
+
+- A DICOM file whose ImagePositionPatient holds text no longer stops `DicomDatabase.from_folders()` with worker processes (2,000 files or more); it stays in the database without a position. An error in one file skips that file with a log line in worker processes too.
+- A DICOM series in the Explicit VR Big Endian transfer syntax with 2²⁰ voxels or more loads. Before, its one-pass conversion failed on the byte order.
+- A NaN in a float mask shows as background in `save_slices()` and `visualize_slices()`, without a RuntimeWarning. Before, it got an arbitrary label colour.
+- A folder with one multi-frame DICOM file loads its frames as `load_image()` of the file does, and a series of several multi-frame files raises a clear error. Before, the frames stacked into a garbled volume without an error.
+- A gzip or bzip2 NRRD file with `byte skip: -1` raises a clear error: the NRRD format allows this value with raw encoding only. Before, the loader read the last byte and reported too few bytes.
+- DICOM SEG frames of one slice whose positions differ by a micrometre stay one slice. Before, this jitter gave a slice step of 0.001 mm and a very large volume when the SEG had no SpacingBetweenSlices.
+- Moran's I and Geary's C of a small ROI (the loop over the voxel pairs) changed in their last digits with the number of threads. The kernel now adds its sums in one fixed order, so the values do not depend on the number of threads; they can change once in the last digits.
+- With 130,000 values or more, the percentiles and the median could be wrong for a rare spread of the values: the largest value fell one bucket past the count table, and the count wrote past the end of the table. The table now holds every bucket.
+- `DeduplicationPlan.is_stale()` tells a mask_values range from a list of the same labels, and reads a numpy array as the list of its values. Before, the configuration hash wrote a tuple and a list as the same text, and an array as its rounded text.
+- `DicomDatabase.from_folders()` reads each file once when the folders overlap (a folder and its subfolder). Before, it read the files of the subfolder twice.
+- `DicomDatabase.get_studies_df()` lists the modalities of a study in sorted order. Before, their order changed from one Python process to the next.
+- `DicomSeries.get_sorted_instances()` keeps the instances with a projection score in score order when some instances have none; those come last, by instance number. Before, one instance without a score sorted the series by instance number, and `check_completeness()` reported false gaps.
+- `save_results()` raises ValueError for a list that mixes dicts or DataFrames with other items, as its documentation says. Before, it raised TypeError or AttributeError.
+- `save_slices()` and `visualize_slices()` raise ValueError for a window_width of 0 or less, before they write a file or open a window. Before, a width of 0 divided by zero, and a negative width made every pixel white.
+
+### Optimized
+
+- A run now scans each mask once for its nonzero box, and `run_rois()` gives each run the box of its label. On a 512×512×200 CT, a run takes 0.8 ms less and `run_rois()` with 20 ROIs 21 ms less, with the same features, bit for bit.
+- Pictologics now uses only the fast cores by default, in every thread of the process: the performance cores of Apple silicon (10 threads of 14 on an M4 Pro, 4 % less time), at most the CPU limit of a Linux container, and the fast cores of an ARM chip with more kinds of cores on Linux. Windows and other computers use all logical CPUs, as before. numba cannot add threads after its start, so a number above the default needs `PICTOLOGICS_NUM_THREADS` before the import; `numba.set_num_threads()` above the default now raises.
+- The GLCM features come from two serial passes over the cells that hold counts, with closed forms for the information correlations: 0.98 ms instead of 3.33 ms at 256 grey levels, 0.25 ms instead of 0.30 ms at 8 levels. The values can differ in the last digits (at most 4e-13 relative on the benchmark cube).
+- The GLDZM distance map of an ROI box of 2¹⁸ voxels or more now runs in threads, one axis at a time: 0.56 ms instead of 1.17 ms on 75³ voxels, and 1.6 ms instead of 10.3 ms on 150³ voxels, with the same map, bit for bit.
+- The GLSZM and GLDZM zones now join across the thread chunks in parallel. The two families take 13 to 19 % less time on ROIs of 50³ to 150³ voxels, with the same matrices, bit for bit.
+- The LoG filter keeps its second and third terms in one temporary array: 126 ms instead of 137 ms on a 256³ image, with the same response, bit for bit.
+- The NGTDM contrast, busyness and strength come from closed forms over the grey levels, and the complexity from one serial kernel, instead of six level-by-level grids: 0.046 ms instead of 0.398 ms at 256 grey levels. The values can differ in the last digit (at most 8e-16 relative on the benchmark cube).
+- The histogram features of integer values (the discretised image) come from their bin counts, in one pass over the values: 0.44 ms instead of 1.23 ms for 268,000 values. The variance, skewness, kurtosis, coefficient of variation and the three absolute deviations add the same terms in another order; they are now closer to the exact values (the kurtosis of 2 million values: 5e-15 instead of 5e-12 relative error).
+- The import no longer runs two warm-up calls that warmed nothing (a scipy call, and a second form of the GLDZM distance map call), so a first import with an empty numba cache compiles one kernel less.
+- The import now warms the mask scans for masks of each type, in row and column order: the scans read an integer or bool mask as the integer type of its size, and a column-order mask as its transpose. It also warms the texture kernels for the int64 and float64 grey levels of direct calls; direct calls with other input types convert them first. So no numba code compiles after the import. In direct calls of the histogram features with uncommon input types, the moments can change in the last digit.
+- The import now warms the parallel sum of the texture tables, so the first texture pass with 182 grey levels or more does not compile it (about 0.2 s with an empty numba cache).
+- The marching cubes of a large ROI runs its x planes in threads: 0.46 ms instead of 0.74 ms for the mesh of a lesion box of 82×81×82 voxels, and 1.9 ms instead of 6.0 ms for a 150³ ROI, with the same mesh.
+- The percentile search of 130,000 values or more does less work around its buckets: the first-order features of 268,000 values take 1.24 ms instead of 1.76 ms, with the same values, bit for bit.
+- The pipeline now checks an image for NaN values once while its array lives: the next run on a 512×512×200 CT saves 2.5 ms. The check assumes that the caller does not change the array in place between runs.
+- The rotation-invariant wavelet computes each of the 24 rotations on the image itself, with reversed kernels on the flipped axes, and runs fewer rotations at once on large images, each pass in two threads: 654 ms instead of 975 ms and 470 MB instead of 805 MB for a 256³ image, and 6 to 15 % less time on 32³ to 192³. A response can differ in the last float32 digit (a reversed kernel adds its taps in the other order): the same bits on the synthetic test images; on the IBSI 2 phase 3 images, 403 of 24,786 values moved by at most 1e-9 relative.
+- With other feature families in a pass, the morphology convex hull and MVEE now run in a worker thread next to them. A standard configuration on a 512×512×200 CT takes 6.5 ms less, also at 1 thread; the features stay the same, bit for bit. While the worker runs, the other families use one numba thread less when the threads fill the fast cores (1 to 2 % less time).
+- `DicomDatabase.export_csv()` looks for lists only in the columns of Python objects: 83 ms instead of 89 ms for a database of 6,000 files, with the same CSV bytes.
+- `load_image()` converts a DICOM series 32 slices at a time, so the stored values of one slab, not of the whole series, stay in memory next to the output: a 200-slice CT needs 441 MB instead of 528 MB, with the same array.
+- `load_image()` inflates a gzip NIfTI file in one pass into its stored values: 158 ms instead of 173 ms for a 512×512×200 CT, with the same array, bit for bit.
+- `load_image()` reads the plain pixel data of a DICOM series straight from its bytes, as pydicom reads them, after pydicom has read the first slice: a 200-slice CT loads in 73 ms instead of 85 ms, with the same array.
+- `load_rtstruct()` fills each contour only between its edge crossings, and keeps only the box of each mask for the label map: 30 ROIs of 50 contours on a 512×512×200 grid take 216 ms instead of 579 ms and 126 MB instead of 1.6 GB of memory, with the same masks.
+- `run_batch()` builds its table without a pandas Series for each configuration of a case: a resumed batch of 150 cases with 6 configurations takes 64 ms instead of 95 ms. `format_results()` now also takes dictionaries of features.
+- `run_rois()` finds the label boxes inside the nonzero box of the label map only, and skips the negative-label check of an unsigned map. On a 512×512×200 CT with 20 small ROIs, the label boxes take 15 ms instead of 83 ms, with the same results, bit for bit.
+- `save_image()` gives nibabel a column-order copy of a large array, so nibabel writes whole slices: 76 ms instead of 207 ms for a 512×512×200 float64 CT as .nii, and 52 ms instead of 1.5 s for a float32 response map, with the same file bytes. The copy needs memory of the size of the array while the file is written.
+- `save_results()` writes a JSON table with a NaN or infinite value in one encode: 80 ms instead of 132 ms for 100 rows of 1,020 features with a NaN in the last row, with the same bytes.
+
+### Dependencies
+
+- Matplotlib is now the optional extra `viz`: `pip install "pictologics[viz]"` installs it for `visualize_slices`. A plain `pip install pictologics` no longer installs Matplotlib and its own packages (about 55 MB). Without Matplotlib, `visualize_slices` raises an ImportError that names the extra; `save_slices` needs only Pillow.
+- Pictologics installs again on Intel Macs and with Intel (x86_64) Python on Apple silicon, for example in 3D Slicer under Rosetta. There it uses numba 0.62.x, the last numba with macOS x86_64 builds (Python 3.12 and 3.13, with NumPy below 2.4). Elsewhere it needs numba 0.62.1 or newer, and 0.63.0 or newer on Python 3.14; before, it needed numba 0.67.x. A new CI job tests an Intel Mac with numba 0.62.1 and NumPy 2.3.5.
+- The lowest allowed versions of nibabel (5.2.0), pandas (2.2.2) and PyWavelets (1.6.0) are now the first ones that work with NumPy 2. Before, pip could keep an older nibabel, which fails at the import. The upper limits of SciPy, Pillow, Matplotlib, PyWavelets and tqdm are gone, so Pillow 12 and numba 0.68 install. The tests pass with the lowest versions (NumPy 2.0.2, numba 0.62.1, SciPy 1.16.3, nibabel 5.2.0, pydicom 3.0.1, pandas 2.2.2, Pillow 11.1.0, PyWavelets 1.6.0, Matplotlib 3.10.0, tqdm 4.66.0) and with the newest ones (numba 0.68.0, NumPy 2.5.3, SciPy 1.18.1, pandas 3.0.6, Pillow 12.3.0). A weekly CI job tests the newest numba, NumPy, SciPy, pandas and Pillow.
+- With SciPy 1.18 or newer, the Riesz and Simoncelli filters, and Moran's I and Geary's C of large ROIs, can change in their last digits with the number of threads, because the FFT of SciPy 1.18 splits its work by thread (in a test, Moran's I changed by 2.6e-16, relative). SciPy 1.17 gives the same values for every number of threads.
+- pandas 3 works: `DicomDatabase.export_csv()` no longer gives a `Pandas4Warning`. With pandas 3, a missing text value in a table, for example `preprocessing_sequence` in `describe_features()` or `derivation` in the SR measurement table, is NaN instead of None, as pandas 3 keeps text in its new `str` type; `pd.isna()` finds both.
+- twine is no longer a development dependency: no script or workflow used it (the PyPI upload uses the PyPA publish action).
+
+
 ## [0.6.0] - 2026-10-04
 
 ### Added
@@ -402,6 +468,7 @@
 
 ---
 
+[0.7.0]: https://github.com/martonkolossvary/pictologics/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/martonkolossvary/pictologics/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/martonkolossvary/pictologics/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/martonkolossvary/pictologics/compare/v0.4.2...v0.5.0

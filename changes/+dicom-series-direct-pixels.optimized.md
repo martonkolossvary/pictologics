@@ -1,1 +1,0 @@
-`load_image()` reads the plain pixel data of a DICOM series straight from its bytes, as pydicom reads them, after pydicom has read the first slice: a 200-slice CT loads in 73 ms instead of 85 ms, with the same array.

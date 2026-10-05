@@ -1,1 +1,0 @@
-The marching cubes of a large ROI runs its x planes in threads: 0.46 ms instead of 0.74 ms for the mesh of a lesion box of 82×81×82 voxels, and 1.9 ms instead of 6.0 ms for a 150³ ROI, with the same mesh.

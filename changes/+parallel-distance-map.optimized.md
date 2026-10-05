@@ -1,1 +1,0 @@
-The GLDZM distance map of an ROI box of 2¹⁸ voxels or more now runs in threads, one axis at a time: 0.56 ms instead of 1.17 ms on 75³ voxels, and 1.6 ms instead of 10.3 ms on 150³ voxels, with the same map, bit for bit.

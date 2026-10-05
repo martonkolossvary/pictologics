@@ -1,1 +1,0 @@
-pandas 3 works: `DicomDatabase.export_csv()` no longer gives a `Pandas4Warning`. With pandas 3, a missing text value in a table, for example `preprocessing_sequence` in `describe_features()` or `derivation` in the SR measurement table, is NaN instead of None, as pandas 3 keeps text in its new `str` type; `pd.isna()` finds both.

@@ -1,1 +1,0 @@
-`save_image()` gives nibabel a column-order copy of a large array, so nibabel writes whole slices: 76 ms instead of 207 ms for a 512×512×200 float64 CT as .nii, and 52 ms instead of 1.5 s for a float32 response map, with the same file bytes. The copy needs memory of the size of the array while the file is written.

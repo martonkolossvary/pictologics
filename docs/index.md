@@ -30,16 +30,14 @@ See the [NOTICE](NOTICE.md) file for the attribution and the third-party librari
 *   **🛡️ Predictable results**: each configuration gives all its feature columns, also when a step fails (the values are then `NaN`). A study table never has missing columns.
 *   **🛠️ Maintained**: Pictologics is developed to give robust radiomic features that describe the morphology of diseases on radiological images.
 
-## What Is New in 0.6.0
+## What Is New in 0.7.0
 
-- **Studies**: `run_batch` runs many cases, in more than one process, with one result file for each case. A stopped batch goes on where it stopped. `run_rois` runs each ROI of a label map with one image load.
-- **Masks**: `grow_mask` grows or shrinks a mask by a distance in mm, or keeps a ring, for example the fat around a vessel.
-- **MR and PET**: the `normalise` step normalises MR intensities, and `load_image(..., suv="bw")` gives PET images in SUV.
-- **Files**: new readers for NRRD, MetaImage, 3D Slicer `.seg.nrrd` and DICOM RTSTRUCT, and `save_image` writes NIfTI files.
-- **Filters and features**: the Gaussian filter, constant padding for all filters, the parts of the Gabor response, and the IBSI texture distances.
-- **Templates**: 60 configurations for cardiac CT (`lv` and `coronary`).
-- **Reproducibility**: each log entry records the `config_hash` of its configuration and the versions of the run.
-- **Breaking changes**: NIfTI geometry in the LPS+ frame, a fixed FBS start in every image, and the long-format column `feature_key`. See the [Changelog](CHANGELOG.md).
+- **Speed**: on a 512×512×200 CT, timed by turns with 0.6.0 on one computer, the configuration `standard_fbn_32` takes 48 % less time, the six standard configurations 30 % less, and `run_rois` with 20 ROIs 60 % less.
+- **Threads**: Pictologics uses the fast cores by default, for example the performance cores of Apple silicon. `set_num_threads()`, `get_num_threads()` and `PICTOLOGICS_NUM_THREADS` set one number for all parallel parts.
+- **First run**: the import compiles every numba kernel that a run can use, so no code compiles during a run.
+- **Installation**: Intel Macs, and 3D Slicer under Rosetta, can install Pictologics again (with numba 0.62). Matplotlib is now the optional extra `viz`: `pip install "pictologics[viz]"`. pandas 3, Pillow 12, SciPy 1.18 and numba 0.68 work.
+- **Fixes**: the DICOM database scan, big-endian and multi-frame DICOM series, the frame positions of DICOM SEG files, NRRD byte skips, and the percentiles of large ROIs (a rare case).
+- **Changes**: merged masks keep the type of their inputs (uint8 with `binarize`), and `save_slices` writes one pixel per voxel, with `dpi` as the tag of the file. Some texture and histogram values change in their last digits; the IBSI compliance is the same. See the [Changelog](CHANGELOG.md).
 
 ## Key Features
 

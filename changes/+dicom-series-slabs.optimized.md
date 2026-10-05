@@ -1,1 +1,0 @@
-`load_image()` converts a DICOM series 32 slices at a time, so the stored values of one slab, not of the whole series, stay in memory next to the output: a 200-slice CT needs 441 MB instead of 528 MB, with the same array.

@@ -1,1 +1,0 @@
-`run_rois()` finds the label boxes inside the nonzero box of the label map only, and skips the negative-label check of an unsigned map. On a 512×512×200 CT with 20 small ROIs, the label boxes take 15 ms instead of 83 ms, with the same results, bit for bit.

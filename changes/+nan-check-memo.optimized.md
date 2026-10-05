@@ -1,1 +1,0 @@
-The pipeline now checks an image for NaN values once while its array lives: the next run on a 512×512×200 CT saves 2.5 ms. The check assumes that the caller does not change the array in place between runs.
