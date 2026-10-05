@@ -14,7 +14,10 @@ number of threads depends on the cores of the computer:
 
 For another number, set the environment variable PICTOLOGICS_NUM_THREADS before you import
 pictologics, or call `set_num_threads` in your script. A NUMBA_NUM_THREADS of your own also
-sets the number. The results do not depend on the number of threads.
+sets the number. The results do not depend on the number of threads, with one exception:
+from SciPy 1.18, the FFT of SciPy splits its work by thread. So the Riesz and Simoncelli
+filters, and Moran's I and Geary's C of large ROIs, can change in their last digits with
+the number of threads (Moran's I by about 1e-16, relative, in a test).
 """
 
 from __future__ import annotations

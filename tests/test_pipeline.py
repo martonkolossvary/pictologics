@@ -4182,7 +4182,7 @@ def test_describe_features_uses_preprocessing_at_extraction_point() -> None:
     morphology = catalog[catalog["family"] == "morphology"].iloc[0]
 
     assert intensity["feature_extraction_step_index"] == 1
-    assert intensity["preprocessing_sequence"] is None
+    assert intensity.isna()["preprocessing_sequence"]  # None in pandas 2, NaN in pandas 3
     assert not intensity["is_resegmented"]
     assert not intensity["uses_morph_mask"]
     assert intensity["uses_intensity_mask"]

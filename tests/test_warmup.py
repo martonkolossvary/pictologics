@@ -90,6 +90,7 @@ _NEW_SIGNATURES = """
 import importlib, json, os, pkgutil, threading, warnings
 
 import numpy as np
+import scipy
 
 with warnings.catch_warnings():
     warnings.simplefilter("error", RuntimeWarning)  # a warm-up that fails
@@ -149,9 +150,21 @@ for threads in (None, 1):  # the default, then one thread: the same features
     pictologics.set_num_threads(threads)
     runs[threads] = [pipeline.run(image, mask, config_names=names)]
     runs[threads].append(pipeline.run(image, small, config_names=["spatial"]))
+# SciPy 1.18 splits its FFT work by thread, so Moran's I and Geary's C of the large ROI (the
+# FFT sums) can change in the last digit with the number of threads; all else is the same bits
+fft_by_thread = tuple(int(p) for p in scipy.__version__.split(".")[:2]) >= (1, 18)
+
+
+def agree(first, again, fft):
+    loose = [k for k in ("morans_i_index_N365", "gearys_c_measure_NPT7") if fft and k in first]
+    if not np.allclose(first[loose], again[loose], rtol=1e-12, atol=0.0):
+        return False
+    return first.drop(loose).to_numpy().tobytes() == again.drop(loose).to_numpy().tobytes()
+
+
 same = all(
-    first[name].to_numpy().tobytes() == again[name].to_numpy().tobytes()
-    for first, again in zip(runs[None], runs[1])
+    agree(first[name], again[name], fft_by_thread and run == 0)  # run 1: the pair loop
+    for run, (first, again) in enumerate(zip(runs[None], runs[1]))
     for name in first
 )
 pictologics.set_num_threads()
@@ -226,9 +239,10 @@ def test_a_pipeline_run_after_the_import_compiles_no_kernel(tmp_path: Path) -> N
     # paths), a filter with many FBS levels, 256 grey levels, masks of each type in row and
     # column order, label maps of five types in run_rois, save_image of five types, direct
     # calls with other input types, and a big-endian DICOM series. One thread gives the
-    # same features as the default (also Moran's I and Geary's C), and a new thread starts
-    # with the default. The check runs in its own numba cache, so it never writes into a
-    # cache that another process builds at the same time.
+    # same features as the default (also Moran's I and Geary's C; with SciPy 1.18 or later,
+    # whose FFT splits its work by thread, these two agree to 1e-12 on the FFT path), and a
+    # new thread starts with the default. The check runs in its own numba cache, so it
+    # never writes into a cache that another process builds at the same time.
     cache = os.environ.get("NUMBA_CACHE_DIR")
     env = {
         **os.environ,

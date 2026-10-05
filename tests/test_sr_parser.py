@@ -1183,5 +1183,6 @@ def test_tid1500_report_written_by_highdicom(tmp_path: Path) -> None:
     assert table["finding_type"].tolist() == ["Lesion"] * 4
     assert table["finding_site"].tolist() == ["Liver", "Liver", "Lung", "Lung"]
     assert table["tracking_id"].tolist() == ["Lesion1", "Lesion1", "Lesion2", "Lesion2"]
-    assert table["derivation"].tolist() == [None, "Mean", None, "Mean"]
+    # A missing value is None in pandas 2 and NaN in pandas 3 (its "str" columns)
+    assert table["derivation"].fillna("").tolist() == ["", "Mean", "", "Mean"]
     assert table["value"].tolist() == [10.0, 40.0, 11.0, 41.0]
