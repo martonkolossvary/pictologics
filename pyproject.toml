@@ -32,15 +32,22 @@ numpy = [
     { version = ">=2.0", python = "<3.14" },
     { version = ">=2.3.2", python = ">=3.14" },  # the first numpy with a Python 3.14 build
 ]
-scipy = "^1.16.3"
-nibabel = ">=3.2.0"
+scipy = ">=1.16.3"
+nibabel = ">=5.2.0"  # the first nibabel that works with numpy 2
 pydicom = ">=3.0.1"  # the SEG reader uses pydicom.pixels
-numba = "^0.67.0"
-pandas = ">=2.0.0"
-tqdm = "^4.66.0"
-matplotlib = "^3.10.0"
-Pillow = "^11.1.0"
-PyWavelets = "^1.4"
+# The rule follows the Python process, not the hardware: Intel Python on Apple silicon (for
+# example 3D Slicer under Rosetta) is x86_64 too. numba 0.62 is the last numba with macOS
+# x86_64 builds (Python 3.12 and 3.13), and numba 0.63 is the first with Python 3.14 builds.
+numba = [
+    { version = ">=0.62.1,<0.63", markers = "sys_platform == 'darwin' and platform_machine == 'x86_64'" },
+    { version = ">=0.62.1", python = "<3.14", markers = "sys_platform != 'darwin' or platform_machine != 'x86_64'" },
+    { version = ">=0.63.0", python = ">=3.14", markers = "sys_platform != 'darwin' or platform_machine != 'x86_64'" },
+]
+pandas = ">=2.2.2"  # the first pandas that works with numpy 2
+tqdm = ">=4.66.0"
+matplotlib = ">=3.10.0"
+Pillow = ">=11.1.0"
+PyWavelets = ">=1.6.0"  # the first PyWavelets that works with numpy 2
 pyyaml = ">=6.0"
 # Decodes compressed DICOM data with pydicom: JPEG Lossless, JPEG-LS, JPEG 2000 (and
 # baseline JPEG, which Pillow also reads)

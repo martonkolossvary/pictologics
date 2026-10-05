@@ -1,0 +1,43 @@
+name: Newest dependencies
+
+# Each week, the tests with the newest numba, NumPy, SciPy, pandas and Pillow (the lock keeps
+# older versions): a new release that breaks Pictologics shows here before users meet it.
+on:
+  schedule:
+    - cron: "0 5 * * 1"  # Mondays, 05:00 UTC
+  workflow_dispatch:
+
+jobs:
+  newest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Poetry
+        run: pipx install poetry==2.2.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'poetry'
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction
+
+      - name: Upgrade numba, NumPy, SciPy, pandas and Pillow
+        run: |
+          poetry run pip install --upgrade numba numpy scipy pandas pillow
+          poetry run pip check
+          poetry run python -c "import numba, numpy, scipy, pandas, PIL; print('numba', numba.__version__, 'numpy', numpy.__version__, 'scipy', scipy.__version__, 'pandas', pandas.__version__, 'Pillow', PIL.__version__)"
+
+      - name: Pytest
+        run: |
+          poetry run pytest -q -n auto

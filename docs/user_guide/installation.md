@@ -3,6 +3,7 @@
 ## Requirements
 
 - Python 3.12, 3.13 or 3.14.
+- On an Intel Mac, and with Intel (x86_64) Python on Apple silicon, for example 3D Slicer under Rosetta: Python 3.12 or 3.13. There pip installs numba 0.62, the last numba with builds for these computers, and NumPy below 2.4, as numba 0.62 needs.
 - pip, or another Python package installer.
 
 ## Install from PyPI
@@ -17,11 +18,11 @@ pip also installs the packages that Pictologics needs:
 |:--|:--|
 | NumPy, SciPy, Numba | The computations (Numba compiles the fast parts) |
 | nibabel | NIfTI files |
-| pydicom, python-gdcm, Pillow | DICOM files, also compressed ones (JPEG Lossless, JPEG-LS, JPEG 2000, baseline JPEG) |
+| pydicom, python-gdcm, Pillow | DICOM files, also compressed ones (JPEG Lossless, JPEG-LS, JPEG 2000, baseline JPEG). Pillow also writes the files of `save_slices` |
 | PyWavelets | The wavelet filters |
 | pandas | The result tables |
 | PyYAML | Configuration files |
-| Matplotlib | The slice viewers (`visualize_slices`, `save_slices`) |
+| Matplotlib | The slice viewer `visualize_slices` |
 | tqdm | The progress bar of `run_batch` |
 
 !!! note "12-bit lossy JPEG DICOM"
