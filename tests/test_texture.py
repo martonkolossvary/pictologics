@@ -924,6 +924,35 @@ def test_the_local_kernel_counts_equal_loops_over_the_voxels() -> None:
                 np.testing.assert_array_equal(part[4], ngldm)
 
 
+def test_the_local_kernel_twin_gives_the_counts_of_the_parallel_kernel() -> None:
+    # Below _LOCAL_PARALLEL_MIN_SIZE voxels of the padded volume the serial twin fills one
+    # table; the parallel kernel fills a table for each thread: the same counts (whole
+    # numbers), with one table for all directions or one for each.
+    import numba
+
+    rng = np.random.default_rng(22)
+    levels = rng.integers(1, 9, (9, 8, 7)).astype(np.float64)
+    roi = (rng.random(levels.shape) > 0.3).astype(np.uint8)
+    vol, counts = texture_module._texture_volume(levels, roi, 8)
+    for merge in (False, True):
+        runs = [
+            texture_module._local_matrices(
+                vol, counts, 8, True, True, True, True, 1, merge, parallel=parallel
+            )  # fmt: skip
+            for parallel in (True, False)
+        ]
+        for a, b in zip(*runs, strict=True):
+            assert a.tobytes() == b.tobytes()
+    twin = texture_module._local_tables_numba_serial
+    for limit, serial in ((vol.size + 1, True), (vol.size, numba.get_num_threads() == 1)):
+        with (
+            patch.object(texture_module, "_LOCAL_PARALLEL_MIN_SIZE", limit),
+            patch.object(texture_module, "_local_tables_numba_serial", wraps=twin) as calls,
+        ):
+            texture_module._local_matrices(vol, counts, 8, True, True, True, True, 1, True)
+        assert calls.call_count == int(serial)
+
+
 def test_texture_distances_match_loops_over_the_voxels() -> None:
     # GLCM, NGTDM and NGLDM distances above 1 (IBSI 1) give the matrices of plain loops
     # over the voxels: one distance for all, two NGTDM and NGLDM distances (two kernel

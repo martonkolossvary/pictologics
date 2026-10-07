@@ -98,7 +98,7 @@ from numba.np.ufunc.parallel import get_thread_id
 from numpy import typing as npt
 from scipy.ndimage import distance_transform_cdt
 
-from ._utils import PRANGE_ONLY, compute_nonzero_bbox, merge_bboxes, roi_min_max
+from ._utils import PRANGE_ONLY, compute_nonzero_bbox, merge_bboxes, roi_min_max, serial_twin
 
 # The texture feature families, in the order of their features
 _TEXTURE_FAMILIES = ("glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm")
@@ -718,6 +718,17 @@ def _local_tables_numba(
                         )  # fmt: skip
 
 
+# The serial twin of the local kernel: one table, no parallel region (see
+# _LOCAL_PARALLEL_MIN_SIZE)
+_local_tables_numba_serial = serial_twin(_local_tables_numba)
+
+# Below this many voxels of the padded volume, the local kernel runs as its serial twin with
+# one table: the start of the parallel region and the thread tables cost more. Measured on
+# pools of 32 spheres (32 levels, all four families, 10 threads), serial against parallel:
+# 1,331 voxels x0.27, 3,375 x0.42, 6,859 x0.74, 12,167 x1.09, 19,683 x1.65.
+_LOCAL_PARALLEL_MIN_SIZE = 10_000
+
+
 @jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
 def _levels_seen_numba(vol: npt.NDArray[np.uint16], seen: npt.NDArray[np.bool_]) -> None:
     """seen[z, g] = True for each grey level g in slice z of `vol` (one row per slice, so
@@ -818,6 +829,7 @@ def _local_matrices(
     glcm_distance: int = 1,
     ngtdm_distance: int = 1,
     ngldm_distance: int = 1,
+    parallel: Optional[bool] = None,
 ) -> tuple[
     npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any]
 ]:
@@ -828,13 +840,18 @@ def _local_matrices(
     placeholder. The directions along an axis of size 1 in the image (`planar`) stay
     empty (see _directions). The GLCM pairs voxels at `glcm_distance` along each
     direction, and the NGTDM and the NGLDM use the voxels up to their Chebyshev distance
-    (IBSI 1); a distance above 1 pads the volume to it."""
+    (IBSI 1); a distance above 1 pads the volume to it. `parallel` picks the parallel
+    kernel (default: from _LOCAL_PARALLEL_MIN_SIZE voxels on; the warm-up asks for both);
+    else the serial twin fills one table, with the same counts."""
     pad = max(
         glcm_distance, ngtdm_distance if calc_ngtdm else 1, ngldm_distance if calc_ngldm else 1
     )
     if pad > 1:
         vol = np.pad(vol, pad - 1)
-    n_threads = numba.get_num_threads()
+    if parallel is None:
+        parallel = vol.size >= _LOCAL_PARALLEL_MIN_SIZE
+    n_threads = numba.get_num_threads() if parallel else 1
+    kernel = _local_tables_numba if n_threads > 1 else _local_tables_numba_serial
     n_tables = 1 if merge_directions else 13
     used = _directions(planar)
     longest = max(vol.shape) - 2 * pad
@@ -868,7 +885,7 @@ def _local_matrices(
         """One kernel pass for the (GLCM, GLRLM, NGTDM, NGLDM) `families`, with the
         neighbourhood of `distance`."""
         neighbours = _flat_offsets(vol.shape, _neighbour_offsets(distance))
-        _local_tables_numba(
+        kernel(
             volume,
             counts,
             blocks,

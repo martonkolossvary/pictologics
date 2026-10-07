@@ -125,6 +125,12 @@ def _warmup_texture() -> None:
             texture._texture_volume_numba(data, mask != 0, n_bins, vol, counts)
             texture._texture_volume_serial_numba(data, mask != 0, n_bins, vol, counts)
     texture.calculate_all_texture_matrices(box, mask, n_bins)
+    # The local kernel and its serial twin (a small volume takes the twin)
+    vol, counts = texture._texture_volume(box, mask != 0, n_bins)
+    for parallel in (True, False):
+        texture._local_matrices(
+            vol, counts, n_bins, True, True, True, True, 0, True, parallel=parallel
+        )
     # The GLCM feature sums: float64 probabilities and int64 grey levels
     glcm_p = np.full((2, 2), 0.25)
     glcm_levels = np.array([1, 2], dtype=np.int64)

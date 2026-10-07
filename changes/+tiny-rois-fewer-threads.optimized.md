@@ -1,0 +1,1 @@
+The local texture kernel (GLCM, GLRLM, NGTDM and NGLDM) runs as a serial copy with one table for a volume below 10,000 voxels, with the same counts. run_rois() with 20 small spheres (257 voxels each) takes x0.92 of the time at 10 threads.
