@@ -20,6 +20,7 @@ from .base import (
     _prepare_masked_image,
     _slab_ufunc,
     _uniform_filter,
+    as_float32,
     ensure_float32,
     get_scipy_mode,
     resolve_boundary,
@@ -284,8 +285,10 @@ def laws_filter(
         - Uses separable 1D convolutions for ~8x speedup over full 3D
     """
 
-    # Convert to float32
-    image = ensure_float32(image)
+    # The passes run in float32. The normalized convolution of a source mask (without
+    # rotation invariance) keeps the image type: it divides two filtered sums.
+    masked_sums = source_mask is not None and not rotation_invariant
+    image = ensure_float32(image) if masked_sums else as_float32(image)
 
     # Parse kernel names (e.g., "E5L5S5" -> ["E5", "L5", "S5"])
     kernel_names = _parse_kernel_string(kernels)

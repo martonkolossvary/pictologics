@@ -217,6 +217,11 @@ def ensure_float32(
     Per IBSI 2: "The phantom data need to be converted from an integer
     data type to at least 32 bit floating point precision, prior to filtering."
 
+    The two rules of the filters: the FFT filters (LoG, Simoncelli, Riesz), Gabor and
+    the normalized convolution of a source mask take this function, so a float64 image
+    stays float64. The separable filters (mean, Gaussian, Laws, wavelets) take
+    `as_float32`, so their passes run in float32.
+
     Args:
         image: Input image array
 
@@ -226,6 +231,17 @@ def ensure_float32(
     if np.issubdtype(image.dtype, np.floating):
         return image.astype(np.float32) if image.dtype == np.float16 else image
     return image.astype(np.float32)
+
+
+def as_float32(image: npt.NDArray[Any]) -> npt.NDArray[np.float32]:
+    """The image as float32: the image itself when it is float32, else a new float32 copy
+    (on slabs in threads for a large array). The separable filters run their passes on
+    it: a float32 pass moves half the bytes of a float64 pass, and scipy still sums each
+    line in double. A float64 image thus changes by the float32 rounding of the passes
+    (see `ensure_float32` for the other rule)."""
+    if image.dtype == np.float32:
+        return image
+    return _float32_cut(image, None)
 
 
 def get_scipy_mode(boundary: BoundaryCondition) -> str:
@@ -442,9 +458,10 @@ def _slab_pass(
     slabs of the longest other axis in `threads` threads (default: numba's thread count;
     1 inside a pool that runs several filters at once). A None `output` is a new array of
     the image type, as scipy makes it; `output` may be `image` itself (scipy copies each
-    line)."""
+    line). The filter writes every value, so a new output needs no zero fill (a zero
+    fill of reused memory runs in one thread)."""
     if output is None:
-        output = np.zeros(image.shape, dtype=image.dtype)
+        output = np.empty(image.shape, dtype=image.dtype)
     if image.size < _SLAB_MIN_SIZE:  # checked first: small images pay no set-up
         function(image, axis=axis, output=output, **kwargs)
         return output
@@ -484,6 +501,35 @@ def _slab_ufunc(ufunc: Any, inputs: Tuple[Any, ...], out: npt.NDArray[Any]) -> n
     return out
 
 
+# _add_times adds in chunks of this many values, so a chunk stays in the cache for its adds
+_ADD_CHUNK = 1 << 15
+
+
+def _add_times(
+    total: npt.NDArray[np.float64], values: npt.NDArray[Any], times: int, first: bool
+) -> None:
+    """`times` float64 adds of `values` into `total`; with `first`, `total` starts at
+    `values` and takes `times` - 1 adds: the bits of `times` numpy adds. In one thread,
+    each chunk of values is read (and cast) once and stays in the cache for its adds. A
+    large array with threads takes one ufunc call for each slab and add instead (a chunk
+    loop in threads waits for the GIL). Both arrays are C-ordered, with one shape."""
+    adds = times - 1 if first else times
+    if total.size >= _SLAB_MIN_SIZE and get_num_threads() > 1:
+        if first:
+            _slab_pass(_copy_pass, values, values.ndim - 1, total)
+        for _ in range(adds):
+            _slab_ufunc(np.add, (total, values), total)
+        return
+    flat_total, flat_values = total.reshape(-1), values.reshape(-1)
+    for a in range(0, total.size, _ADD_CHUNK):
+        part = flat_total[a : a + _ADD_CHUNK]
+        value = flat_values[a : a + _ADD_CHUNK].astype(np.float64, copy=False)
+        if first:
+            part[...] = value
+        for _ in range(adds):
+            np.add(part, value, out=part)
+
+
 def _per_axis(value: Any, ndim: int) -> tuple[Any, ...]:
     """A scalar or a sequence as one value per axis (scipy's _normalize_sequence)."""
     if isinstance(value, (list, tuple, np.ndarray)):
@@ -501,8 +547,8 @@ def _gaussian_filter(
 ) -> npt.NDArray[Any]:
     """`scipy.ndimage.gaussian_filter` with the same steps (one 1-D pass per axis with a
     sigma above 1e-15, in axis order), each in `_slab_pass`: the same values."""
-    if output is None:
-        output = np.zeros(image.shape, dtype=image.dtype)
+    if output is None:  # the passes (or the copy) write every value
+        output = np.empty(image.shape, dtype=image.dtype)
     sigmas = _per_axis(sigma, image.ndim)
     orders = _per_axis(order, image.ndim)
     source = image
@@ -734,8 +780,8 @@ def _uniform_filter(
 ) -> npt.NDArray[Any]:
     """`scipy.ndimage.uniform_filter` with the same steps (one running-sum pass per axis,
     in axis order), each in `_slab_pass`: the same values. `output` may be `image`."""
-    if output is None:
-        output = np.zeros(image.shape, dtype=image.dtype)
+    if output is None:  # the passes (or the copy) write every value
+        output = np.empty(image.shape, dtype=image.dtype)
     if size <= 1:
         output[...] = image
         return output
@@ -757,13 +803,14 @@ def _convolve_axes(
     """1-D convolutions along the axes in order (kernels[axis], one per axis), the first
     into `output` (default: a new array of the image type; may be the image) and the
     others in place, as the filters make them with convolve1d; each pass in
-    `_slab_pass`. With `last_dtype`, the last pass writes a new array of that type: scipy
-    computes in double, so the values are those of a cast after the pass."""
+    `_slab_pass`. With `last_dtype` of another type than the passes, the last pass writes a
+    new array of that type: scipy computes in double, so the values are those of a cast
+    after the pass."""
     first = partial(convolve1d, weights=kernels[0], mode=mode)
     result = _slab_pass(first, image, 0, output, threads)
     for axis in range(1, len(kernels)):
         one = partial(convolve1d, weights=kernels[axis], mode=mode)
-        last = axis == len(kernels) - 1 and last_dtype is not None
+        last = axis == len(kernels) - 1 and last_dtype not in (None, result.dtype)
         target = np.empty(result.shape, dtype=last_dtype) if last else result
         result = _slab_pass(one, result, axis, target, threads)
     return result

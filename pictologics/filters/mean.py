@@ -12,6 +12,7 @@ from .base import (
     _normalized_uniform_filter,
     _padding_value_problem,
     _uniform_filter,
+    as_float32,
     ensure_float32,
     get_scipy_mode,
     resolve_boundary,
@@ -96,8 +97,9 @@ def mean_filter(
     if support < 1 or support % 2 == 0:
         raise ValueError(f"Support must be an odd positive integer, got {support}")
 
-    # Convert to float32 as required by IBSI
-    image = ensure_float32(image)
+    # The passes run in float32. The normalized convolution of a source mask keeps the
+    # image type: it divides two filtered sums.
+    image = ensure_float32(image) if source_mask is not None else as_float32(image)
 
     # Handle string boundary condition
     boundary = resolve_boundary(boundary)
@@ -115,7 +117,5 @@ def mean_filter(
         # Use normalized convolution for source masking
         return _normalized_uniform_filter(image, source_mask, size=support, mode=mode)
     else:
-        # Cast to float32 for consistency with the masked path and the other filters
-        # (uniform_filter accumulates in the input dtype, so a float64 image keeps
-        # its precision through the running sum before the final downcast).
-        return _uniform_filter(image, support, mode).astype(np.float32)
+        # A float32 response: each pass sums its lines in double and writes float32
+        return _uniform_filter(image, support, mode)

@@ -12,7 +12,10 @@ A filtered configuration usually has these steps:
 4. **Discretise** the response map, for texture, histogram and IVH features.
 5. **Extract** the features of the response map.
 
-Every filter returns a float32 response map, half the memory of float64. For a float64 image, the filter passes run in float64, and the last pass writes float32.
+Every filter returns a float32 response map, half the memory of float64. Two rules set the type of the filter passes:
+
+- **Mean, Gaussian, Laws and wavelets**: the passes run in float32 for every image. A float32 pass moves half the bytes, and scipy still sums each line in double. For a float64 image, the response changes by the float32 rounding of the passes: about 1e-7 of the largest response.
+- **LoG, Simoncelli, Riesz and Gabor**: a float64 image stays float64 in the passes and the FFTs, and the last step writes float32. A float64 image below 64³ voxels runs its LoG passes in float32, as they are faster there. The normalized convolution of a source mask also keeps a float64 image in float64.
 
 ## Filter Reference
 

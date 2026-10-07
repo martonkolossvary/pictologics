@@ -12,6 +12,7 @@ from .base import (
     _gaussian_filter,
     _normalized_gaussian,
     _padding_value_problem,
+    as_float32,
     ensure_float32,
     get_scipy_mode,
     resolve_boundary,
@@ -88,7 +89,9 @@ def gaussian_filter(
         - σ is converted from mm to voxels: σ_voxels = σ_mm / spacing_mm
         - The kernel of each axis has the radius ⌊truncate × σ_voxels + 0.5⌋ and sums to 1
     """
-    image = ensure_float32(image)
+    # The passes run in float32. The normalized convolution of a source mask keeps the
+    # image type: it divides two filtered sums.
+    image = ensure_float32(image) if source_mask is not None else as_float32(image)
     if isinstance(spacing_mm, (int, float)):
         spacing_mm = (float(spacing_mm),) * 3
     sigma_voxels = tuple(sigma_mm / s for s in spacing_mm)
@@ -105,6 +108,5 @@ def gaussian_filter(
     mode = get_scipy_mode(boundary)
     if source_mask is not None:
         return _normalized_gaussian(image, source_mask, sigma_voxels, mode, truncate)
-    # The passes run in the type of the image (a float64 image keeps its precision),
-    # then the response is float32 as for the other filters
-    return _gaussian_filter(image, sigma_voxels, mode, truncate).astype(np.float32)
+    # A float32 response: each pass sums its lines in double and writes float32
+    return _gaussian_filter(image, sigma_voxels, mode, truncate)
