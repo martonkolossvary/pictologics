@@ -89,9 +89,32 @@ class TestIntensityFeatures(unittest.TestCase):
         features = calculate_intensity_features(np.array([]))
         self.assertEqual(features, {})
 
+    def test_the_variance_is_the_second_central_moment_of_numpy(self) -> None:
+        # The variance comes from the pass of the central moments, not from np.var: 60
+        # random cases stay within 1e-12 of numpy's two-pass variance, and the coefficient
+        # of variation with it. The other first-order features use unchanged code.
+        rng = np.random.default_rng(11)
+        for case in range(60):
+            n = int(rng.integers(2, 2000))
+            values = (
+                rng.normal(40.0, 60.0, n),
+                rng.normal(1000.0, 1.0, n),
+                rng.integers(-1000, 3000, n).astype(np.float64),
+                rng.exponential(5.0, n).astype(np.float32),
+            )[case % 4]
+            features = calculate_intensity_features(values)
+            exact = values.astype(np.float64)
+            variance = np.var(exact)
+            np.testing.assert_allclose(features["intensity_variance_ECT3"], variance, rtol=1e-12)
+            np.testing.assert_allclose(
+                features["intensity_coefficient_of_variation_7TET"],
+                np.sqrt(variance) / np.mean(exact),
+                rtol=1e-12,
+            )
+
     def test_calculate_intensity_features_constant(self) -> None:
         # IBSI: skewness and kurtosis are 0 when the variance is 0. Equal values whose
-        # mean is not exact (0.1) count too, although np.var gives about 1e-34 for them.
+        # mean is not exact (0.1) count too, although their variance is about 1e-34.
         for value in (5.0, 0.1):
             features = calculate_intensity_features(np.full(3, value))
             self.assertAlmostEqual(features["mean_intensity_Q4LE"], value)
@@ -744,12 +767,21 @@ class TestFastPaths(unittest.TestCase):
                     np.testing.assert_equal(calculate_intensity_features(values), expected)
         with_nan = rng.normal(0.0, 1.0, 50)
         with_nan[7] = np.nan
-        self.assertIsNone(intensity_module._radix_select(with_nan, np.array([3, 20])))
+        bounds = (np.min(with_nan), np.max(with_nan))  # NaN, as numpy gives them
+        self.assertIsNone(intensity_module._radix_select(with_nan, np.array([3, 20]), bounds))
+        # Without the bounds of the caller (the histogram path), the search makes them
+        values = rng.normal(0.0, 100.0, 301)
+        with patch.object(intensity_module, "_RADIX_SELECT_MIN", 8):
+            np.testing.assert_equal(
+                intensity_module._order_statistics(values),
+                intensity_module._order_statistics(values, (np.min(values), np.max(values))),
+            )
 
     def test_radix_select_keeps_the_candidates_of_the_ranks(self) -> None:
         # The search picks the values of np.partition, with the bits of the search of
         # 0.6.0 (numpy copy below: the values of the buckets of the ranks, in their order),
-        # also -0.0 or +0.0 at a rank, for 1 and 3 chunks.
+        # also -0.0 or +0.0 at a rank or as the only smallest or largest value (a bound of
+        # the key range), for 1 and 3 chunks.
         from pictologics.features import intensity as intensity_module
 
         def search_of_0_6_0(values: np.ndarray, ranks: np.ndarray) -> np.ndarray:
@@ -777,6 +809,8 @@ class TestFastPaths(unittest.TestCase):
             rng.choice([-np.inf, np.inf, -2.5, 0.0, 7.0], 1999),
             -rng.gamma(2.0, 30.0, 2000),
             crowded,
+            np.abs(rng.choice([0.0, 3.0, 7.5], 2000)),  # +0.0 only, the smallest value
+            -np.abs(rng.choice([0.0, 3.0, 7.5], 2000)),  # -0.0 only, the largest value
         ):
             n = values.size
             ranks = intensity_module._percentile_ranks(n, values.dtype)
@@ -785,7 +819,8 @@ class TestFastPaths(unittest.TestCase):
             np.testing.assert_array_equal(expected, np.partition(values, ranks)[ranks])
             for chunks in (1, 3):
                 with patch.object(intensity_module, "get_num_threads", return_value=chunks):
-                    got = intensity_module._radix_select(values, ranks)
+                    bounds = (np.min(values), np.max(values))
+                    got = intensity_module._radix_select(values, ranks, bounds)
                 self.assertEqual(got.tobytes(), expected.tobytes())
 
     def test_radix_select_holds_every_bucket_of_the_key_range(self) -> None:
@@ -799,7 +834,7 @@ class TestFastPaths(unittest.TestCase):
         steps[[0, 250]] = 0, 2**17 - 1
         values = (first + steps).view(np.float64)
         ranks = np.arange(values.size)
-        got = intensity_module._radix_select(values, ranks)
+        got = intensity_module._radix_select(values, ranks, (values.min(), values.max()))
         np.testing.assert_array_equal(got, np.sort(values))
 
     def test_two_stage_local_peaks(self) -> None:

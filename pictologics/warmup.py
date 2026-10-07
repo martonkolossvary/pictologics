@@ -201,8 +201,6 @@ def _warmup_intensity() -> None:
     intensity._approximate_local_means_numba(prefix, mask_indices, rows, rows, rows)
     # Order statistics of large ROIs: the radix select kernels
     bits = values.view(np.uint64)
-    edge = np.empty(1, dtype=np.uint64)
-    intensity._key_range_numba(values, bits, edge, edge.copy())
     intensity._bucket_counts_numba(bits, 48, np.uint64(0), np.zeros((1, 1 << 16), dtype=np.int64))
     intensity._bucket_values_numba(
         bits,

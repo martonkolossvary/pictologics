@@ -372,11 +372,12 @@ def _percentile_ranks(n: int, dtype: np.dtype[Any]) -> npt.NDArray[np.intp]:
     return np.where(index - below == 0, below, below + 1).astype(np.intp)
 
 
-# From this many float64 values on, the order statistics come from a radix select: one
-# parallel pass for the key range, one parallel count of about 65,536 key buckets over that
-# range, then a partition of the few values in the buckets of the ranks. Below it, one
-# partition is faster (measured).
-_RADIX_SELECT_MIN = 130_000
+# From this many float64 values on, the order statistics come from a radix select: the key
+# range from the smallest and the largest value, one parallel count of about 65,536 key
+# buckets over that range, then a partition of the few values in the buckets of the ranks.
+# Below it, one partition is faster (measured on CT-like, mixed-sign, LoG-like and bimodal
+# values: from 100,000 values on the radix select wins for each; at 80,000, not for all).
+_RADIX_SELECT_MIN = 100_000
 _SIGN_BIT = np.uint64(1 << 63)
 _ALL_BITS = np.uint64(0xFFFFFFFFFFFFFFFF)
 
@@ -386,35 +387,6 @@ def _float_key(bits: np.uint64) -> np.uint64:
     """The float64 order as an unsigned order: flip the sign bit of a positive value and
     every bit of a negative one."""
     return bits ^ _ALL_BITS if bits >> np.uint64(63) else bits ^ _SIGN_BIT
-
-
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
-def _key_range_numba(
-    values: npt.NDArray[np.float64],
-    bits: npt.NDArray[np.uint64],
-    lo: npt.NDArray[np.uint64],
-    hi: npt.NDArray[np.uint64],
-) -> None:
-    """lo[t] and hi[t]: the smallest and the largest key of chunk t. A chunk with a NaN
-    sets hi[t] = 0 < lo[t] and stops."""
-    n = bits.size
-    n_chunks = lo.size
-    size = (n + n_chunks - 1) // n_chunks
-    for t in prange(n_chunks):
-        low = _ALL_BITS
-        high = np.uint64(0)
-        for i in range(t * size, min(n, (t + 1) * size)):
-            if values[i] != values[i]:
-                low = _ALL_BITS
-                high = np.uint64(0)
-                break
-            k = _float_key(bits[i])
-            if k < low:
-                low = k
-            if k > high:
-                high = k
-        lo[t] = low
-        hi[t] = high
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
@@ -459,28 +431,34 @@ def _bucket_values_numba(
                 c += 1
 
 
+def _key(value: float) -> int:
+    """The key of `_float_key` of one float64 value, in Python."""
+    bits = int(np.float64(value).view(np.uint64))
+    return bits ^ int(_ALL_BITS) if bits >> 63 else bits ^ int(_SIGN_BIT)
+
+
 def _radix_select(
-    values: npt.NDArray[np.float64], ranks: npt.NDArray[np.intp]
+    values: npt.NDArray[np.float64], ranks: npt.NDArray[np.intp], bounds: tuple[Any, Any]
 ) -> Optional[npt.NDArray[np.float64]]:
     """The values at the sorted 0-based `ranks` (np.partition's values), or None when the
-    array holds a NaN.
+    array holds a NaN (then a bound, the smallest or the largest value, is NaN).
 
     About 65,536 buckets split the key range of the data evenly (keys order like the
-    floats), so close values spread over many buckets. The table holds every bucket from
-    the smallest key to the largest: up to 65,537 buckets, because these two keys can be
-    65,536 buckets apart. The values of the buckets of the ranks are copied out and
-    partitioned at the ranks inside them: a partition, not a sort, so data that crowd into
-    few buckets cost about one partition of all values.
+    floats), so close values spread over many buckets. The bounds give the key range; a
+    bound of 0 takes the key of either zero, as -0.0 and +0.0 have two keys. The table holds
+    every bucket from the smallest key to the largest: up to 65,537 buckets, because these
+    two keys can be 65,536 buckets apart. The values of the buckets of the ranks are copied
+    out and partitioned at the ranks inside them: a partition, not a sort, so data that
+    crowd into few buckets cost about one partition of all values.
     """
+    smallest, largest = bounds
+    if smallest != smallest or largest != largest:
+        return None
     values = np.ascontiguousarray(values)
     bits = values.view(np.uint64)
     threads = get_num_threads()
-    lo = np.empty(threads, dtype=np.uint64)
-    hi = np.empty(threads, dtype=np.uint64)
-    _key_range_numba(values, bits, lo, hi)
-    if (hi < lo).any():
-        return None
-    low, high = int(lo.min()), int(hi.max())
+    low = _key(-0.0 if smallest == 0 else smallest)
+    high = _key(0.0 if largest == 0 else largest)
     shift = max(0, (high - low).bit_length() - 16)
     base = np.uint64(low >> shift)
     counts = np.empty((threads, (high >> shift) - (low >> shift) + 1), dtype=np.int64)
@@ -500,20 +478,25 @@ def _radix_select(
     return cast(npt.NDArray[np.float64], np.partition(candidates, np.unique(at))[at])
 
 
-def _order_statistics(values: npt.NDArray[Any]) -> tuple[Any, ...]:
+def _order_statistics(
+    values: npt.NDArray[Any], bounds: Optional[tuple[Any, Any]] = None
+) -> tuple[Any, ...]:
     """P10, P25, P75, P90 and the median of a non-empty array.
 
     `np.percentile(..., method="inverted_cdf")` and `np.median` partition the array one
     time each. One partition at all their ranks gives the same values: the median is
     numpy's mean of the middle value or values. A NaN makes all of them NaN, as in numpy
-    (a partition puts NaNs last).
+    (a partition puts NaNs last). `bounds`: the smallest and the largest value (np.min
+    and np.max), when the caller has them.
     """
     n = values.size
     ranks = _percentile_ranks(n, values.dtype)
     half = n // 2
     low = half - 1 + n % 2  # lower middle rank (the middle rank when n is odd)
     if values.dtype == np.float64 and n >= _RADIX_SELECT_MIN:
-        picked = _radix_select(values, np.concatenate((ranks, [low, half])))
+        if bounds is None:
+            bounds = (np.min(values), np.max(values))
+        picked = _radix_select(values, np.concatenate((ranks, [low, half])), bounds)
         if picked is not None:
             return (
                 picked[0],
@@ -640,8 +623,10 @@ def calculate_intensity_features(
     mean_val = np.mean(values)
     features["mean_intensity_Q4LE"] = float(mean_val)
 
-    # 4.1.2 Intensity variance (ECT3)
-    var_val = float(np.var(values, ddof=0))
+    # 4.1.2 Intensity variance (ECT3): the second central moment. The pass that gives it
+    # also gives the third and the fourth, so np.var does not read the values again.
+    m2, m3, m4 = _central_moments_2_3_4(values, float(mean_val))
+    var_val = m2
     features["intensity_variance_ECT3"] = float(var_val)
 
     # 4.1.3 Intensity skewness (KE2A) and 4.1.4 kurtosis (IPH6). IBSI defines both as 0
@@ -653,7 +638,6 @@ def calculate_intensity_features(
         features["intensity_skewness_KE2A"] = 0.0
         features["intensity_kurtosis_IPH6"] = 0.0
     else:
-        m2, m3, m4 = _central_moments_2_3_4(values, float(mean_val))
         denom = m2**1.5
         if denom != 0.0:
             features["intensity_skewness_KE2A"] = float(m3 / denom)
@@ -667,7 +651,7 @@ def calculate_intensity_features(
     # reproduces the IBSI benchmark (e.g. P90 = 4), whereas linear interpolation
     # would give an interpolated 4.2. The median (Y12H) is the conventional
     # sample median. One partition gives both.
-    p10, p25, p75, p90, median_val = _order_statistics(values)
+    p10, p25, p75, p90, median_val = _order_statistics(values, (min_val, max_val))
 
     # 4.1.5 Median intensity (Y12H)
     features["median_intensity_Y12H"] = float(median_val)
