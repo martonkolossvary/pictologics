@@ -303,7 +303,7 @@ def _constant_padded(
     image. A (response, valid mask) result is cut in both parts."""
     widths = (reach,) * image.ndim if isinstance(reach, int) else tuple(reach)
     pads = [(w, w) for w in widths]
-    padded = np.pad(image, pads, mode="constant", constant_values=value)
+    padded = _padded(image, pads, "constant", value)
     if source_mask is not None:
         kwargs["source_mask"] = np.pad(source_mask, pads, mode="constant", constant_values=True)
     result = func(padded, **kwargs)
@@ -358,8 +358,7 @@ def _apply_with_boundary_padding(
     widths = (pad_width,) * image.ndim if isinstance(pad_width, int) else tuple(pad_width)
     widths = tuple(min(w, s) for w, s in zip(widths, image.shape, strict=True))
 
-    extra = {"constant_values": padding_value} if boundary is BoundaryCondition.ZERO else {}
-    padded = np.pad(image, [(w, w) for w in widths], mode=pad_mode, **extra)  # type: ignore[call-overload]
+    padded = _padded(image, [(w, w) for w in widths], pad_mode, padding_value)
     crop = tuple(slice(w, w + s) for w, s in zip(widths, image.shape, strict=True))
     return func(padded, crop, **kwargs)
 
@@ -571,6 +570,93 @@ _PAD_MODES = {
     "reflect": "symmetric",
     "mirror": "reflect",
 }
+# The code of each np.pad mode in _source_line
+_PAD_CODES = {"constant": 0, "symmetric": 1, "reflect": 2, "edge": 3, "wrap": 4}
+
+
+@jit(nopython=True, inline="always", cache=True)  # type: ignore
+def _source_line(t: int, n: int, mode: int) -> int:
+    """The line of an axis of n lines that line t of the padded axis reads, as np.pad does
+    (`mode`: see _PAD_CODES); -1 for the constant."""
+    if 0 <= t < n:
+        return t
+    if mode == 0:
+        return -1
+    if mode == 3:
+        return 0 if t < 0 else n - 1
+    if mode == 4:
+        return t % n
+    if mode == 1:
+        period = 2 * n
+        t = t % period
+        return t if t < n else period - 1 - t
+    if n == 1:
+        return 0
+    period = 2 * n - 2
+    t = t % period
+    return t if t < n else period - t
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _pad_planes_numba(
+    image: npt.NDArray[np.floating[Any]],
+    out: npt.NDArray[np.floating[Any]],
+    w0: int,
+    w1: int,
+    w2: int,
+    mode: int,
+    value: float,
+    first: int,
+    last: int,
+) -> None:
+    """Planes first to last of `out` = np.pad of `image` with the widths w0, w1 and w2 before
+    the axes (the shape of `out` gives the widths after them), np.pad mode `mode` (see
+    _PAD_CODES) and the constant `value`."""
+    n0, n1, n2 = image.shape
+    for i in range(first, last):
+        si = _source_line(i - w0, n0, mode)
+        for j in range(out.shape[1]):
+            sj = _source_line(j - w1, n1, mode)
+            if si < 0 or sj < 0:
+                for k in range(out.shape[2]):
+                    out[i, j, k] = value
+                continue
+            for k in range(w2):
+                sk = _source_line(k - w2, n2, mode)
+                out[i, j, k] = value if sk < 0 else image[si, sj, sk]
+            for k in range(n2):
+                out[i, j, w2 + k] = image[si, sj, k]
+            for k in range(w2 + n2, out.shape[2]):
+                sk = _source_line(k - w2, n2, mode)
+                out[i, j, k] = value if sk < 0 else image[si, sj, sk]
+
+
+def _padded(
+    image: npt.NDArray[Any], widths: Any, mode: str, value: float = 0.0
+) -> npt.NDArray[Any]:
+    """np.pad(image, widths, mode) with the constant `value` (mode "constant"), in the same
+    memory order. A 3-D image is filled by a numba kernel, on slabs of planes in the slab
+    threads from _SLAB_MIN_SIZE voxels on."""
+    if image.ndim != 3:
+        extra = {"constant_values": value} if mode == "constant" else {}
+        return np.pad(image, widths, mode=mode, **extra)  # type: ignore[call-overload,no-any-return]
+    if image.flags.fnc:  # column order: pad the row-order view of its transpose
+        return _padded(image.T, [tuple(w) for w in widths][::-1], mode, value).T
+    shape = tuple(n + a + b for n, (a, b) in zip(image.shape, widths, strict=True))
+    out = np.empty(shape, dtype=image.dtype)
+    args = (image, out, widths[0][0], widths[1][0], widths[2][0], _PAD_CODES[mode], float(value))
+    threads = get_num_threads()
+    if out.size < _SLAB_MIN_SIZE or threads < 2:
+        _pad_planes_numba(*args, 0, shape[0])
+        return out
+    edges = np.linspace(0, shape[0], min(threads, shape[0]) + 1).astype(int)
+    list(
+        _slab_pool().map(
+            lambda k: _pad_planes_numba(*args, int(edges[k]), int(edges[k + 1])),
+            range(edges.size - 1),
+        )
+    )
+    return out
 
 
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
@@ -623,7 +709,7 @@ def _fft_gaussian_laplace(
         for n, r in zip(image.shape, radii, strict=True)
     ]
     widths = [(r, size - n - r) for n, r, size in zip(image.shape, radii, sizes, strict=True)]
-    padded = np.pad(image, widths, mode=_PAD_MODES[mode])  # type: ignore[call-overload]
+    padded = _padded(image, widths, _PAD_MODES[mode])
     (g0, d0), (g1, d1), (g2, d2) = (
         _kernel_spectra(s, r, size, truncate, axis == 2)
         for axis, (s, r, size) in enumerate(zip(sigmas, radii, sizes, strict=True))

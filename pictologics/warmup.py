@@ -416,3 +416,12 @@ def _warmup_filters() -> None:
         np.ones(2),
         np.ones(2),
     )
+
+    # The pad of the padded filters (np.pad): float32 and float64 images, in row order and
+    # strided (a column-order image goes as the row-order view of its transpose)
+    for kind in (np.float32, np.float64):
+        strided = np.ones((2, 2, 4), dtype=kind)[:, :, :2]
+        for image in (strided, strided.copy()):
+            filter_base._pad_planes_numba(
+                image, np.empty((4, 4, 4), dtype=kind), 1, 1, 1, 2, 0.0, 0, 4
+            )

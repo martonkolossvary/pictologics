@@ -2077,3 +2077,36 @@ def test_wavelet_rotations_need_no_rotated_copies() -> None:
     old = [_old_rotated_wavelet(masked, lo, hi, 1, "LHL", "constant", r) for r in rotations]
     got = wavelet_transform(image, "db2", 1, "LHL", rotation_invariant=True, source_mask=mask)
     assert_allclose(got, _old_pooled(old, "average"), rtol=1e-6, atol=1e-6 * np.max(np.abs(got)))
+
+
+def test_padded_is_np_pad() -> None:
+    """The pad of the padded filters is np.pad, in the same memory order: the five modes,
+    odd shapes, widths before and after each axis (also wider than the axis), float32 and
+    float64, row, column and strided images, a constant value, in one thread and on slabs
+    in threads; another number of axes goes to np.pad."""
+    from pictologics.filters import base
+
+    rng = np.random.default_rng(19)
+    widths_cases = (
+        ((2, 3), (1, 4), (0, 5)),
+        ((6, 9), (13, 2), (4, 12)),
+        ((10, 1), (1, 10), (7, 7)),
+    )
+    for shape in ((5, 7, 3), (1, 6, 2), (9, 4, 11)):
+        image = rng.normal(size=shape)
+        for array in (image, image.astype(np.float32), np.asfortranarray(image), image[:, ::-1]):
+            for widths in widths_cases:
+                for mode in ("constant", "symmetric", "reflect", "edge", "wrap"):
+                    extra = {"constant_values": 1.5} if mode == "constant" else {}
+                    expected = np.pad(array, widths, mode=mode, **extra)
+                    for threads, limit in ((1, base._SLAB_MIN_SIZE), (3, 1)):
+                        with (
+                            patch.object(base, "get_num_threads", return_value=threads),
+                            patch.object(base, "_SLAB_MIN_SIZE", limit),
+                        ):
+                            got = base._padded(array, widths, mode, 1.5)
+                        assert got.dtype == expected.dtype
+                        assert got.flags.f_contiguous == expected.flags.f_contiguous
+                        assert_array_equal(got, expected)
+    flat = rng.normal(size=(6, 5))
+    assert_array_equal(base._padded(flat, ((1, 2), (3, 0)), "reflect"), np.pad(flat, ((1, 2), (3, 0)), "reflect"))  # fmt: skip
