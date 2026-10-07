@@ -665,6 +665,24 @@ class TestGaborFilter:
         )
         assert result.shape == small_3d_image.shape
 
+    def test_the_plane_mean_adds_in_float64_in_plane_order(self, small_3d_image):
+        # The plane responses add in float64 in plane order, and the mean is cast to
+        # float32, on slabs in the slab threads: the values of the numpy steps, bit for bit.
+        from pictologics.filters import base, gabor
+
+        with patch.object(base, "_SLAB_MIN_SIZE", 1):
+            result = gabor_filter(
+                small_3d_image, sigma_mm=5.0, lambda_mm=2.0, gamma=0.5, average_over_planes=True
+            )
+        planes = [
+            gabor._apply_gabor_to_plane(
+                small_3d_image, 5.0, 2.0, 0.5, [0.0], axis, (1.0, 1.0, 1.0), "constant", "average"
+            )
+            for axis in range(3)
+        ]
+        expected = ((planes[0].astype(np.float64) + planes[1] + planes[2]) / 3.0).astype(np.float32)
+        assert result.tobytes() == expected.tobytes()
+
     def test_all_pooling_methods(self, small_3d_image):
         """Test all pooling methods with multiple orientations to hit all branches."""
         for pooling in ["max", "average", "min"]:

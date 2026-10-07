@@ -12,8 +12,12 @@ from numpy import typing as npt
 
 from .base import (
     BoundaryCondition,
+    _copy_pass,
+    _float32_cut,
     _padding_value_problem,
     _prepare_masked_image,
+    _slab_pass,
+    _slab_ufunc,
     ensure_float32,
     get_scipy_mode,
     resolve_boundary,
@@ -215,19 +219,18 @@ def gabor_filter(
         )
 
     if average_over_planes:
-        # Apply to all 3 orthogonal planes and average with in-place aggregation
-        result: npt.NDArray[np.floating[Any]] | None = None
-        for plane_axis in range(3):
-            plane_response = _plane(plane_axis)
-            if result is None:
-                result = plane_response.astype(np.float64)
-            else:
-                result += plane_response
-
-        if result is None:  # pragma: no cover
-            raise RuntimeError("Result should not be None after plane loop")
-
-        return (result / 3.0).astype(np.float32)  # type: ignore[union-attr]
+        # Apply to all 3 orthogonal planes and average: the sum runs in float64, in plane
+        # order. The copy, the sums, the division and the cast run on slabs in the slab
+        # threads (each value as in one numpy call), as the plane responses of axes 1 and 2
+        # are strided views.
+        first = _plane(0)
+        result = np.empty(first.shape, dtype=np.float64)
+        _slab_pass(_copy_pass, first, first.ndim - 1, result)
+        del first
+        for plane_axis in (1, 2):
+            _slab_ufunc(np.add, (result, _plane(plane_axis)), result)
+        _slab_ufunc(np.true_divide, (result, 3.0), result)
+        return _float32_cut(result, None)
     else:
         # Apply only to axial plane (axis 2 = k3 slices)
         return _plane(2)
