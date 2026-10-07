@@ -23,6 +23,7 @@ import pandas as pd
 import pytest
 
 from pictologics.utilities.sr_parser import (
+    SRBatch,
     SRDocument,
     SRMeasurement,
     SRMeasurementGroup,
@@ -1186,3 +1187,34 @@ def test_tid1500_report_written_by_highdicom(tmp_path: Path) -> None:
     # A missing value is None in pandas 2 and NaN in pandas 3 (its "str" columns)
     assert table["derivation"].fillna("").tolist() == ["", "Mean", "", "Mean"]
     assert table["value"].tolist() == [10.0, 40.0, 11.0, 41.0]
+
+
+def test_the_csv_exports_have_the_bytes_of_pandas(tmp_path: Path) -> None:
+    """export_csv and export_combined_csv write with the csv module the bytes of pandas'
+    to_csv: for the stored TID 1500 report, text with commas and quotes, missing text, a NaN
+    value, small and large floats, and a document without measurements."""
+    path = tmp_path / "tid1500.dcm"
+    with np.load(Path(__file__).parent / "data" / "highdicom_seg_sr.npz") as stored:
+        path.write_bytes(stored["tid1500_sr"].tobytes())
+    measurements = [
+        SRMeasurement('q"t', float("nan"), "mm"),
+        SRMeasurement("x,y", 1e-05, "1", derivation="Mean", tracking_id="T 1"),
+        SRMeasurement("big", 1.2345678901234568e17, "HU", finding_site="Lung"),
+    ]
+    documents = [
+        SRDocument.from_file(path),
+        SRDocument(
+            file_path=Path("/test/odd.dcm"),
+            sop_instance_uid="1.2.3",
+            measurement_groups=[SRMeasurementGroup(group_id='a,"b"', measurements=measurements)],
+        ),
+        SRDocument(file_path=Path("/test/empty.dcm"), sop_instance_uid="1.2.4"),
+    ]
+    for k, doc in enumerate(documents):
+        doc.get_measurements_df().to_csv(tmp_path / f"pandas_{k}.csv", index=False)
+        written = doc.export_csv(tmp_path / f"csv_{k}.csv")
+        assert written.read_bytes() == (tmp_path / f"pandas_{k}.csv").read_bytes()
+    batch = SRBatch(documents=documents)
+    batch.get_combined_measurements_df().to_csv(tmp_path / "pandas_all.csv", index=False)
+    written = batch.export_combined_csv(tmp_path / "csv_all.csv")
+    assert written.read_bytes() == (tmp_path / "pandas_all.csv").read_bytes()

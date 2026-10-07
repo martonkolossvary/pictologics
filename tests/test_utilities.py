@@ -1433,6 +1433,16 @@ class TestSyntheticDicom:
         assert len(data["patients"]) == 1
         assert data["patients"][0]["patient_id"] == "SYNTH_PATIENT_001"
 
+    def test_export_json_indent(self, synthetic_dicom_dir: Path, tmp_path: Path) -> None:
+        """The default writes the text of an indent of 2, as before; indent=None writes the
+        same content on one line."""
+        db = DicomDatabase.from_folders([str(synthetic_dicom_dir)], show_progress=False)
+        indented = Path(db.export_json(tmp_path / "indented.json")).read_text()
+        one_line = Path(db.export_json(tmp_path / "one_line.json", indent=None)).read_text()
+        assert json.loads(one_line) == json.loads(indented)
+        assert "\n" not in one_line
+        assert indented == json.dumps(json.loads(indented), indent=2)
+
     def test_scan_files_synthetic(self, synthetic_dicom_dir: Path) -> None:
         """Test file scanning with synthetic files."""
         files = _scan_dicom_files([synthetic_dicom_dir], recursive=True, show_progress=False)

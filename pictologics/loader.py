@@ -364,6 +364,7 @@ class Image:
     def with_source_mask(
         self,
         mask: "npt.NDArray[np.bool_] | npt.NDArray[np.integer[Any]] | Image",
+        copy: bool = True,
     ) -> "Image":
         """
         Return a copy of this image with a source validity mask applied.
@@ -375,6 +376,10 @@ class Image:
         Args:
             mask: Boolean array, integer array (>0 = valid), or Image object.
                   Must have the same shape as the image array.
+            copy: Copy the image array (the default). With False, the new image
+                  shares the array of this image: no copy of the voxels (419 MB for a
+                  512 x 512 x 200 CT). A change to one array then shows in the other.
+                  Pictologics does not write into the array of an image.
 
         Returns:
             New Image with source_mask set.
@@ -408,7 +413,7 @@ class Image:
             )
 
         return Image(
-            array=self.array.copy(),
+            array=self.array.copy() if copy else self.array,
             spacing=self.spacing,
             origin=self.origin,
             direction=(self.direction if self.direction is None else self.direction.copy()),

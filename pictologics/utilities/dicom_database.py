@@ -693,6 +693,7 @@ class DicomDatabase:
         self,
         json_path: str | Path,
         include_instance_lists: bool = True,
+        indent: Optional[int] = 2,
     ) -> str:
         """Export full hierarchy to JSON.
 
@@ -700,6 +701,8 @@ class DicomDatabase:
             json_path: Path for the output JSON file. A missing folder is made.
             include_instance_lists: Whether to include per-instance file paths
                 in the JSON output. Defaults to True for full export.
+            indent: The indent of the JSON text (default 2). With None, the text is on
+                one line and the fast C encoder of Python writes it.
 
         Returns:
             Path to the created file.
@@ -770,7 +773,8 @@ class DicomDatabase:
 
         Path(json_path).parent.mkdir(parents=True, exist_ok=True)
         with open(json_path, "w") as f:
-            json.dump(data, f, indent=2, default=str)
+            # json.dumps, not json.dump: only json.dumps takes the C encoder (indent None)
+            f.write(json.dumps(data, indent=indent, default=str))
 
         return str(json_path)
 

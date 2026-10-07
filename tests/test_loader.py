@@ -872,6 +872,19 @@ class TestLoader(unittest.TestCase):
         mask_img = Image(np.zeros((10, 10, 10), np.uint8), (1, 1, 1), (0, 0, 0))
         self.assertTrue(img.with_source_mask(mask_img).has_source_mask)
 
+    def test_with_source_mask_copies_the_array_unless_copy_is_false(self) -> None:
+        # The default copies the image array; copy=False shares it. Both keep the geometry.
+        img = Image(np.arange(27.0).reshape(3, 3, 3), (1, 2, 3), (4, 5, 6), modality="CT")
+        valid = np.ones((3, 3, 3), dtype=bool)
+        copied = img.with_source_mask(valid)
+        shared = img.with_source_mask(valid, copy=False)
+        self.assertFalse(np.shares_memory(copied.array, img.array))
+        self.assertIs(shared.array, img.array)
+        for masked in (copied, shared):
+            np.testing.assert_array_equal(masked.array, img.array)
+            self.assertEqual((masked.spacing, masked.origin), (img.spacing, img.origin))
+            self.assertTrue(masked.has_source_mask)
+
     def test_with_source_mask_int_array(self) -> None:
         # Non-bool arrays are accepted; nonzero -> valid.
         img = Image(np.zeros((5, 5, 5), np.float32), (1, 1, 1), (0, 0, 0))

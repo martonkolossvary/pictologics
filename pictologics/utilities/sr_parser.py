@@ -12,6 +12,8 @@ group (TID 1500 Measurement Group), with its finding, finding site and tracking 
 
 from __future__ import annotations
 
+import csv
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -252,23 +254,24 @@ class SRDocument:
             - derivation: How it was derived
             - tracking_id: Tracking identifier
         """
-        rows = []
-        for group in self.measurement_groups:
-            for meas in group.measurements:
-                rows.append(
-                    {
-                        "group_id": group.group_id,
-                        "finding_type": group.finding_type or meas.finding_type,
-                        "finding_site": group.finding_site or meas.finding_site,
-                        "measurement_name": meas.name,
-                        "value": meas.value,
-                        "unit": meas.unit,
-                        "derivation": meas.derivation,
-                        "tracking_id": meas.tracking_id,
-                    }
-                )
+        return pd.DataFrame(self._measurement_rows())
 
-        return pd.DataFrame(rows)
+    def _measurement_rows(self) -> list[dict[str, Any]]:
+        """The rows of get_measurements_df, one dict for each measurement."""
+        return [
+            {
+                "group_id": group.group_id,
+                "finding_type": group.finding_type or meas.finding_type,
+                "finding_site": group.finding_site or meas.finding_site,
+                "measurement_name": meas.name,
+                "value": meas.value,
+                "unit": meas.unit,
+                "derivation": meas.derivation,
+                "tracking_id": meas.tracking_id,
+            }
+            for group in self.measurement_groups
+            for meas in group.measurements
+        ]
 
     def get_summary(self) -> dict[str, Any]:
         """Get document summary without full parsing.
@@ -306,8 +309,7 @@ class SRDocument:
         """
         path_obj = Path(path)
         path_obj.parent.mkdir(parents=True, exist_ok=True)
-        df = self.get_measurements_df()
-        df.to_csv(path_obj, index=False)
+        _write_csv(path_obj, self._measurement_rows())
         return path_obj
 
     def export_json(self, path: str | Path) -> Path:
@@ -544,29 +546,29 @@ class SRBatch:
         Returns:
             DataFrame with all measurements from all documents.
         """
-        all_rows: list[dict[str, Any]] = []
+        return pd.DataFrame(self._combined_rows())
 
-        for doc in self.documents:
-            for group in doc.measurement_groups:
-                for meas in group.measurements:
-                    all_rows.append(
-                        {
-                            "sop_instance_uid": doc.sop_instance_uid,
-                            "patient_id": doc.patient_id,
-                            "study_instance_uid": doc.study_instance_uid,
-                            "group_finding_type": group.finding_type,
-                            "group_finding_site": group.finding_site,
-                            "measurement_name": meas.name,
-                            "value": meas.value,
-                            "unit": meas.unit,
-                            "finding_type": meas.finding_type,
-                            "finding_site": meas.finding_site,
-                            "derivation": meas.derivation,
-                            "tracking_id": meas.tracking_id,
-                        }
-                    )
-
-        return pd.DataFrame(all_rows)
+    def _combined_rows(self) -> list[dict[str, Any]]:
+        """The rows of get_combined_measurements_df, one dict for each measurement."""
+        return [
+            {
+                "sop_instance_uid": doc.sop_instance_uid,
+                "patient_id": doc.patient_id,
+                "study_instance_uid": doc.study_instance_uid,
+                "group_finding_type": group.finding_type,
+                "group_finding_site": group.finding_site,
+                "measurement_name": meas.name,
+                "value": meas.value,
+                "unit": meas.unit,
+                "finding_type": meas.finding_type,
+                "finding_site": meas.finding_site,
+                "derivation": meas.derivation,
+                "tracking_id": meas.tracking_id,
+            }
+            for doc in self.documents
+            for group in doc.measurement_groups
+            for meas in group.measurements
+        ]
 
     def export_combined_csv(self, path: str | Path) -> Path:
         """Export combined measurements to a single CSV file.
@@ -579,8 +581,7 @@ class SRBatch:
         """
         path_obj = Path(path)
         path_obj.parent.mkdir(parents=True, exist_ok=True)
-        df = self.get_combined_measurements_df()
-        df.to_csv(path_obj, index=False)
+        _write_csv(path_obj, self._combined_rows())
         return path_obj
 
     def export_log(self, path: str | Path) -> Path:
@@ -600,6 +601,19 @@ class SRBatch:
         df = pd.DataFrame(self.processing_log)
         df.to_csv(path_obj, index=False)
         return path_obj
+
+
+def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Write the measurement `rows` (dicts with the same keys) with the csv module, as
+    `pd.DataFrame(rows).to_csv(path, index=False)` writes them, without a DataFrame. The
+    bytes are the same for text, None and the float values of parsed measurements: pandas
+    writes a float column as repr does, and None or NaN as empty text."""
+    columns = list(rows[0]) if rows else []
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, lineterminator=os.linesep)
+        writer.writerow(columns)
+        for row in rows:
+            writer.writerow([None if row[c] != row[c] else row[c] for c in columns])
 
 
 def _process_sr_file_worker(

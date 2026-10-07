@@ -42,7 +42,7 @@ from pictologics import Image
 - **World frame**: `origin` and `direction` are in the LPS+ frame (left, posterior, superior) for every format, as in DICOM and ITK. A NIfTI affine is in RAS+, so the loader changes the sign of its X and Y rows. Give an `Image` that you make yourself its geometry in LPS+ too.
 - **Values**: DICOM, NIfTI, NRRD and MetaImage images load as float64 (DICOM with `apply_rescale=True`, the default).
 - **Dimensions**: the NIfTI and DICOM loaders give 3D arrays also for a 2D image (one slice). 2D NRRD and MetaImage files raise an error.
-- `image.with_source_mask(valid)` gives a copy with a source mask (see [Sentinel Values](#sentinel-values)).
+- `image.with_source_mask(valid)` gives a copy with a source mask (see [Sentinel Values](#sentinel-values)). With `copy=False`, the new image shares the voxel array and does not copy it.
 
 ## Images
 

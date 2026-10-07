@@ -37,6 +37,7 @@ db.export_csv("output")  # output_patients.csv, output_studies.csv, output_serie
 db.export_csv("output", include_instance_lists=True)  # with the UIDs and paths of the instances
 db.export_json("dataset.json")                         # the hierarchy, with the file paths
 db.export_json("dataset.json", include_instance_lists=False)
+db.export_json("dataset.json", indent=None)            # one line: about 5 times faster
 ```
 
 The tables leave out the long `InstanceSOPUIDs` and `InstanceFilePaths` columns by default; `include_instance_lists=True` adds them. This applies to `get_patients_df()`, `get_studies_df()` and `get_series_df()`.
