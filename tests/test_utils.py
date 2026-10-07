@@ -83,6 +83,28 @@ class TestComputeNonzeroBbox:
             assert call.args[0].dtype == np.uint16 and call.args[0].flags.c_contiguous
 
 
+def test_region_copy_is_np_array() -> None:
+    """A region copy is np.array(view, order="C"): a large float64 view in row order or
+    strided in parallel (with more than one thread), every other view by numpy; the
+    same bits (NaN, -0.0, infinite and subnormal values too)."""
+    rng = np.random.default_rng(14)
+    image = rng.normal(size=(9, 10, 11))
+    image.reshape(-1)[:5] = (np.nan, -0.0, np.inf, -np.inf, 1e-310)
+    views = [image[1:8, 2:9, 3:10], image[2:5], np.asfortranarray(image)[1:8, 2:9, 3:10]]
+    views += [np.asfortranarray(image), image.astype(np.float32)[1:8], image[:, :, 0]]
+    with (
+        patch.object(_utils, "_COPY_PARALLEL_MIN", 8),
+        patch.object(_utils, "get_num_threads", return_value=3),
+        patch.object(_utils, "_copy_numba", wraps=_utils._copy_numba) as kernel,
+    ):
+        for view in views:
+            got = _utils.region_copy(view)
+            assert got.flags.c_contiguous and got.dtype == view.dtype
+            assert got.tobytes() == np.array(view, order="C").tobytes()
+    assert kernel.call_count == 3  # the float64 views in row order or strided (also a cut of
+    # a column-order image); a whole column-order image goes to numpy
+
+
 class TestRoiMinMax:
     """Tests for roi_min_max (serial kernel for small data, parallel for large)."""
 

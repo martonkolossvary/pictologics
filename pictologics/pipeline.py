@@ -63,6 +63,7 @@ from .features._utils import (
     compute_nonzero_bbox,
     label_boxes,
     merge_bboxes,
+    region_copy,
     roi_min_max,
 )
 from .features.intensity import (
@@ -717,7 +718,7 @@ def _cut_to_roi(
     def piece(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
         key = (id(array), bounds)
         if key not in cuts:  # a copy: a view would keep the whole array alive
-            cuts.keep(array, key, np.array(array[region], order="C"))
+            cuts.keep(array, key, region_copy(array[region]))
         return cuts[key]
 
     def part(image: Image) -> Image:

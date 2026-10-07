@@ -272,6 +272,12 @@ def roi_min_max(
     return float(mins[idx].min()), float(maxs[idx].max())
 
 
+_bbox_scan_numba_serial = serial_twin(_bbox_scan_numba)
+# Voxels from which the box scan runs in parallel; below, its serial twin (measured: the twin
+# takes 0.37 to 0.97 of the numpy reductions of before up to 2^20 voxels)
+_BBOX_PARALLEL_MIN = 1 << 20
+
+
 def compute_nonzero_bbox(
     mask: npt.NDArray[Any],
 ) -> Optional[tuple[slice, slice, slice]]:
@@ -286,31 +292,14 @@ def compute_nonzero_bbox(
     if mask.ndim != 3:
         raise ValueError(f"Expected a 3D mask, got shape={mask.shape!r}")
 
-    # For small masks the numba parallel-launch overhead exceeds the scan itself;
-    # keep the pure-numpy reductions there.
-    if mask.size < 1 << 20:
-        m = mask != 0
-        z_any_np = np.any(m, axis=(1, 2))
-        if not bool(np.any(z_any_np)):
-            return None
-        y_any = np.any(m, axis=(0, 2))
-        x_any = np.any(m, axis=(0, 1))
-
-        z0 = int(np.argmax(z_any_np))
-        z1 = int(len(z_any_np) - 1 - np.argmax(z_any_np[::-1]))
-        y0 = int(np.argmax(y_any))
-        y1 = int(len(y_any) - 1 - np.argmax(y_any[::-1]))
-        x0 = int(np.argmax(x_any))
-        x1 = int(len(x_any) - 1 - np.argmax(x_any[::-1]))
-        return slice(z0, z1 + 1), slice(y0, y1 + 1), slice(x0, x1 + 1)
-
     mask = _nonzero_form(mask)
     if not mask.flags.c_contiguous:
         if mask.flags.f_contiguous:  # column order: the box of the row-order transpose
             box = compute_nonzero_bbox(mask.T)
             return None if box is None else (box[2], box[1], box[0])
         mask = np.ascontiguousarray(mask)
-    z_any, y_min, y_max, x_min, x_max = _bbox_scan_numba(mask)
+    scan = sized(_bbox_scan_numba, _bbox_scan_numba_serial, mask.size, _BBOX_PARALLEL_MIN)
+    z_any, y_min, y_max, x_min, x_max = scan(mask)
     nz = np.flatnonzero(z_any)
     if nz.size == 0:
         return None
@@ -410,6 +399,37 @@ def label_boxes(
         )
         for k in range(largest)
     ]
+
+
+@jit(nopython=True, nogil=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _copy_numba(source: npt.NDArray[np.float64], out: npt.NDArray[np.float64]) -> None:
+    """out = source, the planes of axis 0 in parallel."""
+    for i in prange(out.shape[0]):
+        for j in range(out.shape[1]):
+            for k in range(out.shape[2]):
+                out[i, j, k] = source[i, j, k]
+
+
+# From this many float64 values on, with more than one thread, region_copy copies in
+# parallel (measured on regions of a 512 x 512 x 200 image: np.array takes 24 us at 50^3,
+# 165 us at 64^3 and 494 us at 86 x 86 x 90; the parallel copy about 115 and 130 us)
+_COPY_PARALLEL_MIN = 1 << 18
+
+
+def region_copy(view: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """np.array(view, order="C"): a large float64 3-D view in row order or strided is copied
+    in parallel, other arrays by numpy."""
+    if (
+        view.dtype == np.float64
+        and view.ndim == 3
+        and view.size >= _COPY_PARALLEL_MIN
+        and get_num_threads() > 1
+        and (view.flags.c_contiguous or not view.flags.f_contiguous)
+    ):
+        out = np.empty(view.shape, dtype=np.float64)
+        _copy_numba(view, out)
+        return out
+    return np.array(view, order="C")
 
 
 def merge_bboxes(
