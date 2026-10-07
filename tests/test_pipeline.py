@@ -6331,7 +6331,7 @@ def test_runs_do_not_collect_finalizers_on_their_arrays() -> None:
     for _ in range(3):
         pipeline.run(image, mask, config_names=["c"])
         counts.append((finalizers(image.array), finalizers(mask.array)))
-    assert counts == [(1, 0)] * 3  # the image keeps the finalizer of its NaN check
+    assert counts == [(0, 0)] * 3  # the NaN check reads the cut array, not the image
 
 
 def test_run_rois_scans_the_map_once_and_no_label_buffer() -> None:
@@ -6432,6 +6432,54 @@ def test_a_second_run_on_an_image_does_not_check_it_for_nan_again(sm_mask: Image
         assert pipeline.run(copied, sm_mask, config_names=["c"])["c"].equals(first)
         assert kernel.call_count == 2
     assert second.equals(first)
+
+
+def test_the_nan_check_reads_the_region_of_the_run() -> None:
+    # The NaN check reads the image of the extraction (the cut region of a large image): a
+    # NaN far outside the ROI box is never read, and no warning comes. In both cases the
+    # features and the warnings equal those of a check before every extraction.
+    from pictologics import pipeline as pipeline_module
+    from pictologics import preprocessing
+
+    clean = np.random.default_rng(35).normal(40.0, 10.0, (64, 64, 40))  # large: a cut
+    roi = np.zeros(clean.shape, dtype=np.uint8)
+    roi[40:52, 40:52, 20:30] = 1
+    mask = Image(roi, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config(
+        "c",
+        [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+            {"step": "extract_features", "params": {"families": ["intensity", "texture"]}},
+        ],
+    )
+
+    def run(array: np.ndarray) -> tuple[Any, list[str]]:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            out = pipeline.run(Image(array, mask.spacing, mask.origin), mask, config_names=["c"])
+        return out["c"], [str(w.message) for w in caught]
+
+    far, inside = clean.copy(), clean.copy()
+    far[2, 3, 4] = np.nan
+    inside[45, 46, 25] = np.nan
+    with (
+        patch.object(preprocessing, "_FINITE_PARALLEL_MIN", 0),
+        patch.object(
+            preprocessing, "_nonfinite_blocks_numba", wraps=preprocessing._nonfinite_blocks_numba
+        ) as kernel,
+    ):
+        out_far, said_far = run(far)
+    sizes = [call.args[0].size for call in kernel.call_args_list]
+    assert sizes and max(sizes) < far.size  # the cut region, never the whole image
+    assert said_far == [] and out_far.equals(run(clean)[0])
+    out_inside, said_inside = run(inside)
+    assert said_inside == ["Left out 1 ROI voxels with a NaN or infinite intensity from the "
+                           "intensity mask of config 'c'."]  # fmt: skip
+    with patch.object(pipeline_module, "_all_finite", return_value=False):  # check every time
+        for array, out, said in ((far, out_far, said_far), (inside, out_inside, said_inside)):
+            again, said_again = run(array)
+            assert again.equals(out) and said_again == said
 
 
 def _morphology_case() -> tuple[Image, Image]:

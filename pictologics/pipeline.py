@@ -1675,17 +1675,15 @@ class RadiomicsPipeline:
         config_names: Optional[list[str]],
         target_configs: list[str],
         mask_settings: tuple[float, float, float],
-        nonfinite: Optional[bool] = None,
         roi_nearest: Optional[tuple[Image, int]] = None,
         image_options: Optional[Mapping[str, Any]] = None,
         known_boxes: Iterable[tuple[npt.NDArray[Any], Optional[tuple[slice, slice, slice]]]] = (),
     ) -> dict[str, pd.Series]:
         """The part of `run()` after the loading: `target_configs` run (see
         `_target_configs`), and the log records the requested `config_names` and the
-        `image_options` of the image load. `nonfinite` (whether the image has NaN or
-        infinite values) is found when it is None. `roi_nearest`: see
-        PipelineState.roi_nearest. `known_boxes`: (mask array, its nonzero box) pairs that
-        the caller knows, so that the run does not scan these arrays."""
+        `image_options` of the image load. `roi_nearest`: see PipelineState.roi_nearest.
+        `known_boxes`: (mask array, its nonzero box) pairs that the caller knows, so that
+        the run does not scan these arrays."""
         mask_subvoxel_tolerance, mask_subvoxel_warning_threshold, mask_min_overlap_fraction = (
             mask_settings
         )
@@ -1729,9 +1727,6 @@ class RadiomicsPipeline:
         self._dedup_computed_count = 0
         self._last_distance_map = None
         self._roi_cuts.clear()
-        # NaN or infinite intensities leave the intensity mask before each extraction
-        if nonfinite is None:
-            nonfinite = not _all_finite(orig_img.array)
 
         if self._deduplication_enabled and len(target_configs) > 1:
             # Get configs for analysis
@@ -1968,10 +1963,13 @@ class RadiomicsPipeline:
 
                     # Execute Step
                     if step_name == "extract_features":
+                        # NaN or infinite intensities leave the intensity mask. The check reads
+                        # the image of the extraction (the cut region of a large image), once
+                        # for each array: NaN voxels outside it never reach a feature.
                         extract_state = (
-                            _finite_intensity_mask(state, config_name, self._mask_boxes)
-                            if nonfinite
-                            else state
+                            state
+                            if _all_finite(state.raw_image.array)
+                            else _finite_intensity_mask(state, config_name, self._mask_boxes)
                         )
                         # Use deduplication if plan exists
                         if dedup_plan is not None:
@@ -2154,7 +2152,6 @@ class RadiomicsPipeline:
         if isinstance(config_names, str):
             config_names = [config_names]
         names = self._target_configs(config_names)
-        nonfinite = not _all_finite(orig_img.array)
         # One mask array for all ROIs: each run fills the box of its label and clears it
         # after (a run keeps no array of its masks)
         buffer: npt.NDArray[Any] = np.zeros(values.shape, dtype=np.uint8)
@@ -2182,7 +2179,6 @@ class RadiomicsPipeline:
                 config_names,
                 names,
                 mask_settings,
-                nonfinite,
                 None if nearest is None else (nearest, int(label)),
                 image_options,
                 # The buffer holds this label alone, so its nonzero box is the label box
