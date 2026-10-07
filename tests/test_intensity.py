@@ -837,6 +837,67 @@ class TestFastPaths(unittest.TestCase):
         got = intensity_module._radix_select(values, ranks, (values.min(), values.max()))
         np.testing.assert_array_equal(got, np.sort(values))
 
+    def test_linear_select_order_statistics(self) -> None:
+        # From 1,000 float64 values on, the linear select gives the values of the other paths
+        # bit for bit, serial and in threads, or gives way to them: NaN or infinite bounds,
+        # equal values, a span too small for the bucket scale, crowded values (the sample
+        # finds them, or the count after it) and a zero rank with both zeros.
+        from pictologics.features import intensity as intensity_module
+
+        real = intensity_module._linear_select
+        took: list[bool] = []
+
+        def spy(values: np.ndarray, ranks: np.ndarray, bounds: tuple) -> np.ndarray | None:
+            self.assertTrue(np.all(np.diff(ranks) >= 0))  # the kernels read them in order
+            found = real(values, ranks, bounds)
+            took.append(found is not None)
+            return found
+
+        def took_it(values: np.ndarray, threads: int = 1) -> bool:
+            # The values of the other paths, with the bounds of the caller and without them;
+            # whether the linear select gave them
+            with patch.object(intensity_module, "_LINEAR_SELECT_MIN", values.size + 1):
+                expected = np.array(intensity_module._order_statistics(values), dtype=float)
+            took.clear()
+            with (
+                patch.object(intensity_module, "_linear_select", spy),
+                patch.object(intensity_module, "_PARALLEL_SELECT_MIN", 1000),
+                patch.object(intensity_module, "get_num_threads", return_value=threads),
+            ):
+                for bounds in ((np.min(values), np.max(values)), None):
+                    got = intensity_module._order_statistics(values, bounds)
+                    self.assertEqual(np.array(got, dtype=float).tobytes(), expected.tobytes())
+            return all(took)
+
+        rng = np.random.default_rng(16)
+        side = np.abs(rng.normal(0.0, 100.0, 999))
+        for values in (
+            rng.normal(40.0, 20.0, 1001),
+            rng.normal(40.0, 20.0, 1000),
+            np.round(rng.normal(50.0, 30.0, 1000)),  # ties
+            np.concatenate((-side, [0.0, 0.0], side)),  # +0.0 only at the middle ranks
+        ):
+            for threads in (1, 3):
+                self.assertTrue(took_it(values, threads))
+        with_nan, with_inf = rng.normal(0.0, 1.0, (2, 1000))
+        with_nan[7], with_inf[7] = np.nan, np.inf
+        crowded = np.full(2000, 3.0)
+        crowded[:40] = rng.normal(0.0, 1e6, 40)
+        both_zeros = np.concatenate((-side, [-0.0, 0.0], side))  # np.partition orders them freely
+        for values in (
+            with_nan,
+            with_inf,
+            np.full(1000, 0.1),
+            rng.normal(0.0, 1.0, 1000) * 1e-310,  # 4,096 buckets over this span: an inf scale
+            crowded,
+            both_zeros,
+        ):
+            self.assertFalse(took_it(values))
+        self.assertFalse(took_it(both_zeros, 3))
+        with patch.object(intensity_module, "_crowded_numba", return_value=False):
+            for threads in (1, 3):  # the count finds the crowded values
+                self.assertFalse(took_it(crowded, threads))
+
     def test_two_stage_local_peaks(self) -> None:
         from pictologics.features import intensity as intensity_module
         from pictologics.loader import Image

@@ -221,6 +221,22 @@ def _warmup_intensity() -> None:
         np.array([bits.size]),
         np.empty(bits.size),
     )
+    # The linear select: the sample check, the serial kernel, the count and the copy in
+    # threads
+    order = np.array([0, 1, 2, 2, 3, 4], dtype=np.int64)
+    intensity._crowded_numba(values, 0.0, 409.6, order, np.zeros(4096, dtype=np.int64), 2, 1)
+    intensity._linear_select_numba(
+        values, 0.0, 409.6, order, np.zeros(4096, dtype=np.int64), np.empty(6, dtype=np.uint64)
+    )
+    intensity._linear_counts_numba(values, 0.0, 409.6, np.empty((1, 4096), dtype=np.int64))
+    intensity._linear_keys_numba(
+        values,
+        0.0,
+        409.6,
+        np.full(4096, -1, dtype=np.int64),
+        np.zeros((1, 1), dtype=np.int64),
+        np.empty(1, dtype=np.uint64),
+    )
 
 
 def _warmup_morphology() -> None:

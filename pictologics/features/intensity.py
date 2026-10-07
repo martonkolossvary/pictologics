@@ -478,6 +478,251 @@ def _radix_select(
     return cast(npt.NDArray[np.float64], np.partition(candidates, np.unique(at))[at])
 
 
+# From this many float64 values on, the order statistics take a linear select first: buckets
+# of equal width from the smallest to the largest value, a count, and a partition of the keys
+# of the buckets of the ranks only (measured on pools of new CT-like arrays: x0.65 of the
+# partition at 1,000 values, x0.09 to x0.25 from 5,000 to 50,000 values, x0.17 and x0.41 of
+# the radix select at 100,000 and 268,000 values; at 500 values it does not win).
+_LINEAR_SELECT_MIN = 1_000
+# From this many values on, with more than one thread, the count and the copy of the linear
+# select run in threads (measured: the serial passes lose to the radix select at 2 million).
+_PARALLEL_SELECT_MIN = 1 << 20
+_NEGATIVE_ZERO_KEY = np.uint64(0x7FFFFFFFFFFFFFFF)  # the key of -0.0 (see _float_key)
+_POSITIVE_ZERO_KEY = np.uint64(0x8000000000000000)  # the key of +0.0
+
+
+@jit(nopython=True, inline="always", cache=True)  # type: ignore
+def _key_bits(key: np.uint64) -> np.uint64:
+    """The float64 bits of a key of `_float_key`."""
+    return key ^ _SIGN_BIT if key >> np.uint64(63) else key ^ _ALL_BITS
+
+
+@jit(nopython=True, inline="always", cache=True)  # type: ignore
+def _linear_bucket(value: float, low: float, scale: float, last: int) -> int:
+    """The bucket of `value` among buckets of equal width from `low`: (value - low) * scale,
+    at most `last`. It never falls when the value grows, so the buckets keep the order."""
+    return min(int((value - low) * scale), last)
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _crowded_numba(
+    values: npt.NDArray[np.float64],
+    low: float,
+    scale: float,
+    ranks: npt.NDArray[np.int64],
+    counts: npt.NDArray[np.int64],
+    n_blocks: int,
+    block: int,
+) -> bool:
+    """Whether the buckets of the sorted `ranks` hold more than a quarter of a sample of the
+    values (`counts`: zeros, one for each bucket): n_blocks blocks of `block` values, spread
+    evenly from the first value to the last. For such crowded values the linear select is
+    slower than the other paths."""
+    n = values.size
+    last = counts.size - 1
+    m = 0
+    for k in range(n_blocks):
+        first = (n - block) * k // (n_blocks - 1)
+        for i in range(first, first + block):
+            counts[_linear_bucket(values[i], low, scale, last)] += 1
+            m += 1
+    kept = 0
+    run = 0
+    j = 0
+    for b in range(counts.size):
+        c = counts[b]
+        if j < ranks.size and ranks[j] * m < (run + c) * n:
+            kept += c
+            while j < ranks.size and ranks[j] * m < (run + c) * n:
+                j += 1
+        if j == ranks.size:
+            break
+        run += c
+    return 4 * kept > m
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _linear_select_numba(
+    values: npt.NDArray[np.float64],
+    low: float,
+    scale: float,
+    ranks: npt.NDArray[np.int64],
+    counts: npt.NDArray[np.int64],
+    out: npt.NDArray[np.uint64],
+) -> int:
+    """out[j] = the bits of the value at the sorted 0-based rank ranks[j] (in ascending
+    order), in the order of `_float_key` (-0.0 before +0.0). One pass counts the values of
+    each bucket (`counts`: zeros); the running count gives the buckets of the ranks; a
+    second pass copies the keys of their values; a partition of these keys gives the ranks.
+    Returns 1 (no result) when these buckets hold more than a quarter of the values, 2 when
+    a rank is a zero and the values hold -0.0 and +0.0 (np.partition can give either zero
+    there), else 0."""
+    n = values.size
+    last = counts.size - 1
+    for i in range(n):
+        counts[_linear_bucket(values[i], low, scale, last)] += 1
+    m = ranks.size
+    first = np.empty(m, dtype=np.int64)  # the bucket of each rank
+    below = np.empty(m, dtype=np.int64)  # the values of the lower buckets
+    run = 0
+    j = 0
+    for b in range(counts.size):
+        while j < m and ranks[j] < run + counts[b]:
+            first[j] = b
+            below[j] = run
+            j += 1
+        if j == m:
+            break
+        run += counts[b]
+    slot = np.full(counts.size, -1, dtype=np.int64)  # the place of a bucket of the ranks
+    start = np.zeros(m + 1, dtype=np.int64)  # where the keys of each such bucket start
+    k = 0
+    for j in range(m):
+        if slot[first[j]] < 0:
+            slot[first[j]] = k
+            start[k + 1] = start[k] + counts[first[j]]
+            k += 1
+    if 4 * start[k] > n + 256:
+        return 1
+    fill = start[:k].copy()
+    keys = np.empty(start[k], dtype=np.uint64)
+    bits = values.view(np.uint64)
+    for i in range(n):
+        s = slot[_linear_bucket(values[i], low, scale, last)]
+        if s >= 0:
+            keys[fill[s]] = _float_key(bits[i])
+            fill[s] += 1
+    at = np.empty(m, dtype=np.int64)  # the place of each rank among the keys (ascending)
+    kth = np.empty(m, dtype=np.int64)
+    n_kth = 0
+    for j in range(m):
+        at[j] = start[slot[first[j]]] + ranks[j] - below[j]
+        if n_kth == 0 or kth[n_kth - 1] != at[j]:
+            kth[n_kth] = at[j]
+            n_kth += 1
+    picked = np.partition(keys, kth[:n_kth])
+    zero = False
+    for j in range(m):
+        key = picked[at[j]]
+        zero |= (key == _NEGATIVE_ZERO_KEY) | (key == _POSITIVE_ZERO_KEY)
+        out[j] = _key_bits(key)
+    if zero:
+        negative = False
+        positive = False
+        for q in range(keys.size):  # the zeros share one bucket, a bucket of the ranks
+            negative |= keys[q] == _NEGATIVE_ZERO_KEY
+            positive |= keys[q] == _POSITIVE_ZERO_KEY
+        if negative and positive:
+            return 2
+    return 0
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _linear_counts_numba(
+    values: npt.NDArray[np.float64], low: float, scale: float, counts: npt.NDArray[np.int64]
+) -> None:
+    """counts[t, b]: the values of chunk t in bucket b of the linear select. Each chunk
+    sets its row to 0 first."""
+    n = values.size
+    n_chunks, size_b = counts.shape
+    size = (n + n_chunks - 1) // n_chunks
+    for t in prange(n_chunks):
+        for b in range(size_b):
+            counts[t, b] = 0
+        for i in range(t * size, min(n, (t + 1) * size)):
+            counts[t, _linear_bucket(values[i], low, scale, size_b - 1)] += 1
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _linear_keys_numba(
+    values: npt.NDArray[np.float64],
+    low: float,
+    scale: float,
+    slot: npt.NDArray[np.int64],
+    offsets: npt.NDArray[np.int64],
+    keys: npt.NDArray[np.uint64],
+) -> None:
+    """Copy the keys of the values of the buckets b with slot[b] >= 0 into `keys`: chunk t
+    (the chunks of _linear_counts_numba) from offsets[t, slot[b]] on."""
+    n = values.size
+    n_chunks = offsets.shape[0]
+    size = (n + n_chunks - 1) // n_chunks
+    bits = values.view(np.uint64)
+    last = slot.size - 1
+    for t in prange(n_chunks):
+        fill = offsets[t].copy()
+        for i in range(t * size, min(n, (t + 1) * size)):
+            s = slot[_linear_bucket(values[i], low, scale, last)]
+            if s >= 0:
+                keys[fill[s]] = _float_key(bits[i])
+                fill[s] += 1
+
+
+def _linear_select_threads(
+    values: npt.NDArray[np.float64],
+    low: float,
+    scale: float,
+    ranks: npt.NDArray[np.int64],
+    n_buckets: int,
+) -> Optional[npt.NDArray[np.float64]]:
+    """`_linear_select_numba` with the count and the copy in threads (one row of counts for
+    each thread); None for the cases where it returns 1 or 2."""
+    counts = np.empty((get_num_threads(), n_buckets), dtype=np.int64)
+    _linear_counts_numba(values, low, scale, counts)
+    per_bucket = counts.sum(axis=0)
+    below = np.concatenate(([0], np.cumsum(per_bucket)))
+    buckets = np.searchsorted(below[1:], ranks, side="right")
+    used = np.unique(buckets)  # the buckets of the ranks
+    kept = per_bucket[used]
+    if 4 * int(kept.sum()) > values.size + 256:
+        return None
+    slot = np.full(per_bucket.size, -1, dtype=np.int64)
+    slot[used] = np.arange(used.size)
+    start = np.concatenate(([0], np.cumsum(kept)))
+    chunks = counts[:, used]
+    keys = np.empty(int(start[-1]), dtype=np.uint64)
+    _linear_keys_numba(values, low, scale, slot, start[:-1] + np.cumsum(chunks, axis=0) - chunks, keys)  # fmt: skip
+    at = start[np.searchsorted(used, buckets)] + ranks - below[buckets]
+    picked = np.partition(keys, np.unique(at))[at]
+    zeros = (picked == _NEGATIVE_ZERO_KEY) | (picked == _POSITIVE_ZERO_KEY)
+    if zeros.any() and (keys == _NEGATIVE_ZERO_KEY).any() and (keys == _POSITIVE_ZERO_KEY).any():
+        return None
+    return np.where(picked >> np.uint64(63) != 0, picked ^ _SIGN_BIT, picked ^ _ALL_BITS).view(np.float64)  # fmt: skip
+
+
+def _linear_select(
+    values: npt.NDArray[np.float64], ranks: npt.NDArray[np.int64], bounds: tuple[Any, Any]
+) -> Optional[npt.NDArray[np.float64]]:
+    """The values at the sorted 0-based `ranks` (in ascending order) by a linear select, or
+    None where the other paths give the bits: a NaN or an infinite bound, equal values, a
+    span too small for the bucket scale, crowded values (a count of a sample says so
+    first), and a zero rank with both zeros in the values (see _linear_select_numba)."""
+    low = float(bounds[0])
+    span = float(bounds[1]) - low
+    if not 0.0 < span < math.inf:
+        return None
+    values = np.ascontiguousarray(values)
+    n = values.size
+    n_buckets = 4096
+    scale = n_buckets / span
+    if not math.isfinite(scale):
+        return None
+    # The sample: every 16th value of a small array, 32 blocks of 32 values from 16,384
+    # values on (contiguous reads: on a large array each value of a spread sample is one
+    # read from memory)
+    n_blocks, block = (32, 32) if n >= 1 << 14 else (n // 16, 1)
+    if _crowded_numba(
+        values, low, scale, ranks, np.zeros(n_buckets, dtype=np.int64), n_blocks, block
+    ):
+        return None
+    if n >= _PARALLEL_SELECT_MIN and get_num_threads() > 1:
+        return _linear_select_threads(values, low, scale, ranks, n_buckets)
+    out = np.empty(ranks.size, dtype=np.uint64)
+    if _linear_select_numba(values, low, scale, ranks, np.zeros(n_buckets, dtype=np.int64), out):
+        return None
+    return out.view(np.float64)
+
+
 def _order_statistics(
     values: npt.NDArray[Any], bounds: Optional[tuple[Any, Any]] = None
 ) -> tuple[Any, ...]:
@@ -488,11 +733,24 @@ def _order_statistics(
     numpy's mean of the middle value or values. A NaN makes all of them NaN, as in numpy
     (a partition puts NaNs last). `bounds`: the smallest and the largest value (np.min
     and np.max), when the caller has them.
+
+    Float64 values take the linear select first (from _LINEAR_SELECT_MIN values), then
+    the radix select (from _RADIX_SELECT_MIN values), then one partition: each gives the
+    bits of the next one, or gives way to it.
     """
     n = values.size
     ranks = _percentile_ranks(n, values.dtype)
     half = n // 2
     low = half - 1 + n % 2  # lower middle rank (the middle rank when n is odd)
+    if values.dtype == np.float64 and n >= _LINEAR_SELECT_MIN:
+        if bounds is None:
+            bounds = (np.min(values), np.max(values))
+        # The ranks in ascending order: P10, P25, the middle ranks, P75, P90
+        order = np.array([ranks[0], ranks[1], low, half, ranks[2], ranks[3]], dtype=np.int64)
+        found = _linear_select(values, order, bounds)
+        if found is not None:
+            middle = found[2:4] if n % 2 == 0 else found[2:3]
+            return found[0], found[1], found[4], found[5], np.mean(middle)
     if values.dtype == np.float64 and n >= _RADIX_SELECT_MIN:
         if bounds is None:
             bounds = (np.min(values), np.max(values))
