@@ -20,6 +20,7 @@ from .base import (
     _padding_value_problem,
     _prepare_masked_image,
     _slab_pass,
+    _slab_ufunc,
     _slabs,
     _times_mirrored,
     _whole_number,
@@ -32,6 +33,11 @@ from .base import (
 # Threads for the 24 rotations from this size (voxels). Measured: they win from about
 # 14,000 voxels (db2) or 4,000 voxels (coif3), and run 4-8x faster from 30,000 voxels.
 _PARALLEL_THRESHOLD = 15_000
+
+# The LLL and HHH tree (see _flip_tree) runs the chains of each axis at once when its 12
+# arrays (of at most 8 bytes per voxel) take at most this (about 88^3). Measured at 10
+# threads: 8 to 30 % faster than depth first from 64^3 to 128^3, with 3.4 times its arrays.
+_FLIP_LEVELS_BYTES = 64 << 20
 
 # From this size (voxels), half as many rotations run at once, each pass in two threads.
 # Measured (db2, 10 threads): as fast at 96^3, faster from 128^3 on (256^3: 649 against
@@ -148,6 +154,9 @@ def wavelet_transform(
     if rotation_invariant:
         if pooling not in ("max", "average", "min"):
             raise ValueError(f"Unknown pooling: {pooling}")
+        if decomposition in ("LLL", "HHH"):
+            threads = get_num_threads() if use_parallel else 1
+            return _flip_tree(image, lo, hi, level, decomposition[0], mode, pooling, threads)
 
         result: npt.NDArray[np.floating[Any]] | None = None
 
@@ -272,6 +281,112 @@ def _apply_undecimated_wavelet_3d(
                 weights=weights, mode=mode, origin=origin,
             )  # fmt: skip
     return cast(npt.NDArray[np.floating[Any]], result)
+
+
+def _level_chains(
+    lo: npt.NDArray[np.floating[Any]], hi: npt.NDArray[np.floating[Any]], level: int
+) -> dict[str, List[npt.NDArray[np.floating[Any]]]]:
+    """The kernels of the levels 1 to `level` on one axis, for each letter of the last level:
+    the low-pass kernel below the last level, the kernel of the letter at it (each with the
+    zeros of its level, see _atrous_upsample)."""
+    chains = {}
+    for letter in "LH":
+        kernels = [lo if (j < level or letter == "L") else hi for j in range(1, level + 1)]
+        chains[letter] = [_atrous_upsample(k, j) if j > 1 else k for j, k in enumerate(kernels, 1)]
+    return chains
+
+
+def _axis_chain(
+    image: npt.NDArray[np.floating[Any]],
+    axis: int,
+    kernels: List[npt.NDArray[np.floating[Any]]],
+    flip: bool,
+    mode: str,
+    threads: int,
+) -> npt.NDArray[np.floating[Any]]:
+    """The level kernels along `axis`, one pass each in `_slab_pass`: the first into a new
+    array, the others in place. A flipped axis takes each kernel reversed (origin -1 for
+    an even length, 0 for an odd one; the boundary modes are symmetric under a flip)."""
+    result = image
+    for kernel in kernels:
+        weights, origin = (kernel[::-1], -1 if kernel.size % 2 == 0 else 0) if flip else (kernel, 0)
+        target = None if result is image else result
+        result = _slab_pass(
+            convolve1d, result, axis, target, threads, weights=weights, mode=mode, origin=origin
+        )
+    return result
+
+
+def _flip_tree(
+    image: npt.NDArray[np.floating[Any]],
+    lo: npt.NDArray[np.floating[Any]],
+    hi: npt.NDArray[np.floating[Any]],
+    level: int,
+    letter: str,
+    mode: str,
+    pooling: str,
+    threads: int,
+) -> npt.NDArray[np.float32]:
+    """The 24 rotations of an LLL or HHH response (`letter` L or H), pooled.
+
+    Each rotation applies the same chain of level kernels on every image axis (L below the
+    last level, `letter` at it), reversed on the axes that it flips. So the 24 rotations are
+    8 filters, one for each pattern of flipped axes, with 3 rotations each. With the axes in
+    the order 0, 1, 2 the patterns share their first chains: 14 chains instead of the 72
+    passes of the rotations (at each level). A rotation thus runs its passes in another
+    order than level by level, so a value can change in its last float32 bits.
+
+    The patterns pool in the order of their flips (each 3 times for the average); the
+    passes and the sums give the same values in any number of threads, so the result does
+    not depend on the threads. Max and min run in one call, as numpy orders -0.0 and +0.0
+    by the part of its loop. A small image (_FLIP_LEVELS_BYTES) runs the chains of each
+    axis at once, each pass with a share of the threads; a larger one runs depth first,
+    each pass in all threads, with an array for each axis only.
+    """
+    chain = _level_chains(lo, hi, level)[letter]
+    total: Optional[npt.NDArray[Any]] = None
+
+    def pool(pattern: npt.NDArray[Any]) -> None:
+        nonlocal total
+        if pooling != "average":
+            reduce = np.maximum if pooling == "max" else np.minimum
+            total = pattern.copy() if total is None else reduce(total, pattern, out=total)
+            return
+        start = 1 if total is None else 0
+        if total is None:
+            total = pattern.astype(np.float64)
+        for _ in range(start, 3):  # the 3 rotations of the pattern
+            _slab_ufunc(np.add, (total, pattern), total)
+
+    if threads > 1 and 12 * 8 * image.size <= _FLIP_LEVELS_BYTES:
+        arrays = [image]
+        for axis in range(3):  # 2, 4, then the 8 patterns, in the order of their flips
+            tasks = [(array, flip) for array in arrays for flip in (False, True)]
+            workers = min(len(tasks), threads)
+            share = max(1, threads // workers)
+            arrays = list(
+                _ordered_map(
+                    lambda task: _axis_chain(task[0], axis, chain, task[1], mode, share),  # noqa: B023
+                    tasks,
+                    workers,
+                )
+            )
+        for pattern in arrays:
+            pool(pattern)
+    else:
+
+        def walk(array: npt.NDArray[Any], axis: int) -> None:
+            if axis == 3:
+                pool(array)
+                return
+            for flip in (False, True):  # each chain freed once walked
+                walk(_axis_chain(array, axis, chain, flip, mode, threads), axis + 1)
+
+        walk(image, 0)
+    result = cast(npt.NDArray[Any], total)
+    if pooling == "average":
+        _slab_ufunc(np.true_divide, (result, 24.0), result)
+    return _float32_cut(result, None)
 
 
 def _atrous_upsample(

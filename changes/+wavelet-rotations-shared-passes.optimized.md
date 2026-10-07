@@ -1,0 +1,1 @@
+The rotation-invariant LLL and HHH wavelets compute their 24 rotations as 8 patterns of flipped axes in a tree of shared passes: 14 chains of level kernels instead of 72 passes. A 256³ image takes 0.27 s instead of 0.85 s for HHH at 10 threads; the response changes in the last float32 bits (for a float64 image, only values near zero change).

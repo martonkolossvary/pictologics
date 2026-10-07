@@ -2316,3 +2316,49 @@ def test_padded_is_np_pad() -> None:
                         assert_array_equal(got, expected)
     flat = rng.normal(size=(6, 5))
     assert_array_equal(base._padded(flat, ((1, 2), (3, 0)), "reflect"), np.pad(flat, ((1, 2), (3, 0)), "reflect"))  # fmt: skip
+
+
+def test_wavelet_lll_and_hhh_rotations_share_their_passes() -> None:
+    """The rotation-invariant LLL and HHH responses come from a tree of the 8 patterns of
+    flipped axes (3 rotations each): 14 chains of level kernels instead of 72 passes. They
+    equal the 24 rotated-copy responses pooled, within a few float32 units, for each
+    pooling; the bits do not depend on the threads (passes and sums in slabs)."""
+    import pywt
+
+    from pictologics.filters import base, wavelets
+
+    lo = np.array(pywt.Wavelet("db2").dec_lo, dtype=np.float32)
+    hi = np.array(pywt.Wavelet("db2").dec_hi, dtype=np.float32)
+    image = np.random.default_rng(43).normal(size=(20, 18, 16))
+    rotations = wavelets._get_rotation_perms()
+    large = np.random.default_rng(44).normal(size=(64, 64, 64))  # 2^18 voxels: slabs
+    for decomposition in ("LLL", "HHH"):
+        old = [_old_rotated_wavelet(image, lo, hi, 2, decomposition, "reflect", r) for r in rotations]  # fmt: skip
+        for pooling in ("average", "max", "min"):
+            with patch.object(wavelets, "_axis_chain", wraps=wavelets._axis_chain) as chains:
+                got = wavelet_transform(
+                    image, "db2", 2, decomposition, "mirror", rotation_invariant=True,
+                    pooling=pooling,
+                )  # fmt: skip
+            assert chains.call_count == 14
+            expected = _old_pooled(old, pooling)
+            assert_allclose(got, expected, rtol=1e-6, atol=1e-6 * np.max(np.abs(expected)))
+            runs = []
+            for threads in (1, 3):
+                with (
+                    patch.object(wavelets, "get_num_threads", return_value=threads),
+                    patch.object(base, "get_num_threads", return_value=threads),
+                ):
+                    runs.append(
+                        wavelet_transform(
+                            large,
+                            "db2",
+                            1,
+                            decomposition,
+                            "mirror",
+                            rotation_invariant=True,
+                            pooling=pooling,
+                            use_parallel=True,
+                        )  # fmt: skip
+                    )
+            assert runs[0].tobytes() == runs[1].tobytes()
