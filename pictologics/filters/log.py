@@ -7,12 +7,14 @@ import numpy as np
 from numpy import typing as npt
 
 from .base import (
+    _LOG_FFT_MIN,
     BoundaryCondition,
     _constant_padded,
     _float32_cut,
     _gaussian_laplace,
     _normalized_gaussian_laplace,
     _padding_value_problem,
+    as_float32,
     ensure_float32,
     get_scipy_mode,
     resolve_boundary,
@@ -108,6 +110,8 @@ def laplacian_of_gaussian(
         - A float64 image of 64³ voxels or more runs as one FFT convolution with the same
           truncated kernels and boundary: about 2 times faster than the separable passes,
           with values within about 1e-15 of the largest response value.
+        - A smaller float64 image runs the passes in float32, as a float32 image does:
+          faster, with values within about 1e-7 of the largest response value.
     """
     # Convert to float32 as required by IBSI
     image = ensure_float32(image)
@@ -139,7 +143,11 @@ def laplacian_of_gaussian(
             image, source_mask, sigma=sigma_voxels, mode=mode, truncate=truncate
         )
     else:
-        # Cast to float32 for consistency with the masked path and the other filters
-        # (gaussian_laplace accumulates in the input dtype, so a float64 image keeps
-        # its precision through the convolution before the final downcast).
-        return _float32_cut(_gaussian_laplace(image, sigma_voxels, mode, truncate), None)
+        # A float64 image below _LOG_FFT_MIN voxels runs its 8 passes in float32 (faster;
+        # the FFT path of a larger float64 image keeps float64). The response is float32.
+        if image.dtype == np.float64 and image.size < _LOG_FFT_MIN:
+            image = as_float32(image)
+        result = _gaussian_laplace(image, sigma_voxels, mode, truncate)
+        if result.dtype == np.float32:
+            return result
+        return _float32_cut(result, None)

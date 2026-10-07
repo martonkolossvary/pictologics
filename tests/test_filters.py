@@ -2361,3 +2361,52 @@ def test_wavelet_lll_and_hhh_rotations_share_their_passes() -> None:
                         )  # fmt: skip
                     )
             assert runs[0].tobytes() == runs[1].tobytes()
+
+
+def test_separable_filters_run_in_float32() -> None:
+    """The mean, Gaussian, Laws (also its energy step) and wavelet filters run their
+    passes in float32, and so does the LoG of a float64 image below 2^18 voxels: the
+    response of a float64 image is the response of its float32 copy, bit for bit. It
+    stays within a few float32 units of the response with float64 passes (the filters
+    before): 4e-7 of the largest value, and 2e-6 for plain Laws, as its E5 kernel
+    subtracts, so its passes hold values larger than the response."""
+    from pictologics.filters import gaussian, laws, log, mean, wavelets
+
+    image = np.cumsum(np.random.default_rng(45).normal(size=(24, 22, 20)), axis=2) * 20.0 + 100.0
+    cases = {
+        "mean": (lambda x: mean_filter(x, support=5, boundary="mirror"), 4e-7),
+        "gaussian": (lambda x: gaussian_filter(x, sigma_mm=1.5, boundary="mirror"), 4e-7),
+        "log": (lambda x: laplacian_of_gaussian(x, sigma_mm=1.5, boundary="mirror"), 4e-7),
+        "laws": (lambda x: laws_filter(x, "L5E5E5", boundary="mirror"), 2e-6),
+        "laws energy": (lambda x: laws_filter(x, "L5E5E5", "mirror", compute_energy=True), 4e-7),
+        "laws ri": (lambda x: laws_filter(x, "L5E5E5", "mirror", rotation_invariant=True), 4e-7),
+        "laws ri average": (
+            lambda x: laws_filter(
+                x, "S5S5L5", "mirror", rotation_invariant=True, pooling="average"
+            ),
+            4e-7,
+        ),
+        "wavelet": (lambda x: wavelet_transform(x, "db2", 1, "LHL", "mirror"), 4e-7),
+        "wavelet lll ri": (
+            lambda x: wavelet_transform(x, "db2", 1, "LLL", "mirror", rotation_invariant=True),
+            4e-7,
+        ),
+        "wavelet lhl ri": (
+            lambda x: wavelet_transform(x, "db2", 1, "LHL", "mirror", rotation_invariant=True),
+            4e-7,
+        ),
+    }
+    float64_passes = [patch.object(m, "as_float32", ensure_float32) for m in (mean, gaussian, laws, log, wavelets)]  # fmt: skip
+    for name, (case, tolerance) in cases.items():
+        got = case(image)
+        assert got.dtype == np.float32, name
+        assert_array_equal(got, case(image.astype(np.float32)))
+        for change in float64_passes:
+            change.start()
+        try:
+            reference = np.asarray(case(image), dtype=np.float32)
+        finally:
+            for change in float64_passes:
+                change.stop()
+        difference = np.abs(got.astype(np.float64) - reference)
+        assert 0 < difference.max() <= tolerance * np.abs(reference).max(), name
