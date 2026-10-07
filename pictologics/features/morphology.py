@@ -725,6 +725,8 @@ def _mvee_khachiyan_numba(
     2. Rank-1 updates (Sherman-Morrison) for matrix inversion.
     3. Periodic full recomputation for numerical stability.
     4. Pre-allocated working arrays to minimize memory churn.
+    5. The products q_r q_c (r <= c) of each point are kept, so the quadratic form of a
+       point is one dot product with the matching weights of invX (10 products, not 20).
 
     Args:
         points: Array of points (N, d).
@@ -746,6 +748,16 @@ def _mvee_khachiyan_numba(
         for i in range(d):
             Q[k, i] = points[k, i]
         Q[k, d] = 1.0
+    # The products q_r q_c (r <= c) of each point, and their weights in q^T invX q
+    n_prod = d1 * (d1 + 1) // 2
+    P = np.empty((N, n_prod), dtype=np.float64)
+    for k in range(N):
+        m = 0
+        for r in range(d1):
+            for c_idx in range(r, d1):
+                P[k, m] = Q[k, r] * Q[k, c_idx]
+                m += 1
+    weights = np.empty(n_prod, dtype=np.float64)
 
     # Initialize weights u
     u = np.ones(N, dtype=np.float64) / N
@@ -778,15 +790,17 @@ def _mvee_khachiyan_numba(
         max_val = -1.0
         j = -1
 
-        # Bottleneck loop: O(N * d^2)
+        # Bottleneck loop: O(N * d^2). The quadratic form q_k^T * invX * q_k is the dot
+        # product of the kept products of q_k with the weights of invX.
+        m = 0
+        for r in range(d1):
+            for c_idx in range(r, d1):
+                weights[m] = invX[r, r] if r == c_idx else invX[r, c_idx] + invX[c_idx, r]
+                m += 1
         for k in range(N):
             val = 0.0
-            # Compute quadratic form: q_k^T * invX * q_k
-            for r in range(d1):
-                dot_val = 0.0
-                for c_idx in range(d1):
-                    dot_val += invX[r, c_idx] * Q[k, c_idx]
-                val += Q[k, r] * dot_val
+            for m in range(n_prod):
+                val += P[k, m] * weights[m]
 
             if val > max_val:
                 max_val = val

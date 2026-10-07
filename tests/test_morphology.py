@@ -617,5 +617,44 @@ def test_the_morphology_kernels_take_their_serial_twins_below_their_gates() -> N
     assert large == small
 
 
+def _khachiyan_reference(points: np.ndarray, tol: float) -> tuple[np.ndarray, np.ndarray, int]:
+    """The steps of the MVEE kernel with the quadratic form q^T invX q of numpy."""
+    n, d = points.shape
+    q = np.column_stack([points, np.ones(n)])
+    u = np.full(n, 1.0 / n)
+    inv = np.linalg.inv(q.T @ q / n)
+    err, count = 1.0, 0
+    while err > tol and count < 1000:
+        g = np.einsum("kr,rc,kc->k", q, inv, q)
+        j = int(np.argmax(g))
+        step = (g[j] - (d + 1)) / ((d + 1) * (g[j] - 1))
+        err = step * np.sqrt(np.sum(u**2) - u[j] ** 2 + (1 - u[j]) ** 2)
+        u *= 1 - step
+        u[j] += step
+        if count % 50 == 0 and count > 0:
+            inv = np.linalg.inv((q * u[:, None]).T @ q)
+        else:
+            v = inv @ q[j]
+            alpha = step / (1 - step)
+            inv = (inv - alpha / (1 + alpha * g[j]) * np.outer(v, v)) / (1 - step)
+        count += 1
+    c = points.T @ u
+    cov = (points * u[:, None]).T @ points - np.outer(c, c)
+    return np.linalg.inv(cov) / d, c, count
+
+
+def test_the_mvee_kernel_takes_the_steps_of_the_quadratic_form() -> None:
+    # The kernel reads the quadratic form of each point from its kept products: the steps,
+    # and so the ellipsoid, are those of the plain form q^T invX q (40 random point sets).
+    rng = np.random.default_rng(21)
+    for case in range(40):
+        points = rng.normal(0.0, 1.0, (int(rng.integers(8, 40)), 3)) * rng.uniform(0.5, 3.0, 3)
+        tol = 0.001 if case < 4 else 0.01  # the default, and fewer steps (Python is slow)
+        A, c = _mvee_khachiyan_numba(points, tol)
+        A_ref, c_ref, _ = _khachiyan_reference(points, tol)
+        np.testing.assert_allclose(A, A_ref, rtol=1e-9, atol=1e-12)
+        np.testing.assert_allclose(c, c_ref, rtol=1e-9, atol=1e-12)
+
+
 if __name__ == "__main__":
     unittest.main()
