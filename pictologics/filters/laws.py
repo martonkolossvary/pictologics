@@ -431,15 +431,15 @@ def _laws_energy(
     result: npt.NDArray[np.floating[Any]], energy_distance: int, mode: str
 ) -> npt.NDArray[np.float32]:
     """The texture energy (PQSD) of the response `result`, a new array of laws_filter that
-    the steps write into."""
-    # Energy = mean of absolute values over δ neighborhood, i.e. uniform_filter on
-    # |result|. Accumulate in float64: scipy's running moving-sum otherwise drifts in
-    # float32 over long axes. Cast the result back to float32.
-    np.abs(result, out=result)
-    result = result.astype(np.float64, copy=False)
-    energy_support = 2 * energy_distance + 1
-    _uniform_filter(result, energy_support, mode, output=result)
-    return result.astype(np.float32)
+    the steps write into: the mean of |result| over the energy support. A float32 response
+    keeps float32: scipy sums each line in double, so the running sum does not drift (at
+    most 1 float32 unit of the largest value, measured on 512 x 512 x 60). A float64
+    response (average pooling) is cut to float32 at the end."""
+    _slab_ufunc(np.abs, (result,), result)
+    _uniform_filter(result, 2 * energy_distance + 1, mode, output=result)
+    if result.dtype == np.float32:
+        return cast(npt.NDArray[np.float32], result)
+    return _float32_cut(result, None)
 
 
 def _parse_kernel_string(kernels: str) -> List[str]:

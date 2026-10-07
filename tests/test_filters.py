@@ -1594,9 +1594,8 @@ def test_laws_rotations_pool_as_the_rotation_loop() -> None:
                 np.minimum(result, signed, out=result)
         if pooling == "average":
             result /= len(rotations)
-        if energy:
-            abs_result = np.abs(result).astype(np.float64)
-            result = uniform_filter(abs_result, size=5, mode="constant")
+        if energy:  # in the type of the pooled result: float32 for max and min
+            result = uniform_filter(np.abs(result), size=5, mode="constant")
         return result.astype(np.float32)  # every filter gives float32
 
     image = np.random.default_rng(5).normal(size=(11, 10, 9)).astype(np.float32)
