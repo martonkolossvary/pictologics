@@ -835,6 +835,78 @@ def _texture_by_loops(
     return glcm, s, n, ngldm
 
 
+def _runs_by_loops(
+    levels: np.ndarray, roi: np.ndarray, n_bins: int, directions: np.ndarray
+) -> np.ndarray:
+    """GLRLM, one table for each direction, by walks along the directions (IBSI 1): a run
+    starts where the voxel before has another level."""
+    import itertools
+
+    shape = levels.shape
+    glrlm = np.zeros((len(directions), n_bins, max(shape) + 1))
+
+    def level(q: tuple[int, ...]) -> int:
+        inside = all(0 <= c < m for c, m in zip(q, shape, strict=True))
+        return int(levels[q]) if inside and roi[q] else 0
+
+    for k, d in enumerate(directions):
+        for p in itertools.product(*(range(m) for m in shape)):
+            g = level(p)
+            if not g or level(tuple(c - o for c, o in zip(p, d, strict=True))) == g:
+                continue
+            length = 1
+            while level(tuple(c + length * o for c, o in zip(p, d, strict=True))) == g:
+                length += 1
+            glrlm[k, g - 1, length] += 1
+    return glrlm
+
+
+def test_the_local_kernel_counts_equal_loops_over_the_voxels() -> None:
+    # The local kernel (the row passes of the 26 neighbours, the runs of length 1 and 2
+    # without a branch) gives the GLCM, GLRLM, NGTDM and NGLDM counts of plain loops over
+    # the voxels: one-voxel, one-slice, thin and holed ROIs, 2 to 12 levels, NGLDM alpha 0
+    # to 2, one table for all directions or one for each, and the families alone.
+    rng = np.random.default_rng(21)
+    shapes = [(1, 1, 1), (1, 7, 9), (6, 1, 8), (5, 7, 1), (2, 3, 4), (1, 1, 9), (7, 6, 5), (9, 8, 6)]  # fmt: skip
+    for case in range(3 * len(shapes)):
+        shape = shapes[case % len(shapes)]
+        n_bins, alpha = (2, 5, 12)[case % 3], case % 3
+        levels = rng.integers(1, n_bins + 1, shape).astype(np.float64)
+        roi = (rng.random(shape) > 0.3).astype(np.uint8)
+        roi.flat[0] = 1
+        planar = (shape[0] == 1, shape[1] == 1, shape[2] == 1)
+        used = texture_module._directions(planar)
+        glcm, s, n, ngldm = _texture_by_loops(levels, roi, n_bins, 1, 1, 1, alpha)
+        runs = _runs_by_loops(levels, roi, n_bins, texture_module.DIRECTIONS_13[used])
+        vol, counts = texture_module._texture_volume(levels, roi, n_bins)
+        for merge in (False, True):
+            got = texture_module._local_matrices(
+                vol, counts, n_bins, True, True, True, True, alpha, merge, planar
+            )
+            np.testing.assert_array_equal(got[0].sum(axis=0), glcm)
+            if merge:
+                np.testing.assert_array_equal(got[1][0], runs.sum(axis=0))
+            else:
+                np.testing.assert_array_equal(got[1][used], runs)
+            np.testing.assert_allclose(got[2], s, rtol=1e-12)
+            np.testing.assert_array_equal(got[3], n)
+            np.testing.assert_array_equal(got[4], ngldm)
+        # The families alone: GLCM and GLRLM keep the loop over every voxel of a row
+        alone = texture_module._local_matrices(
+            vol, counts, n_bins, True, True, False, False, alpha, True, planar
+        )
+        np.testing.assert_array_equal(alone[0][0], glcm)
+        np.testing.assert_array_equal(alone[1][0], runs.sum(axis=0))
+        for ngtdm, ngldm_on in ((True, False), (False, True)):
+            part = texture_module._local_matrices(
+                vol, counts, n_bins, False, False, ngtdm, ngldm_on, alpha, True, planar
+            )
+            if ngtdm:
+                np.testing.assert_allclose(part[2], s, rtol=1e-12)
+            else:
+                np.testing.assert_array_equal(part[4], ngldm)
+
+
 def test_texture_distances_match_loops_over_the_voxels() -> None:
     # GLCM, NGTDM and NGLDM distances above 1 (IBSI 1) give the matrices of plain loops
     # over the voxels: one distance for all, two NGTDM and NGLDM distances (two kernel

@@ -487,6 +487,124 @@ def _flat_offsets(shape: tuple[int, ...], offsets: npt.NDArray[Any]) -> npt.NDAr
     return cast(npt.NDArray[np.int64], steps.astype(np.int64))
 
 
+@jit(nopython=True, inline="always", cache=True)  # type: ignore
+def _pairs_and_runs(
+    flat: npt.NDArray[np.uint16],
+    v: int,
+    g: int,
+    tid: int,
+    calc_glcm: bool,
+    calc_glrlm: bool,
+    pair_off: npt.NDArray[np.int64],
+    dir_off: npt.NDArray[np.int64],
+    dir_table: npt.NDArray[np.int64],
+    merged: bool,
+    glcm: npt.NDArray[np.uint32],
+    glrlm: npt.NDArray[np.uint32],
+) -> None:
+    """Add the GLCM pairs and the GLRLM runs of voxel v (level g > 0) in each direction to
+    the tables of thread tid. A run starts where the voxel before has another level. Runs
+    of length 1 and 2 count without a branch: the voxels after v have another level. A walk
+    counts the longer runs. With `merged` (one table for all directions), the runs of
+    length 1 and 2 add once for each voxel."""
+    i = g - 1
+    last = flat.size - 1
+    ones = np.uint32(0)
+    twos = np.uint32(0)
+    for d in range(dir_off.shape[0]):
+        od = dir_off[d]
+        t = dir_table[d]
+        if calc_glcm:
+            nv = np.int64(flat[v + pair_off[d]])
+            if nv != 0:
+                glcm[tid, t, i, nv - 1] += 1
+        if calc_glrlm:
+            # & on the booleans: Python's "and" would make a branch
+            starts = np.int64(flat[v - od]) != g
+            ends = np.int64(flat[v + od]) != g
+            ends_2 = np.int64(flat[min(v + 2 * od, last)]) != g
+            one = np.uint32(starts & ends)
+            two = np.uint32(starts & (not ends) & ends_2)
+            if merged:
+                ones += one
+                twos += two
+            else:
+                glrlm[tid, t, i, 1] += one
+                glrlm[tid, t, i, 2] += two
+            if starts & (not ends) & (not ends_2):
+                length = 3
+                c = v + 3 * od
+                while np.int64(flat[c]) == g:
+                    length += 1
+                    c += od
+                glrlm[tid, t, i, length] += 1
+    if calc_glrlm and merged:
+        glrlm[tid, dir_table[0], i, 1] += ones
+        glrlm[tid, dir_table[0], i, 2] += twos
+
+
+@jit(nopython=True, inline="always", cache=True)  # type: ignore
+def _neighbour_rows(
+    flat: npt.NDArray[np.uint16],
+    start: int,
+    n: int,
+    steps: npt.NDArray[np.int64],
+    calc_ngtdm: bool,
+    calc_ngldm: bool,
+    alpha: int,
+    n_sum: npt.NDArray[np.int32],
+    n_count: npt.NDArray[np.int16],
+    dependence: npt.NDArray[np.int16],
+) -> None:
+    """The NGTDM and NGLDM sums over the 26 neighbours of the n voxels of a row from flat
+    index `start`: the level sum and the count of ROI voxels (n_sum, n_count), and the
+    count of ROI voxels within `alpha` levels (dependence). One pass for each of the 9
+    neighbour rows (`steps`) reads x - 1, x and x + 1 with contiguous loads."""
+    for x in range(n):
+        n_sum[x] = 0
+        n_count[x] = 0
+        dependence[x] = 0
+    row = flat[start : start + n]
+    for k in range(steps.shape[0]):
+        o = start + steps[k] - 1
+        r = flat[o : o + n + 2]
+        centre = steps[k] == 0  # the row of the voxels: x itself is not a neighbour
+        if calc_ngtdm:
+            if centre:
+                for x in range(n):
+                    a = r[x]
+                    c = r[x + 2]
+                    n_sum[x] += np.int32(a) + np.int32(c)
+                    n_count[x] += np.int16(a != 0) + np.int16(c != 0)
+            else:
+                for x in range(n):
+                    a = r[x]
+                    m = r[x + 1]
+                    c = r[x + 2]
+                    n_sum[x] += np.int32(a) + np.int32(m) + np.int32(c)
+                    n_count[x] += np.int16(a != 0) + np.int16(m != 0) + np.int16(c != 0)
+        if calc_ngldm:
+            if alpha == 0:  # the levels equal to the level of x (> 0) are ROI voxels
+                if centre:
+                    for x in range(n):
+                        g = row[x]
+                        dependence[x] += np.int16(r[x] == g) + np.int16(r[x + 2] == g)
+                else:
+                    for x in range(n):
+                        g = row[x]
+                        dependence[x] += (
+                            np.int16(r[x] == g) + np.int16(r[x + 1] == g) + np.int16(r[x + 2] == g)
+                        )
+            else:
+                for x in range(n):
+                    g = np.int64(row[x])
+                    for j in range(3):
+                        if centre and j == 1:
+                            continue
+                        nv = np.int64(r[x + j])
+                        dependence[x] += np.int16((nv != 0) & (abs(nv - g) <= alpha))
+
+
 @jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
 def _local_tables_numba(
     vol: npt.NDArray[np.uint16],
@@ -514,63 +632,90 @@ def _local_tables_numba(
 
     The slice blocks `blocks` run in parallel. Direction d adds to table `dir_table[d]`
     of the GLCM and the GLRLM: the GLCM pairs step `pair_off[d]` in the flat index (the
-    GLCM distance), the GLRLM runs step `dir_off[d]`. The NGTDM and the NGLDM read the
-    voxels at the flat steps `neighbours`. The NGTDM
-    keeps whole numbers: for a voxel of level g whose n valid neighbours have the level
-    sum S, it adds |g n - S| (n times |g - S / n|) to ngtdm_d[tid, g - 1, n]. Integer sums
-    do not depend on the order of the voxels, so the NGTDM does not depend on the number
-    of threads. The tables are made and summed outside, so the kernel has no other
-    parallel region.
+    GLCM distance), the GLRLM runs step `dir_off[d]` (see `_pairs_and_runs`). The NGTDM
+    and the NGLDM read the voxels at the flat steps `neighbours`; for the 26 neighbours of
+    distance 1, each row is cut to its first and last ROI voxel and row passes give the
+    sums (`_neighbour_rows`). The NGTDM keeps whole numbers: for a voxel of level g whose
+    n valid neighbours have the level sum S, it adds |g n - S| (n times |g - S / n|) to
+    ngtdm_d[tid, g - 1, n]. Integer sums do not depend on the order of the voxels, so the
+    counts do not depend on the number of threads or on the visit order. The tables are
+    made and summed outside, so the kernel has no other parallel region.
     """
     height = vol.shape[1] - 2 * pad
     width = vol.shape[2] - 2 * pad
     s0 = vol.shape[1] * vol.shape[2]
     s1 = vol.shape[2]
     flat = vol.ravel()
+    alpha = np.int64(ngldm_alpha)
+    rows = (calc_ngtdm or calc_ngldm) and neighbours.shape[0] == 26
+    steps = np.empty(9, dtype=np.int64)  # the 9 (dz, dy) rows of the neighbourhood
+    for k in range(9):
+        steps[k] = (k // 3 - 1) * s0 + (k % 3 - 1) * s1
+    merged = dir_table.shape[0] > 0  # one table for all directions
+    for d in range(1, dir_table.shape[0]):
+        if dir_table[d] != dir_table[0]:
+            merged = False
+    size = width if rows else 0
     for b in prange(blocks.shape[0] - 1):
         tid = get_thread_id()
+        n_sum = np.zeros(size, dtype=np.int32)
+        n_count = np.zeros(size, dtype=np.int16)
+        dependence = np.zeros(size, dtype=np.int16)
         for z in range(blocks[b], blocks[b + 1]):
             if counts[z, 0] == 0:
                 continue
             for y in range(height):
                 base = (z + pad) * s0 + (y + pad) * s1 + pad
-                for x in range(width):
-                    v = base + x
+                start = base
+                n = width
+                if rows:  # cut the row to its first and last ROI voxel
+                    x0 = 0
+                    while x0 < width and flat[base + x0] == 0:
+                        x0 += 1
+                    if x0 == width:
+                        continue
+                    x1 = width
+                    while flat[base + x1 - 1] == 0:
+                        x1 -= 1
+                    start = base + x0
+                    n = x1 - x0
+                    _neighbour_rows(
+                        flat, start, n, steps, calc_ngtdm, calc_ngldm, alpha,
+                        n_sum, n_count, dependence,
+                    )  # fmt: skip
+                for x in range(n):
+                    v = start + x
                     g = np.int64(flat[v])
                     if g == 0:
                         continue
                     i = g - 1
-                    if calc_ngtdm or calc_ngldm:
-                        n_sum = np.int64(0)
-                        n_count = np.int64(0)
-                        dependence = np.int64(1)
+                    if rows:
+                        if calc_ngtdm and n_count[x] > 0:
+                            count = np.int64(n_count[x])
+                            ngtdm_d[tid, i, count] += abs(g * count - np.int64(n_sum[x]))
+                            ngtdm_n[tid, i] += 1
+                        if calc_ngldm:
+                            ngldm[tid, i, dependence[x]] += 1
+                    elif calc_ngtdm or calc_ngldm:
+                        level_sum = np.int64(0)
+                        count = np.int64(0)
+                        equal = np.int64(1)
                         for k in range(neighbours.shape[0]):
                             nv = np.int64(flat[v + neighbours[k]])
                             m = np.int64(nv != 0)
-                            n_sum += nv
-                            n_count += m
-                            dependence += m * np.int64(abs(nv - g) <= ngldm_alpha)
-                        if calc_ngtdm and n_count > 0:
-                            ngtdm_d[tid, i, n_count] += abs(g * n_count - n_sum)
+                            level_sum += nv
+                            count += m
+                            equal += m * np.int64(abs(nv - g) <= alpha)
+                        if calc_ngtdm and count > 0:
+                            ngtdm_d[tid, i, count] += abs(g * count - level_sum)
                             ngtdm_n[tid, i] += 1
                         if calc_ngldm:
-                            ngldm[tid, i, dependence - 1] += 1
+                            ngldm[tid, i, equal - 1] += 1
                     if calc_glcm or calc_glrlm:
-                        for d in range(dir_off.shape[0]):
-                            od = dir_off[d]
-                            t = dir_table[d]
-                            if calc_glcm:
-                                nv = np.int64(flat[v + pair_off[d]])
-                                if nv != 0:
-                                    glcm[tid, t, i, nv - 1] += 1
-                            # A run starts where the previous voxel has another level
-                            if calc_glrlm and np.int64(flat[v - od]) != g:
-                                length = 1
-                                c = v + od
-                                while np.int64(flat[c]) == g:
-                                    length += 1
-                                    c += od
-                                glrlm[tid, t, i, length] += 1
+                        _pairs_and_runs(
+                            flat, v, g, tid, calc_glcm, calc_glrlm, pair_off, dir_off,
+                            dir_table, merged, glcm, glrlm,
+                        )  # fmt: skip
 
 
 @jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
