@@ -1,0 +1,1 @@
+The GLSZM counts its zones in a table of 2^14 cells up to 1,024 grey levels (2^18 above), and the zone labels start the threads once less. The zone matrices of the CT lesion take 7.7 ms instead of 9.2 ms for the six standard configurations at 10 threads, with the same values, bit for bit.

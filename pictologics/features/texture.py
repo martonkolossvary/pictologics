@@ -98,7 +98,7 @@ from numba.np.ufunc.parallel import get_thread_id
 from numpy import typing as npt
 from scipy.ndimage import distance_transform_cdt
 
-from ._utils import compute_nonzero_bbox, merge_bboxes, roi_min_max
+from ._utils import PRANGE_ONLY, compute_nonzero_bbox, merge_bboxes, roi_min_max
 
 # The texture feature families, in the order of their features
 _TEXTURE_FAMILIES = ("glcm", "glrlm", "glszm", "gldzm", "ngtdm", "ngldm")
@@ -1609,8 +1609,11 @@ def calculate_glrlm_features(
 # --- Combined Zone Features Kernel ---
 
 # The GLSZM cell builder counts zones in a small dense table of about this many cells
-# (grey levels x zone sizes). The few larger zones are sorted instead.
-_GLSZM_DENSE_CELLS = 1 << 18
+# (grey levels x zone sizes). The few larger zones are sorted instead. Above 1,024 grey
+# levels the table has more cells, as the small table sends most zones to the sort there.
+_GLSZM_DENSE_CELLS = 1 << 14
+_GLSZM_MANY_LEVELS = 1024
+_GLSZM_MANY_LEVEL_CELLS = 1 << 18
 
 
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
@@ -1810,7 +1813,7 @@ def _face_pairs_numba(
     return n
 
 
-@jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
+@jit(nopython=True, nogil=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
 def _label_zones_numba(
     vol: npt.NDArray[np.uint16],
     dist: npt.NDArray[np.int32],
@@ -1929,7 +1932,8 @@ def _zone_tables_numba(
     if not dense_glszm:
         glszm = np.zeros((3, 0), dtype=np.uint32)
         if calc_glszm:
-            glszm = _glszm_cells(gl, size, n_bins, _GLSZM_DENSE_CELLS)
+            cells = _GLSZM_DENSE_CELLS if n_bins <= _GLSZM_MANY_LEVELS else _GLSZM_MANY_LEVEL_CELLS
+            glszm = _glszm_cells(gl, size, n_bins, cells)
     elif calc_glszm and n_roots > 0:
         glszm = np.zeros((n_bins, size.max()), dtype=np.uint32)
         for r in range(n_roots):

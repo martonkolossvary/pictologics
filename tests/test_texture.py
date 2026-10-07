@@ -596,6 +596,23 @@ class TestTextureFeatures(unittest.TestCase):
         )
         self.assertEqual(par_cells.shape, (3, 0))
 
+    def test_glszm_cells_match_the_dense_matrix_at_many_levels(self):
+        """The cells at 2, 1,024, 1,025 and 4,096 grey levels (the small dense table up to
+        1,024 levels, the large one above) are those of the dense GLSZM, also for a large
+        zone that goes through the sorted path."""
+        rng = np.random.default_rng(31)
+        mask = rng.random((12, 13, 14)) < 0.8
+        dist = np.zeros((14, 15, 16), dtype=np.int32)
+        for n_bins in (2, 1024, 1025, 4096):
+            data = rng.integers(1, n_bins + 1, mask.shape)
+            data[:5] = 1  # one large zone
+            vol, counts = texture_module._texture_volume(data, mask, n_bins)
+            dense, _ = texture_module._zone_matrices(
+                vol.copy(), counts, dist, n_bins, True, False, True
+            )
+            cells, _ = texture_module._zone_matrices(vol, counts, dist, n_bins, True, False, False)
+            np.testing.assert_array_equal(cells, self._dense_cells(dense))
+
     def test_compact_matrices_empty_and_left_out(self):
         # An empty ROI gives empty matrices; the compact mode leaves out the matrices that
         # are not asked for, and the full mode gives zero placeholders.
