@@ -27,7 +27,7 @@ from numba import jit, prange
 from numpy import typing as npt
 from scipy.ndimage import affine_transform, distance_transform_edt, generate_binary_structure, label
 
-from .features._utils import PRANGE_ONLY, compute_nonzero_bbox, roi_min_max
+from .features._utils import PRANGE_ONLY, compute_nonzero_bbox, roi_min_max, serial_twin, sized
 from .loader import Image, _direction_matrix, _validate_geometry
 
 # Common sentinel values used in medical imaging to denote "no data" or "background"
@@ -53,6 +53,11 @@ _KERNEL_MIN_SIZE = 1 << 20
 _NEAREST_KERNEL_MIN_SIZE = 25_000
 _LINEAR_KERNEL_MIN_SIZE = 4_500
 _MASKED_KERNEL_MIN_SIZE = 1_800
+# Output voxels from which the resample kernels run in parallel; below, their serial twins
+# (measured on 10 threads: starting the threads costs about 70 us).
+_NEAREST_PARALLEL_MIN = 160_000
+_LINEAR_PARALLEL_MIN = 50_000
+_MASKED_PARALLEL_MIN = 36_000
 
 # Measured crossovers (14-core M4 Pro), in voxels: below these sizes the kernels'
 # start-up cost (0.07-0.2 ms) is more than the numpy code's whole run.
@@ -272,6 +277,9 @@ def _resample_nearest_numba(
                 out[k, j, i] = 0.0 + src[iz, iy, ix]
 
 
+_resample_nearest_numba_serial = serial_twin(_resample_nearest_numba)
+
+
 @jit(nopython=True, cache=True)  # type: ignore
 def _linear_axis_numba(
     n_out: int, n_in: int, shift: float, scale: float, start: int
@@ -355,6 +363,9 @@ def _resample_trilinear_numba(
                     out[k, j, i] = acc
 
 
+_resample_trilinear_numba_serial = serial_twin(_resample_trilinear_numba)
+
+
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
 def _resample_trilinear_masked_numba(
     src: npt.NDArray[np.float64],
@@ -425,6 +436,9 @@ def _resample_trilinear_masked_numba(
                 else:
                     out[k, j, i] = 0.0
                     out_valid[k, j, i] = False
+
+
+_resample_trilinear_masked_numba_serial = serial_twin(_resample_trilinear_masked_numba)
 
 
 @jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
@@ -978,7 +992,13 @@ def resample_image(
             resampled_array = np.empty(
                 out_shape, dtype=np.uint8 if thresholded else image.array.dtype
             )
-            _resample_trilinear_numba(
+            linear = sized(
+                _resample_trilinear_numba,
+                _resample_trilinear_numba_serial,
+                resampled_array.size,
+                _LINEAR_PARALLEL_MIN,
+            )
+            linear(
                 src,
                 matrix,
                 kernel_shift,
@@ -995,7 +1015,13 @@ def resample_image(
         ):
             src = np.ascontiguousarray(image.array)
             resampled_array = np.empty(out_shape, dtype=image.array.dtype)
-            _resample_nearest_numba(src, matrix, kernel_shift, start, resampled_array)
+            nearest = sized(
+                _resample_nearest_numba,
+                _resample_nearest_numba_serial,
+                resampled_array.size,
+                _NEAREST_PARALLEL_MIN,
+            )
+            nearest(src, matrix, kernel_shift, start, resampled_array)
         else:
             # A mask threshold needs the interpolated value, so a non-float64 mask is
             # interpolated in float64. A uint8 mask at the threshold 0.5 keeps scipy's
@@ -1029,7 +1055,13 @@ def resample_image(
         valid = np.ascontiguousarray(effective_source)
         resampled_array = np.empty(out_shape, dtype=np.float64)
         new_source_mask = np.empty(out_shape, dtype=np.bool_)
-        _resample_trilinear_masked_numba(
+        masked = sized(
+            _resample_trilinear_masked_numba,
+            _resample_trilinear_masked_numba_serial,
+            resampled_array.size,
+            _MASKED_PARALLEL_MIN,
+        )
+        masked(
             src,
             valid,
             matrix,

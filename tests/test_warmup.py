@@ -221,6 +221,42 @@ for conv in (np.ascontiguousarray, np.asfortranarray):
         small_mask = Image(conv(small_roi.astype(kind)), image.spacing, image.origin)
         pipeline.run(small_image, small_mask, config_names=["fbs", "standard_fbn_8", "spatial"])
         pipeline.run(Image(np.ascontiguousarray(small_values), image.spacing, image.origin), small_mask, config_names=["fbs"])
+# Each serial twin gives the bits of its parallel kernel (10 sizes, the warmed signatures)
+from pictologics import preprocessing
+from pictologics.features._mc_tables import EDGE_TABLE, TRIANGLE_COUNT
+
+
+def outputs(kernel, args, outs):
+    result = kernel(*args)
+    return [np.asarray(v).tobytes() for v in (*(result if isinstance(result, tuple) else (result,)), *(args[i] for i in outs))]
+
+
+twins_same = True
+twin_rng = np.random.default_rng(12)
+for n in (3, 5, 8, 11, 16, 23, 31, 40, 52, 64):
+    box = (twin_rng.random((n, n + 1, n + 2)) > 0.4).astype(np.uint8)
+    vals = twin_rng.normal(40.0, 10.0, box.shape)
+    valid = twin_rng.random(box.shape) > 0.1
+    padded = np.pad(box, 1)
+    verts, faces = morphology._mesh(padded, np.zeros(3), np.ones(3))
+    evecs = np.asfortranarray(np.linalg.eigh(np.cov(verts.T))[1])
+    scale, shift, start = np.full(3, 1.25), np.zeros(3), np.zeros(3, dtype=np.int64)
+    out = tuple(int((k - 1) / 1.25) + 1 for k in box.shape)
+    cases = [
+        (morphology._accumulate_moments_from_mask_numba, lambda: (box,), ()),
+        (morphology._accumulate_moments_from_mask_numba, lambda: (box[1:, 1:, 1:],), ()),
+        (morphology._accumulate_intensity_weighted_moments_numba, lambda: (box, vals), ()),
+        (morphology._accumulate_intensity_weighted_moments_numba, lambda: (box[1:, 1:, 1:], vals[1:, 1:, 1:]), ()),
+        (morphology._mc_counts_numba, lambda: (padded, EDGE_TABLE, TRIANGLE_COUNT, np.zeros(n + 2, np.int64), np.zeros(n + 2, np.int64)), (3, 4)),
+        (morphology._mesh_area_volume_numba, lambda: (verts, faces), ()),
+        (morphology._ombb_extents_numba, lambda: (verts, verts.mean(axis=0), evecs), ()),
+        (preprocessing._resample_nearest_numba, lambda: (box, scale, shift, start, np.zeros(out, np.uint8)), (4,)),
+        (preprocessing._resample_trilinear_numba, lambda: (vals, scale, shift, start, False, float("nan"), np.zeros(out)), (6,)),
+        (preprocessing._resample_trilinear_masked_numba, lambda: (vals, valid, scale, shift, start, 0.5, np.zeros(out), np.zeros(out, np.bool_)), (6, 7)),
+    ]
+    for kernel, args, outs in cases:
+        twin = getattr(morphology if hasattr(morphology, kernel.__name__) else preprocessing, kernel.__name__ + "_serial")
+        twins_same = twins_same and outputs(kernel, args(), outs) == outputs(twin, args(), outs)
 statuses = {entry["status"] for entry in pipeline.get_log()}
 after = signatures()
 new = {name: [s for s in after[name] if s not in before.get(name, [])] for name in after}
@@ -229,6 +265,7 @@ print(json.dumps({
     "new": {k: v for k, v in new.items() if v},
     "same at one thread": same,
     "new thread": seen == [pictologics.get_num_threads()],
+    "twins same": twins_same,
 }))
 """
 
@@ -266,4 +303,5 @@ def test_a_pipeline_run_after_the_import_compiles_no_kernel(tmp_path: Path) -> N
         "new": {},
         "same at one thread": True,
         "new thread": True,
+        "twins same": True,
     }

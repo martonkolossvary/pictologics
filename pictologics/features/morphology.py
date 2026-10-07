@@ -54,7 +54,7 @@ from scipy.special import eval_legendre
 
 from ..loader import Image
 from ._mc_tables import EDGE_TABLE, TRIANGLE_COUNT, TRIANGLE_TABLE
-from ._utils import PRANGE_ONLY, compute_nonzero_bbox
+from ._utils import PRANGE_ONLY, compute_nonzero_bbox, serial_twin, sized
 
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
@@ -119,6 +119,13 @@ def _accumulate_moments_from_mask_numba(
     return n, s0, s1, s2, s00, s11, s22, s01, s02, s12
 
 
+# Serial twins of the parallel kernels of a small ROI (see serial_twin). Measured on 10
+# threads: below these sizes, starting the threads costs more than the work.
+_accumulate_moments_from_mask_numba_serial = serial_twin(_accumulate_moments_from_mask_numba)
+# Mask box voxels from which the two moment kernels run in parallel (crossover about 130k)
+_MOMENTS_PARALLEL_MIN = 1 << 17
+
+
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _accumulate_intensity_weighted_moments_numba(
     mask: npt.NDArray[np.floating[Any]], image: npt.NDArray[np.floating[Any]]
@@ -161,6 +168,11 @@ def _accumulate_intensity_weighted_moments_numba(
         sum_i1_w += sums[i, 2]
         sum_i2_w += sums[i, 3]
     return count, sum_w, sum_i0_w, sum_i1_w, sum_i2_w
+
+
+_accumulate_intensity_weighted_moments_numba_serial = serial_twin(
+    _accumulate_intensity_weighted_moments_numba
+)
 
 
 @jit(nopython=True, cache=True)  # type: ignore
@@ -227,6 +239,11 @@ def _ombb_extents_numba(
     max_rot[2] = max_r2
 
     return min_rot, max_rot
+
+
+_ombb_extents_numba_serial = serial_twin(_ombb_extents_numba)
+# Mesh vertices from which the OMBB extents run in parallel (crossover about 120,000)
+_OMBB_PARALLEL_MIN = 120_000
 
 
 @jit(nopython=True, parallel=PRANGE_ONLY, fastmath=True, cache=True)  # type: ignore
@@ -383,6 +400,11 @@ def _mc_counts_numba(
                 n_f += tri_count[c]
         n_verts[i] = n_v
         n_faces[i] = n_f
+
+
+_mc_counts_numba_serial = serial_twin(_mc_counts_numba)
+# Padded volume voxels from which the cube counts run in parallel (crossover about 110,000)
+_MC_COUNTS_PARALLEL_MIN = 100_000
 
 
 @jit(nopython=True, cache=True)  # type: ignore
@@ -573,7 +595,8 @@ def _mesh(
     thread; the warm-up asks for it on a small volume)."""
     n_verts = np.empty(padded.shape[0] - 1, dtype=np.int64)
     n_faces = np.empty(padded.shape[0] - 1, dtype=np.int64)
-    _mc_counts_numba(padded, EDGE_TABLE, TRIANGLE_COUNT, n_verts, n_faces)
+    counts = sized(_mc_counts_numba, _mc_counts_numba_serial, padded.size, _MC_COUNTS_PARALLEL_MIN)
+    counts(padded, EDGE_TABLE, TRIANGLE_COUNT, n_verts, n_faces)
     if parallel is None:
         parallel = padded.size >= _MESH_PARALLEL_MIN and get_num_threads() > 1
     if parallel:
@@ -637,6 +660,11 @@ def _mesh_area_volume_numba(
     if vol < 0.0:
         vol = -vol
     return float(area), float(vol)
+
+
+_mesh_area_volume_numba_serial = serial_twin(_mesh_area_volume_numba)
+# Mesh faces from which the area and volume sums run in parallel (crossover about 50,000)
+_MESH_SUM_PARALLEL_MIN = 12 * _MESH_SUM_BLOCK
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
@@ -931,7 +959,13 @@ def _get_mesh_features(
     if len(faces) == 0:  # a bbox with no ROI voxel
         return {}, None, None
 
-    surface_area, mesh_volume = _mesh_area_volume_numba(verts, faces)
+    area_volume = sized(
+        _mesh_area_volume_numba,
+        _mesh_area_volume_numba_serial,
+        len(faces),
+        _MESH_SUM_PARALLEL_MIN,
+    )
+    surface_area, mesh_volume = area_volume(verts, faces)
     features["surface_area_C0JK"] = float(surface_area)
     features["volume_RNU0"] = float(mesh_volume)
 
@@ -978,9 +1012,13 @@ def _get_pca_features(
         # used below, which is invariant to that index translation.
         n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = mask_moments
     else:
-        n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = _accumulate_moments_from_mask_numba(
-            mask.array
+        moments = sized(
+            _accumulate_moments_from_mask_numba,
+            _accumulate_moments_from_mask_numba_serial,
+            mask.array.size,
+            _MOMENTS_PARALLEL_MIN,
         )
+        n, s0, s1, s2, s00, s11, s22, s01, s02, s12 = moments(mask.array)
     if n <= 3:
         return features, None, None
 
@@ -1111,7 +1149,10 @@ def _get_bounding_box_features(
     # OMBB
     if evecs is not None:
         # Deterministic streaming extents in Numba (avoids allocating rotated_verts and Python loop overhead)
-        min_rot, max_rot = _ombb_extents_numba(
+        extents = sized(
+            _ombb_extents_numba, _ombb_extents_numba_serial, len(verts), _OMBB_PARALLEL_MIN
+        )
+        min_rot, max_rot = extents(
             np.asarray(verts, dtype=np.float64),
             np.asarray(center, dtype=np.float64),
             np.asarray(evecs, dtype=np.float64),
@@ -1200,9 +1241,14 @@ def _get_intensity_morphology_features(
     values = image.array[i_bbox]
     if values.dtype not in (np.float64, np.float32):
         values = values.astype(np.float64)
-    count_i, sum_w, sum_i0_w, sum_i1_w, sum_i2_w = _accumulate_intensity_weighted_moments_numba(
-        _uint8_roi(intensity_mask.array[i_bbox], keep=True), values
+    roi = _uint8_roi(intensity_mask.array[i_bbox], keep=True)
+    weighted = sized(
+        _accumulate_intensity_weighted_moments_numba,
+        _accumulate_intensity_weighted_moments_numba_serial,
+        roi.size,
+        _MOMENTS_PARALLEL_MIN,
     )
+    count_i, sum_w, sum_i0_w, sum_i1_w, sum_i2_w = weighted(roi, values)
     if count_i > 0:
         mean_intensity = sum_w / float(count_i)
         features["integrated_intensity_99N0"] = mesh_volume * mean_intensity
@@ -1216,9 +1262,14 @@ def _get_intensity_morphology_features(
                 mask_moments[3],
             )
         else:
-            n_m, s0_m, s1_m, s2_m, _, _, _, _, _, _ = _accumulate_moments_from_mask_numba(
-                mask.array[mask_bbox] if mask_bbox is not None else mask.array
+            part = mask.array[mask_bbox] if mask_bbox is not None else mask.array
+            moments = sized(
+                _accumulate_moments_from_mask_numba,
+                _accumulate_moments_from_mask_numba_serial,
+                part.size,
+                _MOMENTS_PARALLEL_MIN,
             )
+            n_m, s0_m, s1_m, s2_m, _, _, _, _, _, _ = moments(part)
         if n_m > 0 and sum_w != 0.0:
             # The shift between the geometric and the intensity-weighted centre, in index
             # units per axis. The sums are over the cropped arrays, and the crop starts
@@ -1292,7 +1343,14 @@ def _morphology_first(
     # PCA covariance is translation-invariant, and the center-of-mass consumer
     # adds the bbox offset back. The kernel's voxel count doubles as the count
     # for the voxel-counting volume.
-    mask_moments = _accumulate_moments_from_mask_numba(_uint8_roi(mask.array[bbox], keep=True))
+    roi = _uint8_roi(mask.array[bbox], keep=True)
+    moments = sized(
+        _accumulate_moments_from_mask_numba,
+        _accumulate_moments_from_mask_numba_serial,
+        roi.size,
+        _MOMENTS_PARALLEL_MIN,
+    )
+    mask_moments = moments(roi)
     n_voxels = mask_moments[0]
     features["volume_voxel_counting_YEKZ"] = float(n_voxels * voxel_volume)
 

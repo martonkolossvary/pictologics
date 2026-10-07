@@ -198,3 +198,33 @@ def test_the_range_scan_reads_the_layouts_of_the_import() -> None:
     assert [s[1] for s in seen] == [True] * 6  # the mask is in row order
     assert [s[0] for s in seen] == [True, True, True, True, True, False]  # the crop stays
     assert seen[-1][2] == "uint8"
+
+
+def test_a_serial_twin_is_the_kernel_code_with_parallel_off() -> None:
+    # The twin is a copy of the Python code of the kernel under its own name, compiled with
+    # the options of the kernel but parallel=False; with the compiler off, it is the kernel.
+    def kernel(values: np.ndarray, factor: int = 2) -> float:
+        return float(values.sum() * factor)
+
+    dispatcher = type(
+        "Dispatcher",
+        (),
+        {
+            "py_func": kernel,
+            "targetoptions": {"nopython": True, "parallel": True, "fastmath": True},
+        },
+    )()
+    with patch.object(_utils, "jit", lambda **options: lambda code: (options, code)):
+        options, twin = _utils.serial_twin(dispatcher)
+    assert options == {"nopython": True, "parallel": False, "fastmath": True, "cache": True}
+    assert twin.__name__ == "kernel_serial" and twin.__qualname__.endswith(".kernel_serial")
+    assert twin.__module__ == kernel.__module__ and twin is not kernel
+    assert twin(np.arange(4.0)) == kernel(np.arange(4.0)) == 12.0
+    assert _utils.serial_twin(kernel) is kernel  # the compiler is off
+
+
+def test_sized_picks_the_twin_for_small_work_or_one_thread() -> None:
+    assert _utils.sized("kernel", "twin", 99, 100) == "twin"
+    assert _utils.sized("kernel", "twin", 100, 100) == "kernel"
+    with patch.object(_utils, "get_num_threads", return_value=1):
+        assert _utils.sized("kernel", "twin", 10**9, 100) == "twin"

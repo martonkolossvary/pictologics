@@ -558,9 +558,14 @@ class TestMorphologyFeatures(unittest.TestCase):
         float_image = self._create_image(values.astype(np.float64))
         expected = _get_intensity_morphology_features(mask, float_image, mask, mesh_volume=27.0)
         kernel = morphology_module._accumulate_intensity_weighted_moments_numba
-        with patch.object(
-            morphology_module, "_accumulate_intensity_weighted_moments_numba", wraps=kernel
-        ) as spy:
+        with (
+            patch.object(
+                morphology_module, "_accumulate_intensity_weighted_moments_numba", wraps=kernel
+            ) as spy,
+            patch.object(  # a small ROI takes the serial twin: the same spy
+                morphology_module, "_accumulate_intensity_weighted_moments_numba_serial", new=spy
+            ),
+        ):
             for kind in (np.int16, np.float32):
                 image = self._create_image(values.astype(kind))
                 found = _get_intensity_morphology_features(mask, image, mask, mesh_volume=27.0)
@@ -568,6 +573,48 @@ class TestMorphologyFeatures(unittest.TestCase):
                     self.assertEqual(found, expected)
         kinds = [call.args[1].dtype for call in spy.call_args_list]
         self.assertEqual(kinds, [np.float64, np.float32])
+
+
+def test_the_morphology_kernels_take_their_serial_twins_below_their_gates() -> None:
+    # A small ROI takes the serial twin of each parallel kernel (starting the threads costs
+    # more than the work); from the gate on, with more than one thread, the kernel runs. Both
+    # give the same features.
+    from contextlib import ExitStack
+
+    from pictologics.features import morphology as module
+
+    names = [
+        "_accumulate_moments_from_mask_numba",
+        "_accumulate_intensity_weighted_moments_numba",
+        "_mc_counts_numba",
+        "_mesh_area_volume_numba",
+        "_ombb_extents_numba",
+    ]
+    gates = ["_MOMENTS_PARALLEL_MIN", "_MC_COUNTS_PARALLEL_MIN", "_MESH_SUM_PARALLEL_MIN"]
+    roi = np.zeros((12, 13, 14), dtype=np.uint8)
+    roi[2:9, 3:10, 2:11] = 1
+    image = Image(
+        np.random.default_rng(3).normal(10.0, 2.0, roi.shape), (1.0, 0.9, 1.1), (0.0,) * 3
+    )
+    mask = Image(roi, image.spacing, image.origin)
+
+    def run(gate: int) -> tuple[dict[str, float], dict[str, int]]:
+        with ExitStack() as stack:
+            spies = {
+                name: stack.enter_context(patch.object(module, name, wraps=getattr(module, name)))
+                for base in names
+                for name in (base, base + "_serial")
+            }
+            for name in [*gates, "_OMBB_PARALLEL_MIN"]:
+                stack.enter_context(patch.object(module, name, getattr(module, name) * gate))
+            features = calculate_morphology_features(mask, image=image, intensity_mask=mask)
+        return features, {name: spy.call_count for name, spy in spies.items()}
+
+    small, calls = run(1)
+    assert all(calls[name] == 0 and calls[name + "_serial"] > 0 for name in names)
+    large, calls = run(0)  # every gate at 0: the parallel kernels
+    assert all(calls[name] > 0 and calls[name + "_serial"] == 0 for name in names)
+    assert large == small
 
 
 if __name__ == "__main__":

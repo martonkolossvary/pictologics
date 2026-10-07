@@ -22,6 +22,7 @@ import numpy.typing as npt
 
 # Private imports to access Numba kernels directly
 from .features import _utils, intensity, morphology, texture
+from .features._mc_tables import EDGE_TABLE, TRIANGLE_COUNT
 
 
 def warmup_jit() -> None:
@@ -225,28 +226,43 @@ def _warmup_morphology() -> None:
     img[mask > 0] = 2.0
 
     # Production scans bbox-cropped views (strided) in the common case and
-    # C-contiguous arrays for full-volume ROIs; compile both layouts.
-    morphology._accumulate_moments_from_mask_numba(mask)
-    morphology._accumulate_moments_from_mask_numba(mask[1:, 1:, 1:])
-    morphology._accumulate_intensity_weighted_moments_numba(mask, img)
-    morphology._accumulate_intensity_weighted_moments_numba(mask[1:, 1:, 1:], img[1:, 1:, 1:])
-    # float32 images: the responses of the filters
-    img32 = img.astype(np.float32)
-    morphology._accumulate_intensity_weighted_moments_numba(mask, img32)
-    morphology._accumulate_intensity_weighted_moments_numba(mask[1:, 1:, 1:], img32[1:, 1:, 1:])
+    # C-contiguous arrays for full-volume ROIs; compile both layouts. Each parallel kernel
+    # of a small ROI has a serial twin with the same signatures.
+    for moments in (
+        morphology._accumulate_moments_from_mask_numba,
+        morphology._accumulate_moments_from_mask_numba_serial,
+    ):
+        moments(mask)
+        moments(mask[1:, 1:, 1:])
+    img32 = img.astype(np.float32)  # float32 images: the responses of the filters
     # A mask of another type becomes a row-order uint8 copy of the crop; the image crop
     # stays a strided view
     row_mask = np.ascontiguousarray(mask[1:, 1:, 1:])
-    morphology._accumulate_intensity_weighted_moments_numba(row_mask, img[1:, 1:, 1:])
-    morphology._accumulate_intensity_weighted_moments_numba(row_mask, img32[1:, 1:, 1:])
-    # An image of another type becomes a row-order float64 copy of the crop
-    morphology._accumulate_intensity_weighted_moments_numba(
-        mask[1:, 1:, 1:], np.ascontiguousarray(img[1:, 1:, 1:])
-    )
+    for weighted in (
+        morphology._accumulate_intensity_weighted_moments_numba,
+        morphology._accumulate_intensity_weighted_moments_numba_serial,
+    ):
+        weighted(mask, img)
+        weighted(mask[1:, 1:, 1:], img[1:, 1:, 1:])
+        weighted(mask, img32)
+        weighted(mask[1:, 1:, 1:], img32[1:, 1:, 1:])
+        weighted(row_mask, img[1:, 1:, 1:])
+        weighted(row_mask, img32[1:, 1:, 1:])
+        # An image of another type becomes a row-order float64 copy of the crop
+        weighted(mask[1:, 1:, 1:], np.ascontiguousarray(img[1:, 1:, 1:]))
 
     # Marching cubes (the mask with its zero border), also the parallel form of large volumes
     for parallel in (False, True):
         morphology._mesh(np.pad(mask, 1), np.zeros(3), np.ones(3), parallel)
+    padded = np.pad(mask, 1)
+    for counts in (morphology._mc_counts_numba, morphology._mc_counts_numba_serial):
+        counts(
+            padded,
+            EDGE_TABLE,
+            TRIANGLE_COUNT,
+            np.empty(padded.shape[0] - 1, dtype=np.int64),
+            np.empty(padded.shape[0] - 1, dtype=np.int64),
+        )
     morphology._column_stats_numba(np.ones((4, 3), dtype=np.float64))
 
     # 2. Point Cloud / Mesh Operations
@@ -269,6 +285,7 @@ def _warmup_morphology() -> None:
     # np.linalg.eigh gives its eigenvectors in column order
     evecs = np.asfortranarray(np.eye(3, dtype=np.float64))
     morphology._ombb_extents_numba(verts, center, evecs)
+    morphology._ombb_extents_numba_serial(verts, center, evecs)
     morphology._max_pairwise_distance_numba(verts)
     # The serial twin of the morphology worker thread (see pipeline._MorphologyAhead)
     morphology._max_pairwise_distance_serial_numba(verts)
@@ -282,6 +299,7 @@ def _warmup_morphology() -> None:
         )
     )
     morphology._mesh_area_volume_numba(tet_verts, tet_faces)
+    morphology._mesh_area_volume_numba_serial(tet_verts, tet_faces)
     mvee_points = np.ascontiguousarray(
         np.concatenate([verts, [[1.0, 1.0, 0.0], [1.0, 0.0, 1.0]]], axis=0)
     )
@@ -338,17 +356,24 @@ def _warmup_filters() -> None:
     start = np.zeros(3, dtype=np.int64)  # the first voxel of the computed region
     out3 = np.empty((3, 3, 3), dtype=np.float64)
     out_u8 = np.empty((3, 3, 3), dtype=np.uint8)
-    preprocessing._resample_trilinear_numba(src, scale, shift, start, False, math.nan, out3)
-    preprocessing._resample_trilinear_numba(src, scale, shift, start, False, 0.5, out_u8)
-    preprocessing._resample_trilinear_numba(  # uint8 images and masks
-        src.astype(np.uint8), scale, shift, start, True, math.nan, out_u8
-    )
-    for s_dtype in (np.float64, np.uint8, np.bool_):
-        src_d = src.astype(s_dtype)
-        out_d = np.empty((3, 3, 3), dtype=s_dtype)
-        preprocessing._resample_nearest_numba(src_d, scale, shift, start, out_d)
     valid = np.ones((4, 4, 4), dtype=np.bool_)
     out_valid = np.empty((3, 3, 3), dtype=np.bool_)
-    preprocessing._resample_trilinear_masked_numba(
-        src, valid, scale, shift, start, 0.5, out3, out_valid
-    )
+    for linear, nearest, masked in (
+        (
+            preprocessing._resample_trilinear_numba,
+            preprocessing._resample_nearest_numba,
+            preprocessing._resample_trilinear_masked_numba,
+        ),
+        (
+            preprocessing._resample_trilinear_numba_serial,
+            preprocessing._resample_nearest_numba_serial,
+            preprocessing._resample_trilinear_masked_numba_serial,
+        ),
+    ):
+        linear(src, scale, shift, start, False, math.nan, out3)
+        linear(src, scale, shift, start, False, 0.5, out_u8)
+        linear(src.astype(np.uint8), scale, shift, start, True, math.nan, out_u8)  # uint8 input
+        for s_dtype in (np.float64, np.uint8, np.bool_):
+            out_d = np.empty((3, 3, 3), dtype=s_dtype)
+            nearest(src.astype(s_dtype), scale, shift, start, out_d)
+        masked(src, valid, scale, shift, start, 0.5, out3, out_valid)

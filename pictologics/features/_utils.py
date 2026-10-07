@@ -11,10 +11,11 @@ Note: The underscore prefix (_utils) indicates this is a private module.
 from __future__ import annotations
 
 import math
+import types
 from typing import Any, Optional
 
 import numpy as np
-from numba import jit, prange
+from numba import get_num_threads, jit, prange
 from numba.core.cpu_options import ParallelOptions
 from numpy import typing as npt
 
@@ -34,6 +35,30 @@ PRANGE_ONLY = ParallelOptions(
         "prange": True,
     }
 )
+
+
+def serial_twin(kernel: Any) -> Any:
+    """A serial copy of a parallel numba kernel: the same Python code with parallel=False,
+    so prange runs as range and each iteration computes as in the kernel. It serves work
+    that is too small to pay the start of a parallel region (about 70 us on 10 threads,
+    47 us on 1 thread). The copy has its own name, so the numba cache keeps both. With the
+    compiler off, the kernel is Python code that runs serially, so it is its own twin."""
+    code = getattr(kernel, "py_func", None)
+    if code is None:
+        return kernel
+    twin = types.FunctionType(
+        code.__code__, code.__globals__, code.__name__ + "_serial", code.__defaults__
+    )
+    twin.__qualname__ = code.__qualname__ + "_serial"
+    twin.__module__ = code.__module__
+    twin.__doc__ = code.__doc__
+    return jit(**{**kernel.targetoptions, "parallel": False}, cache=True)(twin)
+
+
+def sized(kernel: Any, twin: Any, size: int, parallel_min: int) -> Any:
+    """`kernel` for work of `size` items from `parallel_min` on, with more than one thread;
+    else its serial `twin` (see serial_twin)."""
+    return kernel if size >= parallel_min and get_num_threads() > 1 else twin
 
 
 # The box and range scans read an integer or bool mask as the integer type of its size: the

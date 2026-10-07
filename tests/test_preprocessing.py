@@ -1296,3 +1296,52 @@ def test_normalise_image_by_its_region() -> None:
         normalise_image(Image(np.full((3, 3, 3), 7.0), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), "zscore")
     with pytest.raises(ValueError, match="Dimension mismatch between mask"):
         normalise_image(image, "zscore", mask=Image(inside[:4], image.spacing, image.origin))
+
+
+def test_the_resample_kernels_take_their_serial_twins_below_their_gates() -> None:
+    # A small output takes the serial twin of each resample kernel; from the gate on, with
+    # more than one thread, the kernel runs. Both give the same arrays.
+    from contextlib import ExitStack
+
+    from pictologics import preprocessing as module
+
+    names = [
+        "_resample_trilinear_numba",
+        "_resample_nearest_numba",
+        "_resample_trilinear_masked_numba",
+    ]
+    gates = ["_LINEAR_PARALLEL_MIN", "_NEAREST_PARALLEL_MIN", "_MASKED_PARALLEL_MIN"]
+    rng = np.random.default_rng(5)
+    image = Image(rng.normal(40.0, 10.0, (20, 21, 22)), (0.7, 0.7, 1.25), (0.0, 0.0, 0.0))
+    mask = Image(
+        (rng.random(image.array.shape) > 0.5).astype(np.uint8), image.spacing, image.origin
+    )
+    valid = rng.random(image.array.shape) > 0.1
+
+    def run(gate: int) -> tuple[list[np.ndarray], dict[str, int]]:
+        with ExitStack() as stack:
+            spies = {
+                name: stack.enter_context(patch.object(module, name, wraps=getattr(module, name)))
+                for base in names
+                for name in (base, base + "_serial")
+            }
+            for name in gates:
+                stack.enter_context(patch.object(module, name, getattr(module, name) * gate))
+            for name in (
+                "_NEAREST_KERNEL_MIN_SIZE",
+                "_LINEAR_KERNEL_MIN_SIZE",
+                "_MASKED_KERNEL_MIN_SIZE",
+            ):
+                stack.enter_context(patch.object(module, name, 0))  # the kernels, not scipy
+            out = [
+                resample_image(image, (1.0, 1.0, 1.0)).array,
+                resample_image(mask, (1.0, 1.0, 1.0), interpolation="nearest").array,
+                resample_image(image, (1.0, 1.0, 1.0), source_mask=valid).array,
+            ]
+        return out, {name: spy.call_count for name, spy in spies.items()}
+
+    small, calls = run(1)
+    assert all(calls[name] == 0 and calls[name + "_serial"] == 1 for name in names)
+    large, calls = run(0)  # every gate at 0: the parallel kernels
+    assert all(calls[name] == 1 and calls[name + "_serial"] == 0 for name in names)
+    assert all(a.tobytes() == b.tobytes() for a, b in zip(small, large, strict=True))
