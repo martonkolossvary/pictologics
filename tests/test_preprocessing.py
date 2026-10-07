@@ -645,9 +645,10 @@ def test_resample_with_source_mask() -> None:
 
 # ---------------------------------------------------------------------------
 # Numba kernel paths (float64, size >= a kernel's limit, for example
-# _DISCRETISE_KERNEL_MIN_SIZE, or _KERNEL_MIN_SIZE for arrays that share no memory
-# order). The limits are patched small so tiny arrays exercise the single-pass
-# kernels; the optimization work proved these bit-identical to the numpy fallback.
+# _RESEGMENT_KERNEL_MIN_SIZE, or _KERNEL_MIN_SIZE for arrays that share no memory
+# order; the discretise kernels take every row- or column-order float64 array). The
+# limits are patched small so tiny arrays exercise the single-pass kernels; the
+# optimization work proved these bit-identical to the numpy fallback.
 # ---------------------------------------------------------------------------
 
 
@@ -661,8 +662,7 @@ def test_discretise_fbn_kernel_clamps() -> None:
     img = Image(arr, (1, 1, 1), (0, 0, 0))
     # Explicit range narrower than the data: values below it clamp to bin 1,
     # values above clamp to n_bins.
-    with patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8):
-        out = discretise_image(img, method="FBN", n_bins=8, min_val=20.0, max_val=40.0)
+    out = discretise_image(img, method="FBN", n_bins=8, min_val=20.0, max_val=40.0)
     assert out.array[0, 0, 0] == 0
     assert out.array.min() >= 0
     assert out.array.max() <= 8
@@ -670,47 +670,54 @@ def test_discretise_fbn_kernel_clamps() -> None:
 
 def test_discretise_fbs_kernel_clamps() -> None:
     # NaN and +inf map to bin 0 (no cast of infinity to an integer), -inf to bin 1, on
-    # both paths. The default minimum is the smallest finite ROI value.
+    # both paths: the kernel (row order) and the numpy chain (a layout of neither order).
+    # The default minimum is the smallest finite ROI value.
     arr = _f64((4, 4, 4))
     arr[0, 0, :3] = (np.nan, np.inf, -np.inf)
-    img = Image(arr, (1, 1, 1), (0, 0, 0))
-    for limit in (8, 1 << 30):
-        with patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", limit):
-            out = discretise_image(img, method="FBS", bin_width=5.0, min_val=20.0, max_val=40.0)
-            assert out.array[0, 0, :3].tolist() == [0, 0, 1]
-            out = discretise_image(img, method="FBS", bin_width=5.0, roi_mask=np.ones((4, 4, 4)))
-            assert out.array[0, 0, 3] == 1 and out.array[3, 3, 3] == 13  # (63 - 3) / 5 + 1
+    for layout in (arr, np.swapaxes(arr, 0, 1)):
+        img = Image(layout, (1, 1, 1), (0, 0, 0))
+        out = discretise_image(img, method="FBS", bin_width=5.0, min_val=20.0, max_val=40.0)
+        assert out.array[0, 0, :3].tolist() == [0, 0, 1]
+        out = discretise_image(img, method="FBS", bin_width=5.0, roi_mask=np.ones((4, 4, 4)))
+        assert out.array[0, 0, 3] == 1 and out.array[3, 3, 3] == 13  # (63 - 3) / 5 + 1
 
 
 def test_discretise_kernel_keeps_array_order() -> None:
-    # The kernels give the numpy chain's bins and layout, for row- and column-order input.
-    # The DICOM loader's layout (neither) needs a copy: below _KERNEL_MIN_SIZE it keeps
-    # the numpy chain.
+    # The kernels give the numpy chain's bins and keep the layout of row- and column-order
+    # input. The DICOM loader's layout (neither) needs a copy: below _KERNEL_MIN_SIZE it
+    # keeps the numpy chain, from it the kernels take a copy.
     rng = np.random.default_rng(5)
     row_order = rng.normal(0.0, 50.0, (5, 6, 7))
     row_order[1, 2, 3] = np.nan
     dicom_layout = np.swapaxes(row_order, 0, 1)
-    for arr in (row_order, np.asfortranarray(row_order), dicom_layout):
-        for method, kw in (("FBN", {"n_bins": 8}), ("FBS", {"bin_width": 10.0})):
-            ref = discretise_image(arr, method, **kw)
-            with (
-                patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8),
-                patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8),
-            ):
-                out = discretise_image(arr, method, **kw)
+    for method, kw in (("FBN", {"n_bins": 8}), ("FBS", {"bin_width": 10.0})):
+        with (
+            patch("pictologics.preprocessing._discretise_fbn_numba", side_effect=AssertionError),
+            patch(
+                "pictologics.preprocessing._discretise_fbn_numba_serial",
+                side_effect=AssertionError,
+            ),
+            patch("pictologics.preprocessing._discretise_fbs_numba", side_effect=AssertionError),
+            patch(
+                "pictologics.preprocessing._discretise_fbs_numba_serial",
+                side_effect=AssertionError,
+            ),
+        ):
+            ref = np.swapaxes(discretise_image(dicom_layout, method, **kw), 0, 1)
+        for arr in (row_order, np.asfortranarray(row_order)):
+            out = discretise_image(arr, method, **kw)
             assert_array_equal(out, ref)
-            assert out.flags.f_contiguous == ref.flags.f_contiguous == arr.flags.f_contiguous
-    with (
-        patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8),
-        patch("pictologics.preprocessing._discretise_fbs_numba", side_effect=AssertionError),
-    ):
-        discretise_image(dicom_layout, "FBS", bin_width=10.0)
+            assert out.flags.f_contiguous == arr.flags.f_contiguous
+        with patch("pictologics.preprocessing._KERNEL_MIN_SIZE", 8):
+            out = discretise_image(dicom_layout, method, **kw)
+        assert_array_equal(np.swapaxes(out, 0, 1), ref)
 
 
 def test_discretise_cutoffs_kernel_matches_digitize() -> None:
     # The cutoff kernel gives the bins of digitize (+1, NaN to 0) for increasing,
-    # decreasing, repeated and no cutoffs, in row and column order. Cutoffs that go up
-    # and down keep the error of digitize.
+    # decreasing, repeated and no cutoffs, in row and column order. The DICOM layout
+    # (neither order) takes digitize. Cutoffs that go up and down keep the error of
+    # digitize.
     rng = np.random.default_rng(6)
     arr = rng.normal(0.0, 50.0, (5, 6, 7))
     arr[1, 2, 3] = np.nan
@@ -718,15 +725,11 @@ def test_discretise_cutoffs_kernel_matches_digitize() -> None:
     for cutoffs in ([-20.0, 0.0, 20.0], [20.0, 0.0, -20.0], [0.0, 0.0, 20.0], []):
         expected = np.digitize(arr, cutoffs) + 1
         expected[np.isnan(arr)] = 0
-        for layout in (arr, np.asfortranarray(arr)):
-            with patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8):
-                out = discretise_image(layout, "FIXED_CUTOFFS", cutoffs=cutoffs)
+        for layout in (arr, np.asfortranarray(arr), np.swapaxes(arr, 0, 1)):
+            out = discretise_image(layout, "FIXED_CUTOFFS", cutoffs=cutoffs)
             assert out.dtype == np.int32
-            assert_array_equal(out, expected)
-    with (
-        patch("pictologics.preprocessing._DISCRETISE_KERNEL_MIN_SIZE", 8),
-        pytest.raises(ValueError, match="monotonically"),
-    ):
+            assert_array_equal(out if layout.flags.forc else np.swapaxes(out, 0, 1), expected)
+    with pytest.raises(ValueError, match="monotonically"):
         discretise_image(arr, "FIXED_CUTOFFS", cutoffs=[0.0, 20.0, 10.0])
 
 
@@ -1018,6 +1021,23 @@ def test_resample_mask_threshold_every_type() -> None:
                     if how == "linear" and thr == 0.5:  # the old uint8 result
                         old = resample(labels.astype(np.uint8), how, None)
                         assert_array_equal(rounded, (old >= 0.5).astype(np.uint8))
+
+
+def test_resample_grid_stays_for_each_input() -> None:
+    # The grid of positive spacings stays for each input: spacings as ints, floats or numpy
+    # floats are one input, with one grid. Other spacings (here -0.0 and NaN) never stay.
+    from pictologics.preprocessing import _grid, _kept_grid, _output_grid
+
+    _kept_grid.cache_clear()
+    shape = (9, 11, 13)
+    first = _output_grid(shape, (1.3, 0.9, 2.1), (1, 1, 1))
+    assert first == _grid(shape, (1.3, 0.9, 2.1), (1.0, 1.0, 1.0))
+    assert _output_grid(shape, (1.3, 0.9, np.float64(2.1)), (1.0, 1.0, 1.0)) is first
+    assert _kept_grid.cache_info().hits == 1
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for spacing in ((1.3, -0.0, 2.1), (1.3, np.nan, 2.1)):
+            _output_grid(shape, spacing, (1.0, 1.0, 1.0))
+    assert _kept_grid.cache_info().currsize == 1
 
 
 def test_resample_region_matches_the_whole_grid() -> None:

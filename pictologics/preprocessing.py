@@ -20,6 +20,7 @@ import math
 import warnings
 import weakref
 from dataclasses import replace
+from functools import lru_cache
 from typing import Any, Literal, Optional, cast
 
 import numpy as np
@@ -61,7 +62,6 @@ _MASKED_PARALLEL_MIN = 36_000
 
 # Measured crossovers (14-core M4 Pro), in voxels: below these sizes the kernels'
 # start-up cost (0.07-0.2 ms) is more than the numpy code's whole run.
-_DISCRETISE_KERNEL_MIN_SIZE = 80_000
 _RESEGMENT_KERNEL_MIN_SIZE = 80_000
 _SENTINEL_KERNEL_MIN_SIZE = 200_000
 
@@ -155,6 +155,9 @@ def _discretise_fbn_numba(
             out[i] = np.int32(t)
 
 
+_discretise_fbn_numba_serial = serial_twin(_discretise_fbn_numba)
+
+
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
 def _discretise_fbs_numba(
     flat: npt.NDArray[np.float64],
@@ -172,6 +175,9 @@ def _discretise_fbs_numba(
             out[i] = 0
         else:
             out[i] = np.int32(t)
+
+
+_discretise_fbs_numba_serial = serial_twin(_discretise_fbs_numba)
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
@@ -210,6 +216,13 @@ def _discretise_cutoffs_numba(
                 else:
                     hi = mid
         out[i] = lo + 1
+
+
+_discretise_cutoffs_numba_serial = serial_twin(_discretise_cutoffs_numba)
+# Voxels from which the discretise kernels run in parallel; below, their serial twins
+# (measured on 10 threads: the two FBN forms take the same time at 160,000 voxels, the
+# FBS forms at about 200,000)
+_DISCRETISE_PARALLEL_MIN = 160_000
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
@@ -712,20 +725,43 @@ def _mask_threshold(values: npt.NDArray[Any], threshold: float, rounded: bool) -
 _NEAREST_DTYPES = (np.float64, np.uint8, np.bool_)
 
 
-def _output_grid(
-    shape: tuple[int, ...],
-    spacing: tuple[float, float, float],
-    new_spacing: tuple[float, float, float],
-) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """The resampled grid shape, and the diagonal transform (matrix, offset) from an
-    output index to an input coordinate, x_in = matrix * x_out + offset ('align grid
-    centers'), with the same steps as `resample_image`."""
+_Grid = tuple[tuple[int, ...], tuple[float, ...], tuple[float, ...], tuple[float, ...]]
+
+
+def _grid(shape: tuple[int, ...], spacing: tuple[Any, ...], new_spacing: tuple[Any, ...]) -> _Grid:
+    """The resampled grid shape, the diagonal transform (matrix, offset) from an output
+    index to an input coordinate, x_in = matrix * x_out + offset ('align grid centers'),
+    and the shift of the origin, as tuples."""
     original_spacing = np.array(spacing)
     target_spacing = np.array(new_spacing)
+    # IBSI: nb = ceil(na * sa / sb). Round to 9 decimals before ceil: floating-point noise
+    # can push an exact integer product (e.g. 110.0) to 110.00000000000001, yielding a
+    # spurious extra voxel along that axis.
     new_shape = np.ceil(np.round(shape * (original_spacing / target_spacing), 9)).astype(int)
     matrix = target_spacing / original_spacing
     offset = (np.array(shape) - 1) / 2.0 - matrix * ((new_shape - 1) / 2.0)
-    return new_shape, matrix, offset
+    # O_new = O_old + 0.5 * ((N_old - 1) * S_old - (N_new - 1) * S_new), along the axes
+    extent_orig = (np.array(shape) - 1) * original_spacing
+    extent_new = (new_shape - 1) * target_spacing
+    origin_shift = 0.5 * (extent_orig - extent_new)
+    return (
+        tuple(new_shape.tolist()),
+        tuple(matrix.tolist()),
+        tuple(offset.tolist()),
+        tuple(origin_shift.tolist()),
+    )
+
+
+_kept_grid = lru_cache(maxsize=256)(_grid)
+
+
+def _output_grid(shape: tuple[int, ...], spacing: Any, new_spacing: Any) -> _Grid:
+    """`_grid` of a resample. The grid of positive spacings stays for each input: equal
+    positive numbers have the same bits, so a kept grid is the grid of the input."""
+    key = (tuple(shape), tuple(spacing), tuple(new_spacing))
+    if all(isinstance(s, (int, float)) and s > 0 for s in key[1] + key[2]):
+        return _kept_grid(*key)
+    return _grid(*key)
 
 
 def _roi_region(
@@ -740,7 +776,7 @@ def _roi_region(
     voxels within 1 of its input coordinate (linear, nearest), so the region holds every
     output whose coordinate is within 2 of the box; a box at the input edge reaches the
     grid edge (the kernels clamp there)."""
-    new_shape, matrix, offset = _output_grid(shape, spacing, new_spacing)
+    new_shape, matrix, offset, _ = _output_grid(shape, spacing, new_spacing)
     region = []
     for b, n_in, n_out, m, o, g in zip(box, shape, new_shape, matrix, offset, margin, strict=True):
         lo = 0 if b.start == 0 else max(math.floor((b.start - 2 - o) / m), 0)
@@ -908,39 +944,17 @@ def resample_image(
 
     order = interpolation_map[interpolation]
 
-    # Calculate new shape
-    # IBSI: nb = ceil(na * sa / sb)
-    original_spacing = np.array(image.spacing)
-    target_spacing = np.array(new_spacing)
-
-    # Scale factor for dimensions (how many new voxels per old voxel)
-    # dim_scale = s_old / s_new
-    dim_scale = original_spacing / target_spacing
-
-    # Round to 9 decimals before ceil: floating-point noise can push an exact
-    # integer product (e.g. 110.0) to 110.00000000000001, yielding a spurious
-    # extra voxel along that axis.
-    new_shape = np.ceil(np.round(image.array.shape * dim_scale, 9)).astype(int)
-
-    # Calculate affine transform parameters
-    # We map Output Coordinate (x_out) -> Input Coordinate (x_in)
-    # x_in = matrix * x_out + offset
-
-    # Scale factor for coordinates (step size in input space per step in output space)
-    # step_in = s_new / s_old
-    coord_scale = target_spacing / original_spacing
-    matrix = coord_scale  # Diagonal matrix elements
-
-    # Calculate offset for 'Align Grid Centers
-    center_orig = (np.array(image.array.shape) - 1) / 2.0
-    center_new = (new_shape - 1) / 2.0
-
-    offset = center_orig - matrix * center_new
+    # The new grid, and the transform from an output index to an input coordinate:
+    # x_in = matrix * x_out + offset ('align grid centers', see _grid)
+    out_shape, scale, shift, origin_shift = _output_grid(
+        image.array.shape, image.spacing, new_spacing
+    )
+    matrix = np.array(scale)
+    offset = np.array(shift)
 
     # Perform resampling
     resampled_array: npt.NDArray[Any]
     new_source_mask: Optional[npt.NDArray[np.bool_]] = None
-    out_shape = tuple(int(n) for n in new_shape)
     start = np.zeros(3, dtype=np.int64)
 
     # The parallel kernels cover the hot path (3D, 'nearest' boundary, common
@@ -1094,12 +1108,10 @@ def resample_image(
         # Round intensities, in place: the resampled array is always a new one
         np.round(resampled_array, out=resampled_array)
 
-    # Update origin to maintain center alignment
-    # O_new = O_old + 0.5 * ( (N_old-1)*S_old - (N_new-1)*S_new )
-    extent_orig = (np.array(image.array.shape) - 1) * original_spacing
-    extent_new = (new_shape - 1) * target_spacing
-    origin_shift = 0.5 * (extent_orig - extent_new)
-    new_origin = tuple(np.array(image.origin) + _direction_matrix(image.direction) @ origin_shift)
+    # Update origin to maintain center alignment (the shift of _grid, in world axes)
+    new_origin = tuple(
+        np.array(image.origin) + _direction_matrix(image.direction) @ np.array(origin_shift)
+    )
     if region is not None:
         new_origin = _region_origin(new_origin, image.direction, new_spacing, region)
 
@@ -1238,11 +1250,10 @@ def discretise_image(
     # The bin maths below run densely on the full array (no boolean
     # gather/scatter): NaN voxels propagate through the float ops and are
     # mapped to bin 0 (invalid) at the end. The kernels read and write a row- or
-    # column-order array in its own order, with no copy.
+    # column-order float64 array in its own order, with no copy (another layout from
+    # _KERNEL_MIN_SIZE voxels on, as a copy); the numpy chain takes the other arrays.
     order = _shared_order(array)
-    use_kernel = array.dtype == np.float64 and array.size >= (
-        _DISCRETISE_KERNEL_MIN_SIZE if order else _KERNEL_MIN_SIZE
-    )
+    use_kernel = array.dtype == np.float64 and (order is not None or array.size >= _KERNEL_MIN_SIZE)
     if method == "FBN":
         if n_bins is None:
             raise ValueError("n_bins required for FBN")
@@ -1260,9 +1271,13 @@ def discretise_image(
             # Single-pass kernel; bit-identical to the numpy chain below
             flat = array.ravel(order or "C")
             binned: npt.NDArray[Any] = np.empty(flat.size, dtype=np.int32)
-            _discretise_fbn_numba(
-                flat, float(n_bins), float(current_min), float(current_max), binned
+            fbn = sized(
+                _discretise_fbn_numba,
+                _discretise_fbn_numba_serial,
+                flat.size,
+                _DISCRETISE_PARALLEL_MIN,
             )
+            fbn(flat, float(n_bins), float(current_min), float(current_max), binned)
             discretised = binned.reshape(array.shape, order=order or "C")
         else:
             # IBSI FBN: floor(N_g * (X - X_min) / (X_max - X_min)) + 1
@@ -1296,7 +1311,13 @@ def discretise_image(
             # Single-pass kernel; bit-identical to the numpy chain below
             flat = array.ravel(order or "C")
             fbs_binned: npt.NDArray[Any] = np.empty(flat.size, dtype=np.int32)
-            _discretise_fbs_numba(flat, float(bin_width), float(current_min), fbs_binned)
+            fbs = sized(
+                _discretise_fbs_numba,
+                _discretise_fbs_numba_serial,
+                flat.size,
+                _DISCRETISE_PARALLEL_MIN,
+            )
+            fbs(flat, float(bin_width), float(current_min), fbs_binned)
             discretised = fbs_binned.reshape(array.shape, order=order or "C")
         else:
             # IBSI FBS: floor((X - X_min) / w_b) + 1
@@ -1329,9 +1350,15 @@ def discretise_image(
             # The bins of np.digitize in one pass, with no int64 array and no copy
             flat = array.ravel(order or "C")
             cut_binned: npt.NDArray[Any] = np.empty(flat.size, dtype=np.int32)
-            _discretise_cutoffs_numba(flat, edges, increasing, cut_binned)
+            cut = sized(
+                _discretise_cutoffs_numba,
+                _discretise_cutoffs_numba_serial,
+                flat.size,
+                _DISCRETISE_PARALLEL_MIN,
+            )
+            cut(flat, edges, increasing, cut_binned)
             discretised = cut_binned.reshape(array.shape, order=order or "C")
-        else:  # small images, and cutoffs that are not monotonic (digitize raises)
+        else:  # other arrays, and cutoffs that are not monotonic (digitize raises)
             temp_int = np.digitize(array, bins=np.array(cutoffs)) + 1
             temp_int[np.isnan(array)] = 0
             discretised = temp_int.astype(np.int32)

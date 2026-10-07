@@ -140,6 +140,29 @@ def _warn_if_other_frame(uid: Optional[str], reference: Image, what: str) -> Non
         )
 
 
+def _same_numbers(a: Any, b: Any) -> bool:
+    """Whether a and b are tuples of equal floats: np.allclose is then True for them."""
+    return (
+        type(a) is tuple
+        and type(b) is tuple
+        and len(a) == len(b)
+        and all(
+            isinstance(x, float) and isinstance(y, float) and x == y
+            for x, y in zip(a, b, strict=True)
+        )
+    )
+
+
+def _same_direction(a: Any, b: Any) -> bool:
+    """Whether the matrices of two directions hold equal values (None is the identity):
+    np.allclose is then True for them. A direction of another shape raises, as in the
+    check."""
+    if a is None and b is None:
+        return True
+    matrix = _direction_matrix(a)
+    return bool((matrix == _direction_matrix(b)).all())
+
+
 def _validate_geometry(
     target: Image,
     reference: Image,
@@ -153,27 +176,37 @@ def _validate_geometry(
     atol: float = 1e-5,
     rtol: float = 1e-5,
 ) -> None:
-    """Validate that two images occupy the same voxel grid in physical space."""
+    """Validate that two images occupy the same voxel grid in physical space. Equal values
+    pass with no tolerance check."""
     if check_shape and target.array.shape != reference.array.shape:
         raise ValueError(
             f"Dimension mismatch between {target_name} {target.array.shape} "
             f"and {reference_name} {reference.array.shape}."
         )
-    if check_spacing and not np.allclose(target.spacing, reference.spacing, atol=atol, rtol=rtol):
+    if check_spacing and not (
+        _same_numbers(target.spacing, reference.spacing)
+        or np.allclose(target.spacing, reference.spacing, atol=atol, rtol=rtol)
+    ):
         raise ValueError(
             f"Spacing mismatch between {target_name} {target.spacing} "
             f"and {reference_name} {reference.spacing}."
         )
-    if check_origin and not np.allclose(target.origin, reference.origin, atol=atol, rtol=rtol):
+    if check_origin and not (
+        _same_numbers(target.origin, reference.origin)
+        or np.allclose(target.origin, reference.origin, atol=atol, rtol=rtol)
+    ):
         raise ValueError(
             f"Origin mismatch between {target_name} {target.origin} "
             f"and {reference_name} {reference.origin}."
         )
-    if check_direction and not np.allclose(
-        _direction_matrix(target.direction),
-        _direction_matrix(reference.direction),
-        atol=atol,
-        rtol=rtol,
+    if check_direction and not (
+        _same_direction(target.direction, reference.direction)
+        or np.allclose(
+            _direction_matrix(target.direction),
+            _direction_matrix(reference.direction),
+            atol=atol,
+            rtol=rtol,
+        )
     ):
         raise ValueError(f"Direction mismatch between {target_name} and {reference_name}.")
 

@@ -3436,3 +3436,35 @@ def test_a_merge_frees_each_image_before_the_next_load() -> None:
         with patch("pictologics.loader.load_image", load):
             merged = load_and_merge_images(["a", "b", "c", "d"], **kwargs)
         assert len(loaded) == 4 and np.all(merged.array == 4.0)
+
+
+def test_equal_geometry_passes_with_no_tolerance_check() -> None:
+    # Tuples of equal floats and directions of equal values (or both None) pass with no
+    # np.allclose. Other inputs take it, as before: close values pass, and a NaN or a
+    # direction of another shape raises.
+    from pictologics.loader import _validate_geometry
+
+    def image(spacing: tuple, origin: tuple, direction: "np.ndarray | None" = None) -> Image:
+        return Image(np.zeros((2, 3, 4)), spacing, origin, direction)
+
+    pairs = [
+        (image((1.0, 2.0, 3.0), (0.0, -0.0, 5.5)), image((1.0, 2.0, 3.0), (-0.0, 0.0, 5.5))),
+        (
+            image((1.0, 2.0, np.float64(3.0)), (0.0, 0.0, 0.0), np.eye(3)),
+            image((1.0, 2.0, 3.0), (0.0, 0.0, 0.0), np.eye(3)),
+        ),
+    ]
+    with patch("pictologics.loader.np.allclose", side_effect=AssertionError):
+        for target, reference in pairs:
+            _validate_geometry(target, reference)
+    close = image((1.0, 2.0, 3.000001), (0, 0, 0), np.eye(3) + 1e-7)
+    _validate_geometry(close, image((1.0, 2.0, 3.0), (0.0, 0.0, 0.0)))
+    nan = image((1.0, np.nan, 3.0), (0.0, 0.0, 0.0))
+    with pytest.raises(ValueError, match="Spacing mismatch"):
+        _validate_geometry(nan, nan)
+    nan_direction = image((1.0, 2.0, 3.0), (0.0, 0.0, 0.0), np.full((3, 3), np.nan))
+    with pytest.raises(ValueError, match="Direction mismatch"):
+        _validate_geometry(nan_direction, nan_direction)
+    wrong = image((1.0, 2.0, 3.0), (0.0, 0.0, 0.0), np.eye(2))
+    with pytest.raises(ValueError, match="3x3"):
+        _validate_geometry(wrong, wrong)

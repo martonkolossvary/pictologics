@@ -364,6 +364,9 @@ def _warmup_filters() -> None:
     preprocessing._discretise_fbn_numba(flat, 4.0, 0.0, 10.0, binned)
     preprocessing._discretise_fbs_numba(flat, 2.5, 0.0, binned)
     preprocessing._discretise_cutoffs_numba(flat, np.array([2.0, 5.0]), True, binned)
+    preprocessing._discretise_fbn_numba_serial(flat, 4.0, 0.0, 10.0, binned)
+    preprocessing._discretise_fbs_numba_serial(flat, 2.5, 0.0, binned)
+    preprocessing._discretise_cutoffs_numba_serial(flat, np.array([2.0, 5.0]), True, binned)
     preprocessing._nonfinite_blocks_numba(flat, np.zeros(1, dtype=np.uint8))
 
     for m_dtype in (np.float64, np.uint8, np.bool_):
