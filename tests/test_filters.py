@@ -2410,3 +2410,46 @@ def test_separable_filters_run_in_float32() -> None:
                 change.stop()
         difference = np.abs(got.astype(np.float64) - reference)
         assert 0 < difference.max() <= tolerance * np.abs(reference).max(), name
+
+
+def test_wavelet_mixed_rotations_share_their_passes_from_a_size() -> None:
+    """From _MIXED_TREE_MIN voxels on, a mixed decomposition with average pooling takes the
+    tree of shared passes too: LHL and HLH take 40 chains of level kernels instead of 72
+    passes (24 filters of one rotation each). They equal the 24 rotated-copy responses
+    pooled, within a few float32 units; the bits do not depend on the threads. Below the
+    limit, and with max and min pooling, the 24 rotations run."""
+    import pywt
+
+    from pictologics.filters import base, wavelets
+
+    lo = np.array(pywt.Wavelet("db2").dec_lo, dtype=np.float32)
+    hi = np.array(pywt.Wavelet("db2").dec_hi, dtype=np.float32)
+    image = np.random.default_rng(46).normal(size=(20, 18, 16))
+    rotations = wavelets._get_rotation_perms()
+    large = np.random.default_rng(47).normal(size=(64, 64, 64))  # 2^18 voxels: slabs
+    with patch.object(wavelets, "_rotation_tree", wraps=wavelets._rotation_tree) as tree:
+        wavelet_transform(image, "db2", 1, "LHL", "mirror", rotation_invariant=True)
+        with patch.object(wavelets, "_MIXED_TREE_MIN", image.size):
+            for pooling in ("max", "min"):
+                wavelet_transform(image, "db2", 1, "LHL", "mirror", True, pooling)
+    assert tree.call_count == 0
+    with patch.object(wavelets, "_MIXED_TREE_MIN", image.size):
+        for decomposition in ("LHL", "HLH"):
+            old = [_old_rotated_wavelet(image, lo, hi, 2, decomposition, "reflect", r) for r in rotations]  # fmt: skip
+            with patch.object(wavelets, "_axis_chain", wraps=wavelets._axis_chain) as chains:
+                got = wavelet_transform(image, "db2", 2, decomposition, "mirror", True)
+            assert chains.call_count == 40
+            expected = _old_pooled(old, "average")
+            assert_allclose(got, expected, rtol=1e-6, atol=1e-6 * np.max(np.abs(expected)))
+            runs = []
+            for threads in (1, 3):
+                with (
+                    patch.object(wavelets, "get_num_threads", return_value=threads),
+                    patch.object(base, "get_num_threads", return_value=threads),
+                ):
+                    runs.append(
+                        wavelet_transform(
+                            large, "db2", 1, decomposition, "mirror", True, use_parallel=True
+                        )  # fmt: skip
+                    )
+            assert runs[0].tobytes() == runs[1].tobytes()

@@ -13,6 +13,7 @@ from scipy.ndimage import convolve1d
 from .base import (
     _TRANSFER_CACHE_BYTES,
     BoundaryCondition,
+    _add_times,
     _apply_with_boundary_padding,
     _constant_padded,
     _float32_cut,
@@ -24,6 +25,7 @@ from .base import (
     _slabs,
     _times_mirrored,
     _whole_number,
+    as_float32,
     cache_by_bytes,
     ensure_float32,
     get_scipy_mode,
@@ -34,10 +36,19 @@ from .base import (
 # 14,000 voxels (db2) or 4,000 voxels (coif3), and run 4-8x faster from 30,000 voxels.
 _PARALLEL_THRESHOLD = 15_000
 
-# The LLL and HHH tree (see _flip_tree) runs the chains of each axis at once when its 12
-# arrays (of at most 8 bytes per voxel) take at most this (about 88^3). Measured at 10
+# The LLL and HHH tree (see _rotation_tree) runs the chains of each axis at once when its 12
+# arrays take at most this (about 88^3 in float64, 110^3 in float32). Measured at 10
 # threads: 8 to 30 % faster than depth first from 64^3 to 128^3, with 3.4 times its arrays.
 _FLIP_LEVELS_BYTES = 64 << 20
+
+# From this size (voxels), a mixed decomposition (such as LHL) with average pooling also
+# takes the tree of _rotation_tree, depth first. Measured (db2, float32, 10 threads):
+# 300 x 300 x 100 x0.80, 220^3 x0.76, 400 x 400 x 80 x0.65, 256^3 x0.50; at 1 thread x0.4 to
+# x0.6 at every size. Below it the 24 rotations side by side win at 10 threads (200 x 200 x
+# 100: the tree x1.22), as they do with max and min pooling (one call for each rotation,
+# hidden behind the passes; 300 x 300 x 100 max: the tree x1.11). The choice must not
+# depend on the threads (other bits).
+_MIXED_TREE_MIN = 1 << 23
 
 # From this size (voxels), half as many rotations run at once, each pass in two threads.
 # Measured (db2, 10 threads): as fast at 96^3, faster from 128^3 on (256^3: 649 against
@@ -133,8 +144,8 @@ def wavelet_transform(
         )  # fmt: skip
         return cast(npt.NDArray[np.floating[Any]], padded)
 
-    # Convert to float32
-    image = ensure_float32(image)
+    # The passes run in float32 (scipy sums each line in double)
+    image = as_float32(image)
 
     # Apply source_mask preprocessing (zero out invalid voxels)
     if source_mask is not None:
@@ -154,9 +165,10 @@ def wavelet_transform(
     if rotation_invariant:
         if pooling not in ("max", "average", "min"):
             raise ValueError(f"Unknown pooling: {pooling}")
-        if decomposition in ("LLL", "HHH"):
+        mixed_tree = pooling == "average" and image.size >= _MIXED_TREE_MIN
+        if decomposition in ("LLL", "HHH") or mixed_tree:
             threads = get_num_threads() if use_parallel else 1
-            return _flip_tree(image, lo, hi, level, decomposition[0], mode, pooling, threads)
+            return _rotation_tree(image, lo, hi, level, decomposition, mode, pooling, threads)
 
         result: npt.NDArray[np.floating[Any]] | None = None
 
@@ -185,13 +197,13 @@ def wavelet_transform(
         # timing. Each response is dropped once pooled. `workers` rotations are in flight,
         # each pass in `threads` threads: one rotation per thread for a small image, two
         # threads per pass from _PAIRED_PASSES_MIN voxels on (half the responses in
-        # memory). At most about 2 GB of float64 responses are in flight.
+        # memory). At most about 2 GB of responses are in flight.
         rotations = _get_rotation_perms()
         workers, threads = 1, 1
         if use_parallel:
             n = get_num_threads()
             workers = n if image.size < _PAIRED_PASSES_MIN else max(1, n // 2)
-            workers = min(len(rotations), workers, max(2, (2 << 30) // (8 * image.size)))
+            workers = min(len(rotations), workers, max(2, (2 << 30) // image.nbytes))
             threads = max(1, n // workers)
         for response in _ordered_map(rotated_response, rotations, workers):
             _pool(response)
@@ -236,8 +248,9 @@ def _apply_undecimated_wavelet_3d(
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply undecimated 3D wavelet decomposition using à trous algorithm. The passes run
-    in `_slab_pass` with `threads` threads. With `last_dtype`, the last pass writes a
-    new array of that type (scipy computes in double: the values of a cast after it).
+    in `_slab_pass` with `threads` threads. With `last_dtype` of another type than the
+    passes, the last pass writes a new array of that type (scipy computes in double:
+    the values of a cast after it).
 
     For level j, filters are upsampled by inserting 2^(j-1) - 1 zeros.
 
@@ -272,7 +285,7 @@ def _apply_undecimated_wavelet_3d(
                 origin = -1 if weights.size % 2 == 0 else 0
             if result is None:
                 source, target = image, None
-            elif j == level and axis == 2 and last_dtype is not None:
+            elif j == level and axis == 2 and last_dtype not in (None, result.dtype):
                 source, target = result, np.empty(result.shape, dtype=last_dtype)
             else:
                 source, target = result, result
@@ -317,50 +330,67 @@ def _axis_chain(
     return result
 
 
-def _flip_tree(
+def _leaf_counts(decomposition: str) -> dict[tuple[tuple[str, bool], ...], int]:
+    """The filter of each of the 24 rotations as (letter, flip) on the image axes 0, 1 and 2,
+    with the number of rotations that share it. A rotation (perm, flips) runs the pass of
+    its axis a along image axis perm[a] (see _apply_undecimated_wavelet_3d): the letter of
+    a, reversed when it flips a. LLL and HHH have 8 filters (3 rotations each)."""
+    counts: dict[tuple[tuple[str, bool], ...], int] = {}
+    for perm, flips in _get_rotation_perms():
+        spec = [("", False)] * 3
+        for a in range(3):
+            spec[perm[a]] = (decomposition[a], flips[a])
+        counts[tuple(spec)] = counts.get(tuple(spec), 0) + 1
+    return counts
+
+
+def _rotation_tree(
     image: npt.NDArray[np.floating[Any]],
     lo: npt.NDArray[np.floating[Any]],
     hi: npt.NDArray[np.floating[Any]],
     level: int,
-    letter: str,
+    decomposition: str,
     mode: str,
     pooling: str,
     threads: int,
 ) -> npt.NDArray[np.float32]:
-    """The 24 rotations of an LLL or HHH response (`letter` L or H), pooled.
+    """The 24 rotations of a response, pooled, as a tree of shared passes.
 
-    Each rotation applies the same chain of level kernels on every image axis (L below the
-    last level, `letter` at it), reversed on the axes that it flips. So the 24 rotations are
-    8 filters, one for each pattern of flipped axes, with 3 rotations each. With the axes in
-    the order 0, 1, 2 the patterns share their first chains: 14 chains instead of the 72
-    passes of the rotations (at each level). A rotation thus runs its passes in another
-    order than level by level, so a value can change in its last float32 bits.
+    Each rotation applies on each image axis a chain of level kernels (L below the last
+    level, the letter of the axis at it), reversed on the axes that it flips. The rotations
+    with the same chains are one filter (_leaf_counts). With the axes in the order 0, 1, 2
+    the filters share their first chains: LLL and HHH take 14 chains instead of the 72
+    passes of the rotations (at each level), LHL 40. A rotation thus runs its passes in
+    another order than level by level, so a value can change in its last float32 bits.
 
-    The patterns pool in the order of their flips (each 3 times for the average); the
-    passes and the sums give the same values in any number of threads, so the result does
-    not depend on the threads. Max and min run in one call, as numpy orders -0.0 and +0.0
-    by the part of its loop. A small image (_FLIP_LEVELS_BYTES) runs the chains of each
-    axis at once, each pass with a share of the threads; a larger one runs depth first,
-    each pass in all threads, with an array for each axis only.
+    The filters pool depth first, in the order of their (letter, flip) on each axis (each
+    as often as its rotations for the average); the passes and the sums give the same
+    values in any number of threads, so the result does not depend on the threads. Max
+    and min run in one call, as numpy orders -0.0 and +0.0 by the part of its loop. A
+    small LLL or HHH image (_FLIP_LEVELS_BYTES) runs the chains of each axis at once, each
+    pass with a share of the threads; else depth first, each pass in all threads, with an
+    array for each axis only.
     """
-    chain = _level_chains(lo, hi, level)[letter]
+    chains = _level_chains(lo, hi, level)
+    leaves = _leaf_counts(decomposition)
     total: Optional[npt.NDArray[Any]] = None
 
-    def pool(pattern: npt.NDArray[Any]) -> None:
+    def pool(response: npt.NDArray[Any], count: int) -> None:
         nonlocal total
         if pooling != "average":
             reduce = np.maximum if pooling == "max" else np.minimum
-            total = pattern.copy() if total is None else reduce(total, pattern, out=total)
+            total = response.copy() if total is None else reduce(total, response, out=total)
             return
-        start = 1 if total is None else 0
+        first = total is None
         if total is None:
-            total = pattern.astype(np.float64)
-        for _ in range(start, 3):  # the 3 rotations of the pattern
-            _slab_ufunc(np.add, (total, pattern), total)
+            total = np.empty(response.shape, dtype=np.float64)
+        _add_times(total, response, count, first)  # once for each rotation of the filter
 
-    if threads > 1 and 12 * 8 * image.size <= _FLIP_LEVELS_BYTES:
+    flat = decomposition in ("LLL", "HHH")
+    if flat and threads > 1 and 12 * image.nbytes <= _FLIP_LEVELS_BYTES:
+        chain = chains[decomposition[0]]
         arrays = [image]
-        for axis in range(3):  # 2, 4, then the 8 patterns, in the order of their flips
+        for axis in range(3):  # 2, 4, then the 8 filters, in the order of their flips
             tasks = [(array, flip) for array in arrays for flip in (False, True)]
             workers = min(len(tasks), threads)
             share = max(1, threads // workers)
@@ -372,17 +402,22 @@ def _flip_tree(
                 )
             )
         for pattern in arrays:
-            pool(pattern)
+            pool(pattern, 3)
     else:
 
-        def walk(array: npt.NDArray[Any], axis: int) -> None:
+        def walk(array: npt.NDArray[Any], prefix: tuple[tuple[str, bool], ...]) -> None:
+            axis = len(prefix)
             if axis == 3:
-                pool(array)
+                pool(array, leaves[prefix])
                 return
-            for flip in (False, True):  # each chain freed once walked
-                walk(_axis_chain(array, axis, chain, flip, mode, threads), axis + 1)
+            for letter, flip in sorted({key[axis] for key in leaves if key[:axis] == prefix}):
+                # each chain freed once walked
+                walk(
+                    _axis_chain(array, axis, chains[letter], flip, mode, threads),
+                    (*prefix, (letter, flip)),
+                )
 
-        walk(image, 0)
+        walk(image, ())
     result = cast(npt.NDArray[Any], total)
     if pooling == "average":
         _slab_ufunc(np.true_divide, (result, 24.0), result)
