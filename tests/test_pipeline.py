@@ -6401,8 +6401,9 @@ def test_label_boxes_are_those_of_find_objects() -> None:
     maps = [labels.astype(dtype) for dtype in (np.uint8, np.uint16, np.int32)]
     maps += [labels.astype(np.float64).astype(np.int64), inside, one]
     maps += [np.zeros((4, 5, 6), dtype=np.uint8), labels[:, :, 0]]
-    # The parallel pass reads maps in row order (one more pass for labels above 255);
-    # find_objects reads a map in column order and a map with a label above the tables
+    # The parallel pass reads maps in row order (one more pass for labels above 255, with
+    # one chunk for each thread above _LABEL_TABLE_MAX); find_objects reads a map in column
+    # order and a map with a label above the tables
     big = np.zeros((6, 7, 8), dtype=np.uint16)
     big[1:3, 2:4, 3:5] = 300
     big[4, 5, 6] = 2
@@ -6411,8 +6412,13 @@ def test_label_boxes_are_those_of_find_objects() -> None:
         boxes = _label_boxes(array)
         assert boxes == ndimage.find_objects(array)
         assert all(type(s.start) is int for box in boxes if box is not None for s in box)
-    with patch.object(_utils, "_LABEL_TABLE_MAX", 100):
+    with patch.object(_utils, "_LABEL_TABLE_LARGE", 100):
         assert _label_boxes(big) == ndimage.find_objects(big)
+    extents = patch.object(_utils, "_label_extents_numba", wraps=_utils._label_extents_numba)
+    with patch.object(_utils, "_LABEL_TABLE_MAX", 100), extents as kernel:
+        assert _label_boxes(big) == ndimage.find_objects(big)
+    chunks, rows = kernel.call_args_list[-1].args[2].shape[:2]
+    assert (chunks, rows) == (min(_utils.get_num_threads(), 4), 301)
     # A large unsigned label reads as a negative one: the tables give no boxes
     huge = np.zeros((3, 3, 3), dtype=np.uint32)
     huge[1, 1, 1] = 2**31 + 1
@@ -6429,7 +6435,7 @@ def test_run_rois_refuses_a_huge_label() -> None:
     # huge label (here above the signed range of its type) raises instead of taking all
     # memory. The limit guards the maps that take find_objects: a label above the tables,
     # column order and 2D maps; the parallel pass needs no check (its labels are at most
-    # 4,096).
+    # 131,072).
     from scipy import ndimage
 
     from pictologics import pipeline as pipeline_module

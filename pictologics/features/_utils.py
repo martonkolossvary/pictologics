@@ -362,9 +362,12 @@ def _label_extents_numba(
         top[c] = largest
 
 
-# The largest label of the tables of label_boxes: 4 chunks for each thread of 4,097 x 6
-# int64 values (8 MB at 10 threads). A map with a larger label takes find_objects.
+# The largest label of the tables of label_boxes with 4 chunks for each thread: 4,097 x 6
+# int64 values each (8 MB at 10 threads). Above it, up to _LABEL_TABLE_LARGE, one chunk for
+# each thread (2^17 labels: 63 MB at 10 threads); a map with a larger label takes
+# find_objects.
 _LABEL_TABLE_MAX = 4096
+_LABEL_TABLE_LARGE = 1 << 17
 
 
 def label_boxes(
@@ -373,7 +376,7 @@ def label_boxes(
     """The box of each label 1, 2, ... of a 3D map of whole numbers of 0 or above in row
     order, with `box` its nonzero box (None for a label that is not in the map), as
     `scipy.ndimage.find_objects` gives them: one parallel pass with a table of each label
-    for each slab. None for a label above _LABEL_TABLE_MAX (find_objects then)."""
+    for each slab. None for a label above _LABEL_TABLE_LARGE (find_objects then)."""
     bounds = np.array([box[0].start, box[0].stop, box[1].start, box[1].stop, box[2].start, box[2].stop])  # fmt: skip
     n_chunks = min(4 * get_num_threads(), box[0].stop - box[0].start)
     size = 256
@@ -382,11 +385,13 @@ def label_boxes(
         top = np.empty(n_chunks, dtype=np.int64)
         _label_extents_numba(_nonzero_form(labels), bounds.astype(np.int64), ext, top)
         largest = int(top.max())
-        if (top < 0).any() or largest > _LABEL_TABLE_MAX:
+        if (top < 0).any() or largest > _LABEL_TABLE_LARGE:
             return None
         if largest < size:
             break
         size = largest + 1  # one more pass with a row for each label
+        if size > _LABEL_TABLE_MAX + 1:
+            n_chunks = min(get_num_threads(), box[0].stop - box[0].start)
     first = ext[:, 1 : largest + 1, 0::2].min(axis=0)
     last = ext[:, 1 : largest + 1, 1::2].max(axis=0)
     return [
