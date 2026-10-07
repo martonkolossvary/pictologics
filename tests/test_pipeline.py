@@ -6385,6 +6385,7 @@ def test_label_boxes_are_those_of_find_objects() -> None:
     # label, labels on the edges, every label type, one voxel, an empty map and a 2D map.
     from scipy import ndimage
 
+    from pictologics.features import _utils
     from pictologics.pipeline import _label_boxes
 
     labels = np.zeros((9, 10, 11), dtype=np.int64)
@@ -6400,10 +6401,22 @@ def test_label_boxes_are_those_of_find_objects() -> None:
     maps = [labels.astype(dtype) for dtype in (np.uint8, np.uint16, np.int32)]
     maps += [labels.astype(np.float64).astype(np.int64), inside, one]
     maps += [np.zeros((4, 5, 6), dtype=np.uint8), labels[:, :, 0]]
+    # The parallel pass reads maps in row order (one more pass for labels above 255);
+    # find_objects reads a map in column order and a map with a label above the tables
+    big = np.zeros((6, 7, 8), dtype=np.uint16)
+    big[1:3, 2:4, 3:5] = 300
+    big[4, 5, 6] = 2
+    maps += [big, labels.astype(np.int16), np.asfortranarray(labels.astype(np.int8))]
     for array in maps:
         boxes = _label_boxes(array)
         assert boxes == ndimage.find_objects(array)
         assert all(type(s.start) is int for box in boxes if box is not None for s in box)
+    with patch.object(_utils, "_LABEL_TABLE_MAX", 100):
+        assert _label_boxes(big) == ndimage.find_objects(big)
+    # A large unsigned label reads as a negative one: the tables give no boxes
+    huge = np.zeros((3, 3, 3), dtype=np.uint32)
+    huge[1, 1, 1] = 2**31 + 1
+    assert _utils.label_boxes(huge, (slice(1, 2),) * 3) is None
     # An empty map stops at the label check, as before
     pipeline = RadiomicsPipeline(load_standard=False)
     empty = Image(np.zeros((0, 4, 4)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))

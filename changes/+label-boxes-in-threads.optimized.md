@@ -1,0 +1,1 @@
+`run_rois()` finds the box of each label of the label map with one parallel pass over the nonzero box of the map, not with scipy's `find_objects` in one thread. For a CT map of 20 spheres the boxes take 1.2 ms instead of 15 ms at 10 threads (4.2 ms instead of 16 ms at 1 thread), and `run_rois()` without texture features 18 ms instead of 31 ms, with the same boxes.

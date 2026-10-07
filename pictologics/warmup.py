@@ -72,6 +72,11 @@ def _warmup_texture() -> None:
     mask_kinds = (np.float64, np.float32, np.uint8, np.uint16, np.int32, np.int64)
     for kind in mask_kinds:
         _utils._bbox_scan_numba(mask.astype(kind))
+    # The label boxes of run_rois: an integer label map as the integer type of its size
+    edges = np.array([0, 1, 0, 1, 0, 1], dtype=np.int64)
+    for kind in (np.uint8, np.uint16, np.int32, np.int64):
+        tables = np.empty((1, 2, 6), dtype=np.int64)
+        _utils._label_extents_numba(mask.astype(kind), edges, tables, np.empty(1, np.int64))
 
     # ROI min/max scan. The FBS bin count reads the discretised image (int32) with the mask
     # of the run (each type of the box scan). Discretise reads float64 data with a uint8

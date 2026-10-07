@@ -59,7 +59,12 @@ from .deduplication import (
     get_default_rules,
 )
 from .features import FEATURE_NAMES
-from .features._utils import compute_nonzero_bbox, merge_bboxes, roi_min_max
+from .features._utils import (
+    compute_nonzero_bbox,
+    label_boxes,
+    merge_bboxes,
+    roi_min_max,
+)
 from .features.intensity import (
     _LOCAL_PEAK_RADIUS_MM,
     calculate_intensity_features,
@@ -403,6 +408,10 @@ def _label_boxes(labels: npt.NDArray[Any]) -> list[Optional[tuple[slice, slice, 
     box = compute_nonzero_bbox(labels)
     if box is None:
         return []
+    if labels.flags.c_contiguous:
+        boxes = label_boxes(labels, box)
+        if boxes is not None:
+            return boxes
     return [
         None
         if found is None

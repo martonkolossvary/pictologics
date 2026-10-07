@@ -324,6 +324,94 @@ def compute_nonzero_bbox(
     return slice(z0, z1 + 1), slice(y0, y1 + 1), slice(x0, x1 + 1)
 
 
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _label_extents_numba(
+    labels: npt.NDArray[Any],
+    box: npt.NDArray[np.int64],
+    ext: npt.NDArray[np.int64],
+    top: npt.NDArray[np.int64],
+) -> None:
+    """ext[c, l] = the first and last z, y and x of label l (0 < l < ext.shape[1]) in chunk
+    c: the slabs of axis 0 of the box (z0, z1, y0, y1, x0, x1), split into ext.shape[0]
+    chunks (a first above the last: label l is not in chunk c). top[c] = the largest label
+    of chunk c, or -1 for a label below 0 (a large unsigned label read as a signed one). A
+    row without a label costs one vectorised test, as in _bbox_scan_numba."""
+    n_chunks, size = ext.shape[0], ext.shape[1]
+    z0, z1, y0, y1, x0, x1 = box[0], box[1], box[2], box[3], box[4], box[5]
+    for c in prange(n_chunks):
+        for k in range(size):
+            ext[c, k, 0] = z1
+            ext[c, k, 1] = -1
+            ext[c, k, 2] = y1
+            ext[c, k, 3] = -1
+            ext[c, k, 4] = x1
+            ext[c, k, 5] = -1
+        largest = np.int64(0)
+        for z in range(z0 + (z1 - z0) * c // n_chunks, z0 + (z1 - z0) * (c + 1) // n_chunks):
+            for y in range(y0, y1):
+                hit = False
+                for x in range(x0, x1):
+                    hit |= labels[z, y, x] != 0
+                if not hit:
+                    continue
+                for x in range(x0, x1):
+                    label = np.int64(labels[z, y, x])
+                    if label == 0:
+                        continue
+                    if label < 0:
+                        largest = np.int64(-1)
+                        break
+                    if largest >= 0 and label > largest:
+                        largest = label
+                    if label < size:
+                        ext[c, label, 0] = min(ext[c, label, 0], z)
+                        ext[c, label, 1] = max(ext[c, label, 1], z)
+                        ext[c, label, 2] = min(ext[c, label, 2], y)
+                        ext[c, label, 3] = max(ext[c, label, 3], y)
+                        ext[c, label, 4] = min(ext[c, label, 4], x)
+                        ext[c, label, 5] = max(ext[c, label, 5], x)
+        top[c] = largest
+
+
+# The largest label of the tables of label_boxes: 4 chunks for each thread of 4,097 x 6
+# int64 values (8 MB at 10 threads). A map with a larger label takes find_objects.
+_LABEL_TABLE_MAX = 4096
+
+
+def label_boxes(
+    labels: npt.NDArray[Any], box: tuple[slice, slice, slice]
+) -> Optional[list[Optional[tuple[slice, slice, slice]]]]:
+    """The box of each label 1, 2, ... of a 3D map of whole numbers of 0 or above in row
+    order, with `box` its nonzero box (None for a label that is not in the map), as
+    `scipy.ndimage.find_objects` gives them: one parallel pass with a table of each label
+    for each slab. None for a label above _LABEL_TABLE_MAX (find_objects then)."""
+    bounds = np.array([box[0].start, box[0].stop, box[1].start, box[1].stop, box[2].start, box[2].stop])  # fmt: skip
+    n_chunks = min(4 * get_num_threads(), box[0].stop - box[0].start)
+    size = 256
+    while True:
+        ext = np.empty((n_chunks, size, 6), dtype=np.int64)
+        top = np.empty(n_chunks, dtype=np.int64)
+        _label_extents_numba(_nonzero_form(labels), bounds.astype(np.int64), ext, top)
+        largest = int(top.max())
+        if (top < 0).any() or largest > _LABEL_TABLE_MAX:
+            return None
+        if largest < size:
+            break
+        size = largest + 1  # one more pass with a row for each label
+    first = ext[:, 1 : largest + 1, 0::2].min(axis=0)
+    last = ext[:, 1 : largest + 1, 1::2].max(axis=0)
+    return [
+        None
+        if last[k, 0] < 0
+        else (
+            slice(int(first[k, 0]), int(last[k, 0]) + 1),
+            slice(int(first[k, 1]), int(last[k, 1]) + 1),
+            slice(int(first[k, 2]), int(last[k, 2]) + 1),
+        )
+        for k in range(largest)
+    ]
+
+
 def merge_bboxes(
     a: Optional[tuple[slice, slice, slice]],
     b: Optional[tuple[slice, slice, slice]],
