@@ -6424,6 +6424,34 @@ def test_label_boxes_are_those_of_find_objects() -> None:
         pipeline.run_rois(empty, Image(np.zeros((0, 4, 4), np.uint8), empty.spacing, empty.origin))
 
 
+def test_run_rois_refuses_a_huge_label() -> None:
+    # find_objects makes a list with one entry for each label up to the largest, so a stray
+    # huge label (here above the signed range of its type) raises instead of taking all
+    # memory. The limit guards the maps that take find_objects: a label above the tables,
+    # column order and 2D maps; the parallel pass needs no check (its labels are at most
+    # 4,096).
+    from scipy import ndimage
+
+    from pictologics import pipeline as pipeline_module
+    from pictologics.pipeline import _label_boxes
+
+    huge = np.zeros((3, 4, 5), dtype=np.uint32)
+    huge[1, 1, 1] = 2**31 + 5
+    with pytest.raises(ValueError, match="largest label of an ROI map must be at most 1,048,576"):
+        _label_boxes(huge)
+    image = Image(np.ones((3, 4, 5)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    rois = Image(huge, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    with pytest.raises(ValueError, match="largest label"):
+        RadiomicsPipeline(load_standard=False).run_rois(image, rois)
+    small = np.zeros((3, 4, 5), dtype=np.int32)
+    small[2, 3, 4] = 300
+    with patch.object(pipeline_module, "_LABEL_LIMIT", 100):
+        assert _label_boxes(small) == ndimage.find_objects(small)
+        for layout in (np.asfortranarray(small), small[2]):
+            with pytest.raises(ValueError, match="at most 100, not 300"):
+                _label_boxes(layout)
+
+
 def test_a_second_run_on_an_image_does_not_check_it_for_nan_again(sm_mask: Image) -> None:
     # The NaN check of an image array runs once while the array lives: a second run on the
     # same image does not read it again, with the same results; another image is read.

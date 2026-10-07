@@ -397,13 +397,31 @@ def _has_roi(array: npt.NDArray[Any], boxes: _Boxes) -> bool:
     return _mask_box(array, boxes) is not None
 
 
+# The largest label of an ROI map: find_objects makes a list with one entry for each label
+# up to it, so one stray huge label would take all memory
+_LABEL_LIMIT = 1 << 20
+
+
+def _check_largest_label(labels: npt.NDArray[Any]) -> None:
+    """Raise for a label above _LABEL_LIMIT (the maps that take find_objects)."""
+    largest = int(labels.max()) if labels.size else 0
+    if largest > _LABEL_LIMIT:
+        raise ValueError(
+            f"The largest label of an ROI map must be at most {_LABEL_LIMIT:,}, not {largest:,}."
+        )
+
+
 def _label_boxes(labels: npt.NDArray[Any]) -> list[Optional[tuple[slice, slice, slice]]]:
     """The box of each label 1, 2, ... of a label map (None for a label that is not in the
-    map), as `scipy.ndimage.find_objects` gives them. For a 3D map, find_objects (one
-    serial pass) reads only the nonzero box of the map, which one parallel scan finds."""
+    map), as `scipy.ndimage.find_objects` gives them. For a 3D map, one parallel scan
+    finds the nonzero box of the map, and one parallel pass over the box gives the boxes
+    of a map in row order (`label_boxes`). find_objects (one serial pass over the box)
+    reads the other maps and the maps with a label above the tables of label_boxes, up to
+    _LABEL_LIMIT (a larger label raises)."""
     from scipy import ndimage
 
     if labels.ndim != 3:
+        _check_largest_label(labels)
         return cast(list[Optional[tuple[slice, slice, slice]]], ndimage.find_objects(labels))
     box = compute_nonzero_bbox(labels)
     if box is None:
@@ -412,6 +430,7 @@ def _label_boxes(labels: npt.NDArray[Any]) -> list[Optional[tuple[slice, slice, 
         boxes = label_boxes(labels, box)
         if boxes is not None:
             return boxes
+    _check_largest_label(labels[box])
     return [
         None
         if found is None
@@ -2119,7 +2138,8 @@ class RadiomicsPipeline:
 
         Raises:
             ValueError: If the label map has values that are not whole numbers or are
-                below 0, or if a label is not a whole number of 1 or above.
+                below 0, if its largest label is above 1,048,576, or if a label is not a
+                whole number of 1 or above.
 
         Example:
             ```python
