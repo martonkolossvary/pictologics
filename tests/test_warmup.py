@@ -151,11 +151,14 @@ for threads in (None, 1):  # the default, then one thread: the same features
     runs[threads] = [pipeline.run(image, mask, config_names=names)]
     runs[threads].append(pipeline.run(image, small, config_names=["spatial"]))
 # SciPy 1.18 splits its FFT work by thread, so Moran's I and Geary's C of the large ROI (the
-# FFT sums) can change in the last digit with the number of threads; all else is the same bits
+# FFT sums) can change in the last digit with the number of threads, and the float32 response
+# of the FFT LoG (filter_fbs) by one step in rare voxels; all else is the same bits
 fft_by_thread = tuple(int(p) for p in scipy.__version__.split(".")[:2]) >= (1, 18)
 
 
-def agree(first, again, fft):
+def agree(first, again, fft, name):
+    if fft and name == "filter_fbs":  # one float32 step of the response moves a feature by 1e-7
+        return np.allclose(first, again, rtol=1e-6, atol=0.0, equal_nan=True)
     loose = [k for k in ("morans_i_index_N365", "gearys_c_measure_NPT7") if fft and k in first]
     if not np.allclose(first[loose], again[loose], rtol=1e-12, atol=0.0):
         return False
@@ -163,7 +166,7 @@ def agree(first, again, fft):
 
 
 same = all(
-    agree(first[name], again[name], fft_by_thread and run == 0)  # run 1: the pair loop
+    agree(first[name], again[name], fft_by_thread and run == 0, name)  # run 1: the pair loop
     for run, (first, again) in enumerate(zip(runs[None], runs[1]))
     for name in first
 )
@@ -277,9 +280,11 @@ def test_a_pipeline_run_after_the_import_compiles_no_kernel(tmp_path: Path) -> N
     # column order, label maps of five types in run_rois, save_image of five types, direct
     # calls with other input types, and a big-endian DICOM series. One thread gives the
     # same features as the default (also Moran's I and Geary's C; with SciPy 1.18 or later,
-    # whose FFT splits its work by thread, these two agree to 1e-12 on the FFT path), and a
-    # new thread starts with the default. The check runs in its own numba cache, so it
-    # never writes into a cache that another process builds at the same time.
+    # whose FFT splits its work by thread, these two agree to 1e-12 on the FFT path, and the
+    # features of the FFT LoG to 1e-6), and a new thread starts with the default. The check
+    # runs in its own numba cache, so it never writes into a cache that another process
+    # builds at the same time. Each serial twin of a parallel kernel gives the bits of its
+    # kernel on 10 sizes.
     cache = os.environ.get("NUMBA_CACHE_DIR")
     env = {
         **os.environ,

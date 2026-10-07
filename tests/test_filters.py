@@ -338,19 +338,61 @@ class TestBaseInternalHelpers:
             np.testing.assert_array_equal(got, expected)
             assert got.dtype == expected.dtype
 
-    def test_laplace_terms_share_one_temporary(self):
-        # The terms after the first share one temporary: scipy's values bit for bit, for
-        # float64 and float32 images.
+    def test_laplace_terms_share_the_first_pass(self):
+        # The terms after the first share the plain pass along axis 0 and one temporary:
+        # scipy's values bit for bit, for 3 sizes, every boundary mode, float64 and float32
+        # images, and sigmas with a zero on axis 0 or on another axis.
+        import tracemalloc
+
         from scipy.ndimage import gaussian_laplace
 
         from pictologics.filters import base
 
         rng = np.random.default_rng(9)
-        for dtype in (np.float64, np.float32):
-            image = rng.normal(0.0, 10.0, (12, 9, 10)).astype(dtype)
-            got = base._gaussian_laplace(image, 1.2, "nearest")
-            expected = gaussian_laplace(image, sigma=1.2, mode="nearest")
-            assert got.dtype == expected.dtype and got.tobytes() == expected.tobytes()
+        with patch.object(base, "_SLAB_MIN_SIZE", 1):
+            for shape in ((12, 9, 10), (7, 16, 5), (20, 21, 22)):
+                for dtype in (np.float64, np.float32):
+                    image = rng.normal(0.0, 10.0, shape).astype(dtype)
+                    for mode in ("reflect", "mirror", "nearest", "wrap", "constant"):
+                        for sigma in (1.2, (1.5, 1.0, 2.0), (0.0, 1.0, 2.0), (1.0, 0.0, 1.5)):
+                            got = base._gaussian_laplace(image, sigma, mode)
+                            expected = gaussian_laplace(image, sigma=sigma, mode=mode)
+                            assert got.dtype == expected.dtype
+                            assert got.tobytes() == expected.tobytes()
+        # The output, the shared pass and one temporary: three arrays of the image size.
+        image = rng.normal(0.0, 10.0, (32, 32, 32))
+        tracemalloc.start()
+        base._gaussian_laplace(image, 1.2, "nearest")
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        assert 3 * image.nbytes <= peak < 3.1 * image.nbytes
+
+    def test_a_large_float64_laplace_is_one_fft_convolution(self):
+        # From _LOG_FFT_MIN voxels on, a float64 image takes one FFT convolution with the
+        # kernels of the passes: within 1e-13 of scipy's largest value (measured: 2.3e-14 for
+        # wrap with a kernel longer than an axis, else 2e-15), for 3 shapes, every boundary
+        # mode, and scalar, per-axis and long sigmas. float32 images and a zero sigma keep
+        # the passes: scipy's bits.
+        from scipy.ndimage import gaussian_laplace
+
+        from pictologics.filters import base
+
+        rng = np.random.default_rng(10)
+        with patch.object(base, "_LOG_FFT_MIN", 1):
+            for shape in ((12, 9, 10), (7, 16, 5), (20, 21, 22)):
+                image = rng.normal(0.0, 10.0, shape)
+                for mode in ("reflect", "mirror", "nearest", "wrap", "constant"):
+                    for sigma in (1.2, (1.5, 1.0, 2.0), 3.0):
+                        got = base._gaussian_laplace(image, sigma, mode)
+                        expected = gaussian_laplace(image, sigma=sigma, mode=mode)
+                        assert got.dtype == np.float64
+                        bound = 1e-13 * np.abs(expected).max()
+                        np.testing.assert_allclose(got, expected, rtol=0.0, atol=bound)
+            image = rng.normal(0.0, 10.0, (12, 9, 10))
+            for passes, sigma in ((image.astype(np.float32), 1.2), (image, (0.0, 1.0, 1.5))):
+                got = base._gaussian_laplace(passes, sigma, "nearest")
+                expected = gaussian_laplace(passes, sigma=sigma, mode="nearest")
+                assert got.tobytes() == expected.tobytes()
 
     def test_ordered_map_keeps_the_item_order(self):
         # Later items end first in the pool, but the results come in item order; one

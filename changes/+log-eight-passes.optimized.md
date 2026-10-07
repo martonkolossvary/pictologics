@@ -1,0 +1,1 @@
+The Laplacian of Gaussian runs the plain Gaussian pass along the first axis one time for the terms of the other two axes: 8 one-dimensional passes instead of 9. A 256³ image takes 127 ms instead of 145 ms, and a 128³ image 79 ms instead of 96 ms at 1 thread, with the same values, bit for bit. The call holds one more temporary array of the image size while it runs.

@@ -11,8 +11,9 @@ from functools import partial, wraps
 from typing import Any, Callable, Dict, Iterable, Iterator, Optional, Tuple, TypeVar, Union, cast
 
 import numpy as np
+import scipy.fft
 from numba import config as numba_config
-from numba import get_num_threads
+from numba import get_num_threads, jit
 from numpy import typing as npt
 from scipy.ndimage import convolve1d, gaussian_filter1d, uniform_filter1d
 
@@ -527,19 +528,116 @@ def _gaussian_laplace(
 ) -> npt.NDArray[Any]:
     """`scipy.ndimage.gaussian_laplace` with the same steps (scipy's generic_laplace: the
     Gaussian second derivative along each axis, added in axis order), each 1-D pass in
-    `_slab_pass`: the same values. One temporary holds each term after the first (the
-    passes write all of it)."""
-    output = _gaussian_filter(image, sigma, mode, truncate, order=_second_on(0, image.ndim))
+    `_slab_pass`: the same values. The terms after the first all start with the same plain
+    pass along axis 0 of the image, so this pass runs once (8 passes, not 9, in 3-D). Its
+    result and one more temporary hold these terms (the passes write all of it).
+
+    From `_LOG_FFT_MIN` voxels on, a float64 3-D image (with no zero sigma, as scipy skips
+    such an axis) takes `_fft_gaussian_laplace`: values within about 1e-15 of the largest
+    value of the passes, not the same bits."""
+    ndim = image.ndim
+    sigmas = _per_axis(sigma, ndim)
+    if (
+        image.dtype == np.float64
+        and image.size >= _LOG_FFT_MIN
+        and ndim == 3
+        and min(sigmas) > 1e-15
+    ):
+        return _fft_gaussian_laplace(image, sigmas, mode, truncate)
+    output = _gaussian_filter(image, sigmas, mode, truncate, order=_second_on(0, ndim))
+    smoothed = _gaussian_filter(image, (sigmas[0],) + (0.0,) * (ndim - 1), mode, truncate)
+    rest = (0.0, *sigmas[1:])
     term = np.empty_like(output)
-    for axis in range(1, image.ndim):
-        order = _second_on(axis, image.ndim)
-        output += _gaussian_filter(image, sigma, mode, truncate, order=order, output=term)
+    for axis in range(1, ndim):
+        order = _second_on(axis, ndim)
+        output += _gaussian_filter(smoothed, rest, mode, truncate, order=order, output=term)
     return output
 
 
 def _second_on(axis: int, ndim: int) -> tuple[int, ...]:
     """Derivative orders with 2 on `axis` and 0 on the other axes."""
     return tuple(2 if a == axis else 0 for a in range(ndim))
+
+
+# From this many voxels on, the LoG of a float64 image is one FFT convolution. Measured: it
+# is faster than the 8 passes from 64^3 on, for sigma 1 to 4 voxels, at 1 and 10 threads.
+_LOG_FFT_MIN = 1 << 18
+
+# The np.pad modes that extend an image as the scipy modes extend each line
+_PAD_MODES = {
+    "constant": "constant",
+    "nearest": "edge",
+    "wrap": "wrap",
+    "reflect": "symmetric",
+    "mirror": "reflect",
+}
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _times_log_transfer(
+    spectrum: npt.NDArray[np.complex128],
+    a: npt.NDArray[np.float64],
+    b: npt.NDArray[np.float64],
+    g: npt.NDArray[np.float64],
+    d: npt.NDArray[np.float64],
+) -> None:
+    """spectrum[i, j, k] *= a[i, j] * g[k] + b[i, j] * d[k], in place: the LoG transfer from
+    the Gaussian (g) and the second derivative (d) of the last axis and the tables a and b of
+    the first two axes."""
+    for i in range(spectrum.shape[0]):
+        for j in range(spectrum.shape[1]):
+            a_ij = a[i, j]
+            b_ij = b[i, j]
+            for k in range(spectrum.shape[2]):
+                spectrum[i, j, k] *= a_ij * g[k] + b_ij * d[k]
+
+
+def _kernel_spectra(
+    sigma: float, radius: int, size: int, truncate: float, half: bool
+) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """The DFTs (rfft for `half`) on `size` points of the order 0 and order 2 kernels of
+    gaussian_filter1d, centred on point 0. The kernels are symmetric: the DFTs are real."""
+    impulse = np.zeros(2 * radius + 1)
+    impulse[radius] = 1.0
+    spectra = []
+    for order in (0, 2):
+        kernel = np.zeros(size)
+        kernel[np.arange(-radius, radius + 1) % size] = gaussian_filter1d(
+            impulse, sigma, order=order, mode="constant", truncate=truncate
+        )
+        spectra.append((np.fft.rfft(kernel) if half else np.fft.fft(kernel)).real.copy())
+    return spectra[0], spectra[1]
+
+
+def _fft_gaussian_laplace(
+    image: npt.NDArray[np.float64], sigmas: Tuple[Any, ...], mode: str, truncate: float
+) -> npt.NDArray[np.float64]:
+    """The LoG of the passes of `_gaussian_laplace` as one FFT convolution with the same
+    truncated kernels. The image is extended with the boundary mode (as each pass extends
+    its lines) by the kernel radius and on to a fast FFT size. Its spectrum is multiplied by
+    the transfer: on each axis the second derivative, times the Gaussian on the other axes,
+    summed over the axes. The result is cut back to the image."""
+    radii = [int(truncate * s + 0.5) for s in sigmas]
+    sizes = [
+        scipy.fft.next_fast_len(n + 2 * r, real=True)
+        for n, r in zip(image.shape, radii, strict=True)
+    ]
+    widths = [(r, size - n - r) for n, r, size in zip(image.shape, radii, sizes, strict=True)]
+    padded = np.pad(image, widths, mode=_PAD_MODES[mode])  # type: ignore[call-overload]
+    (g0, d0), (g1, d1), (g2, d2) = (
+        _kernel_spectra(s, r, size, truncate, axis == 2)
+        for axis, (s, r, size) in enumerate(zip(sigmas, radii, sizes, strict=True))
+    )
+    workers = get_num_threads()
+    spectrum = scipy.fft.rfftn(padded, workers=workers)
+    del padded
+    first_two = np.multiply.outer(d0, g1) + np.multiply.outer(g0, d1)
+    _times_log_transfer(spectrum, first_two, np.multiply.outer(g0, g1), g2, d2)
+    response = scipy.fft.irfftn(spectrum, s=sizes, workers=workers, overwrite_x=True)
+    return cast(
+        npt.NDArray[np.float64],
+        response[tuple(slice(r, r + n) for r, n in zip(radii, image.shape, strict=True))],
+    )
 
 
 def _uniform_filter(

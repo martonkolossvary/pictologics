@@ -310,6 +310,7 @@ def _warmup_filters() -> None:
     """Warmup filter, preprocessing and loader operations."""
     # Import here to avoid circular dependencies
     from . import loader, preprocessing
+    from .filters import base as filter_base
 
     # 0. Loader: the column-order to row-order copy for NIfTI, DICOM and SEG data, and
     # the float64 copy with rescale of stored DICOM pixels and NIfTI data.
@@ -377,3 +378,12 @@ def _warmup_filters() -> None:
             out_d = np.empty((3, 3, 3), dtype=s_dtype)
             nearest(src.astype(s_dtype), scale, shift, start, out_d)
         masked(src, valid, scale, shift, start, 0.5, out3, out_valid)
+
+    # 2. The LoG transfer of the FFT path of large float64 images
+    filter_base._times_log_transfer(
+        np.ones((2, 2, 2), dtype=np.complex128),
+        np.ones((2, 2)),
+        np.ones((2, 2)),
+        np.ones(2),
+        np.ones(2),
+    )
