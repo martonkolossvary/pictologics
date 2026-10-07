@@ -415,16 +415,8 @@ class TestMorphologyFeatures(unittest.TestCase):
         A, c = _mvee_khachiyan_numba(points, tol=1e-7)
         self.assertIsNotNone(A)
 
-    @patch("pictologics.features.morphology.ConvexHull")
-    def test_mvee_features_valid(self, mock_hull_cls):
-        # Mock ConvexHull to bypass environment issues (Numpy 2.0 vs Scipy)
-        mock_instance = MagicMock()
-        mock_instance.vertices = np.array([0, 1, 2, 3, 4, 5, 6, 7], dtype=int)
-        mock_instance.volume = 1.0
-        mock_instance.area = 6.0
-        mock_hull_cls.return_value = mock_instance
-
-        # Cube vertices
+    def test_mvee_features_valid(self):
+        # Cube vertices: the hull vertices that the MVEE reads
         verts = np.array(
             [
                 [0, 0, 0],
@@ -439,8 +431,7 @@ class TestMorphologyFeatures(unittest.TestCase):
             dtype=float,
         )
 
-        mock_instance.points = verts
-        features = _get_mvee_features(mock_instance, 1.0, 1.0)
+        features = _get_mvee_features(verts, 1.0, 1.0)
         self.assertIn("volume_density_mvee_SWZ1", features)
         self.assertIn("area_density_mvee_BRI8", features)
 
@@ -455,7 +446,10 @@ class TestMorphologyFeatures(unittest.TestCase):
 
         verts = np.random.rand(8, 3)
         mock_instance.points = verts
-        features, hull = _get_convex_hull_features(verts, 1.0, 1.0, (1.0, 1.0, 1.0))
+        no_hull = (False, np.zeros(0, dtype=np.int64), np.zeros((0, 3), dtype=np.int64))
+        with patch("pictologics.features.morphology._exact_hull_numba", return_value=no_hull):
+            # No exact hull (as for points in one plane): Qhull runs, here a mock
+            features, hull = _get_convex_hull_features(verts, 1.0, 1.0, (1.0, 1.0, 1.0))
 
         self.assertIsNotNone(hull)
         self.assertEqual(features["volume_density_convex_hull_R3ER"], 1.0 / 123.0)
@@ -699,6 +693,67 @@ def test_the_hull_candidates_keep_every_hull_vertex() -> None:
         }
         assert abs(kept.volume / full.volume - 1) < 1e-12
         assert abs(kept.area / full.area - 1) < 1e-12
+
+
+def test_the_exact_hull_has_the_vertices_of_qhull() -> None:
+    # The exact hull of the candidates has the hull vertices of Qhull in the same order, and
+    # the volume and area of Qhull to 1e-12, on 30 masks (blobs, boxes and plates with
+    # anisotropic spacing). Fewer than four points, points on a line or in a plane have no
+    # hull; then Qhull runs, with the features of the exact hull.
+    from scipy.ndimage import gaussian_filter
+    from scipy.spatial import ConvexHull
+
+    from pictologics.features.morphology import (
+        _exact_hull_numba,
+        _hull_area_volume_numba,
+        _hull_candidates_numba,
+    )
+
+    rng = np.random.default_rng(24)
+    for case in range(30):
+        shape = tuple(int(v) for v in rng.integers(5, 14, 3))
+        roi = np.zeros(shape, dtype=bool)
+        if case % 3 == 0:
+            roi = gaussian_filter(rng.random(shape), 1.2) > 0.5
+        else:
+            roi[1:-1, 1:-1, 1:-1] = True
+            if case % 3 == 2:  # a plate of one voxel
+                roi[: shape[0] // 2] = roi[shape[0] // 2 + 1 :] = False
+        roi[2, 2, 2] |= case % 3 == 0  # a blob is never empty
+        spacing = np.asarray(rng.choice([0.39, 0.7, 1.0, 1.25, 3.0], 3), dtype=np.float64)
+        mask = Image(roi.astype(np.uint8), tuple(spacing), (0.0, 0.0, 0.0))
+        verts = _get_mesh_features(mask)[1]
+        points = verts[_hull_candidates_numba(verts, spacing)]
+        found, vertices, triangles = _exact_hull_numba(
+            np.rint(2.0 * points / spacing).astype(np.int64)
+        )
+        qhull = ConvexHull(points)
+        assert found and np.array_equal(vertices, qhull.vertices)
+        area, volume = _hull_area_volume_numba(points, triangles)
+        assert abs(volume / qhull.volume - 1) < 1e-12 and abs(area / qhull.area - 1) < 1e-12
+    three = np.array([[0, 0, 0], [2, 0, 0], [0, 2, 0]], dtype=np.int64)
+    line = np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3]], dtype=np.int64)
+    plane = np.array([[0, 0, 0], [2, 0, 0], [0, 2, 0], [2, 2, 0], [1, 1, 0]], dtype=np.int64)
+    for lattice in (three, line, plane):
+        assert not _exact_hull_numba(lattice)[0]
+    # A cube with its centre, the lowest x not first: the 8 corners in order, not the centre
+    cube = np.array(
+        [
+            [2, 0, 0],
+            [1, 1, 1],
+            *([x, y, z] for x in (0, 2) for y in (0, 2) for z in (0, 2) if (x, y, z) != (2, 0, 0)),
+        ]
+    )
+    found, vertices, _ = _exact_hull_numba(cube.astype(np.int64))
+    assert found and vertices.tolist() == [0, 2, 3, 4, 5, 6, 7, 8]
+    exact, exact_points = _get_convex_hull_features(verts, 1.0, 1.0, tuple(spacing))
+    no_hull = (False, np.zeros(0, dtype=np.int64), np.zeros((0, 3), dtype=np.int64))
+    with patch("pictologics.features.morphology._exact_hull_numba", return_value=no_hull):
+        by_qhull, qhull_points = _get_convex_hull_features(verts, 1.0, 1.0, tuple(spacing))
+    np.testing.assert_array_equal(exact_points, qhull_points)
+    assert exact.keys() == by_qhull.keys()
+    for key, value in exact.items():
+        assert abs(value / by_qhull[key] - 1) < 1e-12
 
 
 if __name__ == "__main__":

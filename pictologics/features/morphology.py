@@ -18,8 +18,8 @@ Key Features:
 
 Optimization:
 -------------
-Uses `numba` kernels for the marching cubes mesh, the moments, the convex hull candidates,
-the oriented bounding box and the Khachiyan algorithm of the MVEE.
+Uses `numba` kernels for the marching cubes mesh, the moments, the exact convex hull and
+its candidates, the oriented bounding box and the Khachiyan algorithm of the MVEE.
 
 Example:
     Calculate morphology features from a mask:
@@ -478,6 +478,308 @@ def _hull_candidates_numba(
     first, grid = _line_end_candidates_numba(verts, spacing)
     keep: npt.NDArray[np.int64] = _plane_hull_candidates_numba(first, grid)
     return keep
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _gcd_numba(a: int, b: int) -> int:
+    """The greatest common divisor of two whole numbers (0 for two zeros)."""
+    a = abs(a)
+    b = abs(b)
+    while b:
+        a, b = b, a % b
+    return a
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _exact_hull_numba(
+    lattice: npt.NDArray[np.int64],
+) -> tuple[bool, npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """The convex hull of distinct lattice points (quickhull with exact int64 orientation
+    tests): whether it exists (four points, not in one plane), the indices of its vertices
+    in order, and its triangles (outward). A triangle vertex is a hull vertex when its
+    triangles lie in three or more planes; a point inside a face or an edge is none, as in
+    Qhull. Dead triangles give their slots to new ones, so at most 4n + 16 slots are used:
+    a hull of v vertices has 2v - 4 triangles, and a step adds at most v."""
+    n = lattice.shape[0]
+    no_vertices = np.zeros(0, dtype=np.int64)
+    no_triangles = np.zeros((0, 3), dtype=np.int64)
+    if n < 4:
+        return False, no_vertices, no_triangles
+    g = lattice
+    # 1. The start: the lowest x, the farthest point from it, the farthest point from their
+    # line, and the farthest point from their plane
+    a = 0
+    for i in range(n):
+        if g[i, 0] < g[a, 0]:
+            a = i
+    b = a
+    best = 0
+    for i in range(n):
+        d = (g[i, 0] - g[a, 0]) ** 2 + (g[i, 1] - g[a, 1]) ** 2 + (g[i, 2] - g[a, 2]) ** 2
+        if d > best:
+            best = d
+            b = i
+    ux, uy, uz = g[b, 0] - g[a, 0], g[b, 1] - g[a, 1], g[b, 2] - g[a, 2]
+    c = -1
+    best = 0
+    for i in range(n):
+        vx, vy, vz = g[i, 0] - g[a, 0], g[i, 1] - g[a, 1], g[i, 2] - g[a, 2]
+        cx, cy, cz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+        d = cx * cx + cy * cy + cz * cz
+        if d > best:
+            best = d
+            c = i
+    if c < 0:  # all points on one line
+        return False, no_vertices, no_triangles
+    vx, vy, vz = g[c, 0] - g[a, 0], g[c, 1] - g[a, 1], g[c, 2] - g[a, 2]
+    px, py, pz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+    top = -1
+    best = 0
+    for i in range(n):
+        o = px * (g[i, 0] - g[a, 0]) + py * (g[i, 1] - g[a, 1]) + pz * (g[i, 2] - g[a, 2])
+        if abs(o) > best:
+            best = abs(o)
+            top = i
+    if top < 0:  # all points in one plane
+        return False, no_vertices, no_triangles
+    if px * (g[top, 0] - g[a, 0]) + py * (g[top, 1] - g[a, 1]) + pz * (g[top, 2] - g[a, 2]) > 0:
+        b, c = c, b  # the triangle (a, b, c) faces away from the fourth point
+
+    # 2. The triangles: vertices, the neighbours across (v0 v1), (v1 v2), (v2 v0), the
+    # outward normal with its offset, and the outside points (linked lists)
+    cap = 4 * n + 16
+    tri = np.empty((cap, 3), dtype=np.int64)
+    nbr = np.empty((cap, 3), dtype=np.int64)
+    normal = np.empty((cap, 3), dtype=np.int64)
+    offset = np.empty(cap, dtype=np.int64)
+    alive = np.zeros(cap, dtype=np.bool_)
+    queued = np.zeros(cap, dtype=np.bool_)
+    head = np.full(cap, -1, dtype=np.int64)
+    after = np.full(n, -1, dtype=np.int64)
+    free = np.empty(cap, dtype=np.int64)
+    n_free = 0
+    used = 0
+    start = np.array([[a, b, c], [a, top, b], [b, top, c], [c, top, a]], dtype=np.int64)
+    for f in range(4):
+        tri[f] = start[f]
+    used = 4
+    new = np.empty(cap, dtype=np.int64)
+    visible = np.zeros(cap, dtype=np.bool_)
+    seen = np.empty(cap, dtype=np.int64)
+    edge_a = np.empty(cap, dtype=np.int64)
+    edge_b = np.empty(cap, dtype=np.int64)
+    edge_n = np.empty(cap, dtype=np.int64)
+    by_start = np.full(n, -1, dtype=np.int64)
+    by_end = np.full(n, -1, dtype=np.int64)
+    stack = np.empty(cap, dtype=np.int64)
+    depth = 0
+    for f in range(4):
+        new[f] = f
+    n_new = 4
+    point = -1  # the point of the step (none for the start)
+    n_seen = 0  # the triangles that see the point
+    while True:
+        # Normals and neighbours of the new triangles
+        for t in range(n_new):
+            f = new[t]
+            p0, p1, p2 = tri[f, 0], tri[f, 1], tri[f, 2]
+            e1x, e1y, e1z = g[p1, 0] - g[p0, 0], g[p1, 1] - g[p0, 1], g[p1, 2] - g[p0, 2]
+            e2x, e2y, e2z = g[p2, 0] - g[p0, 0], g[p2, 1] - g[p0, 1], g[p2, 2] - g[p0, 2]
+            nx = e1y * e2z - e1z * e2y
+            ny = e1z * e2x - e1x * e2z
+            nz = e1x * e2y - e1y * e2x
+            normal[f, 0], normal[f, 1], normal[f, 2] = nx, ny, nz
+            offset[f] = nx * g[p0, 0] + ny * g[p0, 1] + nz * g[p0, 2]
+            alive[f] = True
+            head[f] = -1
+        if point < 0:  # the start: the neighbours by shared edges
+            for f in range(4):
+                for e in range(3):
+                    u, v = tri[f, e], tri[f, (e + 1) % 3]
+                    for h in range(4):
+                        for e2 in range(3):
+                            if tri[h, e2] == v and tri[h, (e2 + 1) % 3] == u:
+                                nbr[f, e] = h
+            for i in range(n):
+                if i != a and i != b and i != c and i != top:
+                    for f in range(4):
+                        if (
+                            normal[f, 0] * g[i, 0] + normal[f, 1] * g[i, 1] + normal[f, 2] * g[i, 2]
+                            > offset[f]
+                        ):
+                            after[i] = head[f]
+                            head[f] = i
+                            break
+        else:  # a step: the outside points of the visible triangles go to the new ones
+            for t in range(n_new):
+                f = new[t]
+                nbr[f, 1] = by_start[tri[f, 1]]  # across (b, point): the one that starts at b
+                nbr[f, 2] = by_end[tri[f, 0]]  # across (point, a): the one that ends at a
+            for t in range(n_new):
+                by_start[edge_a[t]] = -1
+                by_end[edge_b[t]] = -1
+            for t in range(n_seen):
+                f = seen[t]
+                i = head[f]
+                while i >= 0:
+                    following = after[i]
+                    if i != point:
+                        for u in range(n_new):
+                            h = new[u]
+                            if (
+                                normal[h, 0] * g[i, 0]
+                                + normal[h, 1] * g[i, 1]
+                                + normal[h, 2] * g[i, 2]
+                                > offset[h]
+                            ):
+                                after[i] = head[h]
+                                head[h] = i
+                                break
+                    i = following
+                head[f] = -1
+                alive[f] = False
+                visible[f] = False
+                free[n_free] = f
+                n_free += 1
+        for t in range(n_new):
+            f = new[t]
+            if head[f] >= 0 and not queued[f]:
+                queued[f] = True
+                stack[depth] = f
+                depth += 1
+        # 3. The next triangle with outside points, and its farthest point
+        f0 = -1
+        while depth > 0:
+            depth -= 1
+            f = stack[depth]
+            queued[f] = False
+            if alive[f] and head[f] >= 0:
+                f0 = f
+                break
+        if f0 < 0:
+            break
+        length = np.sqrt(float(normal[f0, 0] ** 2 + normal[f0, 1] ** 2 + normal[f0, 2] ** 2))
+        point = -1
+        far = -1.0
+        i = head[f0]
+        while i >= 0:
+            d = (
+                normal[f0, 0] * g[i, 0]
+                + normal[f0, 1] * g[i, 1]
+                + normal[f0, 2] * g[i, 2]
+                - offset[f0]
+            ) / length
+            if d > far:
+                far = d
+                point = i
+            i = after[i]
+        # 4. The triangles that see the point, and the edges of their border
+        n_seen = 0
+        seen[n_seen] = f0
+        n_seen += 1
+        visible[f0] = True
+        q = 0
+        while q < n_seen:
+            f = seen[q]
+            q += 1
+            for e in range(3):
+                h = nbr[f, e]
+                if not visible[h] and (
+                    normal[h, 0] * g[point, 0]
+                    + normal[h, 1] * g[point, 1]
+                    + normal[h, 2] * g[point, 2]
+                    > offset[h]
+                ):
+                    visible[h] = True
+                    seen[n_seen] = h
+                    n_seen += 1
+        n_new = 0
+        for t in range(n_seen):
+            f = seen[t]
+            for e in range(3):
+                h = nbr[f, e]
+                if not visible[h]:
+                    edge_a[n_new] = tri[f, e]
+                    edge_b[n_new] = tri[f, (e + 1) % 3]
+                    edge_n[n_new] = h
+                    n_new += 1
+        # 5. A new triangle (a, b, point) on each border edge
+        for t in range(n_new):
+            if n_free > 0:
+                n_free -= 1
+                f = free[n_free]
+            else:
+                f = used
+                used += 1
+            ea, eb, h = edge_a[t], edge_b[t], edge_n[t]
+            tri[f, 0], tri[f, 1], tri[f, 2] = ea, eb, point
+            nbr[f, 0] = h
+            for e in range(3):  # the old neighbour faces the new triangle now
+                if tri[h, e] == eb and tri[h, (e + 1) % 3] == ea:
+                    nbr[h, e] = f
+            by_start[ea] = f
+            by_end[eb] = f
+            new[t] = f
+
+    # 6. The triangles and the vertices whose triangles lie in three or more planes
+    planes = np.zeros((n, 3, 3), dtype=np.int64)
+    count = np.zeros(n, dtype=np.int64)
+    m = 0
+    for f in range(used):
+        if alive[f]:
+            m += 1
+            k = _gcd_numba(_gcd_numba(normal[f, 0], normal[f, 1]), normal[f, 2])
+            w0, w1, w2 = normal[f, 0] // k, normal[f, 1] // k, normal[f, 2] // k
+            for e in range(3):
+                v = tri[f, e]
+                fresh = count[v] < 3
+                for j in range(count[v]):
+                    if planes[v, j, 0] == w0 and planes[v, j, 1] == w1 and planes[v, j, 2] == w2:
+                        fresh = False
+                if fresh:
+                    planes[v, count[v], 0] = w0
+                    planes[v, count[v], 1] = w1
+                    planes[v, count[v], 2] = w2
+                    count[v] += 1
+    triangles = np.empty((m, 3), dtype=np.int64)
+    k = 0
+    for f in range(used):
+        if alive[f]:
+            triangles[k] = tri[f]
+            k += 1
+    vertices = np.flatnonzero(count >= 3)
+    return True, vertices, triangles
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _hull_area_volume_numba(
+    points: npt.NDArray[np.float64], triangles: npt.NDArray[np.int64]
+) -> tuple[float, float]:
+    """The area and the volume of a closed triangle mesh with outward triangles."""
+    area = 0.0
+    vol6 = 0.0
+    for t in range(triangles.shape[0]):
+        a, b, c = triangles[t, 0], triangles[t, 1], triangles[t, 2]
+        e1x, e1y, e1z = (
+            points[b, 0] - points[a, 0],
+            points[b, 1] - points[a, 1],
+            points[b, 2] - points[a, 2],
+        )
+        e2x, e2y, e2z = (
+            points[c, 0] - points[a, 0],
+            points[c, 1] - points[a, 1],
+            points[c, 2] - points[a, 2],
+        )
+        cx = e1y * e2z - e1z * e2y
+        cy = e1z * e2x - e1x * e2z
+        cz = e1x * e2y - e1y * e2x
+        area += 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
+        vol6 += (
+            points[a, 0] * (points[b, 1] * points[c, 2] - points[b, 2] * points[c, 1])
+            + points[a, 1] * (points[b, 2] * points[c, 0] - points[b, 0] * points[c, 2])
+            + points[a, 2] * (points[b, 0] * points[c, 1] - points[b, 1] * points[c, 0])
+        )
+    return area, abs(vol6) / 6.0
 
 
 @jit(nopython=True, cache=True)  # type: ignore
@@ -1218,12 +1520,14 @@ def _get_convex_hull_features(
     surface_area: float,
     spacing: tuple[float, float, float],
     serial: bool = False,
-) -> tuple[dict[str, float], Optional[ConvexHull]]:
+) -> tuple[dict[str, float], Optional[npt.NDArray[np.float64]]]:
     """Calculate Convex Hull features.
 
-    `verts` are the marching cubes vertices of `_get_mesh_features`. Qhull gets only the
-    vertices that can be hull vertices (see `_hull_candidates_numba`). It finds the same
-    hull vertices in the same order, and the same volume and area to about 1e-15. With
+    `verts` are the marching cubes vertices of `_get_mesh_features`. The hull is that of
+    the vertices that can be hull vertices (see `_hull_candidates_numba`), exact on their
+    lattice coordinates (`_exact_hull_numba`; Qhull when it finds no hull). It has the hull
+    vertices of Qhull in the same order, and the same volume and area to about 1e-15. It
+    returns the features and the hull vertices (for the MVEE). With
     `serial`, the maximum diameter comes from the serial kernel (the same value).
     """
     features: dict[str, float] = {}
@@ -1231,10 +1535,18 @@ def _get_convex_hull_features(
         return features, None
 
     try:
-        candidates = _hull_candidates_numba(verts, np.asarray(spacing, dtype=np.float64))
-        hull = ConvexHull(verts[candidates])
-        vol_convex = hull.volume
-        area_convex = hull.area
+        grid_spacing = np.asarray(spacing, dtype=np.float64)
+        points = np.asarray(verts[_hull_candidates_numba(verts, grid_spacing)], dtype=np.float64)
+        found, vertices, triangles = _exact_hull_numba(
+            np.rint(2.0 * points / grid_spacing).astype(np.int64)
+        )
+        if found:
+            area_convex, vol_convex = _hull_area_volume_numba(points, triangles)
+            hull_points = points[vertices]
+        else:  # fewer than four points, or all in one plane: Qhull raises there
+            hull = ConvexHull(points)
+            vol_convex, area_convex = hull.volume, hull.area
+            hull_points = np.asarray(hull.points[hull.vertices], dtype=np.float64)
 
         if vol_convex > 0:
             features["volume_density_convex_hull_R3ER"] = mesh_volume / vol_convex
@@ -1242,16 +1554,13 @@ def _get_convex_hull_features(
             features["area_density_convex_hull_7T7F"] = surface_area / area_convex
 
         # Max 3D Diameter
-        hull_points = hull.points[hull.vertices]
         if hull_points.shape[0] > 1:
             diameter = (
                 _max_pairwise_distance_serial_numba if serial else _max_pairwise_distance_numba
             )
-            features["maximum_3d_diameter_L0JK"] = float(
-                diameter(np.asarray(hull_points, dtype=np.float64))
-            )
+            features["maximum_3d_diameter_L0JK"] = float(diameter(hull_points))
 
-        return features, hull
+        return features, hull_points
     except Exception:
         return features, None
 
@@ -1305,20 +1614,16 @@ def _get_bounding_box_features(
 
 
 def _get_mvee_features(
-    hull: Optional[ConvexHull],
+    hull_points: Optional[npt.NDArray[np.float64]],
     mesh_volume: float,
     surface_area: float,
 ) -> dict[str, float]:
-    """Calculate MVEE features."""
+    """Calculate MVEE features of the convex hull vertices (float64, in order)."""
     features: dict[str, float] = {}
-    if hull is None:
+    if hull_points is None:
         return features
 
-    hull_points = hull.points[hull.vertices]
-    hull_points_f64 = (
-        hull_points if hull_points.dtype == np.float64 else hull_points.astype(np.float64)
-    )
-    A_mvee, _ = _mvee_khachiyan_numba(hull_points_f64)
+    A_mvee, _ = _mvee_khachiyan_numba(hull_points)
 
     if A_mvee is not None:
         evals_mvee, _ = np.linalg.eigh(A_mvee)
@@ -1531,14 +1836,16 @@ def _morphology_second(
     """Part 2 of calculate_morphology_features: the convex hull features and the MVEE
     features, or the error of each. With `serial`, part 2 runs no parallel kernel, so it can
     run in a thread next to them (numba's workqueue layer stops at two parallel regions at
-    once). Its kernels and Qhull release the GIL."""
+    once). Its kernels release the GIL, and so does Qhull when it runs."""
     try:
-        hull_features, hull = _get_convex_hull_features(
+        hull_features, hull_points = _get_convex_hull_features(
             rest.verts, rest.mesh_volume, rest.surface_area, rest.spacing, serial
         )
     except Exception as e:
         return e, {}
-    return hull_features, _section(_get_mvee_features, hull, rest.mesh_volume, rest.surface_area)
+    return hull_features, _section(
+        _get_mvee_features, hull_points, rest.mesh_volume, rest.surface_area
+    )
 
 
 def _morphology_merge(

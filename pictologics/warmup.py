@@ -290,6 +290,8 @@ def _warmup_morphology() -> None:
     # The serial twin of the morphology worker thread (see pipeline._MorphologyAhead)
     morphology._max_pairwise_distance_serial_numba(verts)
     morphology._hull_candidates_numba(verts, np.ones(3, dtype=np.float64))
+    found, _, triangles = morphology._exact_hull_numba(np.rint(2.0 * verts).astype(np.int64))
+    morphology._hull_area_volume_numba(verts, triangles)
 
     tet_verts = verts[:4]  # First 4 verts form a tet
     tet_faces = np.ascontiguousarray(
