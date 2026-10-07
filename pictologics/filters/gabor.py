@@ -3,14 +3,20 @@
 
 import math
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from typing import Any, Callable, Optional, Tuple, Union, cast
 
+import numba
 import numpy as np
 import scipy.fft
-from numba import get_num_threads
+from llvmlite import ir
+from numba import get_num_threads, jit, types
+from numba.extending import intrinsic
 from numpy import typing as npt
 
 from .base import (
+    _PAD_CODES,
+    _PAD_MODES,
     BoundaryCondition,
     _copy_pass,
     _float32_cut,
@@ -18,6 +24,7 @@ from .base import (
     _prepare_masked_image,
     _slab_pass,
     _slab_ufunc,
+    _source_line,
     ensure_float32,
     get_scipy_mode,
     resolve_boundary,
@@ -34,6 +41,19 @@ _RESPONSE_PARTS: dict[str, Callable[[Any], Any]] = {
 # Threshold for enabling parallel processing (voxels)
 # Lower than other filters because Gabor has high per-slice cost
 _PARALLEL_THRESHOLD = 100_000  # ~46³
+
+# Slices for each FFT call (measured at 256^3: four are not faster, and take more memory)
+_BLOCK_SLICES = 2
+# The products of a block take at most this for each worker: the orientations go in groups
+# that fit (512^2 slices with 16 orientations would hold 85 MB). Measured against no cap at
+# 10 threads: the same time within the noise (x0.83 to x1.05), at 1 thread x0.99 to x1.00,
+# and the memory of the code before the blocks; one orientation per group costs 5 % on 64^3
+# images, so the budget holds the 16 orientations of a 64^2 slice (1.8 MB) in one group.
+_PRODUCTS_BYTES = 4 << 20
+# Slices whose values are all finite and at most this large make no NaN in the FFTs and the
+# products: the sums stay below 1e34 with 4096 x 4096 slices and kernels of 4801 x 4801. A
+# block of such slices takes one FFT call, as it gives the bits of an FFT for each slice.
+_SAFE_LIMIT = 1e12
 
 
 def gabor_filter(
@@ -236,6 +256,225 @@ def gabor_filter(
         return _plane(2)
 
 
+@intrinsic  # type: ignore
+def _fma32_intrinsic(typingctx: Any, a: Any, b: Any, c: Any) -> Any:
+    """a * b + c of three float32 values with one rounding (llvm.fma), for the kernels."""
+    sig = types.float32(types.float32, types.float32, types.float32)
+
+    def codegen(context: Any, builder: Any, signature: Any, args: Any) -> Any:
+        fma = builder.module.declare_intrinsic("llvm.fma", [ir.FloatType()] * 3)
+        return builder.call(fma, args)
+
+    return sig, codegen
+
+
+def _fma32_python(a: Any, b: Any, c: Any) -> np.float32:
+    """The fma of the kernels with the compiler off: the exact float64 product plus c,
+    then float32 (a second rounding in rare cases; the first-use checks find them)."""
+    return np.float32(np.float64(a) * np.float64(b) + np.float64(c))
+
+
+_fma32 = _fma32_python if numba.config.DISABLE_JIT else _fma32_intrinsic
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _pad_slices_numba(
+    block: npt.NDArray[np.floating[Any]],
+    buf: npt.NDArray[np.complex64],
+    pad_h: int,
+    pad_w: int,
+    mode: int,
+    value: float,
+) -> bool:
+    """buf[s] = slice s of `block` padded by pad_h lines and pad_w columns (np.pad in mode
+    `mode`, see _PAD_CODES; `value` for the constant), then zeros to the FFT shape, as
+    complex64. Returns whether every value of the block and `value` is finite and within
+    _SAFE_LIMIT."""
+    k, h, w = block.shape
+    safe = abs(value) <= _SAFE_LIMIT
+    for i in range(buf.shape[1]):
+        si = _source_line(i - pad_h, h, mode) if i < h + 2 * pad_h else -2
+        if si < 0:  # a line of the constant, or of the zeros after the padded slice
+            fill = value if si == -1 else 0.0
+            for j in range(buf.shape[2]):
+                for s in range(k):
+                    buf[s, i, j] = fill if j < w + 2 * pad_w else 0.0
+            continue
+        for j in range(pad_w):  # the left pad
+            sj = _source_line(j - pad_w, w, mode)
+            for s in range(k):
+                buf[s, i, j] = value if sj < 0 else block[s, si, sj]
+        for j in range(w):  # every value of the block is read here
+            for s in range(k):
+                x = block[s, si, j]
+                safe &= abs(x) <= _SAFE_LIMIT
+                buf[s, i, pad_w + j] = x
+        for j in range(pad_w + w, buf.shape[2]):  # the right pad, then zeros
+            sj = _source_line(j - pad_w, w, mode) if j < w + 2 * pad_w else -2
+            for s in range(k):
+                buf[s, i, j] = 0.0 if sj == -2 else (value if sj < 0 else block[s, si, sj])
+    return safe
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _products_numba(
+    spectra: npt.NDArray[np.complex64],
+    kernels: npt.NDArray[np.complex64],
+    products: npt.NDArray[np.complex64],
+) -> None:
+    """products[s * n + o] = spectra[s] * kernels[o] (n kernels), as numpy's complex64
+    product: fma(ar, br, -(ai * bi)) + i fma(ar, bi, ai * br)."""
+    n = kernels.shape[0]
+    for s in range(spectra.shape[0]):
+        for o in range(n):
+            for i in range(spectra.shape[1]):
+                for j in range(spectra.shape[2]):
+                    a = spectra[s, i, j]
+                    b = kernels[o, i, j]
+                    products[s * n + o, i, j] = complex(
+                        _fma32(a.real, b.real, -(a.imag * b.imag)),
+                        _fma32(a.real, b.imag, a.imag * b.real),
+                    )
+
+
+@jit(nopython=True, inline="always", error_model="numpy", cache=True)  # type: ignore
+def _modulus(z: complex) -> Any:
+    """np.abs of a complex64 value with numpy's formula: an infinite part gives inf, a NaN
+    part NaN, else larger * sqrt(fma(r, r, 1)) with r = smaller / larger. Selects, not
+    branches, so that a row of values runs in vector lanes."""
+    re = abs(z.real)
+    im = abs(z.imag)
+    larger = max(re, im)
+    smaller = min(re, im)
+    ratio = smaller / larger if larger > 0 else np.float32(0.0)
+    modulus = np.sqrt(_fma32(ratio, ratio, np.float32(1.0))) * larger
+    modulus = np.float32(np.nan) if (re != re or im != im) else modulus
+    return np.float32(np.inf) if (re == np.inf or im == np.inf) else modulus
+
+
+@jit(nopython=True, nogil=True, error_model="numpy", cache=True)  # type: ignore
+def _pooled_parts_numba(
+    products: npt.NDArray[np.complex64],
+    n: int,
+    r0: int,
+    c0: int,
+    part: int,
+    pooling: int,
+    first: bool,
+    last: bool,
+    total: int,
+    acc: npt.NDArray[np.float64],
+    out: npt.NDArray[np.float32],
+) -> None:
+    """Pool the part `part` (0 modulus, 1 real, 2 imaginary, 3 angle) of the products
+    products[s * n + o] from line r0 and column c0 over the n orientations o of this group
+    into out[s]: 0 average (a float64 sum in orientation order in `acc`, over `total`
+    orientations, as float32 at the `last` group), 1 max, 2 min (a NaN wins; the running
+    value in `out`). `first` starts the pooling of the block; one orientation gives the part
+    itself. Each row runs in tight loops."""
+    k, h, w = out.shape
+    values = np.empty(w, dtype=np.float32)  # the part of a row
+    for s in range(k):
+        for i in range(h):
+            for o in range(n):
+                line = products[s * n + o, r0 + i, c0 : c0 + w]
+                if part == 0:
+                    for j in range(w):
+                        values[j] = _modulus(line[j])
+                elif part == 1:
+                    for j in range(w):
+                        values[j] = line[j].real
+                elif part == 2:
+                    for j in range(w):
+                        values[j] = line[j].imag
+                else:
+                    for j in range(w):
+                        values[j] = math.atan2(line[j].imag, line[j].real)
+                if first and o == 0:
+                    if pooling == 0:
+                        for j in range(w):
+                            acc[s, i, j] = values[j]
+                    else:
+                        for j in range(w):
+                            out[s, i, j] = values[j]
+                elif pooling == 0:
+                    for j in range(w):
+                        acc[s, i, j] += values[j]
+                elif pooling == 1:
+                    for j in range(w):
+                        a = out[s, i, j]
+                        b = values[j]
+                        out[s, i, j] = a if (a >= b or a != a) else b
+                else:
+                    for j in range(w):
+                        a = out[s, i, j]
+                        b = values[j]
+                        out[s, i, j] = a if (a <= b or a != a) else b
+            if pooling == 0 and last:
+                for j in range(w):
+                    out[s, i, j] = acc[s, i, j] / total
+
+
+def _check_values(special: Tuple[float, ...]) -> Tuple[npt.NDArray[Any], npt.NDArray[Any]]:
+    """Two complex64 arrays of an odd length (numpy's vector loop and its tail both run):
+    random values over 30 decades, then every pair of the `special` values."""
+    rng = np.random.default_rng(0)
+    values = np.array(special, dtype=np.float32)
+    size = 4001 + values.size % 2
+    arrays = []
+    for _ in range(2):
+        z = np.empty(size + values.size**2, dtype=np.complex64)
+        for part, pairs in ((z.real, np.repeat(values, values.size)), (z.imag, np.tile(values, values.size))):  # fmt: skip
+            part[:size] = rng.normal(size=size) * 10.0 ** rng.integers(-15, 15, size)
+            part[size:] = pairs
+        arrays.append(z)
+    return arrays[0], arrays[1][::-1].copy()
+
+
+# The products run on finite spectra only (see _SAFE_LIMIT); the parts also on NaN and inf
+_FINITE_VALUES = (0.0, -0.0, 1.0, -1.5, 1e-40, -3e-39, 1e-45, 1e18, -3e17)
+_SPECIAL_VALUES = _FINITE_VALUES + (math.inf, -math.inf, math.nan)
+
+
+@lru_cache(maxsize=1)
+def _products_exact() -> bool:
+    """Whether _products_numba gives the bits of np.multiply on this CPU and numpy build."""
+    a, b = _check_values(_FINITE_VALUES)
+    got = np.empty((1, 1, a.size), dtype=np.complex64)
+    _products_numba(a.reshape(1, 1, -1), b.reshape(1, 1, -1), got)
+    return bool(np.multiply(a, b).tobytes() == got.tobytes())
+
+
+@lru_cache(maxsize=4)
+def _part_exact(part: int) -> bool:
+    """Whether _pooled_parts_numba gives the bits of numpy's part `part` (see
+    _RESPONSE_PARTS) on this CPU and numpy build."""
+    a = _check_values(_SPECIAL_VALUES)[0]
+    got = np.empty((1, 1, a.size), dtype=np.float32)
+    with np.errstate(invalid="ignore"):  # inf / inf, when the compiler is off
+        _pooled_parts_numba(a.reshape(1, 1, -1), 1, 0, 0, part, 1, True, True, 1, np.empty((0, 0, 0)), got)  # fmt: skip
+    expected = np.ascontiguousarray(list(_RESPONSE_PARTS.values())[part](a))
+    return expected.tobytes() == got.tobytes()
+
+
+def _pooled(
+    state: Optional[npt.NDArray[Any]], parts: list[npt.NDArray[np.float32]], pooling: str
+) -> npt.NDArray[Any]:
+    """`parts` (the parts of some orientations of one slice, in order) pooled into `state`
+    (None before the first part) with numpy, as the loop of before: a float64 sum for the
+    average, else the running max or min."""
+    for response in parts:
+        if state is None:
+            state = response.astype(np.float64) if pooling == "average" else response
+        elif pooling == "max":
+            np.maximum(state, response, out=state)
+        elif pooling == "average":
+            state += response
+        else:
+            np.minimum(state, response, out=state)
+    return cast(npt.NDArray[Any], state)
+
+
 def _apply_gabor_to_plane(
     image: npt.NDArray[np.floating[Any]],
     sigma_mm: float,
@@ -252,6 +491,19 @@ def _apply_gabor_to_plane(
     padding_value: float = 0.0,
 ) -> npt.NDArray[np.floating[Any]]:
     """Apply Gabor filter to slices along a given axis.
+
+    The slices go in blocks of _BLOCK_SLICES: a numba kernel pads them into one complex64
+    buffer, one FFT call transforms them, a numba kernel multiplies them with the kernel
+    spectra of the orientations (in groups whose products fit _PRODUCTS_BYTES for each
+    worker; one group as a rule), one inverse FFT call transforms the products of a group,
+    and a numba kernel takes the response part, pools it and writes it into the one output
+    array.
+    The kernels give the bits of the numpy steps of each slice: the products and the parts
+    use numpy's formulas (fma), and a first-use check takes numpy where a bit differs on
+    this machine. Max and min pooling of a signed part keep numpy (it orders -0.0 and
+    +0.0 in two ways). A block with a NaN, an infinite or a huge value (see _SAFE_LIMIT)
+    takes an FFT for each slice and numpy's products, as their NaN bits depend on the
+    steps.
 
     Args:
         use_parallel: If True, process slices in parallel using ThreadPoolExecutor.
@@ -286,17 +538,14 @@ def _apply_gabor_to_plane(
             for theta in thetas
         ]
 
-    # Move the plane axis to position 0 so each image_reordered[i] is a 2D slice
-    # (a view; the copy happens later in np.pad).
+    # Move the plane axis to position 0 so each image_reordered[i] is a 2D slice (a view)
     image_reordered = np.moveaxis(image, plane_axis, 0)
     n_slices = image_reordered.shape[0]
     slice_h, slice_w = int(image_reordered.shape[1]), int(image_reordered.shape[2])
 
-    # All slices share one 2D shape and all kernels share one shape, so the FFT of
-    # each padded slice can be computed once and reused across every orientation,
-    # and each kernel's FFT can be computed once for the whole plane. This is the
-    # equivalent of fftconvolve(padded, k, "same") but without re-transforming the
-    # slice per kernel and the kernels per slice.
+    # All slices share one 2D shape and all kernels share one shape, so the FFT of each
+    # padded slice serves every orientation, and the FFT of each kernel the whole plane.
+    # This is fftconvolve(padded, k, "same") without the FFTs again for each kernel.
     kernel_shape = kernels[0].shape
     pad_h = kernel_shape[0] // 2
     pad_w = kernel_shape[1] // 2
@@ -309,87 +558,90 @@ def _apply_gabor_to_plane(
         keep_h = (window[0].start - h_lo, window[0].stop - h_lo)
         keep_w = (window[1].start - w_lo, window[1].stop - w_lo)
 
-    # Map scipy.ndimage mode to numpy.pad mode
-    pad_mode_map = {
-        "constant": "constant",
-        "reflect": "symmetric",
-        "mirror": "reflect",
-        "nearest": "edge",
-        "wrap": "wrap",
-    }
-    pad_mode_literal = pad_mode_map.get(mode, "constant")
-    constant = {"constant_values": padding_value} if pad_mode_literal == "constant" else {}
-    part = _RESPONSE_PARTS[response]
-
     # A circular convolution as long as the padded slice is enough: the kept part of the
     # output (the slice) is at least one kernel radius from the ends of the padded slice,
-    # so no wrapped value reaches it
+    # so no wrapped value reaches it. The crop of "same" + unpad is a fixed offset of
+    # 2 * pad, as the kernel half-width equals the pad.
     fshape = (
         scipy.fft.next_fast_len(slice_h + 2 * pad_h),
         scipy.fft.next_fast_len(slice_w + 2 * pad_w),
     )
-    kernel_ffts = [scipy.fft.fftn(k, s=fshape) for k in kernels]
+    kernel_ffts = np.stack([scipy.fft.fftn(k, s=fshape) for k in kernels])
+    n = len(kernels)
+    out_h, out_w = keep_h[1] - keep_h[0], keep_w[1] - keep_w[0]
+    r0, c0 = 2 * pad_h + keep_h[0], 2 * pad_w + keep_w[0]
+    out = np.empty((n_slices, out_h, out_w), dtype=np.float32)
+    code = _PAD_CODES[_PAD_MODES.get(mode, "constant")]
+    part = list(_RESPONSE_PARTS).index(response)
+    take = _RESPONSE_PARTS[response]
+    numba_products = _products_exact()
+    numba_parts = _part_exact(part) and (n == 1 or pooling == "average" or response == "modulus")
+    pool = ("average", "max", "min").index(pooling)
+    # The orientations in groups whose products fit _PRODUCTS_BYTES for each worker
+    group = max(1, min(n, _PRODUCTS_BYTES // (_BLOCK_SLICES * 8 * fshape[0] * fshape[1])))
+    groups = [(g0, min(g0 + group, n)) for g0 in range(0, n, group)]
 
-    def process_slice(
-        slice_2d: npt.NDArray[np.floating[Any]],
-    ) -> npt.NDArray[np.floating[Any]]:
-        """Process a single 2D slice with all orientations using in-place pooling."""
-        padded = np.pad(
-            slice_2d, ((pad_h, pad_h), (pad_w, pad_w)), mode=pad_mode_literal, **constant
-        )  # type: ignore[call-overload]
-        f_padded = scipy.fft.fftn(padded.astype(np.complex64), s=fshape)
-
-        def convolve_prepadded(
-            k_fft: npt.NDArray[np.complexfloating[Any, Any]],
-        ) -> npt.NDArray[np.floating[Any]]:
-            # Full convolution via FFT; the "same"+unpad crop reduces to a fixed
-            # offset of 2*pad because the kernel half-width equals pad.
-            full = scipy.fft.ifftn(f_padded * k_fft)
-            cropped = full[
-                2 * pad_h + keep_h[0] : 2 * pad_h + keep_h[1],
-                2 * pad_w + keep_w[0] : 2 * pad_w + keep_w[1],
-            ]
-            return cast(npt.NDArray[np.floating[Any]], np.ascontiguousarray(part(cropped)))
-
-        if len(kernel_ffts) == 1:
-            return convolve_prepadded(kernel_ffts[0])
-
-        # In-place pooling to avoid allocating n_orientations x slice memory
-        result_slice: npt.NDArray[np.floating[Any]] | None = None
-        for k_fft in kernel_ffts:
-            response = convolve_prepadded(k_fft)
-            if result_slice is None:
-                # The part is a fresh array, so no copy is needed.
-                result_slice = response.astype(np.float64) if pooling == "average" else response
-            elif pooling == "max":
-                np.maximum(result_slice, response, out=result_slice)
-            elif pooling == "average":
-                result_slice += response
-            else:  # pooling == "min"
-                np.minimum(result_slice, response, out=result_slice)
-
-        # Mypy check
-        if result_slice is None:  # pragma: no cover
-            raise RuntimeError("Result slice should not be None")
-
-        if pooling == "average":
-            result_slice /= len(kernel_ffts)
-        return result_slice.astype(np.float32)
-
-    if use_parallel:
-        # Parallel processing for large images
-        with ThreadPoolExecutor(max_workers=get_num_threads()) as executor:
-            # image_reordered[i] is a view, no copy needed
-            processed = list(
-                executor.map(process_slice, [image_reordered[i] for i in range(n_slices)])
+    def run(start: int, stop: int) -> None:
+        """The slices start to stop, in blocks, with buffers for this task."""
+        k = min(_BLOCK_SLICES, stop - start)
+        buf = np.empty((k,) + fshape, dtype=np.complex64)
+        products = np.empty((k * group,) + fshape, dtype=np.complex64)
+        acc = np.empty((k, out_h, out_w) if numba_parts and pool == 0 else (0, 0, 0))
+        for s in range(start, stop, k):
+            m = min(k, stop - s)
+            block = image_reordered[s : s + m]
+            safe = _pad_slices_numba(block, buf[:m], pad_h, pad_w, code, float(padding_value))
+            # An unsafe block (NaN, infinite or huge values) takes an FFT for each slice: the
+            # NaN bits depend on the steps
+            spectra = (
+                scipy.fft.fftn(buf[:m], axes=(1, 2), overwrite_x=True)
+                if safe
+                else np.stack([scipy.fft.fftn(buf[q]) for q in range(m)])
             )
-    else:
-        # Sequential processing for small images
-        processed = [process_slice(image_reordered[i]) for i in range(n_slices)]
+            states: list[Optional[npt.NDArray[Any]]] = [None] * m
+            for g0, g1 in groups:
+                ng = g1 - g0
+                full = products[: m * ng]
+                if not safe:
+                    for q in range(m):
+                        for o in range(ng):
+                            full[q * ng + o] = scipy.fft.ifftn(spectra[q] * kernel_ffts[g0 + o])
+                else:
+                    if numba_products:
+                        _products_numba(spectra, kernel_ffts[g0:g1], full)
+                    else:
+                        for q in range(m):
+                            for o in range(ng):
+                                np.multiply(spectra[q], kernel_ffts[g0 + o], out=full[q * ng + o])
+                    full = scipy.fft.ifftn(full, axes=(1, 2), overwrite_x=True)
+                if numba_parts:
+                    _pooled_parts_numba(
+                        full, ng, r0, c0, part, pool, g0 == 0, g1 == n, n, acc, out[s : s + m]
+                    )
+                else:
+                    for q in range(m):
+                        crops = (
+                            full[q * ng + o, r0 : r0 + out_h, c0 : c0 + out_w] for o in range(ng)
+                        )
+                        parts = [np.ascontiguousarray(take(c)) for c in crops]
+                        states[q] = _pooled(states[q], parts, pooling)
+            if not numba_parts:
+                for q in range(m):
+                    state = cast(npt.NDArray[Any], states[q])
+                    if pooling == "average" and n > 1:
+                        state /= n
+                    out[s + q] = state
 
-    # Stack and move axis back to original position
-    result_reordered = np.stack(processed, axis=0)
-    return np.moveaxis(result_reordered, 0, plane_axis)
+    # One contiguous run of slices for each worker
+    workers = get_num_threads() if use_parallel else 1
+    step = max(1, math.ceil(n_slices / workers))
+    starts = range(0, n_slices, step)
+    if len(starts) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            list(executor.map(lambda s: run(s, min(s + step, n_slices)), starts))
+    else:
+        run(0, n_slices)
+    return np.moveaxis(out, 0, plane_axis)
 
 
 def _create_gabor_kernel_2d(

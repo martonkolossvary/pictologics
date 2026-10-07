@@ -186,6 +186,15 @@ levels = np.asarray(discretise_image(values, "FBN", roi_mask=mask.array, n_bins=
 for kind in (np.uint8, np.int64, np.float32):  # direct calls with other types
     texture.calculate_all_texture_features(levels.astype(kind), mask.array, 16)
     intensity.calculate_intensity_histogram_features(levels[roi].astype(kind))
+from pictologics.filters import gabor_filter
+for kind in (np.float32, np.float64):  # the Gabor slices in each order, each part and a region
+    cube = values[:20, :18, :16].astype(kind)
+    for layout in (cube, np.asfortranarray(cube), cube[:2], np.asfortranarray(cube[:2])):
+        gabor_filter(layout, 1.5, 3.0, rotation_invariant=True, delta_theta=np.pi / 4,
+                     average_over_planes=True)
+    for part in ("real", "imaginary", "angle"):
+        gabor_filter(cube, 1.5, 3.0, rotation_invariant=True, delta_theta=np.pi / 4, pooling="max",
+                     response=part, region=(slice(2, 9), slice(3, 12), slice(1, 8)))
 ct = Image(values.astype(np.int16), image.spacing, image.origin)
 intensity.calculate_local_intensity_features(ct, mask)
 morphology.calculate_morphology_features(mask, ct)

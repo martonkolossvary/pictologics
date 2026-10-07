@@ -337,6 +337,7 @@ def _warmup_filters() -> None:
     # Import here to avoid circular dependencies
     from . import loader, preprocessing
     from .filters import base as filter_base
+    from .filters import gabor
 
     # 0. Loader: the column-order to row-order copy for NIfTI, DICOM and SEG data, and
     # the float64 copy with rescale of stored DICOM pixels and NIfTI data.
@@ -425,3 +426,25 @@ def _warmup_filters() -> None:
             filter_base._pad_planes_numba(
                 image, np.empty((4, 4, 4), dtype=kind), 1, 1, 1, 2, 0.0, 0, 4
             )
+
+    # 3. The Gabor slices: the pad of float32 and float64 blocks in row, column and other
+    # orders, the products and the pooled parts (complex64)
+    buf = np.empty((2, 4, 4), dtype=np.complex64)
+    for kind in (np.float32, np.float64):
+        cube = np.ones((2, 2, 4), dtype=kind)[:, :, :2]
+        for block in (cube, cube.copy(), np.asfortranarray(cube)):
+            gabor._pad_slices_numba(block, buf, 1, 1, 2, 0.0)
+    gabor._products_numba(buf, buf[:1], np.empty((2, 4, 4), dtype=np.complex64))
+    gabor._pooled_parts_numba(
+        buf,
+        1,
+        0,
+        0,
+        0,
+        0,
+        True,
+        True,
+        1,
+        np.empty((2, 4, 4)),
+        np.empty((2, 4, 4), dtype=np.float32),
+    )

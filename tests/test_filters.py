@@ -2079,6 +2079,212 @@ def test_wavelet_rotations_need_no_rotated_copies() -> None:
     assert_allclose(got, _old_pooled(old, "average"), rtol=1e-6, atol=1e-6 * np.max(np.abs(got)))
 
 
+def _gabor_by_slices(image, sigma, thetas, plane_axis, mode, pooling, response, value=0.0):
+    """The Gabor response of a plane with numpy, one slice and one orientation at a time
+    (np.pad, an FFT, the product, an inverse FFT and the part), pooled in orientation
+    order, as the filter did before the blocks."""
+    import functools
+
+    import scipy.fft
+
+    kernels = [_create_gabor_kernel_2d(sigma, 2.0 * sigma, 1.0, t) for t in thetas]
+    pad = kernels[0].shape[0] // 2
+    np_mode = {"constant": "constant", "reflect": "symmetric", "mirror": "reflect"}.get(mode, mode)
+    np_mode = {"nearest": "edge"}.get(np_mode, np_mode)
+    part = {"modulus": np.abs, "real": np.real, "imaginary": np.imag, "angle": np.angle}[response]
+    extra = {"constant_values": value} if np_mode == "constant" else {}
+    slices = np.moveaxis(image, plane_axis, 0)
+    h, w = slices.shape[1:]
+    fshape = (scipy.fft.next_fast_len(h + 2 * pad), scipy.fft.next_fast_len(w + 2 * pad))
+    spectra = [scipy.fft.fftn(k, s=fshape) for k in kernels]
+    pooled = []
+    for slice_2d in slices:
+        padded = np.pad(slice_2d, pad, mode=np_mode, **extra).astype(np.complex64)
+        spectrum = scipy.fft.fftn(padded, s=fshape)
+        crops = [scipy.fft.ifftn(spectrum * k)[2 * pad : 2 * pad + h, 2 * pad : 2 * pad + w] for k in spectra]  # fmt: skip
+        parts = [np.ascontiguousarray(part(c)) for c in crops]
+        if len(parts) == 1:
+            pooled.append(parts[0])
+        elif pooling == "average":
+            total = functools.reduce(np.add, [p.astype(np.float64) for p in parts])
+            pooled.append((total / len(parts)).astype(np.float32))
+        else:
+            pooled.append(functools.reduce(np.maximum if pooling == "max" else np.minimum, parts))
+    return np.moveaxis(np.stack(pooled), 0, plane_axis)
+
+
+def test_gabor_blocks_give_the_bits_of_each_slice() -> None:
+    """The slices in blocks (the pad, one FFT call, the products, one inverse FFT call and
+    the pooled parts) give the bits of numpy on each slice: every boundary, part and
+    pooling, a padding value, pads wider than the slices, float32 and float64 images, the
+    three planes, sequential and threaded, and blocks with NaN, huge values or zeros."""
+    rng = np.random.default_rng(15)
+    image = rng.normal(0.0, 30.0, (6, 7, 5))
+    four = [k * np.pi / 4 for k in range(4)]
+    cases = [(image, 1.0, [0.3], 2, mode, "average", "modulus") for mode in ("constant", "reflect", "mirror", "nearest", "wrap")]  # fmt: skip
+    for response in ("modulus", "real", "imaginary", "angle"):
+        for pooling in ("average", "max", "min"):
+            cases.append((image.astype(np.float32), 1.0, four, 0, "mirror", pooling, response))
+    with_nan = image.copy()
+    with_nan[2, 3, 1] = np.nan
+    cases += [
+        (image, 3.0, [0.2], 1, "mirror", "average", "modulus"),  # pads wider than the slices
+        (with_nan, 1.0, four, 2, "constant", "max", "real"),
+        (image * 1e15, 1.0, four[:2], 2, "nearest", "average", "modulus"),
+        (np.zeros(image.shape), 1.0, four, 2, "constant", "min", "imaginary"),
+    ]
+    for img, sigma, thetas, axis, mode, pooling, response in cases:
+        expected = _gabor_by_slices(img, sigma, thetas, axis, mode, pooling, response)
+        for parallel in (False, True):
+            got = _apply_gabor_to_plane(
+                img, sigma, 2.0 * sigma, 1.0, thetas, axis, (1.0, 1.0, 1.0), mode, pooling,
+                use_parallel=parallel, response=response,
+            )  # fmt: skip
+            assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes()
+    got = _apply_gabor_to_plane(
+        image, 1.0, 2.0, 1.0, four, 2, (1.0, 1.0, 1.0), "constant", "average", padding_value=1.5
+    )
+    expected = _gabor_by_slices(image, 1.0, four, 2, "constant", "average", "modulus", 1.5)
+    assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes()
+
+
+def test_gabor_first_use_checks_take_numpy_where_a_bit_differs() -> None:
+    """When the numba product or part differs from numpy in one bit on this machine, the
+    first-use check takes numpy for it: the response keeps numpy's bits. The checks also
+    pass the numba forms to the slices."""
+    from pictologics.filters import gabor
+
+    image = np.random.default_rng(16).normal(size=(5, 6, 4))
+    thetas = [0.0, 0.7]
+    expected = _gabor_by_slices(image, 1.0, thetas, 2, "mirror", "average", "modulus")
+    real_products, real_parts = gabor._products_numba, gabor._pooled_parts_numba
+
+    def wrong_products(spectra, kernels, products):
+        real_products(spectra, kernels, products)
+        products.real[0, 0, 0] = np.nextafter(products.real[0, 0, 0], np.float32(np.inf))
+
+    def wrong_parts(products, n, r0, c0, part, pooling, first, last, total, acc, out):
+        real_parts(products, n, r0, c0, part, pooling, first, last, total, acc, out)
+        out[0, 0, 0] = np.nextafter(out[0, 0, 0], np.float32(np.inf))
+
+    for name, wrong, exact in (
+        ("_products_numba", wrong_products, gabor._products_exact),
+        ("_pooled_parts_numba", wrong_parts, lambda: gabor._part_exact(0)),
+    ):
+        gabor._products_exact.cache_clear()
+        gabor._part_exact.cache_clear()
+        with patch.object(gabor, name, wrong):
+            assert not exact()
+            got = gabor._apply_gabor_to_plane(
+                image, 1.0, 2.0, 1.0, thetas, 2, (1.0, 1.0, 1.0), "mirror", "average"
+            )
+        assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes()
+    gabor._products_exact.cache_clear()
+    gabor._part_exact.cache_clear()
+    with (
+        patch.object(gabor, "_products_exact", return_value=True),
+        patch.object(gabor, "_part_exact", return_value=True),
+    ):
+        got = gabor._apply_gabor_to_plane(
+            image, 1.0, 2.0, 1.0, thetas, 2, (1.0, 1.0, 1.0), "mirror", "average"
+        )
+    assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes()
+    # Both check arrays have an odd length: numpy's vector loop and its tail both run
+    for values in (gabor._FINITE_VALUES, gabor._SPECIAL_VALUES):
+        assert all(z.size % 2 == 1 for z in gabor._check_values(values))
+
+
+def test_gabor_orientation_groups_give_the_bits_of_one_group() -> None:
+    """The orientations in groups (the products of a block within _PRODUCTS_BYTES for each
+    worker) give the bits of one group: groups of 1, 2 and 3 of 5 orientations, each pooling
+    with the modulus, the real part and the angle, the numba parts (where the first-use check
+    of this machine passes) and numpy's, a block with a NaN (an FFT for each slice),
+    sequential and threaded."""
+    from contextlib import nullcontext
+
+    import scipy.fft
+
+    from pictologics.filters import gabor
+
+    rng = np.random.default_rng(17)
+    image = rng.normal(0.0, 30.0, (3, 9, 8)).astype(np.float32)
+    with_nan = image.copy()
+    with_nan[1, 2, 3] = np.nan
+    thetas = [k * np.pi / 5 for k in range(5)]
+    pad = _create_gabor_kernel_2d(1.0, 2.0, 1.0, 0.0).shape[0] // 2
+    side = scipy.fft.next_fast_len(9 + 2 * pad), scipy.fft.next_fast_len(8 + 2 * pad)
+    one_group = gabor._BLOCK_SLICES * 8 * side[0] * side[1]  # the products of one orientation
+    cases = [(img, pooling, response) for img in (image, with_nan) for pooling in ("average", "max", "min") for response in ("modulus", "real", "angle")]  # fmt: skip
+    for exact in (None, False):
+        forced = nullcontext() if exact is None else patch.object(gabor, "_part_exact", return_value=exact)  # fmt: skip
+        with forced:
+            for img, pooling, response in cases:
+                expected = _gabor_by_slices(img, 1.0, thetas, 0, "mirror", pooling, response)
+                for size in (5, 3, 2, 1):
+                    for parallel in (False, True) if size == 2 else (False,):
+                        with patch.object(gabor, "_PRODUCTS_BYTES", size * one_group):
+                            got = _apply_gabor_to_plane(
+                                img, 1.0, 2.0, 1.0, thetas, 0, (1.0, 1.0, 1.0), "mirror", pooling,
+                                use_parallel=parallel, response=response,
+                            )  # fmt: skip
+                        assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes(), (exact, pooling, response, size)  # fmt: skip
+
+
+def test_gabor_pad_kernel_is_np_pad() -> None:
+    """The pad of a block of slices is np.pad in each of the five modes (odd shapes, pads
+    wider than the slice, a slice of one line), then zeros to the FFT shape. It tells
+    whether every value and the constant are finite and within _SAFE_LIMIT."""
+    from pictologics.filters import gabor
+
+    rng = np.random.default_rng(17)
+    np_modes = ("constant", "symmetric", "reflect", "edge", "wrap")
+    for shape, (ph, pw) in (((3, 5, 4), (2, 3)), ((2, 1, 6), (4, 9)), ((1, 7, 1), (5, 2))):
+        block = rng.normal(size=shape)
+        buf = np.empty((shape[0], shape[1] + 2 * ph + 3, shape[2] + 2 * pw + 1), np.complex64)
+        for code, np_mode in enumerate(np_modes):
+            extra = {"constant_values": 1.5} if np_mode == "constant" else {}
+            assert gabor._pad_slices_numba(block, buf, ph, pw, code, 1.5)
+            expected = np.zeros_like(buf)
+            for s in range(shape[0]):
+                padded = np.pad(block[s], ((ph, ph), (pw, pw)), mode=np_mode, **extra)
+                expected[s, : padded.shape[0], : padded.shape[1]] = padded
+            assert buf.tobytes() == expected.tobytes()
+    for bad in (np.nan, np.inf, -2e12):
+        block[0, 3, 0] = bad
+        assert not gabor._pad_slices_numba(block, buf, ph, pw, 2, 0.0)
+    assert not gabor._pad_slices_numba(block[:, :2], buf, ph, pw, 0, 2e12)
+
+
+def test_gabor_fft_in_blocks_gives_the_bits_of_single_ffts() -> None:
+    """One FFT call over the planes of a block (in place) gives the bits of an FFT for each
+    plane, forward and inverse, for blocks of 2, 3 and 4 planes."""
+    import scipy.fft
+
+    rng = np.random.default_rng(18)
+    for k in (2, 3, 4):
+        planes = np.empty((k, 20, 18), dtype=np.complex64)
+        planes.real, planes.imag = rng.normal(size=(2, k, 20, 18))
+        for transform in (scipy.fft.fftn, scipy.fft.ifftn):
+            single = np.stack([transform(p) for p in planes])
+            block = transform(planes.copy(), axes=(1, 2), overwrite_x=True)
+            assert block.tobytes() == single.tobytes()
+
+
+def test_the_fma_of_the_gabor_kernels_rounds_once() -> None:
+    """The fma of the kernels (llvm.fma, compiled here with the compiler on) and its form
+    for the compiler off give a * b + c with one rounding, as numpy's vector loops do."""
+    import numba
+
+    from pictologics.filters import gabor
+
+    a, b, c = np.float32(1 + 2**-23), np.float32(1 - 2**-23), np.float32(-1.0)
+    assert np.float32(a * b) + c == 0  # two roundings lose the low bits
+    with patch.object(numba.config, "DISABLE_JIT", False):
+        fma = numba.njit(lambda x, y, z: gabor._fma32_intrinsic(x, y, z))
+        assert fma(a, b, c) == np.float32(-(2.0**-46))
+    assert gabor._fma32_python(a, b, c) == np.float32(-(2.0**-46))
+
+
 def test_padded_is_np_pad() -> None:
     """The pad of the padded filters is np.pad, in the same memory order: the five modes,
     odd shapes, widths before and after each axis (also wider than the axis), float32 and
