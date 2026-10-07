@@ -656,5 +656,50 @@ def test_the_mvee_kernel_takes_the_steps_of_the_quadratic_form() -> None:
         np.testing.assert_allclose(c, c_ref, rtol=1e-9, atol=1e-12)
 
 
+def test_the_hull_candidates_keep_every_hull_vertex() -> None:
+    # The candidates are the line ends that are 2-D hull vertices in their three axis planes:
+    # on 40 masks (blobs, boxes, one-voxel plates and lines, anisotropic spacing), Qhull on
+    # the candidates finds the hull vertices and the volume and area of Qhull on all mesh
+    # vertices, from fewer points than the line ends.
+    from scipy.ndimage import gaussian_filter
+    from scipy.spatial import ConvexHull
+
+    from pictologics.features.morphology import (
+        _hull_candidates_numba,
+        _line_end_candidates_numba,
+    )
+
+    rng = np.random.default_rng(22)
+    for case in range(40):
+        shape = tuple(int(v) for v in rng.integers(6, 16, 3))
+        kind = case % 4
+        lo = [int(rng.integers(1, n // 2)) for n in shape]
+        hi = [int(rng.integers(n // 2 + 1, n - 1)) for n in shape]
+        if kind == 0:  # a blob
+            roi = gaussian_filter(rng.random(shape), 1.5) > 0.5
+        else:
+            roi = np.zeros(shape, dtype=bool)
+            if kind == 2:  # a one-voxel plate
+                hi[case % 3] = lo[case % 3] + 1
+            elif kind == 3:  # a line of voxels
+                for a in range(3):
+                    if a != case % 3:
+                        hi[a] = lo[a] + 1
+            roi[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]] = True
+        roi[lo[0], lo[1], lo[2]] = True  # never empty
+        spacing = tuple(float(v) for v in rng.uniform(0.5, 2.0, 3))
+        mask = Image(roi.astype(np.uint8), spacing, (0.0, 0.0, 0.0))
+        verts = _get_mesh_features(mask)[1]
+        grid_spacing = np.asarray(spacing, dtype=np.float64)
+        candidates = _hull_candidates_numba(verts, grid_spacing)
+        assert len(candidates) <= len(_line_end_candidates_numba(verts, grid_spacing)[0])
+        full, kept = ConvexHull(verts), ConvexHull(verts[candidates])
+        assert {tuple(v) for v in full.points[full.vertices]} == {
+            tuple(v) for v in kept.points[kept.vertices]
+        }
+        assert abs(kept.volume / full.volume - 1) < 1e-12
+        assert abs(kept.area / full.area - 1) < 1e-12
+
+
 if __name__ == "__main__":
     unittest.main()
