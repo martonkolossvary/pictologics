@@ -85,12 +85,12 @@ For MR or PET images, use the FBN configurations (`config_names=["standard_fbn_3
 
 | Task | Size | Time (median) |
 |:--|:--|--:|
-| run(): one standard configuration (standard_fbn_32) | CT of 512 × 512 × 200 | 11.3 ms |
-| run(): the 6 standard configurations | CT of 512 × 512 × 200 | 43.4 ms |
-| Texture (all 6 families) | 2,311,384 ROI voxels | 27.1 ms |
-| Morphology | 2,311,384 ROI voxels | 9.9 ms |
-| LoG (sigma 2 mm) | 256³ voxels | 49.6 ms |
-| Gabor (axial, rotation invariant) | 256³ voxels | 46.7 ms |
+| run(): one standard configuration (standard_fbn_32) | CT of 512 × 512 × 200 | 11.7 ms |
+| run(): the 6 standard configurations | CT of 512 × 512 × 200 | 44.5 ms |
+| Texture (all 6 families) | 2,311,384 ROI voxels | 27.4 ms |
+| Morphology | 2,311,384 ROI voxels | 9.6 ms |
+| LoG (sigma 2 mm) | 256³ voxels | 50.3 ms |
+| Gabor (axial, rotation invariant) | 256³ voxels | 48.3 ms |
 
 The median of 5 runs on one computer, after a warm-up run. See the [benchmark page](https://martonkolossvary.github.io/pictologics/benchmarks/) for all results, plots and the computer.
 
