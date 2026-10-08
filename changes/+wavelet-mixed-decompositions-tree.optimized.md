@@ -1,1 +1,0 @@
-The rotation-invariant wavelets with a mixed decomposition (such as LHL) and average pooling run as a tree of shared passes from 2^23 voxels on: 40 passes instead of 72. A 300 × 300 × 100 image takes x0.80 of the time at 10 threads and a 400 × 400 × 80 image x0.65 (x0.52 to x0.65 at 1 thread); the values change in the last float32 bits.

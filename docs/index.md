@@ -30,15 +30,14 @@ See the [NOTICE](NOTICE.md) file for the attribution and the third-party librari
 *   **🛡️ Predictable results**: each configuration gives all its feature columns, also when a step fails (the values are then `NaN`). A study table never has missing columns.
 *   **🛠️ Maintained**: Pictologics is developed to give robust radiomic features that describe the morphology of diseases on radiological images.
 
-## What Is New in 0.7.0
+## What Is New in 0.7.1
 
-- **Speed**: on a 512×512×200 CT, timed by turns with 0.6.0 on one computer, the configuration `standard_fbn_32` takes 48 % less time, the six standard configurations 30 % less, and `run_rois` with 20 ROIs 60 % less.
-- **Threads**: Pictologics uses the fast cores by default, for example the performance cores of Apple silicon. `set_num_threads()`, `get_num_threads()` and `PICTOLOGICS_NUM_THREADS` set one number for all parallel parts.
-- **First run**: the import compiles every numba kernel that a run can use, so no code compiles during a run.
-- **Installation**: Intel Macs, and 3D Slicer under Rosetta, can install Pictologics again (with numba 0.62). Matplotlib is now the optional extra `viz`: `pip install "pictologics[viz]"`. pandas 3, Pillow 12, SciPy 1.18 and numba 0.68 work.
-- **Fixes**: the DICOM database scan, big-endian and multi-frame DICOM series, the frame positions of DICOM SEG files, NRRD byte skips, and the percentiles of large ROIs (a rare case).
-- **Changes**: merged masks keep the type of their inputs (uint8 with `binarize`), and `save_slices` writes one pixel per voxel, with `dpi` as the tag of the file. Some texture and histogram values change in their last digits; the IBSI compliance is the same. See the [Changelog](CHANGELOG.md).
-
+- **Speed**: on a 512×512×200 CT, timed by turns with 0.7.0 on one computer, the configuration `standard_fbn_32` takes 21 % less time, the six standard configurations 22 % less, and `run_rois` with 20 ROIs 70 % less. Against 0.6.0 that is 59 %, 45 % and 88 % less.
+- **Filters**: the mean, Gaussian, Laws and wavelet filters run their passes in float32 for every image, so a 256³ image takes a third to a half less time. The Gabor filter runs its slices in blocks with numba kernels (a 256³ image over three planes: 163 ms instead of 337 ms), a large LoG is one FFT (75 ms instead of 139 ms), and the rotation-invariant wavelets share their passes (LLL and HHH 3 times faster, mixed decompositions up to 2 times faster from 2^23 voxels).
+- **Many ROIs**: `run_rois` finds the label boxes in one parallel pass, also for maps with up to 131,072 labels, and the kernels of a small ROI run without threads.
+- **Memory**: each Gabor worker holds at most 4 MB of products, the wavelet trees hold fewer arrays, and the IBSI 2 phase 3 run takes 18 % less memory.
+- **Fixes**: `run_rois` refuses a label map whose largest label is above 1,048,576 with a clear error; before, such a map could take all the memory of the machine.
+- **Changes**: the responses of the mean, Gaussian, Laws and wavelet filters change by the float32 rounding of their passes (about 1e-7 of the largest value), and a few morphology and wavelet values move in their last digits; the IBSI compliance is the same. See the [Changelog](CHANGELOG.md).
 ## Key Features
 
 *   **Loaders**: NIfTI, NRRD, MetaImage and DICOM images (also compressed and multiframe DICOM, cardiac phases and PET in SUV), DICOM SEG, DICOM RTSTRUCT and 3D Slicer `.seg.nrrd` masks, and DICOM SR reports.

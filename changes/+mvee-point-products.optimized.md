@@ -1,1 +1,0 @@
-The MVEE of the convex hull keeps the products of the coordinates of each hull point, so each step reads one short dot product per point: 0.85 ms instead of 2.74 ms for the 632 hull points of a CT lesion, with the same steps. The two MVEE features move by at most 7e-5 (relative), where rounding changes one step.

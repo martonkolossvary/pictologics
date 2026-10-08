@@ -1,1 +1,0 @@
-The FFT LoG, Simoncelli and Riesz with a boundary that is not periodic, and constant value padding pad the image with a numba kernel on slabs in threads, not with np.pad in one thread, with the same values, bit for bit. The LoG of a 256³ image takes 51 ms instead of 72 ms at 10 threads (mirror boundary).

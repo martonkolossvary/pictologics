@@ -1,1 +1,0 @@
-The discretise kernels run serially below 160,000 voxels, equal geometry passes with no tolerance check, and a resample keeps its grid for each input. In `run_rois()` with 20 spheres the resample and discretise steps take 332 µs per ROI instead of 466 µs, and the run 52.5 ms instead of 55.2 ms, with the same values, bit for bit.

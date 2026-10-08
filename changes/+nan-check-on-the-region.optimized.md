@@ -1,1 +1,0 @@
-The NaN check of a run reads the region that the run reads (the cut ROI region of a large image), not the whole image. The first run of a 512×512×200 CT takes 1.9 ms less at 10 threads and 16 ms less at 1 thread, and `run_rois()` with 20 ROIs 15 ms less at 1 thread, with the same results, bit for bit. A repeated run checks its region again (0.2 ms).

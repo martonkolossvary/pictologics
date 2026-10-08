@@ -1,1 +1,0 @@
-The box scan of a mask below 2^20 voxels runs as a serial numba kernel, not as numpy reductions, and the cut to the ROI region copies a large float64 region in threads. The cut and the box scans of `run()` take 0.95 ms instead of 1.28 ms at 10 threads, with the same values, bit for bit.

@@ -44,7 +44,7 @@ pip install "pictologics @ git+https://github.com/martonkolossvary/pictologics.g
 A tag or a commit:
 
 ```bash
-pip install "pictologics @ git+https://github.com/martonkolossvary/pictologics.git@v0.7.0"
+pip install "pictologics @ git+https://github.com/martonkolossvary/pictologics.git@v0.7.1"
 pip install "pictologics @ git+https://github.com/martonkolossvary/pictologics.git@<commit_sha>"
 ```
 

@@ -1,1 +1,0 @@
-run_rois() finds the boxes of a label map with up to 131,072 labels in its parallel pass (one table for each thread above 4,096 labels), not with scipy's find_objects, with the same boxes. A CT-size map with 10,000 small labels takes 18 ms instead of 99 ms at 10 threads, and 75 ms instead of 130 ms at 1 thread.

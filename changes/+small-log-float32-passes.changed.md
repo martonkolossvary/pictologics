@@ -1,1 +1,0 @@
-The LoG of a float64 image below 64³ voxels now runs its eight passes in float32, as for a float32 image: x0.85 to x0.98 of the time, with values within about 1e-7 of the largest response. Larger float64 images keep the float64 FFT path.

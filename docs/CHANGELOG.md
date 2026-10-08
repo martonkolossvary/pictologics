@@ -2,6 +2,48 @@
 
 <!-- towncrier release notes start -->
 
+## [0.7.1] - 2026-10-08
+
+### Added
+
+- `DicomDatabase.export_json()` has a new parameter `indent` (default 2, the text as before). With `indent=None`, the text is on one line and Python's fast C encoder writes it: a database of 6,000 files exports in 30 ms instead of 145 ms, in 5.5 MB instead of 9.5 MB. The default export is also faster (128 ms instead of 146 ms), with the same bytes.
+- `Image.with_source_mask()` has a new parameter `copy` (default `True`, the copy as before). With `copy=False`, the new image shares the voxel array: for a 512×512×200 CT the call takes 9.7 ms instead of 26.5 ms, and it needs 50 MB instead of 450 MB.
+
+### Changed
+
+- The LoG of a float64 image below 64³ voxels now runs its eight passes in float32, as for a float32 image: x0.85 to x0.98 of the time, with values within about 1e-7 of the largest response. Larger float64 images keep the float64 FFT path.
+- The mean, Gaussian, Laws and wavelet filters now run their passes in float32 for every image, also the Laws energy step. A 256³ float64 image takes x0.56 to x0.78 of the time at 10 threads (x0.83 to x0.90 at 1 thread), with a third less memory. The responses change by the float32 rounding of the passes: about 1e-7 of the largest response, up to 6e-7 for plain Laws. The LoG, Simoncelli, Riesz and Gabor filters keep float64 passes for a float64 image, and every IBSI check passes as before.
+
+### Fixed
+
+- `run_rois()` raises a clear error for a label map whose largest label is above 1,048,576. Before, scipy's `find_objects` built a list with one entry for each label up to the largest, so one stray huge label could take all the memory of the machine.
+
+### Optimized
+
+- The FFT LoG, Simoncelli and Riesz with a boundary that is not periodic, and constant value padding pad the image with a numba kernel on slabs in threads, not with np.pad in one thread, with the same values, bit for bit. The LoG of a 256³ image takes 51 ms instead of 72 ms at 10 threads (mirror boundary).
+- The GLSZM counts its zones in a table of 2^14 cells up to 1,024 grey levels (2^18 above), and the zone labels start the threads once less. The zone matrices of the CT lesion take 7.7 ms instead of 9.2 ms for the six standard configurations at 10 threads, with the same values, bit for bit.
+- The Gabor filter over three planes adds the plane responses, divides them and casts the mean on slabs in threads; before, these steps ran in one thread over the strided plane views. A 256³ image takes 304 ms instead of 351 ms, with the same values, bit for bit.
+- The Gabor filter pads, multiplies and pools its slices in numba kernels and transforms two slices with one FFT call, with the same values, bit for bit. A 256³ image takes 163 ms instead of 337 ms over three planes at 10 threads, and a 128³ image 30 ms instead of 129 ms. Each worker holds at most 4 MB of products at a time: the orientations go in groups where the slices are large.
+- The Laplacian of Gaussian of a float64 image of 64³ voxels or more is now one FFT convolution with the same truncated kernels and boundary. A 256³ image takes 75 ms instead of 139 ms (with the 8 passes below this size), a 128³ image 9.2 ms instead of 16.6 ms, and 26 ms instead of 97 ms at 1 thread. The float32 response stays the same except in very few voxels (3 of 16.8 million at 256³), by one float32 step; the IBSI 2 values move by at most 3.3e-12 (relative).
+- The Laplacian of Gaussian runs the plain Gaussian pass along the first axis one time for the terms of the other two axes: 8 one-dimensional passes instead of 9. A 256³ image takes 127 ms instead of 145 ms, and a 128³ image 79 ms instead of 96 ms at 1 thread, with the same values, bit for bit. The call holds one more temporary array of the image size while it runs.
+- The MVEE of the convex hull keeps the products of the coordinates of each hull point, so each step reads one short dot product per point: 0.85 ms instead of 2.74 ms for the 632 hull points of a CT lesion, with the same steps. The two MVEE features move by at most 7e-5 (relative), where rounding changes one step.
+- The NaN check of a run reads the region that the run reads (the cut ROI region of a large image), not the whole image. The first run of a 512×512×200 CT takes 1.9 ms less at 10 threads and 16 ms less at 1 thread, and `run_rois()` with 20 ROIs 15 ms less at 1 thread, with the same results, bit for bit. A repeated run checks its region again (0.2 ms).
+- The box scan of a mask below 2^20 voxels runs as a serial numba kernel, not as numpy reductions, and the cut to the ROI region copies a large float64 region in threads. The cut and the box scans of `run()` take 0.95 ms instead of 1.28 ms at 10 threads, with the same values, bit for bit.
+- The convex hull gets fewer candidate points: the line ends that are also 2-D hull vertices in their three axis planes (856 instead of 4,950 points for a CT lesion), found with smaller tables. The candidates and Qhull take 2.0 ms instead of 3.3 ms for the lesion and 4.0 ms instead of 6.5 ms for a 150³ ROI. The hull vertices are the same; the hull volume and area move by at most 3e-15 (relative).
+- The convex hull of the morphology features is now exact on the lattice of the mesh vertices (a quickhull with integer orientation tests); Qhull runs only for points in one plane. The hull of the 856 candidates of a CT lesion takes 0.18 ms instead of 1.58 ms, with the same hull vertices in the same order; the hull volume and area move by at most 5e-14 (relative). A morphology-only run on the lesion takes 2.7 ms instead of 7.8 ms with the other morphology items of this release.
+- The discretise kernels run serially below 160,000 voxels, equal geometry passes with no tolerance check, and a resample keeps its grid for each input. In `run_rois()` with 20 spheres the resample and discretise steps take 332 µs per ROI instead of 466 µs, and the run 52.5 ms instead of 55.2 ms, with the same values, bit for bit.
+- The intensity variance of the first-order features is now the second central moment of the pass that gives the skewness and the kurtosis, so `np.var` does not read the values again. The percentiles and the median take the key range of their radix select from the smallest and the largest value (one pass less), from 100,000 values on (before 130,000). The first-order features of a CT ROI with 268,000 values take 0.81 ms instead of 1.15 ms, of 110,000 values 0.84 ms instead of 1.50 ms, and of 2 million values 3.3 ms instead of 4.8 ms. The variance and the coefficient of variation move by at most 3e-13 (relative); the other first-order features stay the same, bit for bit.
+- The local texture kernel (GLCM, GLRLM, NGTDM and NGLDM) runs as a serial copy with one table for a volume below 10,000 voxels, with the same counts. run_rois() with 20 small spheres (257 voxels each) takes x0.92 of the time at 10 threads.
+- The local texture kernel (GLCM, GLRLM, NGTDM and NGLDM) takes the sums of the 26 neighbours from passes along the rows, and counts the runs of length 1 and 2 without a branch. The kernel takes 0.47 to 0.85 of its time, the six standard configurations run in 42.6 ms instead of 50.2 ms at 10 threads and 136 ms instead of 196 ms at 1 thread, with the same values, bit for bit.
+- The parallel kernels of a small ROI (the mask and intensity moments, the marching cubes counts, the mesh area and volume, the OMBB extents and the three resample kernels) run as serial copies below measured sizes and with one thread, as starting the threads costs about 70 µs per kernel. `run_rois()` with 20 small ROIs takes 51 ms instead of 63 ms at 10 threads, and the morphology of a 10³ ROI 0.39 ms instead of 0.94 ms, with the same results, bit for bit.
+- The percentiles and the median of 1,000 or more float64 values come from a linear select, with the same values, bit for bit. 17,000 values take 35 µs instead of 273 µs, 2 million bimodal values 0.8 ms instead of 10.8 ms, and `run_rois()` with 20 spheres 4 ms less.
+- The rotation-invariant LLL and HHH wavelets compute their 24 rotations as 8 patterns of flipped axes in a tree of shared passes: 14 chains of level kernels instead of 72 passes. A 256³ image takes 0.27 s instead of 0.85 s for HHH at 10 threads; the response changes in the last float32 bits (for a float64 image, only values near zero change).
+- The rotation-invariant wavelets with a mixed decomposition (such as LHL) and average pooling run as a tree of shared passes from 2^23 voxels on: 40 passes instead of 72. A 300 × 300 × 100 image takes x0.80 of the time at 10 threads and a 400 × 400 × 80 image x0.65 (x0.52 to x0.65 at 1 thread); the values change in the last float32 bits.
+- `SRDocument.export_csv()` and `SRBatch.export_combined_csv()` write their rows with Python's csv module, not through a pandas DataFrame, with the same bytes. The CSV of a TID 1500 report takes 0.06 ms instead of 0.24 ms, and `from_folders()` with exports of 50 reports takes 95 ms instead of 104 ms.
+- `run_rois()` finds the box of each label of the label map with one parallel pass over the nonzero box of the map, not with scipy's `find_objects` in one thread. For a CT map of 20 spheres the boxes take 1.2 ms instead of 15 ms at 10 threads (4.2 ms instead of 16 ms at 1 thread), and `run_rois()` without texture features 18 ms instead of 31 ms, with the same boxes.
+- run_rois() finds the boxes of a label map with up to 131,072 labels in its parallel pass (one table for each thread above 4,096 labels), not with scipy's find_objects, with the same boxes. A CT-size map with 10,000 small labels takes 18 ms instead of 99 ms at 10 threads, and 75 ms instead of 130 ms at 1 thread.
+
+
 ## [0.7.0] - 2026-10-05
 
 ### Added
@@ -468,6 +510,7 @@
 
 ---
 
+[0.7.1]: https://github.com/martonkolossvary/pictologics/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/martonkolossvary/pictologics/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/martonkolossvary/pictologics/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/martonkolossvary/pictologics/compare/v0.5.0...v0.5.1

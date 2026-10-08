@@ -1,1 +1,0 @@
-`DicomDatabase.export_json()` has a new parameter `indent` (default 2, the text as before). With `indent=None`, the text is on one line and Python's fast C encoder writes it: a database of 6,000 files exports in 30 ms instead of 145 ms, in 5.5 MB instead of 9.5 MB. The default export is also faster (128 ms instead of 146 ms), with the same bytes.

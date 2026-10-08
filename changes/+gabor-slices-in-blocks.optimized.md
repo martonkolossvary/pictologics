@@ -1,1 +1,0 @@
-The Gabor filter pads, multiplies and pools its slices in numba kernels and transforms two slices with one FFT call, with the same values, bit for bit. A 256³ image takes 163 ms instead of 337 ms over three planes at 10 threads, and a 128³ image 30 ms instead of 129 ms. Each worker holds at most 4 MB of products at a time: the orientations go in groups where the slices are large.

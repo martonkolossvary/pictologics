@@ -1,1 +1,0 @@
-The percentiles and the median of 1,000 or more float64 values come from a linear select, with the same values, bit for bit. 17,000 values take 35 µs instead of 273 µs, 2 million bimodal values 0.8 ms instead of 10.8 ms, and `run_rois()` with 20 spheres 4 ms less.

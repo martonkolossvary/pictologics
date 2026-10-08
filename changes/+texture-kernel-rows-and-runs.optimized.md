@@ -1,1 +1,0 @@
-The local texture kernel (GLCM, GLRLM, NGTDM and NGLDM) takes the sums of the 26 neighbours from passes along the rows, and counts the runs of length 1 and 2 without a branch. The kernel takes 0.47 to 0.85 of its time, the six standard configurations run in 42.6 ms instead of 50.2 ms at 10 threads and 136 ms instead of 196 ms at 1 thread, with the same values, bit for bit.

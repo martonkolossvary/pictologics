@@ -1,1 +1,0 @@
-`run_rois()` raises a clear error for a label map whose largest label is above 1,048,576. Before, scipy's `find_objects` built a list with one entry for each label up to the largest, so one stray huge label could take all the memory of the machine.

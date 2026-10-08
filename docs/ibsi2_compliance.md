@@ -147,7 +147,7 @@ max_difference ≤ 0.01 × (reference_max - reference_min)
 ### Provenance
 
 !!! info "Reproducibility Provenance"
-    - **Pictologics version**: `0.7.0`
+    - **Pictologics version**: `0.7.1`
     - **IBSI 2 reference manual**: version 9 (the revision bundled under `dev/IBSI2/documentation/`)
     - **Reference dataset source**: `reference_response_maps` subfolder of the [IBSI 2 reference data repository](https://github.com/theibsi/ibsi_2_reference_data)
     - **Local reference directory**: `dev/IBSI2/references/response_maps`
