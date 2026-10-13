@@ -10,7 +10,7 @@ from typing import Any, Dict, cast
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from dev.compliance_utils import get_rounding_decimals  # noqa: E402
+from dev.compliance_utils import WORKERS, get_rounding_decimals  # noqa: E402
 from pictologics.pipeline import RadiomicsPipeline
 
 # Feature code to name mapping
@@ -586,7 +586,7 @@ class TestIBSICompliance(unittest.TestCase):
         # Use 4 workers since we have 4 independent configs
         n_workers = min(4, os.cpu_count() or 1)
 
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        with ProcessPoolExecutor(max_workers=n_workers, mp_context=WORKERS) as executor:
             futures = [
                 executor.submit(run_single_config, name, img, msk, steps)
                 for name, img, msk, steps in tasks

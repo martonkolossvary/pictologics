@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+import multiprocessing
 import os
 import shutil
 import subprocess
@@ -22,6 +23,10 @@ from dev.pipeline_config import (
     PHASE3_ALLOWED_DROP,
     REGRESSION_THRESHOLD,
 )
+
+# The process pools of the IBSI checks start their workers with spawn on every system, as on
+# a Mac. On Linux, a forked worker of a process that ran numba kernels in threads stops.
+WORKERS = multiprocessing.get_context("spawn")
 
 
 def redirect_caches(clean: bool) -> None:

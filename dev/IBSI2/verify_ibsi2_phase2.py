@@ -28,7 +28,7 @@ import numpy as np
 from pictologics import RadiomicsPipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from dev.compliance_utils import FEATURE_MAP, get_rounding_decimals  # noqa: E402
+from dev.compliance_utils import FEATURE_MAP, WORKERS, get_rounding_decimals  # noqa: E402
 
 # =============================================================================
 # Configuration
@@ -496,7 +496,7 @@ class IBSIPhase2Validator:
                 f"Testing {len(filter_configs)} filters on {self.n_workers} workers..."
             )
 
-        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+        with ProcessPoolExecutor(max_workers=self.n_workers, mp_context=WORKERS) as executor:
             future_to_id = {
                 executor.submit(
                     run_single_test,

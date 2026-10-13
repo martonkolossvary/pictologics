@@ -34,7 +34,12 @@ import pandas as pd
 from pictologics import RadiomicsPipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from dev.compliance_utils import FEATURE_MAP, PHASE3_TEAMS, get_rounding_decimals  # noqa: E402
+from dev.compliance_utils import (  # noqa: E402
+    FEATURE_MAP,
+    PHASE3_TEAMS,
+    WORKERS,
+    get_rounding_decimals,
+)
 
 # =============================================================================
 # Configuration: Preprocessing per Modality (IBSI Table 6.5)
@@ -518,7 +523,7 @@ class IBSIPhase3Validator:
         # Run in parallel
         from tqdm import tqdm
 
-        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+        with ProcessPoolExecutor(max_workers=self.n_workers, mp_context=WORKERS) as executor:
             futures = {
                 executor.submit(
                     run_single_patient, pid, mod, img, msk, filter_configs
@@ -648,7 +653,7 @@ class IBSIPhase3Validator:
             (r.patient_id, r.modality, *map(str, self.get_paths(r.patient_id, r.modality)))
             for r in self._patient_results
         ]
-        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+        with ProcessPoolExecutor(max_workers=self.n_workers, mp_context=WORKERS) as executor:
             mirror = {
                 (pid, mod): feats
                 for pid, mod, feats in executor.map(run_simoncelli_mirror, *zip(*tasks, strict=True))
