@@ -1,0 +1,106 @@
+{
+  "timestamp": "2026-10-07T22:59:39.583566",
+  "total": 9,
+  "passed": 9,
+  "failed": 0,
+  "skipped": 0,
+  "provenance": {
+    "pictologics_version": "0.7.0",
+    "reference_file": "dev/IBSI2/references/feature_values/reference_values.csv",
+    "reference_source": "https://github.com/theibsi/ibsi_2_reference_data",
+    "reference_file_sha256": "6d1a4e7b297e"
+  },
+  "tests": {
+    "1.B": {
+      "filter": "None",
+      "status": "PASS",
+      "passed": 18,
+      "failed": 0,
+      "total": 18,
+      "time_ms": 1074.5,
+      "notes": "Baseline (no filter)"
+    },
+    "2.B": {
+      "filter": "Mean",
+      "status": "PASS",
+      "passed": 18,
+      "failed": 0,
+      "total": 18,
+      "time_ms": 1105.4,
+      "notes": "3D, support=5"
+    },
+    "3.B": {
+      "filter": "LoG",
+      "status": "PASS",
+      "passed": 18,
+      "failed": 0,
+      "total": 18,
+      "time_ms": 1113.7,
+      "notes": "\u03c3=1.5mm, truncate=4\u03c3"
+    },
+    "4.B": {
+      "filter": "Laws",
+      "status": "PASS",
+      "passed": 18,
+      "failed": 0,
+      "total": 18,
+      "time_ms": 1113.0,
+      "notes": "L5E5E5, rot-inv max, energy \u03b4=7"
+    },
+    "5.B": {
+      "filter": "Gabor",
+      "status": "PASS",
+      "passed": 18,
+      "failed": 0,
+      "total": 18,
+      "time_ms": 1098.7,
+      "notes": "\u03c3=5mm, \u03bb=2mm, \u03b3=1.5, rot-inv avg"
+    },
+    "6.B": {
+      "filter": "Daubechies 3",
+      "status": "PASS",
+      "passed": 18,
+      "failed": 0,
+      "total": 18,
+      "time_ms": 1071.5,
+      "notes": "LLH level 1, rot-inv avg"
+    },
+    "7.B": {
+      "filter": "Daubechies 3",
+      "status": "PASS",
+      "passed": 18,
+      "failed": 0,
+      "total": 18,
+      "time_ms": 1080.3,
+      "notes": "HHH level 2, rot-inv avg"
+    },
+    "8.B": {
+      "filter": "Simoncelli",
+      "status": "PASS",
+      "passed": 17,
+      "failed": 0,
+      "total": 17,
+      "time_ms": 1078.6,
+      "notes": "B map level 1"
+    },
+    "9.B": {
+      "filter": "Simoncelli",
+      "status": "PASS",
+      "passed": 18,
+      "failed": 0,
+      "total": 18,
+      "time_ms": 1051.8,
+      "notes": "B map level 2"
+    }
+  },
+  "total_time_seconds": 9.7875,
+  "environment": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "python": "3.12",
+    "numpy": "2.5.3",
+    "scipy": "1.17.0",
+    "numba": "0.67.0",
+    "llvmlite": "0.49.0"
+  }
+}

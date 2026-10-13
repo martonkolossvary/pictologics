@@ -1,0 +1,385 @@
+{
+  "total": 36,
+  "passed": 28,
+  "failed": 0,
+  "skipped": 5,
+  "missing": 3,
+  "provenance": {
+    "pictologics_version": "0.7.0",
+    "reference_dataset_source": "https://github.com/theibsi/ibsi_2_reference_data (subfolder: reference_response_maps)",
+    "reference_dir": "dev/IBSI2/references/response_maps"
+  },
+  "tests": {
+    "1.a.1": {
+      "filter": "Mean",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 3.3,
+      "memory_mb": 1.1,
+      "ref_file": "1_a_1-ValidCRM.nii",
+      "ref_sha256": "4d45bd79271d"
+    },
+    "1.a.2": {
+      "filter": "Mean",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 1.6,
+      "memory_mb": 1.0,
+      "ref_file": "1_a_2-ValidCRM.nii",
+      "ref_sha256": "d32e92e7fd1d"
+    },
+    "1.a.3": {
+      "filter": "Mean",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 1.6,
+      "memory_mb": 1.0,
+      "ref_file": "1_a_3-ValidCRM.nii",
+      "ref_sha256": "8c6d6c09e2f0"
+    },
+    "1.a.4": {
+      "filter": "Mean",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 1.5,
+      "memory_mb": 1.0,
+      "ref_file": "1_a_4-ValidCRM.nii",
+      "ref_sha256": "5903a490acf4"
+    },
+    "1.b.1": {
+      "filter": "Mean (2D)",
+      "phantom": "impulse_response",
+      "status": "SKIP",
+      "error_pct": 0.0,
+      "time_ms": 0.0,
+      "memory_mb": 0.0,
+      "ref_file": "",
+      "ref_sha256": ""
+    },
+    "2.a": {
+      "filter": "LoG",
+      "phantom": "impulse_response",
+      "status": "PASS",
+      "error_pct": 0.0016,
+      "time_ms": 6.3,
+      "memory_mb": 3.0,
+      "ref_file": "2_a-ValidCRM.nii",
+      "ref_sha256": "2b09b838cecb"
+    },
+    "2.b": {
+      "filter": "LoG",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0336,
+      "time_ms": 6.1,
+      "memory_mb": 3.0,
+      "ref_file": "2_b-ValidCRM.nii",
+      "ref_sha256": "654458872fd3"
+    },
+    "2.c": {
+      "filter": "LoG (2D)",
+      "phantom": "checkerboard",
+      "status": "SKIP",
+      "error_pct": 0.0,
+      "time_ms": 0.0,
+      "memory_mb": 0.0,
+      "ref_file": "",
+      "ref_sha256": ""
+    },
+    "3.a.1": {
+      "filter": "Laws",
+      "phantom": "impulse_response",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 1.5,
+      "memory_mb": 1.0,
+      "ref_file": "3_a_1-ValidCRM.nii",
+      "ref_sha256": "653de66c165d"
+    },
+    "3.a.2": {
+      "filter": "Laws",
+      "phantom": "impulse_response",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 5.3,
+      "memory_mb": 4.1,
+      "ref_file": "3_a_2-ValidCRM.nii",
+      "ref_sha256": "e9ac127ae56a"
+    },
+    "3.a.3": {
+      "filter": "Laws",
+      "phantom": "impulse_response",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 6.5,
+      "memory_mb": 4.1,
+      "ref_file": "3_a_3-ValidCRM.nii",
+      "ref_sha256": "cf0569fa94ae"
+    },
+    "3.b.1": {
+      "filter": "Laws",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 1.5,
+      "memory_mb": 1.0,
+      "ref_file": "3_b_1-ValidCRM.nii",
+      "ref_sha256": "b0733aa5eeff"
+    },
+    "3.b.2": {
+      "filter": "Laws",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 5.0,
+      "memory_mb": 4.1,
+      "ref_file": "3_b_2-ValidCRM.nii",
+      "ref_sha256": "43318d37691a"
+    },
+    "3.b.3": {
+      "filter": "Laws",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 6.5,
+      "memory_mb": 4.1,
+      "ref_file": "3_b_3-ValidCRM.nii",
+      "ref_sha256": "ad11703127a2"
+    },
+    "3.c.1": {
+      "filter": "Laws (2D)",
+      "phantom": "checkerboard",
+      "status": "SKIP",
+      "error_pct": 0.0,
+      "time_ms": 0.0,
+      "memory_mb": 0.0,
+      "ref_file": "",
+      "ref_sha256": ""
+    },
+    "3.c.2": {
+      "filter": "Laws (2D)",
+      "phantom": "checkerboard",
+      "status": "SKIP",
+      "error_pct": 0.0,
+      "time_ms": 0.0,
+      "memory_mb": 0.0,
+      "ref_file": "",
+      "ref_sha256": ""
+    },
+    "3.c.3": {
+      "filter": "Laws (2D)",
+      "phantom": "checkerboard",
+      "status": "SKIP",
+      "error_pct": 0.0,
+      "time_ms": 0.0,
+      "memory_mb": 0.0,
+      "ref_file": "",
+      "ref_sha256": ""
+    },
+    "4.a.1": {
+      "filter": "Gabor",
+      "phantom": "impulse_response",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 7.0,
+      "memory_mb": 12.4,
+      "ref_file": "4_a_1-ValidCRM.nii",
+      "ref_sha256": "72636c8b8873"
+    },
+    "4.a.2": {
+      "filter": "Gabor",
+      "phantom": "impulse_response",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 27.2,
+      "memory_mb": 31.1,
+      "ref_file": "4_a_2-ValidCRM.nii",
+      "ref_sha256": "35d04398515d"
+    },
+    "4.b.1": {
+      "filter": "Gabor",
+      "phantom": "sphere",
+      "status": "PASS",
+      "error_pct": 0.0106,
+      "time_ms": 5.5,
+      "memory_mb": 12.4,
+      "ref_file": "4_b_1-ValidCRM.nii",
+      "ref_sha256": "c516a4ac1ce4"
+    },
+    "4.b.2": {
+      "filter": "Gabor",
+      "phantom": "sphere",
+      "status": "PASS",
+      "error_pct": 0.0925,
+      "time_ms": 45.8,
+      "memory_mb": 48.2,
+      "ref_file": "4_b_2-ValidCRM.nii",
+      "ref_sha256": "2feab18d9958"
+    },
+    "5.a.1": {
+      "filter": "Daubechies 2",
+      "phantom": "impulse_response",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 1.8,
+      "memory_mb": 1.0,
+      "ref_file": "5_a_1-ValidCRM.nii",
+      "ref_sha256": "28ca3830658c"
+    },
+    "5.a.2": {
+      "filter": "Daubechies 2",
+      "phantom": "impulse_response",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 10.7,
+      "memory_mb": 12.1,
+      "ref_file": "5_a_2-ValidCRM.nii",
+      "ref_sha256": "2f06f786d19e"
+    },
+    "6.a.1": {
+      "filter": "Coiflet 1",
+      "phantom": "sphere",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 1.6,
+      "memory_mb": 1.0,
+      "ref_file": "6_a_1-ValidCRM.nii",
+      "ref_sha256": "c32f12b1839f"
+    },
+    "6.a.2": {
+      "filter": "Coiflet 1",
+      "phantom": "sphere",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 11.4,
+      "memory_mb": 12.1,
+      "ref_file": "6_a_2-ValidCRM.nii",
+      "ref_sha256": "5e35d206b3b4"
+    },
+    "7.a.1": {
+      "filter": "Haar",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 15.0,
+      "memory_mb": 15.0,
+      "ref_file": "7_a_1-ValidCRM.nii",
+      "ref_sha256": "849d625044a3"
+    },
+    "7.a.2": {
+      "filter": "Haar",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 14.3,
+      "memory_mb": 15.0,
+      "ref_file": "7_a_2-ValidCRM.nii",
+      "ref_sha256": "b58b6f4166be"
+    },
+    "8.a.1": {
+      "filter": "Simoncelli",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.3784,
+      "time_ms": 2.7,
+      "memory_mb": 6.1,
+      "ref_file": "8_a_1-ValidCRM.nii",
+      "ref_sha256": "f26254a1dac5"
+    },
+    "8.a.2": {
+      "filter": "Simoncelli",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 2.4,
+      "memory_mb": 6.1,
+      "ref_file": "8_a_2-ValidCRM.nii",
+      "ref_sha256": "e5df8a75c688"
+    },
+    "8.a.3": {
+      "filter": "Simoncelli",
+      "phantom": "checkerboard",
+      "status": "PASS",
+      "error_pct": 0.0,
+      "time_ms": 1.7,
+      "memory_mb": 6.1,
+      "ref_file": "8_a_3-ValidCRM.nii",
+      "ref_sha256": "0affd2ee3288"
+    },
+    "9.a": {
+      "filter": "Riesz-LoG",
+      "phantom": "impulse_response",
+      "status": "PASS",
+      "error_pct": 0.0475,
+      "time_ms": 18.3,
+      "memory_mb": 44.0,
+      "ref_file": "9_a-ValidCRM.nii",
+      "ref_sha256": "9ef1621d397e"
+    },
+    "9.b.1": {
+      "filter": "Riesz-LoG",
+      "phantom": "sphere",
+      "status": "PASS",
+      "error_pct": 0.317,
+      "time_ms": 16.3,
+      "memory_mb": 44.0,
+      "ref_file": "9_b_1-ValidCRM.nii",
+      "ref_sha256": "fb6df2cd53d5"
+    },
+    "9.b.2": {
+      "filter": "Riesz-LoG (aligned)",
+      "phantom": "sphere",
+      "status": "MISSING",
+      "error_pct": 0.0,
+      "time_ms": 0.0,
+      "memory_mb": 0.0,
+      "ref_file": "",
+      "ref_sha256": ""
+    },
+    "10.a": {
+      "filter": "Riesz-Simoncelli",
+      "phantom": "impulse_response",
+      "status": "MISSING",
+      "error_pct": 0.0,
+      "time_ms": 0.0,
+      "memory_mb": 0.0,
+      "ref_file": "",
+      "ref_sha256": ""
+    },
+    "10.b.1": {
+      "filter": "Riesz-Simoncelli",
+      "phantom": "pattern_1",
+      "status": "PASS",
+      "error_pct": 0.2084,
+      "time_ms": 10.2,
+      "memory_mb": 43.7,
+      "ref_file": "10_b_1-ValidCRM.nii",
+      "ref_sha256": "b02016be9a85"
+    },
+    "10.b.2": {
+      "filter": "Riesz-Simoncelli (aligned)",
+      "phantom": "pattern_1",
+      "status": "MISSING",
+      "error_pct": 0.0,
+      "time_ms": 0.0,
+      "memory_mb": 0.0,
+      "ref_file": "",
+      "ref_sha256": ""
+    }
+  },
+  "timestamp": "2026-10-07T22:59:34.710407",
+  "total_time_seconds": 0.2386,
+  "environment": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "python": "3.12",
+    "numpy": "2.5.3",
+    "scipy": "1.17.0",
+    "numba": "0.67.0",
+    "llvmlite": "0.49.0"
+  }
+}

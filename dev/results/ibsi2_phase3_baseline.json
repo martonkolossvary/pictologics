@@ -1,0 +1,88 @@
+{
+  "timestamp": "2026-10-07T23:00:39.187907",
+  "agreement_rule": "team's range for each modality, filter and feature (max - min over the patients)",
+  "scans_processed": 153,
+  "scans_failed": 0,
+  "nan_values": 0,
+  "pipeline_errors": 0,
+  "patients": 51,
+  "teams_compared": 9,
+  "total_time_seconds": 430.07569116796367,
+  "wall_time_seconds": 57.73801245901268,
+  "memory_metric": "largest worker peak resident memory",
+  "memory_mb": 2595.203125,
+  "team_results": {
+    "CERR": {
+      "total": 16524,
+      "matches_1pct": 14775,
+      "matches_5pct": 16108,
+      "matches_10pct": 16329,
+      "mismatch_count": 195
+    },
+    "Cardiff University": {
+      "total": 24786,
+      "matches_1pct": 23089,
+      "matches_5pct": 24303,
+      "matches_10pct": 24505,
+      "mismatch_count": 281
+    },
+    "King's College London": {
+      "total": 23868,
+      "matches_1pct": 22321,
+      "matches_5pct": 23516,
+      "matches_10pct": 23702,
+      "mismatch_count": 166
+    },
+    "NCT Dresden": {
+      "total": 24786,
+      "matches_1pct": 24329,
+      "matches_5pct": 24575,
+      "matches_10pct": 24658,
+      "mismatch_count": 128
+    },
+    "Qurit SERA": {
+      "total": 24751,
+      "matches_1pct": 19179,
+      "matches_5pct": 20834,
+      "matches_10pct": 21590,
+      "mismatch_count": 3161
+    },
+    "UCSF": {
+      "total": 24786,
+      "matches_1pct": 10096,
+      "matches_5pct": 10099,
+      "matches_10pct": 10103,
+      "mismatch_count": 14683
+    },
+    "USZ": {
+      "total": 16524,
+      "matches_1pct": 16395,
+      "matches_5pct": 16490,
+      "matches_10pct": 16511,
+      "mismatch_count": 13
+    },
+    "UdeS": {
+      "total": 24786,
+      "matches_1pct": 20184,
+      "matches_5pct": 20324,
+      "matches_10pct": 20361,
+      "mismatch_count": 4425
+    },
+    "Veneto Institute of Oncology": {
+      "total": 24786,
+      "matches_1pct": 19621,
+      "matches_5pct": 21277,
+      "matches_10pct": 22285,
+      "mismatch_count": 2501
+    }
+  },
+  "environment": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "python": "3.12",
+    "numpy": "2.5.3",
+    "scipy": "1.17.0",
+    "numba": "0.67.0",
+    "llvmlite": "0.49.0"
+  }
+}

@@ -134,8 +134,35 @@ cython_debug/
 # Linting caches
 .ruff_cache/
 
-# Local developer documentation and scripts
-dev/
+# Local developer documentation and scripts. Only the IBSI harness is published (CI runs
+# it); everything else in dev/ stays local, above all dev/test_data/ (patient data).
+dev/*
+!dev/pre_push.py
+!dev/compliance_utils.py
+!dev/pipeline_config.py
+!dev/verify_ibsi_compliance.py
+!dev/test_compliance_verdicts.py
+!dev/IBSI1/
+dev/IBSI1/*
+!dev/IBSI1/references/
+!dev/IBSI2/
+dev/IBSI2/*
+!dev/IBSI2/download_ibsi2_data.py
+!dev/IBSI2/ibsi2_data_manifest.json
+!dev/IBSI2/verify_ibsi2_compliance.py
+!dev/IBSI2/verify_ibsi2_phase2.py
+!dev/IBSI2/verify_ibsi2_phase3.py
+!dev/results/
+dev/results/*
+!dev/results/ibsi_baseline.json
+!dev/results/ibsi1_values.json
+!dev/results/ibsi2_baseline.json
+!dev/results/ibsi2_phase2_baseline.json
+!dev/results/ibsi2_phase2_values.json
+!dev/results/ibsi2_phase3_baseline.json
+!dev/results/ibsi2_phase3_values.json
+# Never publish: patient data
+dev/test_data/
 
 # Agent workflows (local automation)
 .agent/
