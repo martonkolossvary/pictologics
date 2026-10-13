@@ -52,7 +52,9 @@ _BLOCK_SLICES = 2
 _PRODUCTS_BYTES = 4 << 20
 # Slices whose values are all finite and at most this large make no NaN in the FFTs and the
 # products: the sums stay below 1e34 with 4096 x 4096 slices and kernels of 4801 x 4801. A
-# block of such slices takes one FFT call, as it gives the bits of an FFT for each slice.
+# block of such slices takes one FFT call. Before SciPy 1.18 it gives the bits of an FFT for
+# each slice; from SciPy 1.18 the bits of a slice depend on the batch and on its place in
+# it, so the blocks are the same pairs of slices for every number of threads (see run).
 _SAFE_LIMIT = 1e12
 
 
@@ -500,7 +502,9 @@ def _apply_gabor_to_plane(
     array.
     The kernels give the bits of the numpy steps of each slice: the products and the parts
     use numpy's formulas (fma), and a first-use check takes numpy where a bit differs on
-    this machine. Max and min pooling of a signed part keep numpy (it orders -0.0 and
+    this machine. The FFT calls of a block give the bits of an FFT for each slice before
+    SciPy 1.18, and within a few float32 units from SciPy 1.18; the blocks are fixed pairs
+    of slices, so the result does not depend on the number of threads. Max and min pooling of a signed part keep numpy (it orders -0.0 and
     +0.0 in two ways). A block with a NaN, an infinite or a huge value (see _SAFE_LIMIT)
     takes an FFT for each slice and numpy's products, as their NaN bits depend on the
     steps.
@@ -632,9 +636,11 @@ def _apply_gabor_to_plane(
                         state /= n
                     out[s + q] = state
 
-    # One contiguous run of slices for each worker
+    # One contiguous run of slices for each worker. Each run starts on a multiple of
+    # _BLOCK_SLICES, so the blocks are the same slices for every number of threads (from
+    # SciPy 1.18 a batched FFT rounds a slice by the batch and its place in it).
     workers = get_num_threads() if use_parallel else 1
-    step = max(1, math.ceil(n_slices / workers))
+    step = _BLOCK_SLICES * max(1, math.ceil(n_slices / (workers * _BLOCK_SLICES)))
     starts = range(0, n_slices, step)
     if len(starts) > 1:
         with ThreadPoolExecutor(max_workers=workers) as executor:

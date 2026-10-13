@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+import scipy
 from numpy.testing import assert_allclose, assert_array_equal
 
 from pictologics.filters import (
@@ -2112,11 +2113,34 @@ def _gabor_by_slices(image, sigma, thetas, plane_axis, mode, pooling, response, 
     return np.moveaxis(np.stack(pooled), 0, plane_axis)
 
 
+# From SciPy 1.18 an FFT over a batch of slices rounds a slice otherwise than an FFT of the
+# slice alone (and by its place in the batch). The Gabor blocks then agree with one FFT for
+# each slice within a few float32 units, not bit for bit.
+_BATCH_FFT_ROUNDS = tuple(int(p) for p in scipy.__version__.split(".")[:2]) >= (1, 18)
+
+
+def _assert_gabor_bits(
+    got: np.ndarray, expected: np.ndarray, context: object = None, response: str = "modulus"
+) -> None:
+    """The bits of `expected` before SciPy 1.18; from SciPy 1.18, within 1e-5 of the largest
+    value of `expected` (NaN where it has NaN). The angle is not compared from SciPy 1.18: it
+    jumps by 2 pi at +-pi, so a change in the last bit of an FFT can move it by 2 pi."""
+    got, expected = np.ascontiguousarray(got), np.ascontiguousarray(expected)
+    assert _BATCH_FFT_ROUNDS or got.tobytes() == expected.tobytes(), context
+    finite = np.abs(expected[np.isfinite(expected)])
+    scale = float(finite.max()) if finite.size else 0.0
+    near = response != "angle" or not _BATCH_FFT_ROUNDS
+    assert not near or np.allclose(got, expected, rtol=1e-5, atol=1e-5 * scale, equal_nan=True), (
+        context
+    )
+
+
 def test_gabor_blocks_give_the_bits_of_each_slice() -> None:
     """The slices in blocks (the pad, one FFT call, the products, one inverse FFT call and
     the pooled parts) give the bits of numpy on each slice: every boundary, part and
     pooling, a padding value, pads wider than the slices, float32 and float64 images, the
-    three planes, sequential and threaded, and blocks with NaN, huge values or zeros."""
+    three planes, sequential and threaded, and blocks with NaN, huge values or zeros (from
+    SciPy 1.18: within a few float32 units, see _assert_gabor_bits)."""
     rng = np.random.default_rng(15)
     image = rng.normal(0.0, 30.0, (6, 7, 5))
     four = [k * np.pi / 4 for k in range(4)]
@@ -2139,12 +2163,12 @@ def test_gabor_blocks_give_the_bits_of_each_slice() -> None:
                 img, sigma, 2.0 * sigma, 1.0, thetas, axis, (1.0, 1.0, 1.0), mode, pooling,
                 use_parallel=parallel, response=response,
             )  # fmt: skip
-            assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes()
+            _assert_gabor_bits(got, expected, (sigma, axis, mode, pooling, response), response)
     got = _apply_gabor_to_plane(
         image, 1.0, 2.0, 1.0, four, 2, (1.0, 1.0, 1.0), "constant", "average", padding_value=1.5
     )
     expected = _gabor_by_slices(image, 1.0, four, 2, "constant", "average", "modulus", 1.5)
-    assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes()
+    _assert_gabor_bits(got, expected)
 
 
 def test_gabor_first_use_checks_take_numpy_where_a_bit_differs() -> None:
@@ -2156,6 +2180,10 @@ def test_gabor_first_use_checks_take_numpy_where_a_bit_differs() -> None:
     image = np.random.default_rng(16).normal(size=(5, 6, 4))
     thetas = [0.0, 0.7]
     expected = _gabor_by_slices(image, 1.0, thetas, 2, "mirror", "average", "modulus")
+    # The response with the kernels of this machine: the same FFT blocks, so the same bits
+    # with every SciPy
+    blocks = gabor._apply_gabor_to_plane(image, 1.0, 2.0, 1.0, thetas, 2, (1.0, 1.0, 1.0), "mirror", "average")  # fmt: skip
+    _assert_gabor_bits(blocks, expected)
     real_products, real_parts = gabor._products_numba, gabor._pooled_parts_numba
 
     def wrong_products(spectra, kernels, products):
@@ -2177,7 +2205,7 @@ def test_gabor_first_use_checks_take_numpy_where_a_bit_differs() -> None:
             got = gabor._apply_gabor_to_plane(
                 image, 1.0, 2.0, 1.0, thetas, 2, (1.0, 1.0, 1.0), "mirror", "average"
             )
-        assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes()
+        assert np.ascontiguousarray(got).tobytes() == blocks.tobytes()
     gabor._products_exact.cache_clear()
     gabor._part_exact.cache_clear()
     with (
@@ -2187,7 +2215,7 @@ def test_gabor_first_use_checks_take_numpy_where_a_bit_differs() -> None:
         got = gabor._apply_gabor_to_plane(
             image, 1.0, 2.0, 1.0, thetas, 2, (1.0, 1.0, 1.0), "mirror", "average"
         )
-    assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes()
+    assert np.ascontiguousarray(got).tobytes() == blocks.tobytes()
     # Both check arrays have an odd length: numpy's vector loop and its tail both run
     for values in (gabor._FINITE_VALUES, gabor._SPECIAL_VALUES):
         assert all(z.size % 2 == 1 for z in gabor._check_values(values))
@@ -2198,7 +2226,8 @@ def test_gabor_orientation_groups_give_the_bits_of_one_group() -> None:
     worker) give the bits of one group: groups of 1, 2 and 3 of 5 orientations, each pooling
     with the modulus, the real part and the angle, the numba parts (where the first-use check
     of this machine passes) and numpy's, a block with a NaN (an FFT for each slice),
-    sequential and threaded."""
+    sequential and threaded (from SciPy 1.18: within a few float32 units, see
+    _assert_gabor_bits)."""
     from contextlib import nullcontext
 
     import scipy.fft
@@ -2226,7 +2255,7 @@ def test_gabor_orientation_groups_give_the_bits_of_one_group() -> None:
                                 img, 1.0, 2.0, 1.0, thetas, 0, (1.0, 1.0, 1.0), "mirror", pooling,
                                 use_parallel=parallel, response=response,
                             )  # fmt: skip
-                        assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes(), (exact, pooling, response, size)  # fmt: skip
+                        _assert_gabor_bits(got, expected, (exact, pooling, response, size), response)  # fmt: skip
 
 
 def test_gabor_pad_kernel_is_np_pad() -> None:
@@ -2256,7 +2285,8 @@ def test_gabor_pad_kernel_is_np_pad() -> None:
 
 def test_gabor_fft_in_blocks_gives_the_bits_of_single_ffts() -> None:
     """One FFT call over the planes of a block (in place) gives the bits of an FFT for each
-    plane, forward and inverse, for blocks of 2, 3 and 4 planes."""
+    plane, forward and inverse, for blocks of 2, 3 and 4 planes (from SciPy 1.18: within a
+    few float32 units)."""
     import scipy.fft
 
     rng = np.random.default_rng(18)
@@ -2266,7 +2296,40 @@ def test_gabor_fft_in_blocks_gives_the_bits_of_single_ffts() -> None:
         for transform in (scipy.fft.fftn, scipy.fft.ifftn):
             single = np.stack([transform(p) for p in planes])
             block = transform(planes.copy(), axes=(1, 2), overwrite_x=True)
-            assert block.tobytes() == single.tobytes()
+            assert _BATCH_FFT_ROUNDS or block.tobytes() == single.tobytes()
+            assert_allclose(block, single, rtol=1e-5, atol=1e-5 * np.abs(single).max())
+
+
+def test_gabor_blocks_are_the_same_pairs_for_every_thread_count() -> None:
+    """Each worker starts its run of slices on an even slice, so the blocks are the same
+    pairs of slices for every number of threads: from SciPy 1.18 a batched FFT rounds a
+    slice by the batch, so other pairs would give other bits. 12 slices in 5 threads take
+    blocks of 2 only (runs of 3 slices would end in blocks of 1)."""
+    from pictologics.filters import gabor
+
+    image = np.random.default_rng(19).normal(size=(12, 9, 8)).astype(np.float32)
+    results = []
+    for threads in (1, 5, 7):
+        with (
+            patch.object(gabor, "get_num_threads", return_value=threads),
+            patch.object(gabor, "_pad_slices_numba", wraps=gabor._pad_slices_numba) as pads,
+        ):
+            results.append(
+                gabor._apply_gabor_to_plane(
+                    image,
+                    1.0,
+                    2.0,
+                    1.0,
+                    [0.0, 0.5],
+                    0,
+                    (1.0, 1.0, 1.0),
+                    "mirror",
+                    "average",
+                    use_parallel=True,
+                )  # fmt: skip
+            )
+        assert sorted(c.args[0].shape[0] for c in pads.call_args_list) == [2] * 6
+    assert results[0].tobytes() == results[1].tobytes() == results[2].tobytes()
 
 
 def test_the_fma_of_the_gabor_kernels_rounds_once() -> None:
