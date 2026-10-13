@@ -31,6 +31,7 @@ Complete scripts for common tasks. Change the paths, and each script runs as it 
 6. **Morphology after a filter**: the integrated intensity (99N0) and the centre of mass shift (KLMA) read the image, so after a filter they read the response map. Compute the morphology in a configuration without the filter (recipe 5).
 7. **A name that exists**: `add_config` with the name of a configuration in the pipeline replaces that configuration. Do not use the names of the standard configurations, such as `standard_fbn_32`, for your own.
 8. **Workers without a guard**: keep `run_batch(..., workers=4)` in `if __name__ == "__main__":`. The workers import your script again.
+9. **Your own process pool on Linux**: make it with `multiprocessing.get_context("spawn")`. A worker made by fork or forkserver (the Linux defaults) stops at its first numba kernel, with "Terminating: fork() called from a process already using GNU OpenMP". `run_batch` uses spawn itself.
 
 ## 1. Images Without Masks
 

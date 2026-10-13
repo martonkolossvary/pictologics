@@ -105,9 +105,10 @@ for image_path, mask_path in cases:
                 slice_selection="10%", window_center=40, window_width=400)
 ```
 
-For many large cases, process pools help. Keep the guard: the workers start a new Python process, which imports your script again.
+For many large cases, process pools help. Start the workers with spawn, the default on macOS and Windows: on Linux, a worker made by fork or forkserver stops when it runs a numba kernel. Keep the guard: each worker imports your script again.
 
 ```python
+import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
 
@@ -120,7 +121,7 @@ def one_case(case):
 
 if __name__ == "__main__":
     jobs = [(image, mask, f"qc/case_{k}") for k, (image, mask) in enumerate(cases)]
-    with ProcessPoolExecutor(max_workers=4) as pool:
+    with ProcessPoolExecutor(max_workers=4, mp_context=multiprocessing.get_context("spawn")) as pool:
         results = list(pool.map(one_case, jobs))
 ```
 
