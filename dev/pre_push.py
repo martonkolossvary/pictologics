@@ -37,6 +37,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import shared configuration
 # Import utilities
+from dev import compliance_utils  # noqa: E402
 from dev.compliance_utils import (  # noqa: E402
     Colors,
     ComplianceResult,
@@ -764,6 +765,7 @@ def main() -> int:
 
     results: dict[str, bool] = {}
     tools = not args.compliance_only
+    compliance_utils.SHOW_TIMES = tools
 
     # 1. Clear caches, then compile the numba cache while the tool steps run
     if tools and not args.skip_cache_clear:
@@ -815,7 +817,7 @@ def main() -> int:
     if tools and not args.skip_benchmarks:
         bench_passed, _ = run_benchmarks(update_baseline=args.update_baseline)
         results["Benchmarks"] = bench_passed
-    else:
+    elif tools:
         print_warning("Benchmarks skipped")
 
     # Print summary

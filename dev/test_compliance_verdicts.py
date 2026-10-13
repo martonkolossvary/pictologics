@@ -344,7 +344,19 @@ def test_compliance_only_runs_the_numba_build_and_the_ibsi_checks() -> None:
             patch.object(pre_push, "run_ruff") as ruff,
             patch.object(pre_push, "run_pytest") as pytest_run,
             patch.object(pre_push, "clear_caches") as clear,
+            patch.object(cu, "SHOW_TIMES", True),
         ):
             assert pre_push.main() == 0
+            assert not cu.SHOW_TIMES
     assert not (ruff.called or pytest_run.called or clear.called)
+
+
+def test_compliance_only_hides_the_times(capsys: pytest.CaptureFixture[str]) -> None:
+    with patch.object(cu, "SHOW_TIMES", False):
+        result = report({"a": {"status": "PASS"}}, {"a": {"status": "PASS"}})
+        cu.print_phase3_summary(phase3(), PHASE3, value_changes=[])
+        cu.print_ibsi_summary([result])
+    out = capsys.readouterr().out
+    assert "Overall" in out
+    assert not any(text in out for text in ("Time Regressions", "Wall time", "Performance Summary"))
 

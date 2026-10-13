@@ -28,6 +28,10 @@ from dev.pipeline_config import (
 # a Mac. On Linux, a forked worker of a process that ran numba kernels in threads stops.
 WORKERS = multiprocessing.get_context("spawn")
 
+# The time and memory reports compare with the computer of the baseline. The gate hides them
+# with --compliance-only, as GitHub runs it on other computers.
+SHOW_TIMES = True
+
 
 def redirect_caches(clean: bool) -> None:
     """Keep the tool caches outside OneDrive, in GATE_CACHE_DIR. With clean=True they start
@@ -579,93 +583,94 @@ def print_compliance_report(
     print(f"  Known Gaps: {len(known_failures)}")
     print(f"  Status Improvements: {len(status_improvements)}")
 
-    # 3. Print Performance
-    # --------------------
-    print()
-    print("Performance & Memory:")
+    if SHOW_TIMES:
+        # 3. Print Performance
+        # --------------------
+        print()
+        print("Performance & Memory:")
 
-    time_diff = cur_total_time - base_total_time
-    time_change_pct = (
-        (time_diff / base_total_time * 100) if base_total_time > 0 else 0.0
-    )
-    color = (
-        Colors.FAIL
-        if time_change_pct > 10
-        else (Colors.GREEN if time_change_pct < -10 else Colors.ENDC)
-    )
+        time_diff = cur_total_time - base_total_time
+        time_change_pct = (
+            (time_diff / base_total_time * 100) if base_total_time > 0 else 0.0
+        )
+        color = (
+            Colors.FAIL
+            if time_change_pct > 10
+            else (Colors.GREEN if time_change_pct < -10 else Colors.ENDC)
+        )
 
-    print(
-        f"  Time (sum of the timed runs): {cur_total_time:.2f}s  (vs {base_total_time:.2f}s, {color}{time_change_pct:+.1f}%{Colors.ENDC})"
-    )
+        print(
+            f"  Time (sum of the timed runs): {cur_total_time:.2f}s  (vs {base_total_time:.2f}s, {color}{time_change_pct:+.1f}%{Colors.ENDC})"
+        )
 
-    avg_msg = ""
-    # Only show avg if item count is reasonable approximation of work units
-    if len(current_items) > 0:
-        avg_time = cur_total_time / len(current_items) * 1000
-        avg_msg = f" (~{avg_time:.1f}ms/check)"
+        avg_msg = ""
+        # Only show avg if item count is reasonable approximation of work units
+        if len(current_items) > 0:
+            avg_time = cur_total_time / len(current_items) * 1000
+            avg_msg = f" (~{avg_time:.1f}ms/check)"
 
-    elif total > 0:
-        # Fallback if parsing failed but we have counts
-        avg_time = cur_total_time / total * 1000
-        avg_msg = f" (~{avg_time:.1f}ms/check)"
+        elif total > 0:
+            # Fallback if parsing failed but we have counts
+            avg_time = cur_total_time / total * 1000
+            avg_msg = f" (~{avg_time:.1f}ms/check)"
 
-    print(f"  Throughput: {len(current_items) or total} checks{avg_msg}")
+        print(f"  Throughput: {len(current_items) or total} checks{avg_msg}")
 
-    # Memory Reporting
-    if cur_total_mem > 0:
-        print(f"  Memory Usage: {cur_total_mem:.1f} MB")
+        # Memory Reporting
+        if cur_total_mem > 0:
+            print(f"  Memory Usage: {cur_total_mem:.1f} MB")
 
-    # Time Regressions
-    print()
-    print(f"Time Regressions (> {perf_threshold*100:.0f}% slower):")
-    if perf_regressions:
-        print(f"    {'Test ID':<40} {'Old (ms)':<10} {'New (ms)':<10} {'Change':<10}")
-        print(f"    {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
-        for r in sorted(perf_regressions, key=lambda x: x["change"], reverse=True):
-            print(
-                f"    {r['key']:<40} {r['old']*1000:<10.1f} {r['new']*1000:<10.1f} {Colors.FAIL}{r['change']:+.0%}{Colors.ENDC}"
-            )
-    else:
-        print(f"  {Colors.GREEN}None.{Colors.ENDC}")
+        # Time Regressions
+        print()
+        print(f"Time Regressions (> {perf_threshold*100:.0f}% slower):")
+        if perf_regressions:
+            print(f"    {'Test ID':<40} {'Old (ms)':<10} {'New (ms)':<10} {'Change':<10}")
+            print(f"    {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
+            for r in sorted(perf_regressions, key=lambda x: x["change"], reverse=True):
+                print(
+                    f"    {r['key']:<40} {r['old']*1000:<10.1f} {r['new']*1000:<10.1f} {Colors.FAIL}{r['change']:+.0%}{Colors.ENDC}"
+                )
+        else:
+            print(f"  {Colors.GREEN}None.{Colors.ENDC}")
 
-    # Time Improvements
-    print()
-    print(f"Significant Time Improvements (> {perf_threshold*100:.0f}% faster):")
-    if perf_improvements:
-        print(f"    {'Test ID':<40} {'Old (ms)':<10} {'New (ms)':<10} {'Change':<10}")
-        print(f"    {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
-        for r in sorted(perf_improvements, key=lambda x: x["change"]):
-            print(
-                f"    {r['key']:<40} {r['old']*1000:<10.1f} {r['new']*1000:<10.1f} {Colors.GREEN}{r['change']:+.0%}{Colors.ENDC}"
-            )
-    else:
-        print(f"  {Colors.GREEN}None.{Colors.ENDC}")
+        # Time Improvements
+        print()
+        print(f"Significant Time Improvements (> {perf_threshold*100:.0f}% faster):")
+        if perf_improvements:
+            print(f"    {'Test ID':<40} {'Old (ms)':<10} {'New (ms)':<10} {'Change':<10}")
+            print(f"    {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
+            for r in sorted(perf_improvements, key=lambda x: x["change"]):
+                print(
+                    f"    {r['key']:<40} {r['old']*1000:<10.1f} {r['new']*1000:<10.1f} {Colors.GREEN}{r['change']:+.0%}{Colors.ENDC}"
+                )
+        else:
+            print(f"  {Colors.GREEN}None.{Colors.ENDC}")
 
-    # Memory Regressions
-    print()
-    print(f"Memory Regressions (> {perf_threshold*100:.0f}% increase):")
-    if mem_regressions:
-        print(f"    {'Test ID':<40} {'Old (MB)':<10} {'New (MB)':<10} {'Change':<10}")
-        print(f"    {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
-        for r in sorted(mem_regressions, key=lambda x: x["change"], reverse=True):
-            print(
-                f"    {r['key']:<40} {r['old']:<10.1f} {r['new']:<10.1f} {Colors.FAIL}{r['change']:+.0%}{Colors.ENDC}"
-            )
-    else:
-        print(f"  {Colors.GREEN}None.{Colors.ENDC}")
+        # Memory Regressions
+        print()
+        print(f"Memory Regressions (> {perf_threshold*100:.0f}% increase):")
+        if mem_regressions:
+            print(f"    {'Test ID':<40} {'Old (MB)':<10} {'New (MB)':<10} {'Change':<10}")
+            print(f"    {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
+            for r in sorted(mem_regressions, key=lambda x: x["change"], reverse=True):
+                print(
+                    f"    {r['key']:<40} {r['old']:<10.1f} {r['new']:<10.1f} {Colors.FAIL}{r['change']:+.0%}{Colors.ENDC}"
+                )
+        else:
+            print(f"  {Colors.GREEN}None.{Colors.ENDC}")
 
-    # Memory Improvements
-    print()
-    print(f"Significant Memory Improvements (> {perf_threshold*100:.0f}% decrease):")
-    if mem_improvements:
-        print(f"    {'Test ID':<40} {'Old (MB)':<10} {'New (MB)':<10} {'Change':<10}")
-        print(f"    {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
-        for r in sorted(mem_improvements, key=lambda x: x["change"]):
-            print(
-                f"    {r['key']:<40} {r['old']:<10.1f} {r['new']:<10.1f} {Colors.GREEN}{r['change']:+.0%}{Colors.ENDC}"
-            )
-    else:
-        print(f"  {Colors.GREEN}None.{Colors.ENDC}")
+        # Memory Improvements
+        print()
+        print(f"Significant Memory Improvements (> {perf_threshold*100:.0f}% decrease):")
+        if mem_improvements:
+            print(f"    {'Test ID':<40} {'Old (MB)':<10} {'New (MB)':<10} {'Change':<10}")
+            print(f"    {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
+            for r in sorted(mem_improvements, key=lambda x: x["change"]):
+                print(
+                    f"    {r['key']:<40} {r['old']:<10.1f} {r['new']:<10.1f} {Colors.GREEN}{r['change']:+.0%}{Colors.ENDC}"
+                )
+        else:
+            print(f"  {Colors.GREEN}None.{Colors.ENDC}")
 
     # 4. Print Feature Value Details
     # ------------------------------
@@ -756,54 +761,55 @@ def print_ibsi_summary(results: list[ComplianceResult]) -> bool:
 
     print("-" * 90)
 
-    # Performance Summary Table
-    print()
-    print("Performance Summary:")
-    print(
-        f"{'Check':<22} {'Time (s)':>12} {'Base (s)':>12} {'Time Δ':>12} {'Mem (MB)':>12} {'Mem Δ':>12}"
-    )
-    print("-" * 90)
-
-    for r in results:
-        # Calculate time delta string
-        if r.baseline_time_seconds > 0:
-            time_change = (
-                (r.time_seconds - r.baseline_time_seconds)
-                / r.baseline_time_seconds
-                * 100
-            )
-            time_color = (
-                Colors.GREEN
-                if time_change < -10
-                else (Colors.FAIL if time_change > 10 else "")
-            )
-            time_delta_str = f"{time_change:+.0f}%"
-        else:
-            time_color = ""
-            time_delta_str = "-"
-
-        # Calculate memory delta string
-        if r.baseline_memory_mb > 0:
-            mem_change = (
-                (r.memory_mb - r.baseline_memory_mb) / r.baseline_memory_mb * 100
-            )
-            mem_color = (
-                Colors.GREEN
-                if mem_change < -10
-                else (Colors.FAIL if mem_change > 10 else "")
-            )
-            mem_delta_str = f"{mem_change:+.0f}%"
-        else:
-            mem_color = ""
-            mem_delta_str = "-"
-
+    if SHOW_TIMES:
+        # Performance Summary Table
+        print()
+        print("Performance Summary:")
         print(
-            f"{r.name:<22} {r.time_seconds:>12.2f} {r.baseline_time_seconds:>12.2f} "
-            f"{time_color}{time_delta_str:>12}{Colors.ENDC if time_color else ''} "
-            f"{r.memory_mb:>12.1f} {mem_color}{mem_delta_str:>12}{Colors.ENDC if mem_color else ''}"
+            f"{'Check':<22} {'Time (s)':>12} {'Base (s)':>12} {'Time Δ':>12} {'Mem (MB)':>12} {'Mem Δ':>12}"
         )
+        print("-" * 90)
 
-    print("-" * 90)
+        for r in results:
+            # Calculate time delta string
+            if r.baseline_time_seconds > 0:
+                time_change = (
+                    (r.time_seconds - r.baseline_time_seconds)
+                    / r.baseline_time_seconds
+                    * 100
+                )
+                time_color = (
+                    Colors.GREEN
+                    if time_change < -10
+                    else (Colors.FAIL if time_change > 10 else "")
+                )
+                time_delta_str = f"{time_change:+.0f}%"
+            else:
+                time_color = ""
+                time_delta_str = "-"
+
+            # Calculate memory delta string
+            if r.baseline_memory_mb > 0:
+                mem_change = (
+                    (r.memory_mb - r.baseline_memory_mb) / r.baseline_memory_mb * 100
+                )
+                mem_color = (
+                    Colors.GREEN
+                    if mem_change < -10
+                    else (Colors.FAIL if mem_change > 10 else "")
+                )
+                mem_delta_str = f"{mem_change:+.0f}%"
+            else:
+                mem_color = ""
+                mem_delta_str = "-"
+
+            print(
+                f"{r.name:<22} {r.time_seconds:>12.2f} {r.baseline_time_seconds:>12.2f} "
+                f"{time_color}{time_delta_str:>12}{Colors.ENDC if time_color else ''} "
+                f"{r.memory_mb:>12.1f} {mem_color}{mem_delta_str:>12}{Colors.ENDC if mem_color else ''}"
+            )
+
+        print("-" * 90)
 
     # Overall Status
     print()
@@ -907,8 +913,9 @@ def print_phase3_summary(
     base_wall = baseline_results.get("wall_time_seconds", 0.0)
     memory = current_results.get("memory_mb", 0.0)
     base_memory = baseline_results.get("memory_mb", 0.0) if baseline_results.get("memory_metric") == current_results.get("memory_metric") else 0.0
-    print()
-    print(f"  Wall time: {wall:.1f} s (baseline {base_wall:.1f} s); largest worker memory: {memory:.0f} MB")
+    if SHOW_TIMES:
+        print()
+        print(f"  Wall time: {wall:.1f} s (baseline {base_wall:.1f} s); largest worker memory: {memory:.0f} MB")
     print("-" * 60)
     return ComplianceResult(
         name="IBSI 2 Phase 3",
