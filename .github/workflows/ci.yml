@@ -146,6 +146,58 @@ jobs:
         run: |
           poetry run pytest -q -n auto
 
+  # The IBSI checks of dev/pre_push.py: the pass counts of IBSI 1 and IBSI 2 phases 1 to 3,
+  # the error margin of the phase 1 maps and the phase 3 team agreement (a drop of at most
+  # 0.1 % of a team's comparisons). The baselines come from another platform, so moved values
+  # are listed for review and do not fail (see dev/compliance_utils.py).
+  ibsi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Poetry
+        run: pipx install poetry==2.2.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'poetry'
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction
+
+      - name: Cache the IBSI data
+        id: ibsi-data
+        uses: actions/cache@v6
+        with:
+          path: |
+            dev/IBSI1/data
+            dev/IBSI2/data
+            dev/IBSI2/references
+          key: ibsi-data-${{ hashFiles('dev/IBSI2/ibsi2_data_manifest.json') }}
+
+      - name: Download the IBSI data (pinned commits of the IBSI repositories)
+        if: steps.ibsi-data.outputs.cache-hit != 'true'
+        run: |
+          poetry run python dev/IBSI2/download_ibsi2_data.py --no-manual
+
+      - name: Check the IBSI data against the manifest
+        run: |
+          poetry run python dev/IBSI2/download_ibsi2_data.py --verify-only
+
+      - name: Gate self-test
+        run: |
+          poetry run pytest -q -p no:cacheprovider dev/test_compliance_verdicts.py
+
+      - name: IBSI compliance
+        run: |
+          poetry run python dev/pre_push.py --compliance-only
+
   docs:
     runs-on: ubuntu-latest
     needs: test

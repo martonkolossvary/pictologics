@@ -1,7 +1,9 @@
 name: Newest dependencies
 
-# Each week, the tests with the newest numba, NumPy, SciPy, pandas and Pillow (the lock keeps
-# older versions): a new release that breaks Pictologics shows here before users meet it.
+# Each week, the tests and the IBSI checks with the newest numba, NumPy, SciPy, pandas and
+# Pillow (the lock keeps older versions): a new release that breaks Pictologics or its IBSI
+# compliance shows here before users meet it. Moved values are listed for review only (the
+# baselines come from other packages); the IBSI pass counts must stay.
 on:
   schedule:
     - cron: "0 5 * * 1"  # Mondays, 05:00 UTC
@@ -41,3 +43,25 @@ jobs:
       - name: Pytest
         run: |
           poetry run pytest -q -n auto
+
+      - name: Cache the IBSI data
+        id: ibsi-data
+        if: ${{ !cancelled() }}
+        uses: actions/cache@v6
+        with:
+          path: |
+            dev/IBSI1/data
+            dev/IBSI2/data
+            dev/IBSI2/references
+          key: ibsi-data-${{ hashFiles('dev/IBSI2/ibsi2_data_manifest.json') }}
+
+      - name: Download the IBSI data (pinned commits of the IBSI repositories)
+        if: ${{ !cancelled() && steps.ibsi-data.outputs.cache-hit != 'true' }}
+        run: |
+          poetry run python dev/IBSI2/download_ibsi2_data.py --no-manual
+
+      - name: IBSI compliance with the newest packages
+        if: ${{ !cancelled() }}
+        run: |
+          poetry run python dev/IBSI2/download_ibsi2_data.py --verify-only
+          poetry run python dev/pre_push.py --compliance-only
