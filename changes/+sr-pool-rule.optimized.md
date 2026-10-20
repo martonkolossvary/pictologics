@@ -1,0 +1,1 @@
+`SRDocument.from_folders` with the default `num_workers` parses SR files of less than 8 MB in total in the calling process, and starts one worker per 1.5 MB (at most 8) for a larger batch; a `num_workers` that you give is used as it is. 27 files of 2.5 MB take 1.1 s instead of 3.3 s.

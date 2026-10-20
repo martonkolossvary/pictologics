@@ -141,3 +141,27 @@ def test_metaimage_errors(tmp_path: Path) -> None:
     for message, (header, data) in cases.items():
         with pytest.raises(ValueError, match=message):
             load_image(_write(tmp_path / "bad.mha", header, data))
+
+
+def test_metaimage_values_are_writeable(tmp_path: Path) -> None:
+    # The stored values come as a writeable array (raw and zlib data), so the float64
+    # kernel compiles no second, read-only signature at the first load.
+    from unittest.mock import patch
+
+    from pictologics.loaders import metaimage_loader
+
+    cases = {
+        "raw": (_header(), _raw(VALUES)),
+        "zlib": (_header(CompressedData="true"), zlib.compress(_raw(VALUES))),
+    }
+    read = metaimage_loader._read_values
+    returned: list[np.ndarray] = []
+
+    def capture(*args: object) -> np.ndarray:
+        returned.append(read(*args))
+        return returned[-1]
+
+    for name, (header, data) in cases.items():
+        with patch.object(metaimage_loader, "_read_values", side_effect=capture):
+            load_image(_write(tmp_path / f"{name}.mha", header, data))
+        assert returned[-1].flags.writeable, name

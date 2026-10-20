@@ -16,13 +16,17 @@ For another number, set the environment variable PICTOLOGICS_NUM_THREADS before 
 pictologics, or call `set_num_threads` in your script. A NUMBA_NUM_THREADS of your own also
 sets the number. The results do not depend on the number of threads, with one exception:
 from SciPy 1.18, the FFT of SciPy splits its work by thread. So the Riesz and Simoncelli
-filters, the LoG of float64 images of 64^3 voxels or more, and Moran's I and Geary's C of
+filters, the LoG of float64 images of 131,072 voxels or more, and Moran's I and Geary's C of
 large ROIs can change in their last digits with the number of threads (Moran's I by about
 1e-16, relative, in a test).
+
+This module also gives the memory budget of the large steps: half of the memory of the
+computer (at most the limit of a Linux container), shared by the workers of run_batch.
 """
 
 from __future__ import annotations
 
+import functools
 import math
 import os
 import platform
@@ -33,6 +37,7 @@ from typing import Optional
 # before numba starts.
 _default = 0  # the number of threads that set_num_threads() sets (see _configure)
 _cores = 0  # the fast cores of this computer (see _fast_cores), found at the import
+_memory_shares = 1  # the processes that share the memory budget (see _share_memory)
 
 
 def get_num_threads() -> int:
@@ -191,6 +196,63 @@ def _cpu_limit() -> int:
     if len(quota) != 2 or quota[0] in ("max", "-1"):
         return 0
     return math.ceil(int(quota[0]) / int(quota[1]))
+
+
+@functools.cache
+def _physical_memory() -> int:
+    """The bytes of memory of this computer: its physical memory, at most the memory limit
+    of a Linux container (cgroup v2, then v1). 8 GiB when the system gives no valid number.
+    """
+    if sys.platform == "win32":
+        import ctypes
+
+        class _MemoryStatus(ctypes.Structure):  # MEMORYSTATUSEX: 2 DWORD, 7 DWORDLONG
+            _fields_ = [("length", ctypes.c_uint32), ("load", ctypes.c_uint32)] + [
+                (name, ctypes.c_uint64)
+                for name in (
+                    "total",
+                    "free",
+                    "page",
+                    "free_page",
+                    "virtual",
+                    "free_virtual",
+                    "extended",
+                )
+            ]
+
+        status = _MemoryStatus()
+        status.length = ctypes.sizeof(status)
+        found = ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+        total = int(status.total) if found else 0
+    else:
+        try:
+            page, pages = os.sysconf("SC_PAGE_SIZE"), os.sysconf("SC_PHYS_PAGES")
+        except (OSError, ValueError):
+            page = pages = 0
+        total = page * pages if page > 0 and pages > 0 else 0
+    known = [n for n in (total, _memory_limit()) if n > 0]
+    return min(known) if known else 8 << 30
+
+
+def _memory_limit() -> int:
+    """The memory limit of a Linux container in bytes (cgroup v2, then v1), or 0 for none."""
+    words = _words("/sys/fs/cgroup/memory.max") or _words(
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+    )
+    return int(words[0]) if words and words[0].isdigit() else 0
+
+
+def _memory_budget() -> int:
+    """The bytes that one large step may use: half of the memory of this computer (see
+    _physical_memory), shared by the worker processes that run at the same time."""
+    return _physical_memory() // 2 // _memory_shares
+
+
+def _share_memory(processes: int) -> None:
+    """Give this process its share of the memory budget: one of `processes` worker processes
+    that run at the same time (the workers of run_batch)."""
+    global _memory_shares
+    _memory_shares = processes
 
 
 def _words(path: str) -> list[str]:

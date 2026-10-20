@@ -99,7 +99,7 @@ def gaussian_filter(
     problem = _padding_value_problem(boundary, padding_value)
     if problem:
         raise ValueError(problem)
-    if padding_value:
+    if padding_value and source_mask is not None:
         reach = tuple(int(truncate * s + 0.5) for s in sigma_voxels)
         return _constant_padded(
             gaussian_filter, image, source_mask, padding_value, reach,
@@ -108,5 +108,7 @@ def gaussian_filter(
     mode = get_scipy_mode(boundary)
     if source_mask is not None:
         return _normalized_gaussian(image, source_mask, sigma_voxels, mode, truncate)
-    # A float32 response: each pass sums its lines in double and writes float32
-    return _gaussian_filter(image, sigma_voxels, mode, truncate)
+    # A float32 response: each pass sums its lines in double and writes float32. The passes
+    # read the padding value beyond the image (no padded copy).
+    cval = float(image.dtype.type(padding_value))
+    return _gaussian_filter(image, sigma_voxels, mode, truncate, cval=cval)

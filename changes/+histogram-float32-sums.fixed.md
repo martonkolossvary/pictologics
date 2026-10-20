@@ -1,0 +1,1 @@
+The histogram features of float32 (and other non-float64) discretised values sum in float64: their mean, variance, skewness, kurtosis, coefficient of variation, percentiles and absolute deviations are now those of the same values as float64, bit for bit (before, off by up to 5e-6 relative).

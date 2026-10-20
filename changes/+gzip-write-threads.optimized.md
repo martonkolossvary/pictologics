@@ -1,0 +1,1 @@
+`save_image` compresses a large `.nii.gz` file in blocks of about 1 MB on the threads of the package: a 512x512x200 float64 CT saves in 0.8 s instead of 6.8 s at 10 threads. The file is one standard gzip member, and its decompressed bytes are the bytes of nibabel's file. An extra field of its gzip header holds the index of the blocks (other gzip readers ignore it).

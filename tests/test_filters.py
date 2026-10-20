@@ -3,6 +3,8 @@
 import os
 import signal
 import time
+from contextlib import ExitStack
+from typing import Any
 from unittest.mock import patch
 
 import numpy as np
@@ -301,8 +303,9 @@ class TestBaseInternalHelpers:
         assert not np.isnan(result).any()
 
     def test_threaded_passes_match_scipy(self):
-        # The slab passes in threads give scipy's values bit for bit, also in place, and a
-        # zero sigma copies the image, as scipy does.
+        # The slab passes in threads give scipy's values bit for bit, and a zero sigma copies
+        # the image, as scipy does. The mean sums each window on its own: scipy's values to
+        # one float32 unit, also in place.
         from scipy.ndimage import convolve1d, gaussian_laplace, uniform_filter
 
         from pictologics.filters import base
@@ -323,21 +326,19 @@ class TestBaseInternalHelpers:
                     base._gaussian_laplace(image, (1.5, 1.0, 2.0), "mirror", 4.0),
                     gaussian_laplace(image, sigma=(1.5, 1.0, 2.0), mode="mirror", truncate=4.0),
                 ),
-                (
-                    base._uniform_filter(image, 5, "nearest"),
-                    uniform_filter(image, size=5, mode="nearest"),
-                ),
                 (base._convolve_axes(image, kernels, "mirror"), expected_conv),
                 (base._gaussian_filter(image, 0.0, "mirror"), image),
             ]
             in_place = image.copy()
             base._uniform_filter(in_place, 3, "reflect", output=in_place)
-            pairs.append((in_place, uniform_filter(image, size=3, mode="reflect")))
+            window_sums = base._uniform_filter(image, 5, "nearest")  # one float32 unit
             line = image[:, 0, 0]  # one axis: no other axis to cut into slabs
             pairs.append((base._uniform_filter(line, 3, "reflect"), uniform_filter(line, 3)))
         for got, expected in pairs:
             np.testing.assert_array_equal(got, expected)
             assert got.dtype == expected.dtype
+        assert_allclose(in_place, uniform_filter(image, size=3, mode="reflect"), rtol=1e-6)
+        assert_allclose(window_sums, uniform_filter(image, size=5, mode="nearest"), rtol=1e-6)
 
     def test_laplace_terms_share_the_first_pass(self):
         # The terms after the first share the plain pass along axis 0 and one temporary:
@@ -1383,6 +1384,37 @@ def test_cache_by_bytes_keeps_the_newest_results() -> None:
     assert calls == [100, 120, 60, 120, 300]
 
 
+def test_transfer_caches_follow_the_memory_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each transfer-function cache keeps at most 2 GiB and at most a quarter of the
+    memory budget, read at each new result (a run_batch worker sets its share after the
+    import)."""
+    from pictologics.filters import base
+
+    monkeypatch.setattr(base, "_memory_budget", lambda: 64 << 30)
+    assert base._transfer_cache_bytes() == 2 << 30
+    monkeypatch.setattr(base, "_memory_budget", lambda: 2 << 30)
+    assert base._transfer_cache_bytes() == 512 << 20
+
+    calls: list[int] = []
+    limit = [250]
+
+    @base.cache_by_bytes(lambda: limit[0])
+    def make(n: int) -> np.ndarray:
+        calls.append(n)
+        return np.zeros(n, dtype=np.uint8)
+
+    make(100)
+    make(120)
+    limit[0] = 150
+    make(10)  # 230 bytes, above the new limit: drops 100
+    make(120)  # a hit
+    assert calls == [100, 120, 10]
+    limit[0] = 250
+    make(100)  # 230 bytes: all stay
+    make(10)  # a hit
+    assert calls == [100, 120, 10, 100]
+
+
 def test_wavelet_passes_in_place_give_the_new_array_result() -> None:
     """Every pass after the first writes into one array; the result equals passes that
     each make a new array, bit for bit, and the input stays unchanged."""
@@ -1634,7 +1666,7 @@ def test_filter_threads_follow_the_numba_thread_count() -> None:
 
     import scipy.fft
 
-    from pictologics.filters import base, gabor, laws, riesz, wavelets
+    from pictologics.filters import _wavelet_pass, base, gabor, laws, riesz, wavelets
 
     image = np.random.default_rng(7).normal(size=(12, 11, 10)).astype(np.float32)
     fft_runs = {
@@ -1672,10 +1704,14 @@ def test_filter_threads_follow_the_numba_thread_count() -> None:
             [2, 2],
             [2],
         ]
-        # A large wavelet image: one rotation at a time with 2 threads, each pass in slabs
-        large = np.random.default_rng(8).normal(size=(128, 128, 64)).astype(np.float32)
-        slabs = stack.enter_context(patch.object(base, "_slab_pool", wraps=base._slab_pool))
-        wavelet_transform(large, wavelet="haar", rotation_invariant=True, use_parallel=True)
+        # A large wavelet image (the size gates at 1): one rotation at a time with 2 threads,
+        # each pass in slabs
+        stack.enter_context(patch.object(wavelets, "_PAIRED_PASSES_MIN", 1))
+        stack.enter_context(patch.object(_wavelet_pass, "_SLAB_MIN_SIZE", 1))
+        slabs = stack.enter_context(
+            patch.object(_wavelet_pass, "_slab_pool", wraps=base._slab_pool)
+        )
+        wavelet_transform(image, wavelet="haar", rotation_invariant=True, use_parallel=True)
         assert slabs.call_count == 24 * 3  # 3 passes of each of the 24 rotations
 
 
@@ -1749,10 +1785,7 @@ def test_transfer_cache_is_safe_for_threads() -> None:
 
 
 def test_every_filter_returns_float32() -> None:
-    """For a float64 image, every filter returns float32. The Laws and wavelet passes
-    stay in float64, and the last pass writes float32: the values of a cast after it."""
-    from pictologics.filters.base import _convolve_axes
-
+    """For a float64 image, every filter returns float32."""
     image = np.random.default_rng(2).normal(size=(14, 14, 14))
     mask = image > -1.5
     outputs = {
@@ -1772,12 +1805,6 @@ def test_every_filter_returns_float32() -> None:
     }
     assert {name: out.dtype for name, out in outputs.items()} == dict.fromkeys(
         outputs, np.dtype(np.float32)
-    )
-    kernels = [np.array([1.0, 2.0, -1.0], np.float32)] * 3
-    exact = _convolve_axes(image, kernels, "mirror")
-    assert exact.dtype == np.float64
-    assert_array_equal(
-        _convolve_axes(image, kernels, "mirror", last_dtype=np.float32), exact.astype(np.float32)
     )
 
 
@@ -1809,13 +1836,16 @@ def test_slab_ufunc_gives_the_values_of_one_call() -> None:
     with array and number inputs, a cast output and a unary ufunc."""
     import numba
 
+    from pictologics.filters import base
     from pictologics.filters.base import _SLAB_MIN_SIZE, _slab_ufunc
 
     rng = np.random.default_rng(4)
     threads = numba.get_num_threads()
     numba.set_num_threads(max(2, min(4, numba.config.NUMBA_NUM_THREADS)))
     try:
-        for size in (1000, _SLAB_MIN_SIZE + 17):
+        for size, gate in ((1000, 1 << 30), (_SLAB_MIN_SIZE + 17, 1)):
+            stack = patch.object(base, "_SLAB_UFUNC_MIN_BYTES", gate)
+            stack.start()
             a = rng.normal(size=(size // 10, 10))
             b = rng.normal(size=a.shape)
             out = np.empty(a.shape, dtype=np.float32)
@@ -1826,6 +1856,7 @@ def test_slab_ufunc_gives_the_values_of_one_call() -> None:
             assert_array_equal(in_place, a / 24)
             _slab_ufunc(np.negative, (in_place,), in_place)
             assert_array_equal(in_place, -(a / 24))
+            stack.stop()
     finally:
         numba.set_num_threads(threads)
 
@@ -1971,6 +2002,63 @@ def test_padding_value_is_constant_value_padding() -> None:
     assert energy.shape == valid.shape == image.shape
 
 
+def test_padding_value_reads_the_constant_with_no_padded_copy() -> None:
+    """Without a source mask, mean, Gaussian and Laws read the padding value beyond the image
+    (each pass hands the constant to the next): the bits of the padded copy, for float32
+    and float64 images, padding values -1000, 0.1 and 1e30, and an image of one plane. With
+    a source mask the padded copy stays."""
+    from pictologics.filters import base, gaussian, laws, mean
+    from pictologics.filters.laws import _laws_energy
+
+    zero = BoundaryCondition.ZERO
+    rng = np.random.default_rng(27)
+    for shape in ((1, 5, 7), (6, 7, 8)):
+        for dtype in (np.float32, np.float64):
+            image = rng.normal(40.0, 20.0, shape).astype(dtype)
+            for value in (-1000.0, 0.1, 1e30):
+                cases = [
+                    (mean_filter, {"support": 5}, 2),
+                    (mean_filter, {"support": 15}, 7),
+                    (gaussian_filter, {"sigma_mm": 1.5, "spacing_mm": (1.0, 0.8, 1.2)}, (6, 8, 5)),
+                    (laws_filter, {"kernels": "E5L5S5"}, 2),
+                    (laws_filter, {"kernels": "E3L3S3", "rotation_invariant": True}, 1),
+                ]
+                for func, kw, reach in cases:
+                    expected = base._constant_padded(
+                        func, image, None, value, reach, boundary=zero, **kw
+                    )
+                    with patch.object(base, "_constant_padded") as padded:
+                        got = func(image, boundary="constant", padding_value=value, **kw)
+                    assert padded.call_count == 0
+                    assert got.tobytes() == expected.tobytes(), (func.__name__, kw, value)
+                plain = base._constant_padded(
+                    laws_filter, image, None, value, 2, kernels="E5L5S5", boundary=zero
+                )
+                energy = laws_filter(
+                    image, "E5L5S5", "constant", compute_energy=True, padding_value=value
+                )
+                assert energy.tobytes() == _laws_energy(plain.copy(), 7, "constant").tobytes()
+    # A source mask keeps the padded copy
+    image = rng.normal(40.0, 20.0, (6, 7, 8)).astype(np.float32)
+    mask = rng.random(image.shape) > 0.2
+    for module, call in (
+        (mean, lambda: mean_filter(image, 5, "constant", source_mask=mask, padding_value=3.0)),
+        (
+            gaussian,
+            lambda: gaussian_filter(
+                image, 1.5, boundary="constant", source_mask=mask, padding_value=3.0
+            ),
+        ),
+        (
+            laws,
+            lambda: laws_filter(image, "E5L5S5", "constant", source_mask=mask, padding_value=3.0),
+        ),
+    ):
+        with patch.object(module, "_constant_padded", wraps=base._constant_padded) as padded:
+            call()
+        assert padded.call_count == 1
+
+
 def test_filters_name_unknown_boundaries() -> None:
     # Every filter resolves its boundary by name, so an unknown name gives one ValueError
     # that lists the names (also "constant")
@@ -2023,13 +2111,41 @@ def _old_pooled(responses: list, pooling: str) -> np.ndarray:
     return (result / 24 if pooling == "average" else result).astype(np.float32)
 
 
+def _scipy_wavelet_passes() -> Any:
+    """The wavelet passes of scipy (the path before the numba kernels), for a test of the
+    rotation steps: with the compiler off, the Python form of the kernels takes hours there.
+    test_wavelet_pass_matches_scipy shows that the kernels give the bits of scipy."""
+    from scipy.ndimage import convolve1d
+
+    from pictologics.filters import base, wavelets
+
+    def scipy_pass(
+        image: np.ndarray,
+        axis: int,
+        output: Any,
+        threads: Any,
+        weights: Any,
+        mode: str,
+        origin: int,
+    ) -> np.ndarray:
+        kw = {"weights": weights, "mode": mode, "origin": origin}
+        return base._slab_pass(convolve1d, image, axis, output, threads, **kw)
+
+    return patch.object(wavelets, "wavelet_pass", scipy_pass)
+
+
 def test_wavelet_rotations_need_no_rotated_copies() -> None:
     # Each of the 24 rotations of the rotation-invariant wavelet is computed on the image
     # itself: passes along the rotated axes, with reversed kernels on the flipped axes.
     # Every rotation equals the old rotated-copy response within a few float32 units (the
     # identity bit for bit), for 4 wavelets, levels 1 and 2, every boundary and 3
     # decompositions; so do the pooled responses, with and without threads, and with a
-    # source mask.
+    # source mask. The passes are those of scipy here (see _scipy_wavelet_passes).
+    with _scipy_wavelet_passes():
+        _rotations_need_no_rotated_copies()
+
+
+def _rotations_need_no_rotated_copies() -> None:
     import pywt
 
     from pictologics.filters import wavelets
@@ -2347,6 +2463,284 @@ def test_the_fma_of_the_gabor_kernels_rounds_once() -> None:
     assert gabor._fma32_python(a, b, c) == np.float32(-(2.0**-46))
 
 
+def test_the_fma_of_the_pass_kernels_rounds_once() -> None:
+    """The float64 fma of the pass and resample kernels with the compiler off rounds
+    a * b + c once, keeps the sign of a zero, and gives inf and NaN as the plain form does
+    (every branch). The fma of the compiled kernels (llvm.fma, compiled here with the
+    compiler on) gives the same value."""
+    import math
+
+    import numba
+
+    from pictologics.filters._passes import _fma_intrinsic, _fma_python
+
+    assert 3.0 * (1 / 3) - 1.0 == 0.0  # the plain form rounds twice
+    assert _fma_python(3.0, 1 / 3, -1.0) == -5.551115123125783e-17
+    with patch.object(numba.config, "DISABLE_JIT", False):
+        fma = numba.njit(lambda x, y, z: _fma_intrinsic(x, y, z))
+        assert fma(3.0, 1 / 3, -1.0) == -5.551115123125783e-17
+    assert math.copysign(1.0, _fma_python(-0.5, 0.0, -0.0)) == -1.0
+    assert _fma_python(1.0, 1e308, 1e308) == math.inf  # the exact sum overflows
+    assert math.isnan(_fma_python(0.5, 1.0, math.nan))
+    assert _fma_python(2.0, 0.5, -1.0) == 0.0
+
+
+def test_pass_twins_match_scipy() -> None:
+    """The numba twins of the correlation passes give the bits of correlate1d: float32 and
+    float64 arrays with an axis of 1 and 3 lines, Gaussian kernels of 1, 9 and 10 pairs (the
+    plain pairs of the block of scipy from 10 pairs on), an antisymmetric kernel, general
+    kernels of 4, 5 and 1 taps, the 5 modes with kernels longer than the axis, cval 0 and
+    -3, each axis."""
+    from scipy.ndimage import correlate1d
+
+    from pictologics.filters.base import _gaussian_weights, _numba_pass
+
+    rng = np.random.default_rng(23)
+    kernels = [
+        _gaussian_weights(0.6, 0, 4.0),  # 1 pair
+        _gaussian_weights(2.2, 0, 4.0),  # 9 pairs
+        _gaussian_weights(2.4, 1, 4.0),  # 10 pairs, antisymmetric
+        _gaussian_weights(2.4, 2, 4.0),  # 10 pairs
+        np.array([-1.0, -2.0, 0.0, 2.0, 1.0]) / np.sqrt(10.0),  # E5
+        np.array([0.1, -0.4, 0.7, 0.2]),
+        np.array([0.3, 0.5, -0.1, 0.2, 0.6]),  # odd and neither symmetric nor antisymmetric
+        np.array([1.7]),
+    ]
+    for shape in ((5, 6, 7), (1, 4, 6), (3, 1, 5)):
+        for dtype in (np.float32, np.float64):
+            image = rng.normal(0.0, 10.0, shape).astype(dtype)
+            for axis in range(3):
+                for mode in ("constant", "reflect", "mirror", "nearest", "wrap"):
+                    for cval in (0.0, -3.0):
+                        expected = [
+                            correlate1d(image, w, axis, mode=mode, cval=cval) for w in kernels
+                        ]
+                        got = [
+                            _numba_pass(
+                                "correlate", image, axis, np.empty_like(image), 1, mode, cval, w
+                            )
+                            for w in kernels
+                        ]
+                        for a, b in zip(got, expected, strict=True):
+                            assert a.dtype == b.dtype
+                            assert a.tobytes() == b.tobytes(), (shape, dtype, axis, mode, cval)
+
+
+def test_uniform_passes_sum_each_window_on_its_own() -> None:
+    """The uniform passes give the exact mean of each window of float32 values, rounded once
+    to double and then to float32 (a value does not depend on where the line starts): an
+    axis of 1 and 3 lines, the 5 modes with windows longer than the axis, cval 0 and -3, the
+    sizes 1, 2, 3, 5, 7 (plain sums), 9 (blocks of 3) and 15 (blocks of 5), each axis, in
+    place. float64 values agree with the running sum of scipy to 1e-12. On a line of large
+    and tiny values the running sum of scipy misses the exact mean; the window sums do not."""
+    from fractions import Fraction
+
+    from scipy.ndimage import uniform_filter1d
+
+    from pictologics.filters.base import _PAD_MODES, _numba_pass
+
+    def exact_means(image: np.ndarray, size: int, axis: int, mode: str, cval: float) -> np.ndarray:
+        pads = [(0, 0)] * 3
+        pads[axis] = (size // 2, size - size // 2 - 1)
+        extra = {"constant_values": cval} if mode == "constant" else {}
+        ext = np.moveaxis(np.pad(image, pads, mode=_PAD_MODES[mode], **extra), axis, -1)
+        out = np.empty(np.moveaxis(image, axis, -1).shape, dtype=image.dtype)
+        for index in np.ndindex(out.shape):
+            window = ext[index[:-1]][index[-1] : index[-1] + size].tolist()
+            out[index] = float(sum(map(Fraction, window), Fraction(0)) / size)
+        return np.moveaxis(out, -1, axis)
+
+    rng = np.random.default_rng(28)
+    for shape in ((5, 6, 7), (1, 4, 6), (3, 1, 5)):
+        for dtype in (np.float32, np.float64):
+            image = rng.normal(0.0, 10.0, shape).astype(dtype)
+            for axis in range(3):
+                for mode in ("constant", "reflect", "mirror", "nearest", "wrap"):
+                    for cval in (0.0, -3.0):
+                        for size in (1, 2, 3, 5, 7, 9, 15):
+                            got = image.copy()
+                            _numba_pass("uniform", got, axis, got, 1, mode, cval, size=size)
+                            if dtype == np.float32:
+                                expected = exact_means(image, size, axis, mode, cval)
+                                assert got.tobytes() == expected.tobytes(), (shape, axis, mode)
+                            else:
+                                running = uniform_filter1d(image, size, axis, mode=mode, cval=cval)
+                                assert_allclose(got, running, rtol=1e-12, atol=1e-12)
+    line = np.array(
+        [8.574043e-07, 2000.0, 2000.0, 2000.0, 8.631789e-07, 5.4146125e-07, 2.997119e-07, 4.226872e-07, 2.8319672e-08, 1.2428328e-07, 6.706244e-07, 2000.0],
+        dtype=np.float32,
+    ).reshape(1, 1, 12)  # fmt: skip
+    exact = exact_means(line, 3, 2, "constant", 0.0)
+    got = _numba_pass("uniform", line, 2, np.empty_like(line), 1, "constant", 0.0, size=3)
+    assert got.tobytes() == exact.tobytes()
+    assert uniform_filter1d(line, 3, 2, mode="constant").tobytes() != exact.tobytes()
+
+
+def test_pass_twins_in_threads_and_the_scipy_passes_agree() -> None:
+    """A twin pass in threads gives the bits of one call. For an image in column order the
+    Gaussian and the convolutions take the scipy passes, with the same values; the uniform
+    passes copy it to row order (also in place) for the same window sums. Also with the
+    constant of a padded image (cval), which each pass hands to the next."""
+    from functools import partial
+
+    from scipy.ndimage import uniform_filter1d
+    from scipy.ndimage._filters import _gaussian_kernel1d
+
+    from pictologics.filters import base
+
+    rng = np.random.default_rng(24)
+    image = rng.normal(0.0, 10.0, (9, 10, 11))
+    kernels = (np.array([1.0, 2.0, 1.0]), np.array([-1.0, 0.0, 1.0]), np.array([1.0, -2.0, 1.0]))
+    for cval in (0.0, -3.0):
+        calls = [
+            lambda a, c=cval: base._gaussian_filter(a, (1.5, 1.0, 2.0), "constant", cval=c),
+            lambda a, c=cval: base._uniform_filter(a, 5, "constant", cval=c),
+            lambda a, c=cval: base._convolve_axes(a, kernels, "constant", cval=c),
+        ]
+        for call, twin_passes in zip(calls, (0, 3, 0), strict=True):
+            one = call(image)
+            with patch.object(base, "_SLAB_MIN_SIZE", 1):
+                threaded = call(image)
+            with patch.object(base, "_numba_pass", wraps=base._numba_pass) as twin:
+                columns = call(np.asfortranarray(image))
+            assert twin.call_count == twin_passes
+            assert one.tobytes() == threaded.tobytes()
+            assert one.tobytes() == np.ascontiguousarray(columns).tobytes()
+        in_place = np.asfortranarray(image)
+        base._uniform_filter(in_place, 5, "constant", output=in_place, cval=cval)
+        assert in_place.flags.f_contiguous
+        assert np.ascontiguousarray(in_place).tobytes() == calls[1](image).tobytes()
+    # The constant that a pass leaves on a constant line
+    mean5 = partial(uniform_filter1d, size=5)
+    assert base._pass_constant(mean5, 0.0, np.float32, 5) == 0.0
+    assert base._pass_constant(mean5, -3.0, np.float32, 5) == float(np.float32(-3.0))
+    # The Gaussian weights are those of scipy
+    for sigma, order, truncate in ((0.6, 0, 4.0), (2.4, 1, 4.0), (1.7, 2, 3.0), (3.1, 0, 6.0)):
+        radius = int(truncate * sigma + 0.5)
+        expected = _gaussian_kernel1d(sigma, order, radius)[::-1]
+        assert base._gaussian_weights(sigma, order, truncate).tobytes() == expected.tobytes()
+
+
+def test_wavelet_pass_matches_scipy() -> None:
+    """The numba wavelet pass gives the bits of convolve1d on float32 row-order images:
+    db2, haar of level 2 (zero taps), coif3 of level 2 (36 taps: scipy on the short axes),
+    bior2.2 (a zero tap at the start), each kernel flipped (origin -1) and not, the five
+    modes, axes of 1 and 3 lines, each axis, a new output and in place, in one call and on
+    slabs in threads. Other arrays and modes take scipy."""
+    import pywt
+    from scipy.ndimage import convolve1d
+
+    from pictologics.filters import _wavelet_pass
+    from pictologics.filters._wavelet_pass import wavelet_pass
+    from pictologics.filters.wavelets import _atrous_upsample
+
+    def kernel(name: str, level: int) -> np.ndarray:
+        lo = np.array(pywt.Wavelet(name).dec_lo, dtype=np.float32)
+        return _atrous_upsample(lo, level) if level > 1 else lo
+
+    kernels = [kernel("db2", 1), kernel("haar", 2), kernel("coif3", 2), kernel("bior2.2", 1)]
+    rng = np.random.default_rng(29)
+    for shape in ((5, 6, 7), (3, 1, 5), (1, 4, 6)):
+        image = rng.normal(0.0, 10.0, shape).astype(np.float32)
+        for weights in kernels:
+            for flip, origin in ((False, 0), (True, -1)):
+                w = weights[::-1] if flip else weights
+                for mode in ("constant", "nearest", "wrap", "reflect", "mirror"):
+                    for axis in range(3):
+                        expected = convolve1d(image, w, axis=axis, mode=mode, origin=origin)
+                        got = wavelet_pass(image, axis, None, 1, w, mode, origin)
+                        in_place = image.copy()
+                        wavelet_pass(in_place, axis, in_place, 1, w, mode, origin)
+                        for result in (got, in_place):
+                            assert result.dtype == expected.dtype
+                            assert result.tobytes() == expected.tobytes(), (shape, mode, axis)
+    image = rng.normal(0.0, 10.0, (9, 10, 11)).astype(np.float32)
+    w = kernel("db2", 2)
+    for axis in range(3):
+        expected = convolve1d(image, w, axis=axis, mode="mirror")
+        for threads in (3, 1):
+            with patch.object(_wavelet_pass, "_SLAB_MIN_SIZE", 1):
+                got = wavelet_pass(image, axis, None, threads, w, "mirror", 0)
+            assert got.tobytes() == expected.tobytes()
+    # scipy for other arrays, a mode without a code and a kernel longer than the axis
+    others = [
+        (image.astype(np.float64), 0, "mirror", w),
+        (np.asfortranarray(image), 1, "mirror", w),
+        (image[0], 1, "mirror", w),
+        (image, 2, "grid-wrap", w),
+        (image[:2], 0, "mirror", kernel("coif3", 1)),
+    ]
+    for array, axis, mode, weights in others:
+        with (
+            patch.object(_wavelet_pass, "_pass_axis0") as k0,
+            patch.object(_wavelet_pass, "_pass_axis1") as k1,
+            patch.object(_wavelet_pass, "_pass_axis2") as k2,
+        ):
+            got = wavelet_pass(array, axis, None, 1, weights, mode, 0)
+        assert k0.call_count == k1.call_count == k2.call_count == 0
+        expected = convolve1d(array, weights, axis=axis, mode=mode)
+        assert np.ascontiguousarray(got).tobytes() == np.ascontiguousarray(expected).tobytes()
+
+
+def test_wavelet_pass_skips_the_zero_taps() -> None:
+    """A NaN voxel under a kernel with zero taps (haar of level 2) spreads over the non-zero
+    taps only (scipy adds NaN * 0 for a zero tap): the finite voxels are those of scipy, and
+    the NaN voxels are a part of the NaN voxels of scipy."""
+    import pywt
+    from scipy.ndimage import convolve1d
+
+    from pictologics.filters._wavelet_pass import wavelet_pass
+    from pictologics.filters.wavelets import _atrous_upsample
+
+    w = _atrous_upsample(np.array(pywt.Wavelet("haar").dec_lo, dtype=np.float32), 2)
+    image = np.random.default_rng(30).normal(0.0, 10.0, (6, 7, 8)).astype(np.float32)
+    image[3, 3, 3] = np.nan
+    for axis in range(3):
+        expected = convolve1d(image, w, axis=axis, mode="mirror")
+        got = wavelet_pass(image, axis, None, 1, w, "mirror", 0)
+        finite = np.isfinite(got)
+        assert np.isnan(expected[~finite]).all()
+        assert (~np.isfinite(expected)).sum() > (~finite).sum()
+        both = finite & np.isfinite(expected)
+        assert got[both].tobytes() == expected[both].tobytes()
+
+
+def test_laws_rotation_invariance_keeps_two_bases_in_flight() -> None:
+    """A large image (here the size gate at 1) with 6 distinct bases and 10 threads makes
+    two bases at a time."""
+    from pictologics.filters import laws
+
+    image = np.random.default_rng(26).normal(size=(6, 7, 8))
+    with (
+        patch.object(laws, "_SLAB_MIN_SIZE", 1),
+        patch.object(laws, "get_num_threads", return_value=10),
+        patch.object(laws, "_ordered_map", wraps=laws._ordered_map) as pool,
+    ):
+        laws_filter(image, "E5L5S5", rotation_invariant=True, use_parallel=True)
+    assert pool.call_args.args[2] == 2
+
+
+def test_laws_pooling_steps_in_threads_give_the_values_of_one_thread() -> None:
+    """The pooling steps of the Laws rotation invariance on slabs in threads give the bits
+    of one call, for max, min and average pooling."""
+    import numba
+
+    from pictologics.filters import base
+
+    image = np.random.default_rng(25).normal(0.0, 10.0, (12, 13, 14))
+    threads = numba.get_num_threads()
+    try:
+        for pooling in ("max", "min", "average"):
+            numba.set_num_threads(1)
+            one = laws_filter(image, "E5L5S5", rotation_invariant=True, pooling=pooling)
+            numba.set_num_threads(max(2, min(3, numba.config.NUMBA_NUM_THREADS)))
+            with patch.object(base, "_SLAB_UFUNC_MIN_BYTES", 1):
+                threaded = laws_filter(image, "E5L5S5", rotation_invariant=True, pooling=pooling)
+            assert one.tobytes() == threaded.tobytes()
+    finally:
+        numba.set_num_threads(threads)
+
+
 def test_padded_is_np_pad() -> None:
     """The pad of the padded filters is np.pad, in the same memory order: the five modes,
     odd shapes, widths before and after each axis (also wider than the axis), float32 and
@@ -2380,6 +2774,22 @@ def test_padded_is_np_pad() -> None:
     assert_array_equal(base._padded(flat, ((1, 2), (3, 0)), "reflect"), np.pad(flat, ((1, 2), (3, 0)), "reflect"))  # fmt: skip
 
 
+def _slabs_from_one_voxel() -> ExitStack:
+    """The slab gates of the passes, the adds and the ufuncs at 1, so a small image takes the
+    slab paths of a large one."""
+    from pictologics.filters import _wavelet_pass, base, wavelets
+
+    stack = ExitStack()
+    for module, name in (
+        (base, "_SLAB_MIN_SIZE"),
+        (base, "_SLAB_UFUNC_MIN_BYTES"),
+        (_wavelet_pass, "_SLAB_MIN_SIZE"),
+        (wavelets, "_SLAB_MIN_SIZE"),
+    ):
+        stack.enter_context(patch.object(module, name, 1))
+    return stack
+
+
 def test_wavelet_lll_and_hhh_rotations_share_their_passes() -> None:
     """The rotation-invariant LLL and HHH responses come from a tree of the 8 patterns of
     flipped axes (3 rotations each): 14 chains of level kernels instead of 72 passes. They
@@ -2393,7 +2803,7 @@ def test_wavelet_lll_and_hhh_rotations_share_their_passes() -> None:
     hi = np.array(pywt.Wavelet("db2").dec_hi, dtype=np.float32)
     image = np.random.default_rng(43).normal(size=(20, 18, 16))
     rotations = wavelets._get_rotation_perms()
-    large = np.random.default_rng(44).normal(size=(64, 64, 64))  # 2^18 voxels: slabs
+    large = np.random.default_rng(44).normal(size=(12, 13, 14))  # slabs (the gates at 1)
     for decomposition in ("LLL", "HHH"):
         old = [_old_rotated_wavelet(image, lo, hi, 2, decomposition, "reflect", r) for r in rotations]  # fmt: skip
         for pooling in ("average", "max", "min"):
@@ -2410,6 +2820,7 @@ def test_wavelet_lll_and_hhh_rotations_share_their_passes() -> None:
                 with (
                     patch.object(wavelets, "get_num_threads", return_value=threads),
                     patch.object(base, "get_num_threads", return_value=threads),
+                    _slabs_from_one_voxel(),
                 ):
                     runs.append(
                         wavelet_transform(
@@ -2476,11 +2887,11 @@ def test_separable_filters_run_in_float32() -> None:
 
 
 def test_wavelet_mixed_rotations_share_their_passes_from_a_size() -> None:
-    """From _MIXED_TREE_MIN voxels on, a mixed decomposition with average pooling takes the
-    tree of shared passes too: LHL and HLH take 40 chains of level kernels instead of 72
+    """From _MIXED_TREE_MIN voxels on, a mixed decomposition takes the tree of shared passes
+    too, with every pooling: LHL and HLH take 40 chains of level kernels instead of 72
     passes (24 filters of one rotation each). They equal the 24 rotated-copy responses
-    pooled, within a few float32 units; the bits do not depend on the threads. Below the
-    limit, and with max and min pooling, the 24 rotations run."""
+    pooled, within a few float32 units; the bits do not depend on the threads (max and min
+    pool in chunks of planes in threads). Below the limit the 24 rotations run."""
     import pywt
 
     from pictologics.filters import base, wavelets
@@ -2489,30 +2900,241 @@ def test_wavelet_mixed_rotations_share_their_passes_from_a_size() -> None:
     hi = np.array(pywt.Wavelet("db2").dec_hi, dtype=np.float32)
     image = np.random.default_rng(46).normal(size=(20, 18, 16))
     rotations = wavelets._get_rotation_perms()
-    large = np.random.default_rng(47).normal(size=(64, 64, 64))  # 2^18 voxels: slabs
+    large = np.random.default_rng(47).normal(size=(12, 13, 14))  # slabs (the gates at 1)
     with patch.object(wavelets, "_rotation_tree", wraps=wavelets._rotation_tree) as tree:
         wavelet_transform(image, "db2", 1, "LHL", "mirror", rotation_invariant=True)
-        with patch.object(wavelets, "_MIXED_TREE_MIN", image.size):
-            for pooling in ("max", "min"):
-                wavelet_transform(image, "db2", 1, "LHL", "mirror", True, pooling)
     assert tree.call_count == 0
-    with patch.object(wavelets, "_MIXED_TREE_MIN", image.size):
+    with patch.object(wavelets, "_MIXED_TREE_MIN", large.size):
         for decomposition in ("LHL", "HLH"):
             old = [_old_rotated_wavelet(image, lo, hi, 2, decomposition, "reflect", r) for r in rotations]  # fmt: skip
-            with patch.object(wavelets, "_axis_chain", wraps=wavelets._axis_chain) as chains:
-                got = wavelet_transform(image, "db2", 2, decomposition, "mirror", True)
-            assert chains.call_count == 40
-            expected = _old_pooled(old, "average")
-            assert_allclose(got, expected, rtol=1e-6, atol=1e-6 * np.max(np.abs(expected)))
-            runs = []
-            for threads in (1, 3):
+            for pooling in ("average", "max", "min"):
+                with patch.object(wavelets, "_axis_chain", wraps=wavelets._axis_chain) as chains:
+                    got = wavelet_transform(image, "db2", 2, decomposition, "mirror", True, pooling)
+                assert chains.call_count == 40
+                assert (
+                    len({id(c.args[6]) for c in chains.call_args_list}) == 3
+                )  # a buffer per depth
+                expected = _old_pooled(old, pooling)
+                assert_allclose(got, expected, rtol=1e-6, atol=1e-6 * np.max(np.abs(expected)))
+                runs = []
+                for threads in (1, 3):
+                    with (
+                        patch.object(wavelets, "get_num_threads", return_value=threads),
+                        patch.object(base, "get_num_threads", return_value=threads),
+                        _slabs_from_one_voxel(),
+                    ):
+                        runs.append(
+                            wavelet_transform(
+                                large,
+                                "db2",
+                                1,
+                                decomposition,
+                                "mirror",
+                                True,
+                                pooling,
+                                use_parallel=True,
+                            )  # fmt: skip
+                        )
+                assert runs[0].tobytes() == runs[1].tobytes()
+
+
+def test_pool_reduce_in_chunks_of_planes() -> None:
+    """The max and min pooling of the tree run in fixed chunks of planes, in one thread or in
+    threads: the values of one numpy call, also for -0.0 and +0.0 inside a chunk."""
+    from pictologics.filters import wavelets
+
+    rng = np.random.default_rng(31)
+    total = rng.normal(size=(7, 3, 4)).astype(np.float32)
+    response = rng.normal(size=total.shape).astype(np.float32)
+    total[0, 0, :2], response[0, 0, :2] = (0.0, -0.0), (-0.0, 0.0)
+    for reduce in (np.maximum, np.minimum):
+        expected = reduce(total, response)
+        for threads in (1, 3):
+            got = total.copy()
+            with (
+                patch.object(wavelets, "_SLAB_MIN_SIZE", 30),  # 2 planes in a chunk: 4 chunks
+                patch.object(wavelets, "get_num_threads", return_value=threads),
+            ):
+                wavelets._pool_reduce(reduce, got, response)
+            assert got.tobytes() == expected.tobytes()
+
+
+def test_the_fft_laplace_on_slabs_gives_the_bits_of_the_rfftn_path() -> None:
+    """From _LOG_SLAB_MIN padded voxels on, the FFT LoG runs on slabs (no padded array, the
+    inverse of the cropped planes only), with the bits of the rfftn path (from SciPy 1.18
+    within a few units, see _assert_gabor_bits): five shapes (one plane on an axis too),
+    the five modes, scalar, per-axis and long sigmas, truncate 4 and 6, float32 and float64
+    outputs as new row-order arrays; chunks of one plane and one chunk per slab, serial and
+    in threads (the threaded transfer too)."""
+    from pictologics.filters import base
+
+    rng = np.random.default_rng(23)
+    sigmas = (1.2, (1.5, 1.0, 2.0), 3.0)
+    case = 0
+    for shape in ((12, 9, 10), (1, 9, 10), (9, 1, 10), (9, 10, 1), (7, 16, 5)):
+        image = rng.normal(0.0, 10.0, shape)
+        for mode in ("reflect", "mirror", "nearest", "wrap", "constant"):
+            sigma, truncate = sigmas[case % 3], (4.0, 6.0)[case % 2]
+            dtype = (np.float32, np.float64)[(case // 2) % 2]
+            case += 1
+            for chunk, threads in ((1, 1), (1 << 40, 3)):
                 with (
-                    patch.object(wavelets, "get_num_threads", return_value=threads),
+                    patch.object(base, "_LOG_FFT_MIN", 1),
                     patch.object(base, "get_num_threads", return_value=threads),
+                    patch.object(base, "_SLAB_MIN_SIZE", 1),
+                    patch.object(base, "_FFT_CHUNK_BYTES", chunk),
                 ):
-                    runs.append(
-                        wavelet_transform(
-                            large, "db2", 1, decomposition, "mirror", True, use_parallel=True
-                        )  # fmt: skip
-                    )
-            assert runs[0].tobytes() == runs[1].tobytes()
+                    with patch.object(base, "_LOG_SLAB_MIN", 1 << 60):
+                        expected = base._gaussian_laplace(image, sigma, mode, truncate, dtype)
+                    with patch.object(base, "_LOG_SLAB_MIN", 1):
+                        got = base._gaussian_laplace(image, sigma, mode, truncate, dtype)
+                assert got.dtype == expected.dtype == dtype and got.flags.c_contiguous
+                _assert_gabor_bits(got, expected, (shape, mode, chunk, threads))
+
+
+def test_the_fft_laplace_of_a_column_order_image_takes_the_rfftn_path() -> None:
+    """A column-order float64 image takes the rfftn path at every size (no copy), with the
+    bits of the row-order image; the plain LoG asks for a float32 output, the masked one
+    keeps float64."""
+    from pictologics.filters import base, laplacian_of_gaussian
+
+    image = np.random.default_rng(24).normal(0.0, 10.0, (12, 9, 10))
+    with patch.object(base, "_LOG_FFT_MIN", 1), patch.object(base, "_LOG_SLAB_MIN", 1):
+        with patch.object(base, "_scale_cut", wraps=base._scale_cut) as cut:
+            column = base._gaussian_laplace(np.asfortranarray(image), 1.5, "mirror")
+        assert cut.call_count == 0
+        _assert_gabor_bits(column, base._gaussian_laplace(image, 1.5, "mirror"))
+        fft = base._fft_gaussian_laplace
+        with (
+            patch.object(base, "_fft_gaussian_laplace", wraps=fft) as spy,
+            patch("pictologics.filters.log._LOG_FFT_MIN", 1),
+        ):
+            laplacian_of_gaussian(image, 1.5)
+            laplacian_of_gaussian(image, 1.5, source_mask=np.ones(image.shape, dtype=bool))
+    assert [call.args[4] for call in spy.call_args_list] == [np.float32, np.float64]
+
+
+def test_the_pad_planes_from_a_first_plane() -> None:
+    """The pad kernel writes the planes of np.pad from a given first plane into a smaller
+    output (a slab of the padded image)."""
+    from pictologics.filters import base
+
+    image = np.random.default_rng(25).normal(size=(5, 7, 3))
+    widths = ((2, 3), (1, 4), (0, 5))
+    for mode in ("constant", "symmetric", "reflect", "edge", "wrap"):
+        extra = {"constant_values": 1.5} if mode == "constant" else {}
+        expected = np.pad(image, widths, mode=mode, **extra)[1:4]
+        out = np.empty(expected.shape)
+        base._pad_planes_numba(image, out, 2, 1, 0, base._PAD_CODES[mode], 1.5, 1)
+        assert_array_equal(out, expected)
+
+
+def test_simoncelli_of_a_single_slice_is_its_2d_response() -> None:
+    """A singleton axis has no frequency: the Simoncelli wavelet (and the Riesz-Simoncelli
+    filter) of a volume of one slice is the 2-D response of the slice, not zeros."""
+    image = np.random.default_rng(56).normal(0.0, 1.0, (24, 24))
+    flat = simoncelli_wavelet(image, 1)
+    assert np.abs(flat).max() > 0
+    for volume, cut in (
+        (image[None], (0, slice(None), slice(None))),
+        (image[:, None], (slice(None), 0, slice(None))),
+        (image[:, :, None], (slice(None), slice(None), 0)),
+    ):
+        assert_array_equal(simoncelli_wavelet(volume, 1)[cut], flat)
+    riesz = riesz_simoncelli(image[None], 1, (0, 1, 0))
+    assert np.all(np.isfinite(riesz))
+    assert_array_equal(riesz[0], riesz_simoncelli(image, 1, (1, 0)))
+
+
+def test_filters_reject_bad_parameters() -> None:
+    """The Gabor filter and the LoG raise a ValueError that names the bad parameter: a
+    sigma, wavelength, aspect ratio, spacing or truncation that is not a finite positive
+    number, and a rotation step outside (0, 2 pi]. A good call is unchanged."""
+    image = np.random.default_rng(57).normal(0.0, 1.0, (6, 7, 5))
+    good = {"sigma_mm": 2.0, "lambda_mm": 4.0}
+    cases = [
+        ({"sigma_mm": 0.0}, "sigma_mm"), ({"sigma_mm": -2.0}, "sigma_mm"),
+        ({"sigma_mm": np.nan}, "sigma_mm"), ({"sigma_mm": np.inf}, "sigma_mm"),
+        ({"lambda_mm": 0.0}, "lambda_mm"), ({"lambda_mm": -2.0}, "lambda_mm"),
+        ({"gamma": 0.0}, "gamma"), ({"gamma": -1.0}, "gamma"),
+        ({"spacing_mm": 0.0}, "spacing_mm"), ({"spacing_mm": -1.0}, "spacing_mm"),
+        ({"spacing_mm": (1.0, 1.0, 0.0)}, "spacing_mm"),
+        ({"rotation_invariant": True, "delta_theta": 0.0}, "delta_theta"),
+        ({"rotation_invariant": True, "delta_theta": -np.pi / 4}, "delta_theta"),
+        ({"rotation_invariant": True, "delta_theta": 10.0}, "delta_theta"),
+    ]  # fmt: skip
+    for change, name in cases:
+        with pytest.raises(ValueError, match=name):
+            gabor_filter(image, **{**good, **change})
+    for change, name in (
+        ({"sigma_mm": 0.0}, "sigma_mm"), ({"sigma_mm": np.nan}, "sigma_mm"),
+        ({"spacing_mm": -1.0}, "spacing_mm"), ({"spacing_mm": (1.0, 0.0, 1.0)}, "spacing_mm"),
+        ({"truncate": 0.0}, "truncate"),
+    ):  # fmt: skip
+        with pytest.raises(ValueError, match=name):
+            laplacian_of_gaussian(image, **{"sigma_mm": 2.0, **change})
+    assert gabor_filter(image, **good).shape == image.shape
+    assert laplacian_of_gaussian(image, 2.0).shape == image.shape
+
+
+def test_gabor_returns_a_row_order_array() -> None:
+    """The Gabor response is a row-order array on every plane (the default axial plane
+    filters along the last axis), also with a region and rotation invariance, with the
+    values of the moved view."""
+    from pictologics.filters import gabor as gabor_module
+
+    image = np.random.default_rng(58).normal(0.0, 1.0, (6, 7, 5))
+    region = (slice(1, 5), slice(2, 6), slice(0, 4))
+    moves = []
+    move = np.moveaxis
+
+    def spy(*args: Any, **kwargs: Any) -> np.ndarray:
+        moves.append(move(*args, **kwargs))
+        return moves[-1]
+
+    for kwargs in (
+        {},
+        {"region": region},
+        {"rotation_invariant": True, "delta_theta": np.pi / 2},
+    ):
+        moves.clear()
+        with patch.object(gabor_module.np, "moveaxis", side_effect=spy):
+            out = gabor_filter(image, 2.0, 4.0, **kwargs)
+        assert out.flags.c_contiguous
+        assert out.tobytes() == np.ascontiguousarray(moves[-1]).tobytes()
+
+
+def test_cache_by_bytes_keeps_the_newest_shapes() -> None:
+    """With max_shapes, a new result drops the results of the first arguments (the image
+    shapes) that are not among the newest ones by their newest use: a cohort of images
+    keeps the tables of two shapes."""
+    from pictologics.filters.base import cache_by_bytes
+
+    calls = []
+
+    @cache_by_bytes(1 << 30, 2)
+    def table(shape: tuple[int, ...], level: int) -> np.ndarray:
+        calls.append((shape, level))
+        return np.zeros(shape)
+
+    for request in (((4,), 1), ((4,), 2), ((5,), 1), ((4,), 1), ((6,), 1), ((5,), 1), ((4,), 1)):
+        table(*request)
+    assert calls == [((4,), 1), ((4,), 2), ((5,), 1), ((6,), 1), ((5,), 1), ((4,), 1)]
+
+
+def test_the_log_takes_the_fft_from_131072_voxels() -> None:
+    """A float64 image of _LOG_FFT_MIN = 131,072 voxels (64 x 64 x 32) takes the FFT
+    convolution in float64; one voxel fewer runs the passes on a float32 copy."""
+    from pictologics.filters import base
+    from pictologics.filters import log as log_module
+
+    assert base._LOG_FFT_MIN == 1 << 17
+    at_gate, below = np.zeros((64, 64, 32)), np.zeros((131_071, 1, 1))
+    sentinel = np.zeros(1, dtype=np.float32)
+    with patch.object(log_module, "_gaussian_laplace", return_value=sentinel) as laplace:
+        laplacian_of_gaussian(at_gate, 2.0)
+        laplacian_of_gaussian(below, 2.0)
+    assert [call.args[0].dtype for call in laplace.call_args_list] == [np.float64, np.float32]
+    with patch.object(base, "_fft_gaussian_laplace", return_value=sentinel) as fft:
+        assert base._gaussian_laplace(at_gate, 2.0, "mirror") is sentinel
+    fft.assert_called_once()

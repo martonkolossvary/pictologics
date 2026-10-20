@@ -77,8 +77,10 @@ class FilterCapability:
             (FFT-domain filters: the requested boundary is realised by a
             defined pad-filter-crop procedure — the transform itself remains
             periodic on the padded domain, so the boundary is honoured
-            approximately rather than exactly), or ``"periodic"`` (periodic
-            regardless of what is requested).
+            approximately rather than exactly: with the default pads the response
+            differs from that of a 64-voxel pad by up to about 1e-1 of its range
+            near the border and at the centre of a large uniform object), or
+            ``"periodic"`` (periodic regardless of what is requested).
         supported_riesz_orders: Description of the Riesz derivative orders
             accepted (Riesz-family filters only), or `None` if the filter has
             no Riesz order concept.

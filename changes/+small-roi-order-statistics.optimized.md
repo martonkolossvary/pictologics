@@ -1,0 +1,1 @@
+The percentiles and the median of fewer than 1,000 float64 values come from one partition in numba, and the percentile ranks of every size from a numba kernel, with the same values, bit for bit. The first-order features of 40 values take 6 µs instead of 14 µs, of 500 values 16 µs instead of 20 µs, and of 1,000 to 5,000 values 9 to 14 % less time.

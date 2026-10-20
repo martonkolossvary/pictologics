@@ -1073,27 +1073,39 @@ class TestSRDocumentFromFolders:
     def test_from_folders_small_batches_use_no_workers(
         self, tmp_path: Path, num_workers: int | None
     ) -> None:
-        """SR files of fewer than SR_POOL_BYTES bytes are parsed in this process; from
-        that size the requested workers (cpu_count - 1 by default) run."""
+        """With num_workers None, SR files of fewer than SR_POOL_BYTES bytes are parsed in
+        this process, and from that size one worker runs per SR_BYTES_PER_WORKER bytes (at
+        most SR_MAX_WORKERS and cpu_count - 1); an explicit num_workers is used as it is."""
         import pictologics.utilities.dicom_utils as dicom_utils
+        from pictologics.utilities.sr_parser import _sr_workers
 
         for i in range(3):
             _write_dicom(tmp_path / f"sr_{i}.dcm", "1.2.840.10008.5.1.4.1.1.88.33", size=100)
         total = sum(f.stat().st_size for f in tmp_path.iterdir())
         with patch.object(dicom_utils, "worker_pool") as pool:
+            pool.return_value.__enter__.return_value.map.return_value = []
             with patch("pictologics.utilities.sr_parser.SR_POOL_BYTES", total + 1):
                 batch = SRDocument.from_folders(
                     [tmp_path], show_progress=False, num_workers=num_workers
                 )
-            assert len(batch.processing_log) == 3
-            pool.assert_not_called()
-            pool.return_value.__enter__.return_value.map.return_value = []
+            if num_workers is None:
+                assert len(batch.processing_log) == 3
+                pool.assert_not_called()
+            else:
+                pool.assert_called_once_with(num_workers)
+            pool.reset_mock()
             with (
                 patch("pictologics.utilities.sr_parser.SR_POOL_BYTES", total),
+                patch("pictologics.utilities.sr_parser.SR_BYTES_PER_WORKER", total // 3),
                 patch("os.cpu_count", return_value=6),
             ):
                 SRDocument.from_folders([tmp_path], show_progress=False, num_workers=num_workers)
-            pool.assert_called_once_with(5 if num_workers is None else num_workers)
+            pool.assert_called_once_with(3 if num_workers is None else num_workers)
+        with patch("os.cpu_count", return_value=14):
+            assert _sr_workers(2_500_000, None) == 1
+            assert _sr_workers(8_000_000, None) == 5
+            assert _sr_workers(30_000_000, None) == 8
+            assert _sr_workers(1_000, 3) == 3
 
 
 class TestProcessSRFileWorker:

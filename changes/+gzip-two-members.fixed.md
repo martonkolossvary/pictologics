@@ -1,0 +1,1 @@
+`load_image` no longer stops responding on a `.nii.gz` file of two or more gzip members whose first member decompresses to more than 16 MB. The read loop did not stop, and the memory use increased without limit. Now nibabel reads such a file.

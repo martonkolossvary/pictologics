@@ -20,11 +20,29 @@ from typing import Any, Optional
 
 import pandas as pd
 
-# SRDocument.from_folders parses fewer than SR_POOL_BYTES bytes of SR files in the calling
-# process: each worker process imports the package before its first file (about 1 s),
-# which costs more than the workers save on smaller batches. Parse time grows with the
-# file size (3 ms for 10 KB, 50 ms for 120 KB).
-SR_POOL_BYTES = 2_500_000
+# With num_workers None, SRDocument.from_folders parses fewer than SR_POOL_BYTES bytes of SR
+# files in the calling process: each worker process imports the package before its first
+# file (about 1 s), which costs more than the workers save on smaller batches (27 files of
+# 2.5 MB: 1.09 s in this process, 3.28 s with 13 workers). From that size it starts one
+# worker per SR_BYTES_PER_WORKER bytes, at most SR_MAX_WORKERS (x0.86-0.92 from 90 to 300
+# files). Parse time grows with the file size (3 ms for 10 KB, 50 ms for 120 KB).
+SR_POOL_BYTES = 8_000_000
+SR_BYTES_PER_WORKER = 1_500_000
+SR_MAX_WORKERS = 8
+
+
+def _sr_workers(total_bytes: int, num_workers: Optional[int]) -> int:
+    """The worker processes of SRDocument.from_folders for SR files of `total_bytes` bytes:
+    an explicit `num_workers` (1 = this process); with None, this process below
+    SR_POOL_BYTES, else one per SR_BYTES_PER_WORKER bytes, at most SR_MAX_WORKERS and
+    cpu_count - 1."""
+    if num_workers is not None:
+        return num_workers
+    if total_bytes < SR_POOL_BYTES:
+        return 1
+    per_size = total_bytes // SR_BYTES_PER_WORKER
+    return max(1, min((os.cpu_count() or 1) - 1, SR_MAX_WORKERS, per_size))
+
 
 # ============================================================================
 # Dataclass Definitions (mirroring dicom_database.py pattern)
@@ -396,11 +414,13 @@ class SRDocument:
             paths: List of folder paths to scan for SR files.
             recursive: Whether to scan subdirectories (default: True).
             show_progress: Whether to display progress bars (default: True).
-            num_workers: Number of parallel workers. None=auto (cpu_count-1),
-                        1=sequential (no multiprocessing). SR files of fewer than
-                        SR_POOL_BYTES bytes in total are parsed in this process: each
-                        worker process imports the package first, so smaller batches
-                        run faster without workers.
+            num_workers: Number of parallel workers. None=auto: SR files of fewer
+                        than SR_POOL_BYTES bytes in total are parsed in this process
+                        (each worker process imports the package first, so smaller
+                        batches run faster without workers), larger batches start one
+                        worker per SR_BYTES_PER_WORKER bytes, at most SR_MAX_WORKERS and
+                        cpu_count - 1. 1=sequential (no multiprocessing); another
+                        number starts that many workers.
             output_dir: If specified, exports each SR to this directory.
             export_csv: Export individual CSV files (default: True).
             export_json: Export individual JSON files (default: True).
@@ -430,8 +450,6 @@ class SRDocument:
             batch.export_log("sr_exports/processing_log.csv")
             ```
         """
-        import os
-
         from tqdm import tqdm
 
         from .dicom_utils import worker_pool
@@ -458,11 +476,7 @@ class SRDocument:
             return SRBatch(documents=[], processing_log=[], output_dir=None)
 
         # Determine number of workers
-        if sum(f.stat().st_size for f in sr_files) < SR_POOL_BYTES:
-            num_workers = 1
-        elif num_workers is None:
-            cpu_count = os.cpu_count()
-            num_workers = max(1, (cpu_count - 1) if cpu_count else 1)
+        num_workers = _sr_workers(sum(f.stat().st_size for f in sr_files), num_workers)
 
         # Create output directory if specified
         out_path = Path(output_dir) if output_dir else None

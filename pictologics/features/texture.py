@@ -488,7 +488,7 @@ def _flat_offsets(shape: tuple[int, ...], offsets: npt.NDArray[Any]) -> npt.NDAr
 
 
 @jit(nopython=True, inline="always", cache=True)  # type: ignore
-def _pairs_and_runs(
+def _pairs_and_runs_voxel(
     flat: npt.NDArray[np.uint16],
     v: int,
     g: int,
@@ -503,10 +503,8 @@ def _pairs_and_runs(
     glrlm: npt.NDArray[np.uint32],
 ) -> None:
     """Add the GLCM pairs and the GLRLM runs of voxel v (level g > 0) in each direction to
-    the tables of thread tid. A run starts where the voxel before has another level. Runs
-    of length 1 and 2 count without a branch: the voxels after v have another level. A walk
-    counts the longer runs. With `merged` (one table for all directions), the runs of
-    length 1 and 2 add once for each voxel."""
+    the tables of thread tid: the path of a row segment shorter than _ROW_SEGMENT_MIN
+    voxels (see _pairs_and_runs_row for the tables and the runs)."""
     i = g - 1
     last = flat.size - 1
     ones = np.uint32(0)
@@ -515,9 +513,7 @@ def _pairs_and_runs(
         od = dir_off[d]
         t = dir_table[d]
         if calc_glcm:
-            nv = np.int64(flat[v + pair_off[d]])
-            if nv != 0:
-                glcm[tid, t, i, nv - 1] += 1
+            glcm[tid, 0, t, g, flat[v + pair_off[d]]] += 1
         if calc_glrlm:
             # & on the booleans: Python's "and" would make a branch
             starts = np.int64(flat[v - od]) != g
@@ -541,6 +537,117 @@ def _pairs_and_runs(
     if calc_glrlm and merged:
         glrlm[tid, dir_table[0], i, 1] += ones
         glrlm[tid, dir_table[0], i, 2] += twos
+
+
+# A row segment of fewer ROI voxels goes voxel by voxel: the row passes pay a start for
+# each direction
+_ROW_SEGMENT_MIN = 8
+
+
+@jit(nopython=True, inline="always", cache=True)  # type: ignore
+def _pairs_and_runs_row(
+    flat: npt.NDArray[np.uint16],
+    start: int,
+    n: int,
+    tid: int,
+    calc_glcm: bool,
+    calc_glrlm: bool,
+    pair_off: npt.NDArray[np.int64],
+    dir_off: npt.NDArray[np.int64],
+    dir_table: npt.NDArray[np.int64],
+    merged: bool,
+    glcm: npt.NDArray[np.uint32],
+    glrlm: npt.NDArray[np.uint32],
+    ones_x: npt.NDArray[np.uint32],
+    twos_x: npt.NDArray[np.uint32],
+    longf: npt.NDArray[np.bool_],
+    idx: npt.NDArray[np.int64],
+) -> None:
+    """Add the GLCM pairs and the GLRLM runs of the n ROI voxels of the row segment from
+    flat index `start` (no voxel of the segment is 0) in each direction to the tables of
+    thread tid. The GLCM tables are 1-based with a dummy row
+    and column 0 (the pairs with a voxel outside the ROI land there); the pairs of the
+    even and the odd x alternate between the two tables of the thread. A run starts where
+    the voxel before has another level. Runs of length 1 and 2 count from three row
+    slices (the voxel before, after and two after), in one loop without a branch; a walk
+    counts the longer runs. With `merged` (one table for all directions), the runs of
+    length 1 and 2 add once for each voxel."""
+    size = flat.shape[0]
+    last = size - 1
+    row = flat[start : start + n]
+    n_alt = glcm.shape[1]
+    if calc_glrlm and merged:
+        for x in range(n):
+            ones_x[x] = 0
+            twos_x[x] = 0
+    for d in range(dir_off.shape[0]):
+        od = dir_off[d]
+        t = dir_table[d]
+        if calc_glcm:
+            po = pair_off[d]
+            nxt = flat[start + po : start + po + n]
+            if n_alt == 1:
+                for x in range(n):
+                    glcm[tid, 0, t, row[x], nxt[x]] += 1
+            else:
+                for x in range(n):
+                    glcm[tid, x & 1, t, row[x], nxt[x]] += 1
+        if calc_glrlm:
+            prev = flat[start - od : start - od + n]
+            nxt = flat[start + od : start + od + n]
+            if start + 2 * od + n <= size:
+                nxt2 = flat[start + 2 * od : start + 2 * od + n]
+                if merged:
+                    for x in range(n):
+                        g = row[x]
+                        s = prev[x] != g
+                        e = nxt[x] != g
+                        e2 = nxt2[x] != g
+                        ones_x[x] += np.uint32(s & e)
+                        twos_x[x] += np.uint32(s & (not e) & e2)
+                        longf[x] = s & (not e) & (not e2)
+                else:
+                    for x in range(n):
+                        g = row[x]
+                        s = prev[x] != g
+                        e = nxt[x] != g
+                        e2 = nxt2[x] != g
+                        longf[x] = s & (not e) & (not e2)
+                        glrlm[tid, t, g - 1, 1] += np.uint32(s & e)
+                        glrlm[tid, t, g - 1, 2] += np.uint32(s & (not e) & e2)
+            else:  # the last rows of the volume: clamp the second step
+                for x in range(n):
+                    g = row[x]
+                    v = start + x
+                    s = flat[v - od] != g
+                    e = flat[v + od] != g
+                    e2 = flat[min(v + 2 * od, last)] != g
+                    longf[x] = s & (not e) & (not e2)
+                    if merged:
+                        ones_x[x] += np.uint32(s & e)
+                        twos_x[x] += np.uint32(s & (not e) & e2)
+                    else:
+                        glrlm[tid, t, g - 1, 1] += np.uint32(s & e)
+                        glrlm[tid, t, g - 1, 2] += np.uint32(s & (not e) & e2)
+            k = 0
+            for x in range(n):
+                idx[k] = x
+                k += int(longf[x])
+            for j in range(k):
+                x = idx[j]
+                g = row[x]
+                length = 3
+                c = start + x + 3 * od
+                while flat[c] == g:
+                    length += 1
+                    c += od
+                glrlm[tid, t, g - 1, length] += 1
+    if calc_glrlm and merged:
+        t0 = dir_table[0]
+        for x in range(n):
+            g = row[x]
+            glrlm[tid, t0, g - 1, 1] += ones_x[x]
+            glrlm[tid, t0, g - 1, 2] += twos_x[x]
 
 
 @jit(nopython=True, inline="always", cache=True)  # type: ignore
@@ -648,6 +755,7 @@ def _local_tables_numba(
     flat = vol.ravel()
     alpha = np.int64(ngldm_alpha)
     rows = (calc_ngtdm or calc_ngldm) and neighbours.shape[0] == 26
+    local = calc_glcm or calc_glrlm
     steps = np.empty(9, dtype=np.int64)  # the 9 (dz, dy) rows of the neighbourhood
     for k in range(9):
         steps[k] = (k // 3 - 1) * s0 + (k % 3 - 1) * s1
@@ -656,33 +764,61 @@ def _local_tables_numba(
         if dir_table[d] != dir_table[0]:
             merged = False
     size = width if rows else 0
+    lsize = width if local else 0
     for b in prange(blocks.shape[0] - 1):
         tid = get_thread_id()
         n_sum = np.zeros(size, dtype=np.int32)
         n_count = np.zeros(size, dtype=np.int16)
         dependence = np.zeros(size, dtype=np.int16)
+        ones_x = np.zeros(lsize, dtype=np.uint32)
+        twos_x = np.zeros(lsize, dtype=np.uint32)
+        longf = np.zeros(lsize, dtype=np.bool_)
+        idx = np.zeros(lsize, dtype=np.int64)
         for z in range(blocks[b], blocks[b + 1]):
             if counts[z, 0] == 0:
                 continue
             for y in range(height):
                 base = (z + pad) * s0 + (y + pad) * s1 + pad
-                start = base
-                n = width
-                if rows:  # cut the row to its first and last ROI voxel
-                    x0 = 0
-                    while x0 < width and flat[base + x0] == 0:
-                        x0 += 1
-                    if x0 == width:
-                        continue
-                    x1 = width
-                    while flat[base + x1 - 1] == 0:
-                        x1 -= 1
-                    start = base + x0
-                    n = x1 - x0
+                # Cut the row to its first and last ROI voxel
+                x0 = 0
+                while x0 < width and flat[base + x0] == 0:
+                    x0 += 1
+                if x0 == width:
+                    continue
+                x1 = width
+                while flat[base + x1 - 1] == 0:
+                    x1 -= 1
+                start = base + x0
+                n = x1 - x0
+                if rows:
                     _neighbour_rows(
                         flat, start, n, steps, calc_ngtdm, calc_ngldm, alpha,
                         n_sum, n_count, dependence,
                     )  # fmt: skip
+                if local:  # the contiguous ROI segments of the row
+                    xs = 0
+                    while xs < n:
+                        if flat[start + xs] == 0:
+                            xs += 1
+                            continue
+                        xe = xs + 1
+                        while xe < n and flat[start + xe] != 0:
+                            xe += 1
+                        if xe - xs >= _ROW_SEGMENT_MIN:
+                            _pairs_and_runs_row(
+                                flat, start + xs, xe - xs, tid, calc_glcm, calc_glrlm, pair_off,
+                                dir_off, dir_table, merged, glcm, glrlm, ones_x, twos_x, longf, idx,
+                            )  # fmt: skip
+                        else:
+                            for x in range(xs, xe):
+                                v = start + x
+                                _pairs_and_runs_voxel(
+                                    flat, v, np.int64(flat[v]), tid, calc_glcm, calc_glrlm,
+                                    pair_off, dir_off, dir_table, merged, glcm, glrlm,
+                                )  # fmt: skip
+                        xs = xe
+                if not (calc_ngtdm or calc_ngldm):
+                    continue
                 for x in range(n):
                     v = start + x
                     g = np.int64(flat[v])
@@ -711,11 +847,6 @@ def _local_tables_numba(
                             ngtdm_n[tid, i] += 1
                         if calc_ngldm:
                             ngldm[tid, i, equal - 1] += 1
-                    if calc_glcm or calc_glrlm:
-                        _pairs_and_runs(
-                            flat, v, g, tid, calc_glcm, calc_glrlm, pair_off, dir_off,
-                            dir_table, merged, glcm, glrlm,
-                        )  # fmt: skip
 
 
 # The serial twin of the local kernel: one table, no parallel region (see
@@ -761,6 +892,10 @@ def _table_levels(
 
 
 _NO_TABLE_4D = np.zeros((1, 1, 1, 1), dtype=np.uint32)
+_NO_TABLE_5D = np.zeros((1, 1, 1, 1, 1), dtype=np.uint32)
+# The GLCM tables of a thread: the pairs of the even and the odd x alternate between them
+_GLCM_ALT = 2
+_GLCM_ALT_MAX_LEVELS = 64
 # From this many cells (4 MB) on, the thread tables are zeroed in threads: np.zeros of a
 # large block that the allocator reuses costs a serial memset (2 ms for 48 MB).
 _PARALLEL_ZERO_MIN = 1 << 20
@@ -859,7 +994,14 @@ def _local_matrices(
     cells = (n_bins if calc_glcm else 0) + (longest + 1 if calc_glrlm else 0)
     levels = _table_levels(vol, n_bins, 4 * n_threads * n_tables * n_bins * cells)
     rows = n_bins if levels is None else levels.size
-    glcm_t = _thread_tables((n_threads, n_tables, rows, rows)) if calc_glcm else _NO_TABLE_4D
+    # Up to 64 levels, the pairs of the even and the odd x alternate between two tables
+    # (shorter store chains); larger tables cost more to zero and to sum than they save
+    n_alt = _GLCM_ALT if rows <= _GLCM_ALT_MAX_LEVELS else 1
+    glcm_t = (
+        _thread_tables((n_threads, n_alt, n_tables, rows + 1, rows + 1))
+        if calc_glcm
+        else _NO_TABLE_5D
+    )
     glrlm_t = (
         _thread_tables((n_threads, n_tables, rows, longest + 1)) if calc_glrlm else _NO_TABLE_4D
     )
@@ -913,7 +1055,11 @@ def _local_matrices(
     for ngtdm, ngldm, distance in passes:
         if ngtdm or ngldm:
             run(vol, (False, False, ngtdm, ngldm), distance)
-    glcm = _thread_sum(glcm_t) if calc_glcm else np.zeros((13, n_bins, n_bins), dtype=np.uint64)
+    glcm = (
+        np.ascontiguousarray(_thread_sum(glcm_t.reshape((-1,) + glcm_t.shape[2:]))[:, 1:, 1:])
+        if calc_glcm
+        else np.zeros((13, n_bins, n_bins), dtype=np.uint64)
+    )
     glrlm = _thread_sum(glrlm_t) if calc_glrlm else np.zeros((13, n_bins, 1), dtype=np.uint64)
     if levels is not None:  # back to a row and a column for each of the n_bins levels
         if calc_glcm:
@@ -1141,6 +1287,14 @@ def _texture_matrices(
                 # Distance-to-border map of distance_mask, else of the ROI, with the image
                 # border treated as an edge (padded like `vol`).
                 d_roi = roi if distmask_c is None else np.not_equal(distmask_c, 0, order="C")
+                if distmask_c is not None and np.any(roi & ~d_roi):
+                    # A texture voxel outside the distance mask would get distance 0 and
+                    # its whole zone would leave the GLDZM (the distance of a zone is 1 or
+                    # more): the distance mask must hold the mask
+                    raise ValueError(
+                        f"{int(np.count_nonzero(roi & ~d_roi))} mask voxels lie outside "
+                        "distance_mask; the GLDZM needs the mask inside the distance mask."
+                    )
                 distance_map = _distance_map(d_roi, planar)
             dist = distance_map
             if compact:
@@ -1958,6 +2112,8 @@ def _zone_tables_numba(
 
     gldzm = np.zeros((n_bins, 1), dtype=np.uint32)
     if calc_gldzm and n_roots > 0:
+        # A zone of distance 0 holds a texture voxel outside the distance mask: the caller
+        # checks for it (the distance of a zone is 1 or more)
         gldzm = np.zeros((n_bins, max(1, int(dist.max()))), dtype=np.uint32)
         for r in range(n_roots):
             if dist[r] > 0:

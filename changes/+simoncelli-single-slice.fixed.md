@@ -1,0 +1,1 @@
+`simoncelli_wavelet` and `riesz_simoncelli` of a volume with one slice (a singleton axis) now give the 2-D response of the slice. Before, they gave zeros with a RuntimeWarning (a division by zero in the frequency grid).

@@ -1,0 +1,1 @@
+`run_rois` reads a float64 label map (the form of a NIfTI label map stored as float) in one parallel pass and casts it to the smallest integer type that holds its labels. A 512x512x200 map with 20 ROIs takes 25 ms instead of 94 ms (resample, intensity and morphology) and 100 MB instead of 450 MB. The checks and errors are the same.

@@ -278,15 +278,13 @@ class TestTextureFeatures(unittest.TestCase):
         )
         self.assertEqual(f_glrlm, {})
 
-        # 2. GLDZM max_dist_val == 0 (Line 1300)
-        # Force distance map to 0 so all zones have 0 distance
-        # Zones with distance 0 are excluded from matrix population (d > 0 check)
-        # So matrix remains empty -> N_zones=0 -> returns {}
+        # 2. A distance mask of zeros leaves every mask voxel outside it: a zone of
+        # distance 0 would leave the GLDZM, so the call raises
         dist_map_zero = np.zeros(self.shape, dtype=int)
-        f_gldzm = texture_module.calculate_gldzm_features(
-            self.data, self.mask, self.n_bins, distance_mask=dist_map_zero
-        )
-        self.assertEqual(f_gldzm, {})
+        with self.assertRaisesRegex(ValueError, "lie outside distance_mask"):
+            texture_module.calculate_gldzm_features(
+                self.data, self.mask, self.n_bins, distance_mask=dist_map_zero
+            )
 
         # 3. GLSZM mask.dtype != uint8 (Line 1392)
         # Use int64 mask
@@ -881,39 +879,57 @@ def _runs_by_loops(
 def test_the_local_kernel_counts_equal_loops_over_the_voxels() -> None:
     # The local kernel (the row passes of the 26 neighbours, the runs of length 1 and 2
     # without a branch) gives the GLCM, GLRLM, NGTDM and NGLDM counts of plain loops over
-    # the voxels: one-voxel, one-slice, thin and holed ROIs, 2 to 12 levels, NGLDM alpha 0
-    # to 2, one table for all directions or one for each, and the families alone.
+    # the voxels: one-voxel, one-slice, thin and holed ROIs, long rows (the row passes of
+    # the GLCM and GLRLM, also on the last rows of the volume), 2 to 70 levels (one GLCM
+    # table from 65 levels), NGLDM alpha 0 to 2, one table for all directions or one for
+    # each, every row segment through the row passes, through the voxel path, or by its
+    # length, and the families alone.
     rng = np.random.default_rng(21)
-    shapes = [(1, 1, 1), (1, 7, 9), (6, 1, 8), (5, 7, 1), (2, 3, 4), (1, 1, 9), (7, 6, 5), (9, 8, 6)]  # fmt: skip
+    shapes = [(1, 1, 1), (1, 7, 9), (6, 1, 8), (5, 7, 1), (2, 3, 4), (1, 1, 9), (7, 6, 5), (9, 8, 6),
+              (2, 3, 24), (1, 1, 40), (4, 5, 17), (3, 20, 20)]  # fmt: skip
     for case in range(3 * len(shapes)):
         shape = shapes[case % len(shapes)]
-        n_bins, alpha = (2, 5, 12)[case % 3], case % 3
+        n_bins, alpha = (2, 5, 12, 70)[case % 4], case % 3
         levels = rng.integers(1, n_bins + 1, shape).astype(np.float64)
         roi = (rng.random(shape) > 0.3).astype(np.uint8)
         roi.flat[0] = 1
+        if shape[2] >= 17:  # long rows: segments of 16 voxels
+            roi[:, :, 4:20] = 1
+        if case == 3 * len(shapes) - 1:  # a row of 16 equal levels: runs of 3 and more
+            levels[0, 0, 4:20] = 1
         planar = (shape[0] == 1, shape[1] == 1, shape[2] == 1)
         used = texture_module._directions(planar)
         glcm, s, n, ngldm = _texture_by_loops(levels, roi, n_bins, 1, 1, 1, alpha)
         runs = _runs_by_loops(levels, roi, n_bins, texture_module.DIRECTIONS_13[used])
         vol, counts = texture_module._texture_volume(levels, roi, n_bins)
-        for merge in (False, True):
-            got = texture_module._local_matrices(
-                vol, counts, n_bins, True, True, True, True, alpha, merge, planar
-            )
-            np.testing.assert_array_equal(got[0].sum(axis=0), glcm)
-            if merge:
-                np.testing.assert_array_equal(got[1][0], runs.sum(axis=0))
-            else:
-                np.testing.assert_array_equal(got[1][used], runs)
-            np.testing.assert_allclose(got[2], s, rtol=1e-12)
-            np.testing.assert_array_equal(got[3], n)
-            np.testing.assert_array_equal(got[4], ngldm)
+        for segment_min in (1, 8, 10**9):
+            for merge in (False, True):
+                with patch.object(texture_module, "_ROW_SEGMENT_MIN", segment_min):
+                    got = texture_module._local_matrices(
+                        vol, counts, n_bins, True, True, True, True, alpha, merge, planar
+                    )
+                np.testing.assert_array_equal(got[0].sum(axis=0), glcm)
+                if merge:
+                    np.testing.assert_array_equal(got[1][0], runs.sum(axis=0))
+                else:
+                    np.testing.assert_array_equal(got[1][used], runs)
+                np.testing.assert_allclose(got[2], s, rtol=1e-12)
+                np.testing.assert_array_equal(got[3], n)
+                np.testing.assert_array_equal(got[4], ngldm)
         # The families alone: GLCM and GLRLM keep the loop over every voxel of a row
         alone = texture_module._local_matrices(
             vol, counts, n_bins, True, True, False, False, alpha, True, planar
         )
         np.testing.assert_array_equal(alone[0][0], glcm)
         np.testing.assert_array_equal(alone[1][0], runs.sum(axis=0))
+        glcm_only = texture_module._local_matrices(
+            vol, counts, n_bins, True, False, False, False, alpha, True, planar
+        )
+        np.testing.assert_array_equal(glcm_only[0][0], glcm)
+        glrlm_only = texture_module._local_matrices(
+            vol, counts, n_bins, False, True, False, False, alpha, True, planar
+        )
+        np.testing.assert_array_equal(glrlm_only[1][0], runs.sum(axis=0))
         for ngtdm, ngldm_on in ((True, False), (False, True)):
             part = texture_module._local_matrices(
                 vol, counts, n_bins, False, False, ngtdm, ngldm_on, alpha, True, planar
@@ -931,18 +947,23 @@ def test_the_local_kernel_twin_gives_the_counts_of_the_parallel_kernel() -> None
     import numba
 
     rng = np.random.default_rng(22)
+    for n_bins in (8, 65):  # two GLCM tables for each thread, then one
+        levels = rng.integers(1, n_bins + 1, (9, 8, 20)).astype(np.float64)
+        roi = (rng.random(levels.shape) > 0.3).astype(np.uint8)
+        roi[:, :, 2:18] = 1
+        vol, counts = texture_module._texture_volume(levels, roi, n_bins)
+        for merge in (False, True):
+            runs = [
+                texture_module._local_matrices(
+                    vol, counts, n_bins, True, True, True, True, 1, merge, parallel=parallel
+                )  # fmt: skip
+                for parallel in (True, False)
+            ]
+            for a, b in zip(*runs, strict=True):
+                assert a.tobytes() == b.tobytes()
     levels = rng.integers(1, 9, (9, 8, 7)).astype(np.float64)
     roi = (rng.random(levels.shape) > 0.3).astype(np.uint8)
     vol, counts = texture_module._texture_volume(levels, roi, 8)
-    for merge in (False, True):
-        runs = [
-            texture_module._local_matrices(
-                vol, counts, 8, True, True, True, True, 1, merge, parallel=parallel
-            )  # fmt: skip
-            for parallel in (True, False)
-        ]
-        for a, b in zip(*runs, strict=True):
-            assert a.tobytes() == b.tobytes()
     twin = texture_module._local_tables_numba_serial
     for limit, serial in ((vol.size + 1, True), (vol.size, numba.get_num_threads() == 1)):
         with (
@@ -951,6 +972,29 @@ def test_the_local_kernel_twin_gives_the_counts_of_the_parallel_kernel() -> None
         ):
             texture_module._local_matrices(vol, counts, 8, True, True, True, True, 1, True)
         assert calls.call_count == int(serial)
+
+
+def test_glcm_tables_alternate_up_to_64_levels() -> None:
+    # Up to 64 levels the GLCM pairs of the even and the odd x of a row go to two tables of
+    # each thread; from 65 levels to one. The tables are 1-based (a row and a column 0 for
+    # the pairs with a voxel outside the ROI); the counts equal plain loops.
+    rng = np.random.default_rng(23)
+    for n_bins, n_alt in ((64, 2), (65, 1)):
+        levels = rng.integers(1, n_bins + 1, (4, 5, 20)).astype(np.float64)
+        roi = (rng.random(levels.shape) > 0.2).astype(np.uint8)
+        roi[:, :, 2:18] = 1
+        vol, counts = texture_module._texture_volume(levels, roi, n_bins)
+        with patch.object(
+            texture_module, "_thread_tables", wraps=texture_module._thread_tables
+        ) as tables:
+            got = texture_module._local_matrices(
+                vol, counts, n_bins, True, False, False, False, 1, True
+            )
+        shape = tables.call_args_list[0].args[0]
+        assert shape[1:] == (n_alt, 1, n_bins + 1, n_bins + 1)
+        np.testing.assert_array_equal(
+            got[0][0], _texture_by_loops(levels, roi, n_bins, 1, 1, 1, 1)[0]
+        )
 
 
 def test_texture_distances_match_loops_over_the_voxels() -> None:
@@ -1162,3 +1206,24 @@ def test_ngtdm_features_equal_the_grid_formulas() -> None:
         )
         for key, value in _ngtdm_reference(s, n).items():
             assert np.isclose(got[key], value, rtol=1e-12, atol=0.0), (case, key)
+
+
+def test_gldzm_needs_the_mask_inside_the_distance_mask() -> None:
+    # A texture voxel outside the distance mask would get distance 0 and its zone would
+    # leave the GLDZM silently: the call raises with the count. A mask inside a larger
+    # distance mask keeps every zone.
+    data = np.full((5, 5, 5), 2, dtype=np.int32)
+    data[0, 0, 0] = 3  # a zone of one voxel at the corner
+    mask = np.ones((5, 5, 5), dtype=np.uint8)
+    distance = np.ones((5, 5, 5), dtype=np.uint8)
+    distance[0, 0, 0] = 0
+    with pytest.raises(ValueError, match="^1 mask voxels lie outside distance_mask"):
+        texture_module.calculate_gldzm_features(data, mask, 3, distance_mask=distance)
+    inner = np.zeros((5, 5, 5), dtype=np.uint8)
+    inner[1:4, 1:4, 1:4] = 1
+    data[1, 1, 1] = 3
+    features = texture_module.calculate_gldzm_features(
+        data, inner, 3, distance_mask=np.ones((5, 5, 5))
+    )
+    zones = texture_module.calculate_glszm_features(data, inner, 3)
+    assert features["zone_percentage_VIWW"] == zones["zone_percentage_P30P"]

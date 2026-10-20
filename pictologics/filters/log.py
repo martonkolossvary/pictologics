@@ -1,6 +1,7 @@
 # pictologics/filters/log.py
 """Laplacian of Gaussian filter implementation (IBSI code: L6PA)."""
 
+import math
 from typing import Any, Optional, Tuple, Union, overload
 
 import numpy as np
@@ -78,6 +79,11 @@ def laplacian_of_gaussian(
         If source_mask is None: Response map with same dimensions as input
         If source_mask provided: Tuple of (response_map, output_valid_mask)
 
+    Raises:
+        ValueError: If `sigma_mm`, an entry of `spacing_mm` or `truncate` is not a finite
+            positive number, or if `padding_value` is not 0 with another boundary than
+            ZERO.
+
     Example:
         Apply LoG filter with 5.0mm sigma on an image with 2.0mm spacing:
 
@@ -107,18 +113,24 @@ def laplacian_of_gaussian(
         - σ is converted from mm to voxels: σ_voxels = σ_mm / spacing_mm
         - Filter size: M = 1 + 2⌊d×σ + 0.5⌋ where d=truncate
         - The kernel should sum to approximately 0 (zero-mean)
-        - A float64 image of 64³ voxels or more runs as one FFT convolution with the same
-          truncated kernels and boundary: about 2 times faster than the separable passes,
-          with values within about 1e-15 of the largest response value.
+        - A float64 image of 131,072 voxels (about 51³) or more runs as one FFT
+          convolution with the same truncated kernels and boundary: about 2 times faster
+          than the separable passes, with values within about 1e-15 of the largest
+          response value.
         - A smaller float64 image runs the passes in float32, as a float32 image does:
           faster, with values within about 1e-7 of the largest response value.
     """
-    # Convert to float32 as required by IBSI
-    image = ensure_float32(image)
-
     # Handle scalar spacing
     if isinstance(spacing_mm, (int, float)):
         spacing_mm = (float(spacing_mm),) * 3
+    for name, value in (("sigma_mm", sigma_mm), ("truncate", truncate)):
+        if not (math.isfinite(value) and value > 0):
+            raise ValueError(f"{name} must be a positive number, not {value!r}")
+    if not all(math.isfinite(s) and s > 0 for s in spacing_mm):
+        raise ValueError(f"spacing_mm must hold positive numbers, not {spacing_mm!r}")
+
+    # Convert to float32 as required by IBSI
+    image = ensure_float32(image)
 
     # Convert sigma from mm to voxels for each axis
     sigma_voxels = tuple(sigma_mm / s for s in spacing_mm)
@@ -147,7 +159,7 @@ def laplacian_of_gaussian(
         # the FFT path of a larger float64 image keeps float64). The response is float32.
         if image.dtype == np.float64 and image.size < _LOG_FFT_MIN:
             image = as_float32(image)
-        result = _gaussian_laplace(image, sigma_voxels, mode, truncate)
+        result = _gaussian_laplace(image, sigma_voxels, mode, truncate, fft_dtype=np.float32)
         if result.dtype == np.float32:
             return result
         return _float32_cut(result, None)

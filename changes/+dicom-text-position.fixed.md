@@ -1,0 +1,1 @@
+A DICOM slice whose ImagePositionPatient is not numeric no longer makes `load_image` and `get_dicom_phases` fail: such a series sorts by the instance numbers, and its origin comes from the first slice that has a position.

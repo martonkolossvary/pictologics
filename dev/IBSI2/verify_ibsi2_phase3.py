@@ -18,6 +18,7 @@ Usage:
 """
 
 import json
+import os
 import resource
 import sys
 import time
@@ -289,6 +290,15 @@ def within(cell: Cell, fraction: float) -> bool:
     return error <= cell.feature_range * fraction if cell.feature_range > 0 else error == 0
 
 
+def _honest_worker_memory() -> None:
+    """On macOS, let the spawned workers return each freed large array to the system at once
+    (MallocLargeCache=0): worker_peak_mb then measures live memory, not the reusable pages
+    that the default malloc keeps (the same 21 scans of a worker read 4,203 MB with them and
+    2,547 MB without). The workers inherit the variable; the scans take about 2 % longer."""
+    if sys.platform == "darwin":
+        os.environ.setdefault("MallocLargeCache", "0")
+
+
 def worker_peak_mb() -> float:
     """Peak resident memory of this process so far, in MB (ru_maxrss is in bytes on macOS)."""
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -523,6 +533,7 @@ class IBSIPhase3Validator:
         # Run in parallel
         from tqdm import tqdm
 
+        _honest_worker_memory()
         with ProcessPoolExecutor(max_workers=self.n_workers, mp_context=WORKERS) as executor:
             futures = {
                 executor.submit(
@@ -653,6 +664,7 @@ class IBSIPhase3Validator:
             (r.patient_id, r.modality, *map(str, self.get_paths(r.patient_id, r.modality)))
             for r in self._patient_results
         ]
+        _honest_worker_memory()
         with ProcessPoolExecutor(max_workers=self.n_workers, mp_context=WORKERS) as executor:
             mirror = {
                 (pid, mod): feats

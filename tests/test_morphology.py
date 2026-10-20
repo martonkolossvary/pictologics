@@ -10,9 +10,11 @@ os.environ["NUMBA_DISABLE_JIT"] = "1"
 warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
 import unittest
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from pictologics.features.morphology import (
     _calculate_ellipsoid_surface_area,
@@ -201,40 +203,33 @@ class TestMorphologyFeatures(unittest.TestCase):
         self.assertIsNone(evals)
         self.assertEqual(features, {})
 
-    def test_convex_hull_few_points(self):
-        # 3 points -> ConvexHull needs 4 for 3D
-        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
-        features, hull = _get_convex_hull_features(verts, 1.0, 1.0, (1.0, 1.0, 1.0))
-        self.assertIsNone(hull)
-        self.assertEqual(features, {})
+    def test_convex_hull_of_one_voxel(self):
+        # One voxel: the hull of its six mesh vertices (an octahedron), both densities and
+        # the diameter 1.0. Points in one plane (Qhull raises): no features and no hull
+        # points. Any other error of the hull step passes to the caller, also through
+        # calculate_morphology_features (no feature is dropped silently).
+        from scipy.spatial import QhullError
 
-    def test_hull_candidates_keep_the_hull(self):
-        # Qhull on the candidate vertices finds the same hull vertices, in the same order,
-        # and the same volume and area (to rounding), as Qhull on all mesh vertices.
-        from scipy.spatial import ConvexHull
-
-        from pictologics.features.morphology import _hull_candidates_numba
-
-        rng = np.random.default_rng(2)
-        box = np.zeros((9, 10, 8))
-        box[2:7, 3:8, 2:6] = 1  # flat faces: many coplanar vertices
-        blob = (rng.random((9, 10, 8)) < 0.5).astype(float)
-        blob[[0, -1]] = blob[:, [0, -1]] = blob[:, :, [0, -1]] = 0
-        for arr, spacing in ((box, (1.0, 1.0, 1.0)), (blob, (0.8, 0.9, 2.5))):
-            _, verts, _ = _get_mesh_features(self._create_image(arr, spacing))
-            candidates = _hull_candidates_numba(verts, np.asarray(spacing))
-            self.assertLess(len(candidates), len(verts))
-            full, reduced = ConvexHull(verts), ConvexHull(verts[candidates])
-            np.testing.assert_array_equal(reduced.points[reduced.vertices], verts[full.vertices])
-            self.assertAlmostEqual(reduced.volume, full.volume, delta=1e-12 * full.volume)
-            self.assertAlmostEqual(reduced.area, full.area, delta=1e-12 * full.area)
-
-    def test_convex_hull_coplanar(self):
-        # 4 points on a plane -> Volume 0, scipy might error or return flat hull.
-        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=float)
-        features, hull = _get_convex_hull_features(verts, 1.0, 1.0, (1.0, 1.0, 1.0))
-        # Should catch exception or return None
-        self.assertIsNone(hull)
+        padded = np.pad(np.ones((1, 1, 1), dtype=np.uint8), 1)
+        args = (padded, np.zeros(3), 1.0, 1.0, (1.0, 1.0, 1.0))
+        features, hull = _get_convex_hull_features(*args)
+        self.assertEqual(hull.shape, (6, 3))
+        self.assertEqual(features["maximum_3d_diameter_L0JK"], 1.0)
+        self.assertIn("volume_density_convex_hull_R3ER", features)
+        self.assertIn("area_density_convex_hull_7T7F", features)
+        no_hull = (False, np.zeros(0, dtype=np.int64), np.zeros((0, 3), dtype=np.int64))
+        with (
+            patch("pictologics.features.morphology._exact_hull_numba", return_value=no_hull),
+            patch("pictologics.features.morphology.ConvexHull", side_effect=QhullError("flat")),
+        ):
+            self.assertEqual(_get_convex_hull_features(*args), ({}, None))
+        kernel = "pictologics.features.morphology._max_pairwise_distance_serial_numba"
+        with patch(kernel, side_effect=RuntimeError("diameter")):
+            with self.assertRaisesRegex(RuntimeError, "diameter"):
+                _get_convex_hull_features(*args)
+            mask = self._create_image(np.pad(np.ones((3, 3, 3), dtype=np.uint8), 1))
+            with self.assertRaisesRegex(RuntimeError, "diameter"):
+                calculate_morphology_features(mask)
 
     def test_bounding_box_empty(self):
         features = _get_bounding_box_features(np.array([]), None, 1.0, 1.0)
@@ -267,6 +262,7 @@ class TestMorphologyFeatures(unittest.TestCase):
                     # offset 1 and spacing 1: the vertices in padded voxel units, as PyMCubes
                     padded = np.pad(ref[f"mask_{i}"], 1)
                     verts, faces = _mesh(padded, np.ones(3), np.ones(3), parallel)
+                    self.assertEqual(faces.dtype, np.int32)
                     np.testing.assert_array_equal(verts, ref[f"verts_{i}"])
                     np.testing.assert_array_equal(faces, ref[f"faces_{i}"])
 
@@ -289,6 +285,7 @@ class TestMorphologyFeatures(unittest.TestCase):
             ):
                 mesh = morphology_module._mesh(padded, np.full(3, 0.5), np.array([0.7, 0.8, 1.5]))
             self.assertEqual(parallel.call_count, calls)
+            self.assertEqual(mesh[1].dtype, np.int32)
             for got, expected in zip(mesh, serial, strict=True):
                 np.testing.assert_array_equal(got, expected)
 
@@ -378,7 +375,7 @@ class TestMorphologyFeatures(unittest.TestCase):
         # Faces: calculate by hand logic or just checking it runs
         # Correct faces for outward normals... just testing it runs without error
         # for regression on non-crash in parallel.
-        faces = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], dtype=int)
+        faces = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], dtype=np.int32)
         area, vol = _mesh_area_volume_numba(verts, faces)
         self.assertGreater(area, 0.0)
         self.assertGreater(vol, 0.0)
@@ -401,7 +398,7 @@ class TestMorphologyFeatures(unittest.TestCase):
         verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
         # 0,1,2 is counter-clockwise. Vectorized formula might produce -vol.
         # Swapping nodes 1 and 2 to invert orientation
-        faces = np.array([[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]], dtype=int)
+        faces = np.array([[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]], dtype=np.int32)
         area, vol = _mesh_area_volume_numba(verts, faces)
         self.assertGreater(vol, 0.0)
 
@@ -411,8 +408,8 @@ class TestMorphologyFeatures(unittest.TestCase):
         # A set of points that converges slowly.
         points = np.random.rand(100, 3)
 
-        # Test it runs without error with low tolerance
-        A, c = _mvee_khachiyan_numba(points, tol=1e-7)
+        # No stop (eps 0) for 60 iterations: the full recompute at iteration 50 runs
+        A, c = _mvee_khachiyan_numba(points, eps=0.0, max_iter=60)
         self.assertIsNotNone(A)
 
     def test_mvee_features_valid(self):
@@ -444,12 +441,14 @@ class TestMorphologyFeatures(unittest.TestCase):
         mock_instance.area = 456.0
         mock_hull_cls.return_value = mock_instance
 
-        verts = np.random.rand(8, 3)
-        mock_instance.points = verts
+        mock_instance.points = np.random.rand(8, 3)
+        padded = np.pad(np.ones((2, 2, 2), dtype=np.uint8), 1)
         no_hull = (False, np.zeros(0, dtype=np.int64), np.zeros((0, 3), dtype=np.int64))
         with patch("pictologics.features.morphology._exact_hull_numba", return_value=no_hull):
             # No exact hull (as for points in one plane): Qhull runs, here a mock
-            features, hull = _get_convex_hull_features(verts, 1.0, 1.0, (1.0, 1.0, 1.0))
+            features, hull = _get_convex_hull_features(
+                padded, np.zeros(3), 1.0, 1.0, (1.0, 1.0, 1.0)
+            )
 
         self.assertIsNotNone(hull)
         self.assertEqual(features["volume_density_convex_hull_R3ER"], 1.0 / 123.0)
@@ -479,7 +478,7 @@ class TestMorphologyFeatures(unittest.TestCase):
             return original_inv(a)
 
         with patch("numpy.linalg.inv", side_effect=side_effect_inv):
-            A, c = _mvee_khachiyan_numba(points, tol=1e-1)
+            A, c = _mvee_khachiyan_numba(points, eps=1e-1)
             self.assertIsNone(A)
 
         # 2. Recompute Inversion Failure (Line 323)
@@ -498,8 +497,8 @@ class TestMorphologyFeatures(unittest.TestCase):
             return original_inv(a)
 
         with patch("numpy.linalg.inv", side_effect=side_effect_inv_recompute):
-            # tol=0.0 forces maximum iterations
-            A, c = _mvee_khachiyan_numba(points_sphere, tol=0.0)
+            # eps=0.0 forces maximum iterations
+            A, c = _mvee_khachiyan_numba(points_sphere, eps=0.0)
             self.assertIsNone(A)
             self.assertIsNone(c)
 
@@ -611,26 +610,37 @@ def test_the_morphology_kernels_take_their_serial_twins_below_their_gates() -> N
     assert large == small
 
 
-def _khachiyan_reference(points: np.ndarray, tol: float) -> tuple[np.ndarray, np.ndarray, int]:
-    """The steps of the MVEE kernel with the quadratic form q^T invX q of numpy."""
+def _khachiyan_reference(points: np.ndarray, eps: float) -> tuple[np.ndarray, np.ndarray, int]:
+    """The steps of the MVEE kernel (Wolfe-Atwood: toward the largest Mahalanobis value or
+    away from the smallest weighted one) with the quadratic form q^T invX q of numpy."""
     n, d = points.shape
+    d1 = d + 1
     q = np.column_stack([points, np.ones(n)])
     u = np.full(n, 1.0 / n)
     inv = np.linalg.inv(q.T @ q / n)
-    err, count = 1.0, 0
-    while err > tol and count < 1000:
+    count = 0
+    while count < 200000:
         g = np.einsum("kr,rc,kc->k", q, inv, q)
         j = int(np.argmax(g))
-        step = (g[j] - (d + 1)) / ((d + 1) * (g[j] - 1))
-        err = step * np.sqrt(np.sum(u**2) - u[j] ** 2 + (1 - u[j]) ** 2)
+        weighted = np.flatnonzero(u > 0)
+        jm = int(weighted[np.argmin(g[weighted])])
+        if g[j] / d1 - 1 <= eps and 1 - g[jm] / d1 <= eps:
+            break
+        if g[j] / d1 - 1 >= 1 - g[jm] / d1:
+            step, value = (g[j] - d1) / (d1 * (g[j] - 1)), g[j]
+        else:
+            limit = u[jm] / (1 - u[jm])
+            step = limit if g[jm] <= 1 else min((d1 - g[jm]) / (d1 * (g[jm] - 1)), limit)
+            step, value, j = -step, g[jm], jm
+        new = u[j] * (1 - step) + step
         u *= 1 - step
-        u[j] += step
+        u[j] = max(new, 0.0)
         if count % 50 == 0 and count > 0:
             inv = np.linalg.inv((q * u[:, None]).T @ q)
         else:
             v = inv @ q[j]
             alpha = step / (1 - step)
-            inv = (inv - alpha / (1 + alpha * g[j]) * np.outer(v, v)) / (1 - step)
+            inv = (inv - alpha / (1 + alpha * value) * np.outer(v, v)) / (1 - step)
         count += 1
     c = points.T @ u
     cov = (points * u[:, None]).T @ points - np.outer(c, c)
@@ -643,56 +653,195 @@ def test_the_mvee_kernel_takes_the_steps_of_the_quadratic_form() -> None:
     rng = np.random.default_rng(21)
     for case in range(40):
         points = rng.normal(0.0, 1.0, (int(rng.integers(8, 40)), 3)) * rng.uniform(0.5, 3.0, 3)
-        tol = 0.001 if case < 4 else 0.01  # the default, and fewer steps (Python is slow)
-        A, c = _mvee_khachiyan_numba(points, tol)
-        A_ref, c_ref, _ = _khachiyan_reference(points, tol)
+        eps = 1e-3 if case < 4 else 1e-2  # the default, and fewer steps (Python is slow)
+        A, c = _mvee_khachiyan_numba(points, eps)
+        A_ref, c_ref, _ = _khachiyan_reference(points, eps)
         np.testing.assert_allclose(A, A_ref, rtol=1e-9, atol=1e-12)
         np.testing.assert_allclose(c, c_ref, rtol=1e-9, atol=1e-12)
 
 
-def test_the_hull_candidates_keep_every_hull_vertex() -> None:
-    # The candidates are the line ends that are 2-D hull vertices in their three axis planes:
-    # on 40 masks (blobs, boxes, one-voxel plates and lines, anisotropic spacing), Qhull on
-    # the candidates finds the hull vertices and the volume and area of Qhull on all mesh
-    # vertices, from fewer points than the line ends.
+def _hull_test_roi(rng: np.random.Generator, case: int) -> np.ndarray:
+    """A blob, a box, a one-voxel plate or a line of voxels (by case % 4), never empty."""
     from scipy.ndimage import gaussian_filter
+
+    shape = tuple(int(v) for v in rng.integers(6, 16, 3))
+    kind = case % 4
+    lo = [int(rng.integers(1, n // 2)) for n in shape]
+    hi = [int(rng.integers(n // 2 + 1, n - 1)) for n in shape]
+    if kind == 0:
+        roi = gaussian_filter(rng.random(shape), 1.5) > 0.5
+    else:
+        roi = np.zeros(shape, dtype=bool)
+        if kind == 2:
+            hi[case % 3] = lo[case % 3] + 1
+        elif kind == 3:
+            for a in range(3):
+                if a != case % 3:
+                    hi[a] = lo[a] + 1
+        roi[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]] = True
+    roi[lo[0], lo[1], lo[2]] = True
+    return roi
+
+
+def test_the_hull_lattice_keeps_every_hull_vertex() -> None:
+    # On 40 masks (blobs, boxes, one-voxel plates and lines, anisotropic spacing) the exact
+    # hull on the candidate lattice has the vertex set of Qhull on all mesh vertices, and the
+    # candidate points are mesh vertices (the same floats), also with a grid offset. A sphere
+    # (more than 64 voxel candidates: the plane filter runs first) and a 3x3x3 cube (fewer)
+    # take both paths of the lattice kernel.
     from scipy.spatial import ConvexHull
 
+    from pictologics.features._utils import compute_nonzero_bbox
     from pictologics.features.morphology import (
-        _hull_candidates_numba,
-        _line_end_candidates_numba,
+        _exact_hull_numba,
+        _hull_lattice_serial_numba,
+        _padded_roi,
+        _voxel_hull_candidates_numba,
     )
+
+    def check(roi: np.ndarray, spacing: tuple[float, ...], grid: tuple[int, int, int]) -> int:
+        mask = Image(roi.astype(np.uint8), spacing, (0.0, 0.0, 0.0))
+        verts = _get_mesh_features(mask, grid_offset=grid)[1]
+        bbox = compute_nonzero_bbox(roi)
+        offset = np.array([b.start + g for b, g in zip(bbox, grid, strict=True)], dtype=float)
+        padded = _padded_roi(roi[bbox].astype(np.uint8))
+        lattice, points = _hull_lattice_serial_numba(padded, offset, np.asarray(spacing))
+        found, vertices, _ = _exact_hull_numba(lattice)
+        full = ConvexHull(verts)
+        assert found
+        assert {tuple(v) for v in points[vertices]} == {tuple(v) for v in verts[full.vertices]}
+        assert {tuple(v) for v in points} <= {tuple(v) for v in verts}
+        rows = _row_ends_of(padded)
+        return int(_voxel_hull_candidates_numba(*rows).shape[0])
 
     rng = np.random.default_rng(22)
     for case in range(40):
-        shape = tuple(int(v) for v in rng.integers(6, 16, 3))
-        kind = case % 4
-        lo = [int(rng.integers(1, n // 2)) for n in shape]
-        hi = [int(rng.integers(n // 2 + 1, n - 1)) for n in shape]
-        if kind == 0:  # a blob
-            roi = gaussian_filter(rng.random(shape), 1.5) > 0.5
-        else:
-            roi = np.zeros(shape, dtype=bool)
-            if kind == 2:  # a one-voxel plate
-                hi[case % 3] = lo[case % 3] + 1
-            elif kind == 3:  # a line of voxels
-                for a in range(3):
-                    if a != case % 3:
-                        hi[a] = lo[a] + 1
-            roi[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]] = True
-        roi[lo[0], lo[1], lo[2]] = True  # never empty
         spacing = tuple(float(v) for v in rng.uniform(0.5, 2.0, 3))
-        mask = Image(roi.astype(np.uint8), spacing, (0.0, 0.0, 0.0))
-        verts = _get_mesh_features(mask)[1]
-        grid_spacing = np.asarray(spacing, dtype=np.float64)
-        candidates = _hull_candidates_numba(verts, grid_spacing)
-        assert len(candidates) <= len(_line_end_candidates_numba(verts, grid_spacing)[0])
-        full, kept = ConvexHull(verts), ConvexHull(verts[candidates])
-        assert {tuple(v) for v in full.points[full.vertices]} == {
-            tuple(v) for v in kept.points[kept.vertices]
-        }
-        assert abs(kept.volume / full.volume - 1) < 1e-12
-        assert abs(kept.area / full.area - 1) < 1e-12
+        grid = (12, 34, 56) if case % 10 == 0 else (0, 0, 0)
+        check(_hull_test_roi(rng, case), spacing, grid)
+    sphere = (np.indices((15, 15, 15)) - 7.0) ** 2
+    assert check(sphere.sum(axis=0) <= 36.0, (0.7, 0.7, 1.25), (0, 0, 0)) > 64
+    cube = np.zeros((5, 5, 5), dtype=bool)
+    cube[1:4, 1:4, 1:4] = True
+    assert check(cube, (1.0, 1.0, 1.0), (0, 0, 0)) <= 64
+
+
+def _row_ends_of(padded: np.ndarray) -> tuple[np.ndarray, ...]:
+    """The six row-end tables of _row_ends_numba, from numpy (size and -1 for an empty row)."""
+    inside = padded != 0
+    tables = []
+    for axis in (2, 1, 0):
+        size = padded.shape[axis]
+        has = inside.any(axis=axis)
+        first = np.where(has, inside.argmax(axis=axis), size)
+        last = np.where(has, size - 1 - np.flip(inside, axis=axis).argmax(axis=axis), -1)
+        tables += [first.astype(np.int32), last.astype(np.int32)]
+    return tuple(tables)
+
+
+def test_the_row_ends() -> None:
+    # The row ends of the kernel are the numpy ends for 1, 2, 3 and 20 chunks of x planes
+    # (20 chunks of 11 planes: empty chunks) and for the serial twin.
+    from pictologics.features import morphology as module
+
+    padded = np.pad((np.random.default_rng(45).random((9, 10, 8)) < 0.3).astype(np.uint8), 1)
+    expected = _row_ends_of(padded)
+    runs = [(module._row_ends_numba, n) for n in (1, 2, 3, 20)]
+    for kernel, n in [*runs, (module._row_ends_numba_serial, 1)]:
+        for got, want in zip(kernel(padded, n), expected, strict=True):
+            assert got.dtype == np.int32
+            np.testing.assert_array_equal(got, want)
+
+
+def test_the_voxel_candidates_end_their_rows() -> None:
+    # The voxel candidates are the voxels that end each of their three rows, in row order:
+    # a random mask, a checkerboard, and a full box (its 8 corners).
+    from pictologics.features.morphology import _voxel_hull_candidates_numba
+
+    board = np.pad((np.indices((5, 6, 7)).sum(axis=0) % 2).astype(np.uint8), 1)
+    full = np.pad(np.ones((4, 5, 6), dtype=np.uint8), 1)
+    blob = np.pad((np.random.default_rng(46).random((6, 7, 8)) < 0.4).astype(np.uint8), 1)
+    for padded in (board, full, blob):
+        fk, lk, fj, lj, fi, li = rows = _row_ends_of(padded)
+        expected = [
+            (i, j, k)
+            for i, j, k in np.argwhere(padded != 0)
+            if k in (fk[i, j], lk[i, j]) and j in (fj[i, k], lj[i, k]) and i in (fi[j, k], li[j, k])
+        ]
+        got = _voxel_hull_candidates_numba(*rows)
+        assert got.dtype == np.int32 and [tuple(v) for v in got] == expected
+    assert _voxel_hull_candidates_numba(*_row_ends_of(full)).shape[0] == 8
+
+
+def test_the_mesh_candidates_are_sorted_in_mesh_order() -> None:
+    # With every ROI voxel as a candidate, the mesh candidates are all mesh vertices, in the
+    # order of the marching cubes mesh.
+    from pictologics.features.morphology import _mesh, _mesh_hull_candidates_numba
+
+    padded = np.pad((np.random.default_rng(47).random((6, 7, 5)) < 0.5).astype(np.uint8), 1)
+    lattice = _mesh_hull_candidates_numba(padded, np.argwhere(padded != 0).astype(np.int32))
+    verts, _ = _mesh(padded, np.zeros(3), np.ones(3))
+    np.testing.assert_array_equal(0.5 * (lattice - 1.0), verts)
+
+
+def test_the_hull_row_ends_run_in_parallel_above_the_gate() -> None:
+    # From _ROW_ENDS_PARALLEL_MIN voxels and _ROW_ENDS_PLANES_PER_CHUNK planes per thread on,
+    # the row ends run in parallel (one chunk per thread); with `serial`, one thread or a
+    # thin box, the serial lattice kernel runs. Both give the same features.
+    from pictologics.features import morphology as module
+
+    cube = np.zeros((10, 9, 8), dtype=np.uint8)
+    cube[2:8, 1:7, 2:6] = 1
+    padded = np.pad(cube, 1)
+
+    def calls(threads: int, per_chunk: int, serial: bool) -> tuple[tuple[int, int], Any]:
+        with (
+            patch.object(module, "get_num_threads", return_value=threads),
+            patch.object(module, "_ROW_ENDS_PARALLEL_MIN", 1),
+            patch.object(module, "_ROW_ENDS_PLANES_PER_CHUNK", per_chunk),
+            patch.object(module, "_row_ends_numba", wraps=module._row_ends_numba) as rows,
+            patch.object(
+                module, "_hull_lattice_serial_numba", wraps=module._hull_lattice_serial_numba
+            ) as lattice,
+        ):
+            features = module._get_convex_hull_features(
+                padded, np.zeros(3), 144.0, 120.0, (1.0, 1.0, 1.0), serial
+            )
+        return (rows.call_count, lattice.call_count), features
+
+    parallel, features = calls(3, 0, False)
+    assert parallel == (1, 0)
+    for case in ((3, 0, True), (1, 0, False), (3, 100, False)):
+        counts, other = calls(*case)
+        assert counts == (0, 1) and other[0] == features[0]
+
+
+def test_the_hull_volume_adds_from_a_hull_vertex() -> None:
+    # The volume adds the tetrahedra from a hull vertex: a unit cube far from the origin has
+    # the volume 1.0 and the area 6.0 exactly. No triangles: zero area and volume.
+    from pictologics.features.morphology import _exact_hull_numba, _hull_area_volume_numba
+
+    corners = np.array([[x, y, z] for x in (0, 2) for y in (0, 2) for z in (0, 2)], dtype=np.int64)
+    found, _, triangles = _exact_hull_numba(corners)
+    points = 0.5 * corners + np.array([1e5, 2e5, 3e5])
+    assert found and _hull_area_volume_numba(points, triangles) == (6.0, 1.0)
+    assert _hull_area_volume_numba(points, np.zeros((0, 3), dtype=np.int64)) == (0.0, 0.0)
+
+
+def test_a_mesh_of_too_many_vertices_raises() -> None:
+    # The faces hold vertex numbers as int32: a mesh of more than 2^31 - 1 vertices raises.
+    from pictologics.features import morphology as module
+
+    padded = np.pad(np.ones((2, 2, 2), dtype=np.uint8), 1)
+    with (
+        patch.object(
+            module,
+            "_mc_counts_numba_serial",
+            side_effect=lambda p, e, t, n_v, n_f: n_v.fill(2**31),
+        ),
+        pytest.raises(ValueError, match="2\\^31 - 1 vertices"),
+    ):
+        module._mesh(padded, np.zeros(3), np.ones(3))
 
 
 def test_the_exact_hull_has_the_vertices_of_qhull() -> None:
@@ -706,7 +855,7 @@ def test_the_exact_hull_has_the_vertices_of_qhull() -> None:
     from pictologics.features.morphology import (
         _exact_hull_numba,
         _hull_area_volume_numba,
-        _hull_candidates_numba,
+        _hull_lattice_serial_numba,
     )
 
     rng = np.random.default_rng(24)
@@ -721,12 +870,9 @@ def test_the_exact_hull_has_the_vertices_of_qhull() -> None:
                 roi[: shape[0] // 2] = roi[shape[0] // 2 + 1 :] = False
         roi[2, 2, 2] |= case % 3 == 0  # a blob is never empty
         spacing = np.asarray(rng.choice([0.39, 0.7, 1.0, 1.25, 3.0], 3), dtype=np.float64)
-        mask = Image(roi.astype(np.uint8), tuple(spacing), (0.0, 0.0, 0.0))
-        verts = _get_mesh_features(mask)[1]
-        points = verts[_hull_candidates_numba(verts, spacing)]
-        found, vertices, triangles = _exact_hull_numba(
-            np.rint(2.0 * points / spacing).astype(np.int64)
-        )
+        padded = np.pad(roi.astype(np.uint8), 1)
+        lattice, points = _hull_lattice_serial_numba(padded, np.zeros(3), spacing)
+        found, vertices, triangles = _exact_hull_numba(lattice)
         qhull = ConvexHull(points)
         assert found and np.array_equal(vertices, qhull.vertices)
         area, volume = _hull_area_volume_numba(points, triangles)
@@ -746,10 +892,11 @@ def test_the_exact_hull_has_the_vertices_of_qhull() -> None:
     )
     found, vertices, _ = _exact_hull_numba(cube.astype(np.int64))
     assert found and vertices.tolist() == [0, 2, 3, 4, 5, 6, 7, 8]
-    exact, exact_points = _get_convex_hull_features(verts, 1.0, 1.0, tuple(spacing))
+    hull_input = (padded, np.zeros(3), 1.0, 1.0, tuple(spacing))
+    exact, exact_points = _get_convex_hull_features(*hull_input)
     no_hull = (False, np.zeros(0, dtype=np.int64), np.zeros((0, 3), dtype=np.int64))
     with patch("pictologics.features.morphology._exact_hull_numba", return_value=no_hull):
-        by_qhull, qhull_points = _get_convex_hull_features(verts, 1.0, 1.0, tuple(spacing))
+        by_qhull, qhull_points = _get_convex_hull_features(*hull_input)
     np.testing.assert_array_equal(exact_points, qhull_points)
     assert exact.keys() == by_qhull.keys()
     for key, value in exact.items():
@@ -758,3 +905,151 @@ def test_the_exact_hull_has_the_vertices_of_qhull() -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_the_moments_kernel_sums_each_row() -> None:
+    # The moments of the row form are the numpy sums over the ROI voxels, exactly: the
+    # count and the nine sums of a random uint8 box, for the kernel and its serial twin.
+    from pictologics.features import morphology as module
+
+    box = np.random.default_rng(41).integers(0, 4, (9, 10, 8)).astype(np.uint8)
+    i, j, k = (axis.astype(np.float64) for axis in np.nonzero(box))
+    expected = (
+        i.size, i.sum(), j.sum(), k.sum(), (i * i).sum(), (j * j).sum(), (k * k).sum(),
+        (i * j).sum(), (i * k).sum(), (j * k).sum(),
+    )  # fmt: skip
+    for kernel in (
+        module._accumulate_moments_from_mask_numba,
+        module._accumulate_moments_from_mask_numba_serial,
+    ):
+        assert tuple(kernel(box)) == expected
+
+
+def test_the_column_stats_are_those_of_numpy() -> None:
+    # The scalar column stats give numpy's minimum, maximum and mean (rows added in order).
+    from pictologics.features.morphology import _column_stats_numba
+
+    rng = np.random.default_rng(42)
+    for n in (1, 2, 7, 1000):
+        points = rng.normal(0.0, 10.0, (n, 3))
+        lo, hi, mean = _column_stats_numba(points)
+        assert np.array_equal(lo, points.min(axis=0)) and np.array_equal(hi, points.max(axis=0))
+        assert np.array_equal(mean, points.mean(axis=0))
+
+
+def test_the_diameter_takes_the_serial_kernel_below_its_gate() -> None:
+    # Below _DIAMETER_PARALLEL_MIN hull vertices, with one thread, or with `serial`, the
+    # maximum diameter comes from the serial kernel; else from the parallel one.
+    from pictologics.features import _utils
+    from pictologics.features import morphology as module
+
+    cube = np.zeros((8, 8, 8), dtype=np.uint8)
+    cube[1:7, 1:7, 1:7] = 1
+    padded = np.pad(cube, 1)
+
+    def calls(gate: int, threads: int, serial: bool) -> tuple[int, int]:
+        with (
+            patch.object(module, "_DIAMETER_PARALLEL_MIN", gate),
+            patch.object(_utils, "get_num_threads", return_value=threads),
+            patch.object(
+                module, "_max_pairwise_distance_numba", wraps=module._max_pairwise_distance_numba
+            ) as parallel,
+            patch.object(
+                module,
+                "_max_pairwise_distance_serial_numba",
+                wraps=module._max_pairwise_distance_serial_numba,
+            ) as serial_kernel,
+        ):
+            module._get_convex_hull_features(padded, np.zeros(3), 216.0, 216.0, (1.0,) * 3, serial)
+        return parallel.call_count, serial_kernel.call_count
+
+    assert calls(module._DIAMETER_PARALLEL_MIN, 4, False) == (0, 1)
+    assert calls(2, 4, False) == (1, 0)
+    assert calls(2, 1, False) == (0, 1)
+    assert calls(2, 4, True) == (0, 1)
+
+
+def test_the_parallel_marching_cubes_in_any_number_of_blocks() -> None:
+    # The parallel marching cubes give the serial mesh for any number of blocks: one block,
+    # blocks after the first (they count the plane before them again), and more blocks than
+    # planes (empty blocks).
+    from pictologics.features import morphology as module
+
+    rng = np.random.default_rng(43)
+    padded = np.pad((rng.random((7, 8, 6)) < 0.5).astype(np.uint8), 1)
+    offset, spacing = np.full(3, 0.5), np.array([0.7, 0.8, 1.5])
+    expected = module._mesh(padded, offset, spacing, False)
+    for n_chunks in (1, 2, 3, 7, 50):
+        with patch.object(module, "get_num_threads", return_value=n_chunks):
+            mesh = module._mesh(padded, offset, spacing, True)
+        for got, want in zip(mesh, expected, strict=True):
+            np.testing.assert_array_equal(got, want)
+
+
+def test_the_mvee_of_few_points_encloses_them() -> None:
+    # The MVEE takes four points at a time and then the rest: for 4 to 9 points (every
+    # remainder), the ellipsoid encloses every point (to the eps of the stop rule).
+    rng = np.random.default_rng(44)
+    for n in (4, 5, 6, 7, 8, 9):
+        points = rng.normal(0.0, 1.0, (n, 3))
+        A, c = _mvee_khachiyan_numba(points)
+        assert A is not None and c is not None
+        d = points - c
+        assert np.all(np.einsum("ki,ij,kj->k", d, A, d) <= 1.0 + 2e-3)
+
+
+def test_the_padded_roi_is_one_copy_with_a_zero_border() -> None:
+    # _padded_roi keeps the values of a uint8 box and gives another type as box != 0 (a NaN
+    # is ROI), with a zero border; the mesh from it equals the mesh of the mask, and an
+    # int16 mask gives the features of the same ROI as uint8.
+    from pictologics.features.morphology import _padded_roi
+
+    box = np.zeros((3, 4, 5), dtype=np.uint8)
+    box[1, 2, 3], box[2, 0, 0] = 7, 255
+    padded = _padded_roi(box)
+    assert padded.shape == (5, 6, 7) and padded.dtype == np.uint8
+    assert np.array_equal(padded[1:-1, 1:-1, 1:-1], box)
+    inner = np.zeros(padded.shape, dtype=bool)
+    inner[1:-1, 1:-1, 1:-1] = True
+    assert not padded[~inner].any()
+    values = np.zeros((3, 4, 5))
+    values[0, 1, 2], values[1, 1, 1], values[2, 3, 4] = -3.0, np.nan, 0.5
+    signed_box = np.zeros((3, 4, 5), dtype=np.int16)
+    signed_box[0, 1, 2], signed_box[2, 3, 4] = -3, 5
+    for other in (values != 0, signed_box, values):  # bool, int16, float64 with a NaN
+        inside = _padded_roi(other)[1:-1, 1:-1, 1:-1]
+        assert np.array_equal(inside, (other != 0).astype(np.uint8))
+    roi = np.zeros((10, 10, 10), dtype=np.uint8)
+    roi[2:7, 3:8, 2:9] = 1
+    roi[4, 4, 1] = 1
+    mask = Image(roi, (1.0, 0.9, 1.1), (0.0, 0.0, 0.0))
+    bbox = (slice(2, 7), slice(3, 8), slice(1, 9))
+    plain = _get_mesh_features(mask, roi_bbox=bbox)
+    given = _get_mesh_features(mask, roi_bbox=bbox, padded=_padded_roi(roi[bbox]))
+    assert plain[0] == given[0]
+    for got, want in zip(given[1:], plain[1:], strict=True):
+        np.testing.assert_array_equal(got, want)
+    signed = Image(roi.astype(np.int16) * -2, mask.spacing, mask.origin)
+    assert calculate_morphology_features(signed) == calculate_morphology_features(mask)
+
+
+def test_the_mvee_stops_on_the_mahalanobis_gap() -> None:
+    # The away steps drop a point inside the ellipsoid: the 8 corners of a cube and its
+    # centre give the sphere through the corners (A = I / 3, c = 0), and every corner
+    # lies within 1 + eps. The volume of a random set is that of a converged fit within
+    # about eps. One iteration (max_iter 1) still gives an ellipsoid.
+    corners = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)], float)
+    points = np.vstack([corners, [[0.0, 0.0, 0.0]]])
+    A, c = _mvee_khachiyan_numba(points)
+    assert A is not None and c is not None
+    np.testing.assert_allclose(A, np.eye(3) / 3.0, rtol=0.0, atol=2e-3)
+    np.testing.assert_allclose(c, 0.0, atol=1e-5)
+    d = corners - c
+    assert np.all(np.einsum("ki,ij,kj->k", d, A, d) <= 1.0 + 2e-3)
+    blob = np.random.default_rng(54).normal(size=(20, 3)) * np.array([1.0, 2.0, 0.5])
+    A_fit, _ = _mvee_khachiyan_numba(blob)
+    A_best, _ = _mvee_khachiyan_numba(blob, eps=1e-8)
+    assert A_fit is not None and A_best is not None
+    volume_fit, volume_best = (np.linalg.det(m) ** -0.5 for m in (A_fit, A_best))
+    assert abs(volume_fit / volume_best - 1.0) < 2e-3
+    assert _mvee_khachiyan_numba(blob, max_iter=1)[0] is not None

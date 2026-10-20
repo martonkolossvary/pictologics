@@ -14,8 +14,8 @@ A filtered configuration usually has these steps:
 
 Every filter returns a float32 response map, half the memory of float64. Two rules set the type of the filter passes:
 
-- **Mean, Gaussian, Laws and wavelets**: the passes run in float32 for every image. A float32 pass moves half the bytes, and scipy still sums each line in double. For a float64 image, the response changes by the float32 rounding of the passes: about 1e-7 of the largest response.
-- **LoG, Simoncelli, Riesz and Gabor**: a float64 image stays float64 in the passes and the FFTs, and the last step writes float32. A float64 image below 64³ voxels runs its LoG passes in float32, as they are faster there. The normalized convolution of a source mask also keeps a float64 image in float64.
+- **Mean, Gaussian, Laws and wavelets**: the passes run in float32 for every image. A float32 pass moves half the bytes, and the passes still sum each line in double (numba kernels with the arithmetic of scipy). The mean filter and the Laws energy sum each window on its own: the exact mean of the float32 values, so a value does not depend on where the image starts. For a float64 image, the response changes by the float32 rounding of the passes: about 1e-7 of the largest response.
+- **LoG, Simoncelli, Riesz and Gabor**: a float64 image stays float64 in the passes and the FFTs, and the last step writes float32. A float64 image below 131,072 voxels (about 51³) runs its LoG passes in float32, as they are faster there. The normalized convolution of a source mask also keeps a float64 image in float64.
 
 ## Filter Reference
 
@@ -56,7 +56,7 @@ A filter reads voxels past the image edge. The boundary sets their values:
     }}
     ```
 
-    Every filter takes `padding_value`. A value other than 0 needs the `"constant"` (or `"zero"`) boundary; with another boundary, the filter raises `ValueError`. A spatial filter gives the response of the image padded with the constant as far as the filter reads. A Laws energy step then pads the response with 0.
+    Every filter takes `padding_value`. A value other than 0 needs the `"constant"` (or `"zero"`) boundary; with another boundary, the filter raises `ValueError`. A spatial filter gives the response of the image padded with the constant as far as the filter reads (no padded copy is made). A Laws energy step then pads the response with 0.
 
 ### FFT Filter Boundaries
 
@@ -75,7 +75,7 @@ The Simoncelli and Riesz filters work in the Fourier domain, which is periodic:
 
 - **Checks**: `add_config` checks every filter step. An unknown parameter gets a hint (`"kernels"` gives "did you mean 'kernel'?"). A missing `sigma_mm`, `lambda_mm` or `order` is an error, and so is a bad wavelet level or decomposition, a bad Riesz order, an unknown Gabor `response`, or a `padding_value` without the constant boundary.
 - **FBS after a filter**: the response has other units than the image, so a filter step cancels the FBS start of an earlier `resegment` step. An FBS `discretise` step after a filter needs `min_val`, or a `resegment` step after the filter (IBSI asks for a fixed start).
-- **The region around the ROI**: when no later step reads the image away from the ROI, the mean, Gaussian, LoG, Laws, wavelet and Gabor filters compute only the region around the ROI box (grown by the reach of the filter). The features are the same, bit for bit, and a small ROI in a large image costs much less time. A later filter, resample, `binarize_mask` that keeps the value 0, or whole-image `normalise` step needs the whole grid. See [Tips for Speed and Memory](../tutorials/performance.md).
+- **The region around the ROI**: when no later step reads the image away from the ROI, the mean, Gaussian, LoG, Laws, wavelet and Gabor filters compute only the region around the ROI box (grown by the reach of the filter). The pipeline then keeps only that region: the image and the masks are cut to it, as after a discretise step. The features are the same, bit for bit, and a small ROI in a large image costs much less time. A later filter, resample, `binarize_mask` that keeps the value 0, or whole-image `normalise` step needs the whole grid. See [Tips for Speed and Memory](../tutorials/performance.md).
 - **The log**: the log entry of each filter step records `boundary_requested`, `boundary_effective`, `params_requested` and `params_effective` (with the spacing and the boundary that the pipeline gave).
 
 ## Mean Filter

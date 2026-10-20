@@ -49,7 +49,7 @@ from typing import Any, NamedTuple, Optional, cast
 import numpy as np
 from numba import get_num_threads, jit, prange
 from numpy import typing as npt
-from scipy.spatial import ConvexHull
+from scipy.spatial import ConvexHull, QhullError
 from scipy.special import eval_legendre
 
 from ..loader import Image
@@ -65,28 +65,34 @@ def _accumulate_moments_from_mask_numba(
 
     Each slice has its own sums, and the slice sums add in order, so the result does
     not depend on the number of threads. The sums are whole numbers, so they are exact
-    below 2^53."""
+    below 2^53. A voxel adds 1.0 or 0.0 (no branch), so a row vectorises."""
     d0, d1, d2 = mask.shape
-    counts = np.empty(d0, dtype=np.int64)
+    counts = np.empty(d0, dtype=np.float64)
     sums = np.empty((d0, 5), dtype=np.float64)  # sums of j, k, j * j, k * k and j * k
     for i in prange(d0):
-        count = 0
+        count = 0.0
         sj = 0.0
         sk = 0.0
         sjj = 0.0
         skk = 0.0
         sjk = 0.0
         for j in range(d1):
+            fj = float(j)
+            rc = 0.0
+            rk = 0.0
+            rkk = 0.0
             for k in range(d2):
-                if mask[i, j, k] != 0:
-                    fj = float(j)
-                    fk = float(k)
-                    count += 1
-                    sj += fj
-                    sk += fk
-                    sjj += fj * fj
-                    skk += fk * fk
-                    sjk += fj * fk
+                m = 1.0 if mask[i, j, k] != 0 else 0.0
+                fk = float(k)
+                rc += m
+                rk += m * fk
+                rkk += m * fk * fk
+            count += rc
+            sj += fj * rc
+            sjj += fj * fj * rc
+            sk += rk
+            skk += rkk
+            sjk += fj * rk
         counts[i] = count
         sums[i, 0] = sj
         sums[i, 1] = sk
@@ -106,7 +112,7 @@ def _accumulate_moments_from_mask_numba(
     s12 = 0.0
     for i in range(d0):
         fi = float(i)
-        n += counts[i]
+        n += int(counts[i])
         s0 += fi * counts[i]
         s00 += fi * fi * counts[i]
         s1 += sums[i, 0]
@@ -180,19 +186,32 @@ def _column_stats_numba(
     points: npt.NDArray[np.float64],
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Minimum, maximum and mean of each column of an (n, 3) array in one pass. The sums
-    run row by row, as numpy reduces axis 0, so the mean is that of np.mean."""
-    lo = points[0].copy()
-    hi = points[0].copy()
-    total = np.zeros(3, dtype=np.float64)
-    for i in range(points.shape[0]):
-        for a in range(3):
-            v = points[i, a]
-            if v < lo[a]:
-                lo[a] = v
-            if v > hi[a]:
-                hi[a] = v
-            total[a] += v
-    return lo, hi, total / points.shape[0]
+    run row by row, as numpy reduces axis 0, so the mean is that of np.mean. Scalar
+    accumulators, so the loop stays in registers."""
+    n = points.shape[0]
+    lo0 = hi0 = points[0, 0]
+    lo1 = hi1 = points[0, 1]
+    lo2 = hi2 = points[0, 2]
+    s0 = 0.0
+    s1 = 0.0
+    s2 = 0.0
+    for i in range(n):
+        v0 = points[i, 0]
+        v1 = points[i, 1]
+        v2 = points[i, 2]
+        lo0 = min(lo0, v0)
+        hi0 = max(hi0, v0)
+        lo1 = min(lo1, v1)
+        hi1 = max(hi1, v1)
+        lo2 = min(lo2, v2)
+        hi2 = max(hi2, v2)
+        s0 += v0
+        s1 += v1
+        s2 += v2
+    lo = np.array([lo0, lo1, lo2])
+    hi = np.array([hi0, hi1, hi2])
+    mean = np.array([s0 / n, s1 / n, s2 / n])
+    return lo, hi, mean
 
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
@@ -242,6 +261,9 @@ def _ombb_extents_numba(
 
 
 _ombb_extents_numba_serial = serial_twin(_ombb_extents_numba)
+# Hull vertices from which the maximum diameter runs in parallel (crossover about 700 on
+# 10 threads; at 1 thread the serial kernel is faster at every size)
+_DIAMETER_PARALLEL_MIN = 640
 # Mesh vertices from which the OMBB extents run in parallel (crossover about 120,000)
 _OMBB_PARALLEL_MIN = 120_000
 
@@ -310,65 +332,6 @@ def _max_pairwise_distance_serial_numba(points: npt.NDArray[np.floating[Any]]) -
 
 
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
-def _line_end_candidates_numba(
-    verts: npt.NDArray[np.floating[Any]], spacing: npt.NDArray[np.floating[Any]]
-) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int32]]:
-    """Indices, in order, of the mesh vertices that are the first or the last vertex on each
-    of their three grid lines (a hull vertex is extreme on each line through it), and the
-    grid coordinates of these vertices. Marching cubes on a binary mask puts the vertices on
-    a half-voxel grid, so `round(2 * verts / spacing)` gives exact grid coordinates. The
-    tables hold the low and the high end of each line side by side, as int32."""
-    n = verts.shape[0]
-    lowest = np.empty(3, dtype=np.int64)
-    for a in range(3):
-        lowest[a] = int(np.rint(2.0 * verts[0, a] / spacing[a]))
-    for i in range(n):
-        for a in range(3):
-            g = int(np.rint(2.0 * verts[i, a] / spacing[a]))
-            if g < lowest[a]:
-                lowest[a] = g
-    grid = np.empty((n, 3), dtype=np.int32)
-    size = np.zeros(3, dtype=np.int64)
-    for i in range(n):
-        for a in range(3):
-            g = int(np.rint(2.0 * verts[i, a] / spacing[a])) - lowest[a]
-            grid[i, a] = g
-            if g + 1 > size[a]:
-                size[a] = g + 1
-    nx, ny, nz = size[0], size[1], size[2]
-    ends0 = np.empty((ny, nz, 2), dtype=np.int32)  # along axis 0
-    ends1 = np.empty((nx, nz, 2), dtype=np.int32)
-    ends2 = np.empty((nx, ny, 2), dtype=np.int32)
-    ends0[:, :, 0] = nx
-    ends0[:, :, 1] = -1
-    ends1[:, :, 0] = ny
-    ends1[:, :, 1] = -1
-    ends2[:, :, 0] = nz
-    ends2[:, :, 1] = -1
-    for i in range(n):
-        x, y, z = grid[i, 0], grid[i, 1], grid[i, 2]
-        ends0[y, z, 0] = min(ends0[y, z, 0], x)
-        ends0[y, z, 1] = max(ends0[y, z, 1], x)
-        ends1[x, z, 0] = min(ends1[x, z, 0], y)
-        ends1[x, z, 1] = max(ends1[x, z, 1], y)
-        ends2[x, y, 0] = min(ends2[x, y, 0], z)
-        ends2[x, y, 1] = max(ends2[x, y, 1], z)
-
-    keep = np.empty(n, dtype=np.int64)
-    m = 0
-    for i in range(n):
-        x, y, z = grid[i, 0], grid[i, 1], grid[i, 2]
-        if (
-            (x == ends0[y, z, 0] or x == ends0[y, z, 1])
-            and (y == ends1[x, z, 0] or y == ends1[x, z, 1])
-            and (z == ends2[x, y, 0] or z == ends2[x, y, 1])
-        ):
-            keep[m] = i
-            m += 1
-    return keep[:m], grid[keep[:m]]
-
-
-@jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _counting_order(
     keys: npt.NDArray[np.int32], order: npt.NDArray[np.int64], size: int
 ) -> npt.NDArray[np.int64]:
@@ -422,9 +385,10 @@ def _mark_plane_hull(
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _plane_hull_candidates_numba(
     first: npt.NDArray[np.int64], grid: npt.NDArray[np.int32]
-) -> npt.NDArray[np.int64]:
-    """The indices of `first` (line-end candidates, with their grid coordinates `grid`) that
-    are vertices of the 2-D convex hull of the candidates of each of their three axis planes.
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int32]]:
+    """The indices of `first` (candidates, with their grid coordinates `grid`) that are
+    vertices of the 2-D convex hull of the candidates of each of their three axis planes,
+    and their grid coordinates.
     A 3-D hull vertex is extreme in every plane through it, so no hull vertex is lost. Each
     axis orders the candidates by plane, row and column with three counting sorts."""
     m = first.shape[0]  # a mesh has at least one line end
@@ -459,25 +423,14 @@ def _plane_hull_candidates_numba(
             _mark_plane_hull(us[:n], vs[:n], ids[:n], marks[a], stack)
             start += n
     keep = np.empty(m, dtype=np.int64)
+    kept = np.empty(m, dtype=np.int64)
     k = 0
     for t in range(m):
         if marks[0, t] and marks[1, t] and marks[2, t]:
             keep[k] = first[t]
+            kept[k] = t
             k += 1
-    return keep[:k]
-
-
-@jit(nopython=True, nogil=True, cache=True)  # type: ignore
-def _hull_candidates_numba(
-    verts: npt.NDArray[np.floating[Any]], spacing: npt.NDArray[np.floating[Any]]
-) -> npt.NDArray[np.int64]:
-    """Indices, in order, of the mesh vertices that can be convex hull vertices: the line
-    ends (`_line_end_candidates_numba`) that are 2-D hull vertices in their three axis
-    planes (`_plane_hull_candidates_numba`). On the CT lesion, 856 of 30,186 vertices stay
-    (4,950 line ends) for its 632 hull vertices."""
-    first, grid = _line_end_candidates_numba(verts, spacing)
-    keep: npt.NDArray[np.int64] = _plane_hull_candidates_numba(first, grid)
-    return keep
+    return keep[:k], grid[kept[:k]]
 
 
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
@@ -755,9 +708,15 @@ def _exact_hull_numba(
 def _hull_area_volume_numba(
     points: npt.NDArray[np.float64], triangles: npt.NDArray[np.int64]
 ) -> tuple[float, float]:
-    """The area and the volume of a closed triangle mesh with outward triangles."""
+    """The area and the volume of a closed triangle mesh with outward triangles. The
+    volume adds the tetrahedra from the first vertex of the mesh, not from the origin, so
+    far coordinates (a region deep in a large grid) do not cancel in the products."""
     area = 0.0
     vol6 = 0.0
+    if triangles.shape[0] == 0:
+        return area, vol6
+    o = triangles[0, 0]
+    ox, oy, oz = points[o, 0], points[o, 1], points[o, 2]
     for t in range(triangles.shape[0]):
         a, b, c = triangles[t, 0], triangles[t, 1], triangles[t, 2]
         e1x, e1y, e1z = (
@@ -774,11 +733,8 @@ def _hull_area_volume_numba(
         cy = e1z * e2x - e1x * e2z
         cz = e1x * e2y - e1y * e2x
         area += 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
-        vol6 += (
-            points[a, 0] * (points[b, 1] * points[c, 2] - points[b, 2] * points[c, 1])
-            + points[a, 1] * (points[b, 2] * points[c, 0] - points[b, 0] * points[c, 2])
-            + points[a, 2] * (points[b, 0] * points[c, 1] - points[b, 1] * points[c, 0])
-        )
+        # (a - o) . ((b - o) x (c - o)) = (a - o) . n, with n the cross product above
+        vol6 += (points[a, 0] - ox) * cx + (points[a, 1] - oy) * cy + (points[a, 2] - oz) * cz
     return area, abs(vol6) / 6.0
 
 
@@ -837,8 +793,9 @@ def _marching_cubes_numba(
     n_f: int,
     offset: npt.NDArray[np.float64],
     spacing: npt.NDArray[np.float64],
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]]:
-    """Marching cubes of a 0/1 volume with a zero border, at the isovalue 0.5.
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int32]]:
+    """Marching cubes of a 0/1 volume with a zero border, at the isovalue 0.5. The faces
+    are int32 (a mesh has fewer than 2^31 vertices; half the bytes of the largest array).
 
     Gives the mesh of mc::marching_cubes in PyMCubes 0.1.6 (marchingcubes.h; BSD 3-Clause,
     Copyright (c) 2012-2015, P. M. Neila; see NOTICE): the same vertices and faces, in the
@@ -854,12 +811,12 @@ def _marching_cubes_numba(
     o0, o1, o2 = offset[0], offset[1], offset[2]
     s0, s1, s2 = spacing[0], spacing[1], spacing[2]
     verts = np.empty((n_v, 3), dtype=np.float64)
-    faces = np.empty(n_f, dtype=np.int64)
+    faces = np.empty(n_f, dtype=np.int32)
     # Vertex numbers of the edges on the two latest x planes (index: i % 2, j, k).
-    sx = np.zeros((2, ny + 1, nz + 1), dtype=np.int64)
-    sy = np.zeros((2, ny + 1, nz + 1), dtype=np.int64)
-    sz = np.zeros((2, ny + 1, nz + 1), dtype=np.int64)
-    idx = np.zeros(12, dtype=np.int64)
+    sx = np.zeros((2, ny + 1, nz + 1), dtype=np.int32)
+    sy = np.zeros((2, ny + 1, nz + 1), dtype=np.int32)
+    sz = np.zeros((2, ny + 1, nz + 1), dtype=np.int32)
+    idx = np.zeros(12, dtype=np.int32)
     nv = 0
     nf = 0
     for i in range(nx):
@@ -921,80 +878,89 @@ def _marching_cubes_parallel_numba(
     offset: npt.NDArray[np.float64],
     spacing: npt.NDArray[np.float64],
     verts: npt.NDArray[np.float64],
-    faces: npt.NDArray[np.int64],
+    faces: npt.NDArray[np.int32],
+    n_chunks: int,
 ) -> None:
-    """`_marching_cubes_numba` with the x planes of cubes in parallel: the same vertices
-    and faces in the same order. Plane i writes its vertices from v_start[i] and its face
-    corners from f_start[i] (the counts of `_mc_counts_numba` before plane i). It counts
-    plane i - 1 again for the numbers of the vertices on the edges of their common face."""
+    """`_marching_cubes_numba` with the x planes of cubes in `n_chunks` blocks in parallel:
+    the same vertices and faces in the same order. Plane i writes its vertices from
+    v_start[i] and its face corners from f_start[i] (the counts of `_mc_counts_numba`
+    before plane i). A block counts the plane before it again for the numbers of the
+    vertices on the edges of their common face, then walks its planes as the serial kernel
+    does (two scratch planes). The scratch arrays are not zeroed: the triangle table reads
+    only crossed edges, and a crossed edge was numbered by an earlier cube."""
     nx, ny, nz = vol.shape[0] - 1, vol.shape[1] - 1, vol.shape[2] - 1
     o0, o1, o2 = offset[0], offset[1], offset[2]
     s0, s1, s2 = spacing[0], spacing[1], spacing[2]
-    for i in prange(nx):
-        # The vertex numbers of the y and z edges at x = i, made by plane i - 1
-        sy_prev = np.zeros((ny + 1, nz + 1), dtype=np.int64)
-        sz_prev = np.zeros((ny + 1, nz + 1), dtype=np.int64)
-        if i > 0:
-            nv = v_start[i - 1]
-            for j in range(ny):
-                c = _mc_corners(vol, i - 1, j, 0) << 4
-                for k in range(nz):
-                    c = (c >> 4) | (_mc_corners(vol, i - 1, j, k + 1) << 4)
-                    e = edge_table[c]
-                    if e & 0x040:
-                        nv += 1
-                    if e & 0x020:
-                        sy_prev[j + 1, k + 1] = nv
-                        nv += 1
-                    if e & 0x400:
-                        sz_prev[j + 1, k + 1] = nv
-                        nv += 1
-        sx = np.zeros((ny + 1, nz + 1), dtype=np.int64)
-        sy = np.zeros((ny + 1, nz + 1), dtype=np.int64)
-        sz = np.zeros((ny + 1, nz + 1), dtype=np.int64)
-        idx = np.zeros(12, dtype=np.int64)
-        nv = v_start[i]
-        nf = f_start[i]
-        for j in range(ny):
-            c = _mc_corners(vol, i, j, 0) << 4
-            for k in range(nz):
-                c = (c >> 4) | (_mc_corners(vol, i, j, k + 1) << 4)
-                e = edge_table[c]
-                if e == 0:
-                    continue
-                if e & 0x040:
-                    verts[nv, 0] = (i + 0.5 - 1.0 + o0) * s0
-                    verts[nv, 1] = (j + 1.0 - 1.0 + o1) * s1
-                    verts[nv, 2] = (k + 1.0 - 1.0 + o2) * s2
-                    idx[6] = nv
-                    sx[j + 1, k + 1] = nv
-                    nv += 1
-                if e & 0x020:
-                    verts[nv, 0] = (i + 1.0 - 1.0 + o0) * s0
-                    verts[nv, 1] = (j + 0.5 - 1.0 + o1) * s1
-                    verts[nv, 2] = (k + 1.0 - 1.0 + o2) * s2
-                    idx[5] = nv
-                    sy[j + 1, k + 1] = nv
-                    nv += 1
-                if e & 0x400:
-                    verts[nv, 0] = (i + 1.0 - 1.0 + o0) * s0
-                    verts[nv, 1] = (j + 1.0 - 1.0 + o1) * s1
-                    verts[nv, 2] = (k + 0.5 - 1.0 + o2) * s2
-                    idx[10] = nv
-                    sz[j + 1, k + 1] = nv
-                    nv += 1
-                idx[0] = sx[j, k]
-                idx[1] = sy[j + 1, k]
-                idx[2] = sx[j + 1, k]
-                idx[3] = sy_prev[j + 1, k]
-                idx[4] = sx[j, k + 1]
-                idx[7] = sy_prev[j + 1, k + 1]
-                idx[8] = sz_prev[j, k + 1]
-                idx[9] = sz[j, k + 1]
-                idx[11] = sz_prev[j + 1, k + 1]
-                for m in range(tri_count[c]):
-                    faces[nf] = idx[tri_table[c, m]]
-                    nf += 1
+    for ch in prange(n_chunks):
+        i_lo = nx * ch // n_chunks
+        i_hi = nx * (ch + 1) // n_chunks
+        if i_hi > i_lo:
+            sx = np.empty((ny + 1, nz + 1), dtype=np.int32)
+            sy = np.empty((2, ny + 1, nz + 1), dtype=np.int32)
+            sz = np.empty((2, ny + 1, nz + 1), dtype=np.int32)
+            idx = np.zeros(12, dtype=np.int32)
+            if i_lo > 0:
+                # The vertex numbers of the y and z edges at x = i_lo, made by plane i_lo - 1
+                q0 = i_lo % 2
+                nv = v_start[i_lo - 1]
+                for j in range(ny):
+                    c = _mc_corners(vol, i_lo - 1, j, 0) << 4
+                    for k in range(nz):
+                        c = (c >> 4) | (_mc_corners(vol, i_lo - 1, j, k + 1) << 4)
+                        e = edge_table[c]
+                        if e & 0x040:
+                            nv += 1
+                        if e & 0x020:
+                            sy[q0, j + 1, k + 1] = nv
+                            nv += 1
+                        if e & 0x400:
+                            sz[q0, j + 1, k + 1] = nv
+                            nv += 1
+            nv = v_start[i_lo]
+            nf = f_start[i_lo]
+            for i in range(i_lo, i_hi):
+                p = i % 2
+                q = 1 - p
+                for j in range(ny):
+                    c = _mc_corners(vol, i, j, 0) << 4
+                    for k in range(nz):
+                        c = (c >> 4) | (_mc_corners(vol, i, j, k + 1) << 4)
+                        e = edge_table[c]
+                        if e == 0:
+                            continue
+                        if e & 0x040:
+                            verts[nv, 0] = (i + 0.5 - 1.0 + o0) * s0
+                            verts[nv, 1] = (j + 1.0 - 1.0 + o1) * s1
+                            verts[nv, 2] = (k + 1.0 - 1.0 + o2) * s2
+                            idx[6] = nv
+                            sx[j + 1, k + 1] = nv
+                            nv += 1
+                        if e & 0x020:
+                            verts[nv, 0] = (i + 1.0 - 1.0 + o0) * s0
+                            verts[nv, 1] = (j + 0.5 - 1.0 + o1) * s1
+                            verts[nv, 2] = (k + 1.0 - 1.0 + o2) * s2
+                            idx[5] = nv
+                            sy[q, j + 1, k + 1] = nv
+                            nv += 1
+                        if e & 0x400:
+                            verts[nv, 0] = (i + 1.0 - 1.0 + o0) * s0
+                            verts[nv, 1] = (j + 1.0 - 1.0 + o1) * s1
+                            verts[nv, 2] = (k + 0.5 - 1.0 + o2) * s2
+                            idx[10] = nv
+                            sz[q, j + 1, k + 1] = nv
+                            nv += 1
+                        idx[0] = sx[j, k]
+                        idx[1] = sy[q, j + 1, k]
+                        idx[2] = sx[j + 1, k]
+                        idx[3] = sy[p, j + 1, k]
+                        idx[4] = sx[j, k + 1]
+                        idx[7] = sy[p, j + 1, k + 1]
+                        idx[8] = sz[p, j, k + 1]
+                        idx[9] = sz[q, j, k + 1]
+                        idx[11] = sz[p, j + 1, k + 1]
+                        for m in range(tri_count[c]):
+                            faces[nf] = idx[tri_table[c, m]]
+                            nf += 1
 
 
 # From this many voxels of the padded volume on (and with more than one thread), the x
@@ -1008,20 +974,23 @@ def _mesh(
     offset: npt.NDArray[np.float64],
     spacing: npt.NDArray[np.float64],
     parallel: Optional[bool] = None,
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]]:
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int32]]:
     """The marching cubes mesh of a 0/1 volume with a zero border: a parallel count pass,
-    then `_marching_cubes_numba` (vertices as (v - 1 + offset) * spacing). `parallel` picks
-    its parallel form (default: from _MESH_PARALLEL_MIN voxels on, with more than one
-    thread; the warm-up asks for it on a small volume)."""
+    then `_marching_cubes_numba` (vertices as (v - 1 + offset) * spacing, faces as int32).
+    `parallel` picks its parallel form (default: from _MESH_PARALLEL_MIN voxels on, with
+    more than one thread; the warm-up asks for it on a small volume). Raises ValueError for
+    a mesh of more than 2^31 - 1 vertices (a 512^3 image gives at most about 4e8)."""
     n_verts = np.empty(padded.shape[0] - 1, dtype=np.int64)
     n_faces = np.empty(padded.shape[0] - 1, dtype=np.int64)
     counts = sized(_mc_counts_numba, _mc_counts_numba_serial, padded.size, _MC_COUNTS_PARALLEL_MIN)
     counts(padded, EDGE_TABLE, TRIANGLE_COUNT, n_verts, n_faces)
     if parallel is None:
         parallel = padded.size >= _MESH_PARALLEL_MIN and get_num_threads() > 1
+    if int(n_verts.sum()) > np.iinfo(np.int32).max:  # the faces hold vertex numbers as int32
+        raise ValueError("the mesh has more than 2^31 - 1 vertices")
     if parallel:
         verts = np.empty((int(n_verts.sum()), 3), dtype=np.float64)
-        faces = np.empty(int(n_faces.sum()), dtype=np.int64)
+        faces = np.empty(int(n_faces.sum()), dtype=np.int32)
         _marching_cubes_parallel_numba(
             padded,
             EDGE_TABLE,
@@ -1033,10 +1002,11 @@ def _mesh(
             spacing,
             verts,
             faces,
+            get_num_threads(),
         )
         return verts, faces.reshape(-1, 3)
     return cast(
-        tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]],
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.int32]],
         _marching_cubes_numba(
             padded,
             EDGE_TABLE,
@@ -1057,7 +1027,7 @@ _MESH_SUM_BLOCK = 4096
 
 @jit(nopython=True, parallel=True, fastmath=True, cache=True)  # type: ignore
 def _mesh_area_volume_numba(
-    verts: npt.NDArray[np.floating[Any]], faces: npt.NDArray[np.floating[Any]]
+    verts: npt.NDArray[np.floating[Any]], faces: npt.NDArray[np.int32]
 ) -> tuple[float, float]:
     """Compute mesh surface area and absolute volume in one pass. The faces add in
     blocks of _MESH_SUM_BLOCK and the block sums in order, so the result is the same
@@ -1090,7 +1060,7 @@ _MESH_SUM_PARALLEL_MIN = 12 * _MESH_SUM_BLOCK
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
 def _mesh_block_sums(
     verts: npt.NDArray[np.floating[Any]],
-    faces: npt.NDArray[np.floating[Any]],
+    faces: npt.NDArray[np.int32],
     start: int,
     stop: int,
 ) -> tuple[float, float]:
@@ -1135,7 +1105,7 @@ def _mesh_block_sums(
 
 @jit(nopython=True, nogil=True, fastmath=True, cache=True)  # type: ignore
 def _mvee_khachiyan_numba(
-    points: npt.NDArray[np.floating[Any]], tol: float = 0.001
+    points: npt.NDArray[np.floating[Any]], eps: float = 1e-3, max_iter: int = 200000
 ) -> tuple[Optional[npt.NDArray[np.floating[Any]]], Optional[npt.NDArray[np.floating[Any]]]]:
     """
     Find Minimum Volume Enclosing Ellipsoid (MVEE) using the Khachiyan algorithm.
@@ -1147,10 +1117,15 @@ def _mvee_khachiyan_numba(
     4. Pre-allocated working arrays to minimize memory churn.
     5. The products q_r q_c (r <= c) of each point are kept, so the quadratic form of a
        point is one dot product with the matching weights of invX (10 products, not 20).
+    6. Wolfe-Atwood away steps and a stop on the Mahalanobis gap (Todd and Yildirim
+       2007): the ellipsoid volume is within about eps of the minimum (the step-norm stop
+       of the plain Khachiyan iteration left it 0.3-0.5 % too small).
 
     Args:
         points: Array of points (N, d).
-        tol: Tolerance for convergence.
+        eps: The stop: every point within (1 + eps) d1 and every weighted point above
+            (1 - eps) d1 in the Mahalanobis value (d1 = d + 1).
+        max_iter: The largest number of iterations.
 
     Returns:
         Tuple containing:
@@ -1198,44 +1173,100 @@ def _mvee_khachiyan_numba(
     except Exception:
         return None, None
 
-    err = 1.0
     count = 0
 
     # Pre-allocate work arrays
     tmp_vec = np.zeros(d1, dtype=np.float64)
 
-    while err > tol and count < 1000:
+    n4 = N - N % 4
+    # Wolfe-Atwood iteration (Todd and Yildirim 2007): a step toward the point with the
+    # largest Mahalanobis value, or an away step from the weighted point with the smallest
+    # one. Stops when every point lies within (1 + eps) d1 and every weighted point above
+    # (1 - eps) d1: the volume is then within about eps of the minimum.
+    while count < max_iter:
         # Find point with max Mahalanobis distance
         # M_k = Q[k] @ invX @ Q[k].T
         max_val = -1.0
         j = -1
+        min_val = 1.0e300
+        jm = -1
 
         # Bottleneck loop: O(N * d^2). The quadratic form q_k^T * invX * q_k is the dot
-        # product of the kept products of q_k with the weights of invX.
+        # product of the kept products of q_k with the weights of invX. Four points at a
+        # time, each with its own sum (the same additions per point, so the same value):
+        # the four sums run side by side.
         m = 0
         for r in range(d1):
             for c_idx in range(r, d1):
                 weights[m] = invX[r, r] if r == c_idx else invX[r, c_idx] + invX[c_idx, r]
                 m += 1
-        for k in range(N):
+        for k in range(0, n4, 4):
+            v0 = 0.0
+            v1 = 0.0
+            v2 = 0.0
+            v3 = 0.0
+            for m in range(n_prod):
+                wm = weights[m]
+                v0 += P[k, m] * wm
+                v1 += P[k + 1, m] * wm
+                v2 += P[k + 2, m] * wm
+                v3 += P[k + 3, m] * wm
+            if v0 > max_val:
+                max_val = v0
+                j = k
+            if v1 > max_val:
+                max_val = v1
+                j = k + 1
+            if v2 > max_val:
+                max_val = v2
+                j = k + 2
+            if v3 > max_val:
+                max_val = v3
+                j = k + 3
+            if u[k] > 0.0 and v0 < min_val:
+                min_val = v0
+                jm = k
+            if u[k + 1] > 0.0 and v1 < min_val:
+                min_val = v1
+                jm = k + 1
+            if u[k + 2] > 0.0 and v2 < min_val:
+                min_val = v2
+                jm = k + 2
+            if u[k + 3] > 0.0 and v3 < min_val:
+                min_val = v3
+                jm = k + 3
+        for k in range(n4, N):
             val = 0.0
             for m in range(n_prod):
                 val += P[k, m] * weights[m]
-
             if val > max_val:
                 max_val = val
                 j = k
+            if u[k] > 0.0 and val < min_val:
+                min_val = val
+                jm = k
 
-        step_size = (max_val - d1) / (d1 * (max_val - 1))
+        up = max_val / d1 - 1.0
+        down = 1.0 - min_val / d1
+        if up <= eps and down <= eps:
+            break
+        if up >= down:
+            step_size = (max_val - d1) / (d1 * (max_val - 1.0))
+            val_j = max_val
+        else:
+            # The away step, at most the step that drops the point (weight 0)
+            limit = u[jm] / (1.0 - u[jm])
+            step_size = limit
+            if min_val > 1.0:
+                step_size = min((d1 - min_val) / (d1 * (min_val - 1.0)), limit)
+            step_size = -step_size
+            val_j = min_val
+            j = jm
 
         # Update u
-        sum_u_sq = np.sum(u**2)
-        err_sq = step_size**2 * (sum_u_sq - u[j] ** 2 + (1 - u[j]) ** 2)
-        err = np.sqrt(err_sq)
-
         new_u_j = u[j] * (1 - step_size) + step_size
         u *= 1 - step_size
-        u[j] = new_u_j
+        u[j] = max(new_u_j, 0.0)
 
         # Rank-1 Update of invX (Sherman-Morrison)
         # Recompute fully every 50 iterations to prevent numerical drift
@@ -1261,8 +1292,8 @@ def _mvee_khachiyan_numba(
                 for c_idx in range(d1):
                     tmp_vec[r] += invX[r, c_idx] * Q[j, c_idx]
 
-            # Denominator
-            denom = 1.0 + alpha * max_val
+            # Denominator (the Mahalanobis value of the stepped point)
+            denom = 1.0 + alpha * val_j
 
             # Update invX
             factor = alpha / denom
@@ -1347,6 +1378,19 @@ def _calculate_ellipsoid_surface_area(a: float, b: float, c: float) -> float:
     return float(area)
 
 
+def _padded_roi(box: npt.NDArray[Any]) -> npt.NDArray[np.uint8]:
+    """The ROI box with a zero border of one voxel, as uint8, in one copy: a uint8 box keeps
+    its values (the marching cubes kernel tests `== 0`); another type becomes `box != 0`,
+    written into the border array."""
+    padded = np.zeros(tuple(s + 2 for s in box.shape), dtype=np.uint8)
+    inner = padded[1:-1, 1:-1, 1:-1]
+    if box.dtype == np.uint8:
+        inner[...] = box
+    else:
+        np.not_equal(box, 0, out=inner)
+    return padded
+
+
 def _uint8_roi(mask: npt.NDArray[Any], keep: bool = False) -> npt.NDArray[np.uint8]:
     """The ROI (`mask != 0`) as a row-order uint8 array, so the kernels compile for one
     mask type and layout. With `keep`, a uint8 mask (the common case) is used as it is."""
@@ -1359,6 +1403,7 @@ def _get_mesh_features(
     mask: Image,
     roi_bbox: Optional[tuple[slice, slice, slice]] = None,
     grid_offset: Optional[tuple[int, int, int]] = None,
+    padded: Optional[npt.NDArray[np.uint8]] = None,
 ) -> tuple[
     dict[str, float],
     Optional[npt.NDArray[np.floating[Any]]],
@@ -1366,6 +1411,8 @@ def _get_mesh_features(
 ]:
     """
     Calculate mesh-based features (Surface Area, Volume) and return mesh data.
+    `padded` may pass the ROI box with its zero border (see _padded_roi) when the caller
+    made it already.
 
     The marching cubes kernel gives the PyMCubes mesh (the same vertices and faces, in
     the same order), which produces IBSI-compliant results for the digital phantom.
@@ -1381,15 +1428,14 @@ def _get_mesh_features(
     if bbox is None:
         return {}, None, None
 
-    mask_cropped = _uint8_roi(mask.array[bbox])
+    if padded is None:
+        padded = _padded_roi(mask.array[bbox])
     origin_offset = np.array([bbox[0].start, bbox[1].start, bbox[2].start], dtype=np.float64)
     if grid_offset is not None:  # the mask is a region of a larger grid
         origin_offset += np.array(grid_offset, dtype=np.float64)
 
     # The vertices come in physical units: padding (-1), bbox offset, spacing
-    verts, faces = _mesh(
-        np.pad(mask_cropped, 1), origin_offset, np.asarray(mask.spacing, dtype=np.float64)
-    )
+    verts, faces = _mesh(padded, origin_offset, np.asarray(mask.spacing, dtype=np.float64))
     if len(faces) == 0:  # a bbox with no ROI voxel
         return {}, None, None
 
@@ -1515,7 +1561,8 @@ def _get_pca_features(
 
 
 def _get_convex_hull_features(
-    verts: npt.NDArray[np.floating[Any]],
+    padded: npt.NDArray[np.uint8],
+    offset: npt.NDArray[np.float64],
     mesh_volume: float,
     surface_area: float,
     spacing: tuple[float, float, float],
@@ -1523,46 +1570,270 @@ def _get_convex_hull_features(
 ) -> tuple[dict[str, float], Optional[npt.NDArray[np.float64]]]:
     """Calculate Convex Hull features.
 
-    `verts` are the marching cubes vertices of `_get_mesh_features`. The hull is that of
-    the vertices that can be hull vertices (see `_hull_candidates_numba`), exact on their
-    lattice coordinates (`_exact_hull_numba`; Qhull when it finds no hull). It has the hull
-    vertices of Qhull in the same order, and the same volume and area to about 1e-15. It
-    returns the features and the hull vertices (for the MVEE). With
-    `serial`, the maximum diameter comes from the serial kernel (the same value).
+    `padded` is the ROI box with its zero border (see `_padded_roi`), `offset` the grid
+    position of the box (as for `_get_mesh_features`). The hull is that of the mesh
+    vertices that can be hull vertices, found on the box without a pass over the mesh
+    vertices (`_hull_lattice_numba`), exact on their lattice coordinates
+    (`_exact_hull_numba`; Qhull when it finds no hull). It has the hull vertices of the mesh
+    in mesh order, and the same volume and area to about 1e-15. The row ends run in
+    parallel from _ROW_ENDS_PARALLEL_MIN voxels; with `serial` (the worker form) their
+    serial twin runs, so part 2 starts no parallel region. It returns the features and the
+    hull vertices (for the MVEE). The maximum diameter comes from the serial kernel with
+    `serial`, below _DIAMETER_PARALLEL_MIN hull vertices or with one thread, else from the
+    parallel kernel (the same value). Points in one plane (Qhull raises there) give no
+    features; any other error passes to the caller.
     """
     features: dict[str, float] = {}
-    if len(verts) <= 3:
-        return features, None
-
-    try:
-        grid_spacing = np.asarray(spacing, dtype=np.float64)
-        points = np.asarray(verts[_hull_candidates_numba(verts, grid_spacing)], dtype=np.float64)
-        found, vertices, triangles = _exact_hull_numba(
-            np.rint(2.0 * points / grid_spacing).astype(np.int64)
-        )
-        if found:
-            area_convex, vol_convex = _hull_area_volume_numba(points, triangles)
-            hull_points = points[vertices]
-        else:  # fewer than four points, or all in one plane: Qhull raises there
+    grid_spacing = np.asarray(spacing, dtype=np.float64)
+    threads = get_num_threads()
+    if (
+        serial
+        or threads == 1
+        or padded.size < _ROW_ENDS_PARALLEL_MIN
+        or padded.shape[0] < _ROW_ENDS_PLANES_PER_CHUNK * threads
+    ):
+        lattice, points = _hull_lattice_serial_numba(padded, offset, grid_spacing)
+    else:
+        rows = _row_ends_numba(padded, threads)
+        lattice, points = _hull_lattice_numba(padded, *rows, offset, grid_spacing)
+    found, vertices, triangles = _exact_hull_numba(lattice)
+    if found:
+        area_convex, vol_convex = _hull_area_volume_numba(points, triangles)
+        hull_points = points[vertices]
+    else:  # fewer than four points, or all in one plane: Qhull raises there
+        try:
             hull = ConvexHull(points)
-            vol_convex, area_convex = hull.volume, hull.area
-            hull_points = np.asarray(hull.points[hull.vertices], dtype=np.float64)
+        except QhullError:
+            return features, None
+        vol_convex, area_convex = hull.volume, hull.area
+        hull_points = np.asarray(hull.points[hull.vertices], dtype=np.float64)
 
-        if vol_convex > 0:
-            features["volume_density_convex_hull_R3ER"] = mesh_volume / vol_convex
-        if area_convex > 0:
-            features["area_density_convex_hull_7T7F"] = surface_area / area_convex
+    if vol_convex > 0:
+        features["volume_density_convex_hull_R3ER"] = mesh_volume / vol_convex
+    if area_convex > 0:
+        features["area_density_convex_hull_7T7F"] = surface_area / area_convex
 
-        # Max 3D Diameter
-        if hull_points.shape[0] > 1:
-            diameter = (
-                _max_pairwise_distance_serial_numba if serial else _max_pairwise_distance_numba
+    # Max 3D Diameter
+    if hull_points.shape[0] > 1:
+        diameter = (
+            _max_pairwise_distance_serial_numba
+            if serial
+            else sized(
+                _max_pairwise_distance_numba,
+                _max_pairwise_distance_serial_numba,
+                hull_points.shape[0],
+                _DIAMETER_PARALLEL_MIN,
             )
-            features["maximum_3d_diameter_L0JK"] = float(diameter(hull_points))
+        )
+        features["maximum_3d_diameter_L0JK"] = float(diameter(hull_points))
 
-        return features, hull_points
-    except Exception:
-        return features, None
+    return features, hull_points
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, nogil=True, cache=True)  # type: ignore
+def _row_ends_numba(
+    roi: npt.NDArray[np.uint8], n_chunks: int
+) -> tuple[
+    npt.NDArray[np.int32],
+    npt.NDArray[np.int32],
+    npt.NDArray[np.int32],
+    npt.NDArray[np.int32],
+    npt.NDArray[np.int32],
+    npt.NDArray[np.int32],
+]:
+    """The first and the last ROI voxel of each row of the box along the three axes: six
+    int32 tables (first and last k of each (i, j); first and last j of each (i, k); first
+    and last i of each (j, k), reduced over the chunks of x planes, so the tables do not
+    depend on the chunks). A row without a ROI voxel has the first end at the size and the
+    last at -1. Branchless min and max per row, so the loops vectorise."""
+    d0, d1, d2 = roi.shape
+    d0v = np.int32(d0)
+    d1v = np.int32(d1)
+    d2v = np.int32(d2)
+    none = np.int32(-1)
+    fk = np.empty((d0, d1), dtype=np.int32)
+    lk = np.empty((d0, d1), dtype=np.int32)
+    fj = np.empty((d0, d2), dtype=np.int32)
+    lj = np.empty((d0, d2), dtype=np.int32)
+    fi_c = np.empty((n_chunks, d1, d2), dtype=np.int32)
+    li_c = np.empty((n_chunks, d1, d2), dtype=np.int32)
+    for ch in prange(n_chunks):
+        a = d0 * ch // n_chunks
+        b = d0 * (ch + 1) // n_chunks
+        for j in range(d1):
+            for k in range(d2):
+                fi_c[ch, j, k] = d0v
+                li_c[ch, j, k] = none
+        for i in range(a, b):
+            iv = np.int32(i)
+            for k in range(d2):
+                fj[i, k] = d1v
+                lj[i, k] = none
+            for j in range(d1):
+                jv = np.int32(j)
+                first = d2v
+                last = none
+                for k in range(d2):
+                    nz = roi[i, j, k] != 0
+                    kv = np.int32(k)
+                    first = min(first, kv if nz else d2v)
+                    last = max(last, kv if nz else none)
+                fk[i, j] = first
+                lk[i, j] = last
+                if last >= 0:
+                    for k in range(d2):
+                        nz = roi[i, j, k] != 0
+                        fj[i, k] = min(fj[i, k], jv if nz else d1v)
+                        lj[i, k] = max(lj[i, k], jv if nz else none)
+                    for k in range(d2):
+                        nz = roi[i, j, k] != 0
+                        fi_c[ch, j, k] = min(fi_c[ch, j, k], iv if nz else d0v)
+                        li_c[ch, j, k] = max(li_c[ch, j, k], iv if nz else none)
+    fi = np.empty((d1, d2), dtype=np.int32)
+    li = np.empty((d1, d2), dtype=np.int32)
+    for j in range(d1):
+        for k in range(d2):
+            fi[j, k] = fi_c[0, j, k]
+            li[j, k] = li_c[0, j, k]
+        for ch in range(1, n_chunks):
+            for k in range(d2):
+                fi[j, k] = min(fi[j, k], fi_c[ch, j, k])
+                li[j, k] = max(li[j, k], li_c[ch, j, k])
+    return fk, lk, fj, lj, fi, li
+
+
+_row_ends_numba_serial = serial_twin(_row_ends_numba)
+# Padded box voxels from which the row ends run in parallel, with at least this many x
+# planes per chunk (thread): a thin box pays the per-chunk tables and the reduction. Measured
+# on 10 threads: the crossover is about 550,000 voxels for 4 or more planes per chunk;
+# a box of 22 planes stays slower up to 1.2 M voxels.
+_ROW_ENDS_PARALLEL_MIN = 1 << 19
+_ROW_ENDS_PLANES_PER_CHUNK = 4
+# Voxel candidates from which the 2-D plane hulls filter them before the mesh step (below,
+# the plane filter costs more than the six mesh vertices per voxel that it saves)
+_VOXEL_FILTER_MIN = 64
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _voxel_hull_candidates_numba(
+    fk: npt.NDArray[np.int32],
+    lk: npt.NDArray[np.int32],
+    fj: npt.NDArray[np.int32],
+    lj: npt.NDArray[np.int32],
+    fi: npt.NDArray[np.int32],
+    li: npt.NDArray[np.int32],
+) -> npt.NDArray[np.int32]:
+    """The voxels that are an end of each of their three rows (a hull vertex of the voxel
+    centres is one), as int32 (i, j, k), in that order."""
+    d0, d1 = fk.shape
+    d2 = fj.shape[1]
+    cand = np.empty((2 * d0 * d1, 3), dtype=np.int32)
+    m = 0
+    for i in range(d0):
+        for j in range(d1):
+            k0 = fk[i, j]
+            if k0 == d2:
+                continue
+            k1 = lk[i, j]
+            if (fj[i, k0] == j or lj[i, k0] == j) and (fi[j, k0] == i or li[j, k0] == i):
+                cand[m, 0] = i
+                cand[m, 1] = j
+                cand[m, 2] = k0
+                m += 1
+            if (
+                k1 != k0
+                and (fj[i, k1] == j or lj[i, k1] == j)
+                and (fi[j, k1] == i or li[j, k1] == i)
+            ):
+                cand[m, 0] = i
+                cand[m, 1] = j
+                cand[m, 2] = k1
+                m += 1
+    return cand[:m]
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _mesh_hull_candidates_numba(
+    padded: npt.NDArray[np.uint8], voxels: npt.NDArray[np.int32]
+) -> npt.NDArray[np.int32]:
+    """The mesh vertices next to the voxels `voxels` (padded indices) on the doubled box
+    lattice: a voxel centre at 2 i - 1, a vertex at 2 i - 1 +- 1 where that neighbour is
+    zero (the border is zero, so a neighbour is always inside the array). int32, sorted in
+    the order of the marching cubes mesh (the cube that makes the vertex, then its x, y, z
+    edge), so the hull vertices come out in mesh order."""
+    d1, d2 = padded.shape[1], padded.shape[2]
+    v = voxels.shape[0]
+    out = np.empty((6 * v, 3), dtype=np.int32)
+    keys = np.empty(6 * v, dtype=np.int64)
+    m = 0
+    for t in range(v):
+        i, j, k = voxels[t, 0], voxels[t, 1], voxels[t, 2]
+        for a in range(3):
+            for s in (-1, 1):
+                si = s if a == 0 else 0
+                sj = s if a == 1 else 0
+                sk = s if a == 2 else 0
+                if padded[i + si, j + sj, k + sk] == 0:
+                    x = 2 * i - 1 + si
+                    y = 2 * j - 1 + sj
+                    z = 2 * k - 1 + sk
+                    out[m, 0] = x
+                    out[m, 1] = y
+                    out[m, 2] = z
+                    keys[m] = (((x // 2) * d1 + y // 2) * d2 + z // 2) * 3 + a
+                    m += 1
+    order = np.argsort(keys[:m])
+    sorted_out = np.empty((m, 3), dtype=np.int32)
+    for t in range(m):
+        sorted_out[t, 0] = out[order[t], 0]
+        sorted_out[t, 1] = out[order[t], 1]
+        sorted_out[t, 2] = out[order[t], 2]
+    return sorted_out
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _hull_lattice_numba(
+    padded: npt.NDArray[np.uint8],
+    fk: npt.NDArray[np.int32],
+    lk: npt.NDArray[np.int32],
+    fj: npt.NDArray[np.int32],
+    lj: npt.NDArray[np.int32],
+    fi: npt.NDArray[np.int32],
+    li: npt.NDArray[np.int32],
+    offset: npt.NDArray[np.float64],
+    spacing: npt.NDArray[np.float64],
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.float64]]:
+    """The mesh vertices that can be convex hull vertices, as the input of the exact hull:
+    their lattice coordinates (int64, mesh order) and their physical points, computed as
+    the mesh kernel computes a vertex, (0.5 * (x - 1) + offset) * spacing. The candidates
+    are the voxels that end each of their three rows (see _row_ends_numba), kept by the
+    2-D hulls of their planes, then the mesh vertices next to them, kept the same way."""
+    cand = _voxel_hull_candidates_numba(fk, lk, fj, lj, fi, li)
+    if cand.shape[0] > _VOXEL_FILTER_MIN:  # a small set goes to the mesh step as it is
+        _, cand = _plane_hull_candidates_numba(np.arange(cand.shape[0]), cand)
+    mesh_cand = _mesh_hull_candidates_numba(padded, cand)
+    _, kept2 = _plane_hull_candidates_numba(np.arange(mesh_cand.shape[0]), mesh_cand)
+    n = kept2.shape[0]
+    lattice = np.empty((n, 3), dtype=np.int64)
+    points = np.empty((n, 3), dtype=np.float64)
+    for t in range(n):
+        for a in range(3):
+            lattice[t, a] = kept2[t, a]
+            points[t, a] = (0.5 * float(kept2[t, a] - 1) + offset[a]) * spacing[a]
+    return lattice, points
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _hull_lattice_serial_numba(
+    padded: npt.NDArray[np.uint8], offset: npt.NDArray[np.float64], spacing: npt.NDArray[np.float64]
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.float64]]:
+    """`_hull_lattice_numba` with the row ends of the serial twin inside: one call for a
+    small box, or for the worker thread."""
+    fk, lk, fj, lj, fi, li = _row_ends_numba_serial(padded, 1)
+    result: tuple[npt.NDArray[np.int64], npt.NDArray[np.float64]] = _hull_lattice_numba(
+        padded, fk, lk, fj, lj, fi, li, offset, spacing
+    )
+    return result
 
 
 def _get_bounding_box_features(
@@ -1732,7 +2003,8 @@ class _Rest(NamedTuple):
     part 2, and the bounding box and intensity-weighted features of part 1 (or their
     errors)."""
 
-    verts: npt.NDArray[np.floating[Any]]
+    padded: npt.NDArray[np.uint8]  # the ROI box with its zero border: the hull input
+    offset: npt.NDArray[np.float64]
     mesh_volume: float
     surface_area: float
     spacing: tuple[float, float, float]
@@ -1765,7 +2037,7 @@ def _morphology_first(
     features: dict[str, float] = {}
     i_mask = intensity_mask if intensity_mask is not None else mask
 
-    voxel_volume = np.prod(mask.spacing)
+    voxel_volume = math.prod(mask.spacing)
 
     # Compute the ROI bounding box once; the scans below run on the cropped region
     # instead of the full volume, which dominates runtime for sparse ROIs.
@@ -1780,7 +2052,9 @@ def _morphology_first(
     # PCA covariance is translation-invariant, and the center-of-mass consumer
     # adds the bbox offset back. The kernel's voxel count doubles as the count
     # for the voxel-counting volume.
-    roi = _uint8_roi(mask.array[bbox], keep=True)
+    roi_box = mask.array[bbox]
+    padded = _padded_roi(roi_box)  # the mesh input; the ROI of another type is its inside
+    roi = roi_box if roi_box.dtype == np.uint8 else padded[1:-1, 1:-1, 1:-1]
     moments = sized(
         _accumulate_moments_from_mask_numba,
         _accumulate_moments_from_mask_numba_serial,
@@ -1792,7 +2066,9 @@ def _morphology_first(
     features["volume_voxel_counting_YEKZ"] = float(n_voxels * voxel_volume)
 
     # 2. Mesh Based Features
-    mesh_feats, verts, faces = _get_mesh_features(mask, roi_bbox=bbox, grid_offset=grid_offset)
+    mesh_feats, verts, faces = _get_mesh_features(
+        mask, roi_bbox=bbox, grid_offset=grid_offset, padded=padded
+    )
     features.update(mesh_feats)
 
     if verts is None or faces is None:
@@ -1827,7 +2103,10 @@ def _morphology_first(
             mask_bbox=bbox,
         )
     )
-    return features, _Rest(verts, mesh_volume, surface_area, mask.spacing, box, intensity)
+    offset = np.array([bbox[0].start, bbox[1].start, bbox[2].start], dtype=np.float64)
+    if grid_offset is not None:
+        offset += np.array(grid_offset, dtype=np.float64)
+    return features, _Rest(padded, offset, mesh_volume, surface_area, mask.spacing, box, intensity)
 
 
 def _morphology_second(
@@ -1839,7 +2118,7 @@ def _morphology_second(
     once). Its kernels release the GIL, and so does Qhull when it runs."""
     try:
         hull_features, hull_points = _get_convex_hull_features(
-            rest.verts, rest.mesh_volume, rest.surface_area, rest.spacing, serial
+            rest.padded, rest.offset, rest.mesh_volume, rest.surface_area, rest.spacing, serial
         )
     except Exception as e:
         return e, {}

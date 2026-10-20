@@ -115,6 +115,114 @@ def test_fast_cores_on_linux(
     assert threads._fast_cores() == expected
 
 
+@pytest.fixture
+def physical_memory() -> Iterator[None]:
+    """A fresh reading of the memory before and after the test (the reading is cached)."""
+    threads._physical_memory.cache_clear()
+    yield
+    threads._physical_memory.cache_clear()
+
+
+def test_physical_memory_of_this_computer(physical_memory: None) -> None:
+    assert threads._physical_memory() == min(
+        n
+        for n in (os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"), threads._memory_limit())
+        if n > 0
+    )
+
+
+@pytest.mark.parametrize(
+    ("found", "total", "limit", "expected"),
+    [
+        (1, 33_396_543_488, [], 33_396_543_488),  # the memory that Windows reports
+        (0, 33_396_543_488, [], 8 << 30),  # a failed call: 8 GiB assumed
+        (1, 0, [], 8 << 30),  # no valid number
+    ],
+)
+def test_physical_memory_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+    physical_memory: None,
+    found: int,
+    total: int,
+    limit: list[str],
+    expected: int,
+) -> None:
+    from unittest.mock import MagicMock
+
+    def memory_status(status: Any) -> int:
+        status._obj.total = total
+        return found
+
+    kernel32 = MagicMock()
+    kernel32.GlobalMemoryStatusEx.side_effect = memory_status
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(ctypes, "windll", MagicMock(kernel32=kernel32), raising=False)
+    monkeypatch.setattr(threads, "_words", lambda path: limit)
+    assert threads._physical_memory() == expected
+    # MEMORYSTATUSEX: 2 numbers of 4 bytes and 7 of 8 bytes
+    assert kernel32.GlobalMemoryStatusEx.call_args.args[0]._obj.length == 64
+
+
+@pytest.mark.parametrize(
+    ("sysconf", "files", "expected"),
+    [
+        ({"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": 1 << 22}, {}, 16 << 30),
+        ({"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": -1}, {}, 8 << 30),  # no valid number
+        ({"SC_PAGE_SIZE": -1, "SC_PHYS_PAGES": -1}, {}, 8 << 30),
+        (ValueError, {}, 8 << 30),  # the system has no such name
+        (OSError, {}, 8 << 30),
+        # A container with a limit below the memory of the computer
+        ({"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": 1 << 22}, {"memory.max": ["4294967296"]}, 4 << 30),
+        ({"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": 1 << 22}, {"memory.max": ["max"]}, 16 << 30),
+        # cgroup v1: a limit, and the huge number of no limit
+        ({"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": 1 << 22}, {"v1": ["2147483648"]}, 2 << 30),
+        (
+            {"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": 1 << 22},
+            {"v1": ["9223372036854771712"]},
+            16 << 30,
+        ),
+        (ValueError, {"memory.max": ["4294967296"]}, 4 << 30),  # only the limit is known
+    ],
+)
+def test_physical_memory_on_posix(
+    monkeypatch: pytest.MonkeyPatch,
+    physical_memory: None,
+    sysconf: Any,
+    files: dict[str, list[str]],
+    expected: int,
+) -> None:
+    paths = {
+        "/sys/fs/cgroup/memory.max": files.get("memory.max", []),
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes": files.get("v1", []),
+    }
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        os, "sysconf", sysconf.__getitem__ if isinstance(sysconf, dict) else _raises(sysconf)
+    )
+    monkeypatch.setattr(threads, "_words", paths.__getitem__)
+    assert threads._physical_memory() == expected
+
+
+def _raises(error: type[Exception]) -> Any:
+    def sysconf(name: str) -> int:
+        raise error(name)
+
+    return sysconf
+
+
+def test_memory_budget_is_half_of_the_memory_shared_by_the_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Half of the memory, with no upper limit; run_batch workers share it
+    monkeypatch.setattr(threads, "_physical_memory", lambda: 33_396_543_488)
+    monkeypatch.setattr(threads, "_memory_shares", 1)
+    assert threads._memory_budget() == 16_698_271_744
+    monkeypatch.setattr(threads, "_physical_memory", lambda: 256 << 30)
+    assert threads._memory_budget() == 128 << 30
+    threads._share_memory(4)
+    assert threads._memory_shares == 4 and threads._memory_budget() == 32 << 30
+
+
 def test_words_reads_a_small_file(tmp_path: Path) -> None:
     path = tmp_path / "cpu.max"
     path.write_text("150000 100000\n")

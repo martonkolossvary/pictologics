@@ -238,7 +238,7 @@ def _series_metadata(dcm: Any, file_path: Any) -> dict[str, Any]:
     try:
         ipp = dcm.ImagePositionPatient
         meta["ImagePositionPatient"] = (float(ipp[0]), float(ipp[1]), float(ipp[2]))
-    except (AttributeError, IndexError, TypeError):
+    except (AttributeError, IndexError, TypeError, ValueError):  # missing, short or text
         meta["ImagePositionPatient"] = None
     for tag in MULTI_PHASE_TAGS:
         val = getattr(dcm, tag, None)

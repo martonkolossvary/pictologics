@@ -32,7 +32,6 @@ import os
 import pickle
 import platform
 import re
-import sys
 import time
 import warnings
 import weakref
@@ -50,6 +49,7 @@ import numpy as np
 import pandas as pd
 import pywt
 import yaml
+from numba import jit, prange
 from numpy import typing as npt
 
 from .deduplication import (
@@ -60,6 +60,7 @@ from .deduplication import (
 )
 from .features import FEATURE_NAMES
 from .features._utils import (
+    PRANGE_ONLY,
     compute_nonzero_bbox,
     label_boxes,
     merge_bboxes,
@@ -109,7 +110,15 @@ from .filters import (
 from .filters.base import _whole_number, resolve_boundary
 from .filters.riesz import _riesz_order_problem
 from .filters.wavelets import _wavelet_problem
-from .loader import Image, _validate_geometry, create_full_mask, load_image
+from .loader import (
+    _NIFTI_FUSED_DTYPES,
+    _ROW_ORDER_MIN_SIZE,
+    Image,
+    _float_row_order,
+    _validate_geometry,
+    create_full_mask,
+    load_image,
+)
 from .preprocessing import (
     _NORMALISE_METHODS,
     _all_finite,
@@ -133,7 +142,7 @@ from .preprocessing import (
 )
 from .results import _json_safe, format_results
 from .templates import _load_yaml, get_standard_templates, list_template_files, load_template_file
-from .threads import _make_room
+from .threads import _make_room, _physical_memory, _share_memory
 
 # Schema version for config serialization - increment when format changes
 CONFIG_SCHEMA_VERSION = "1.0"
@@ -391,11 +400,49 @@ def _mask_box(array: npt.NDArray[Any], boxes: _Boxes) -> Optional[tuple[slice, s
 
 
 def _has_roi(array: npt.NDArray[Any], boxes: _Boxes) -> bool:
-    """Whether a mask has a nonzero voxel. A large mask takes the parallel box scan, and
-    `boxes` keeps its box; `ndarray.any` reads it in one thread (22 % of a 1 mm CT run)."""
+    """Whether a mask has a nonzero voxel. A box that `boxes` keeps answers first. Else a
+    large mask takes the parallel box scan, and `boxes` keeps its box; `ndarray.any` reads
+    it in one thread (22 % of a 1 mm CT run)."""
+    if id(array) in boxes:
+        return boxes[id(array)] is not None
     if array.size < 1 << 20:
         return bool(array.any())
     return _mask_box(array, boxes) is not None
+
+
+def _series(features: dict[str, Any], indexes: dict[tuple[str, ...], pd.Index]) -> pd.Series:
+    """pd.Series(features) for a dict of floats, with the Index of these names made once
+    (`indexes` keeps it): a Series from a dict costs 4 times more. An empty dict gives
+    pandas' own empty Series, as before."""
+    if not features:
+        return pd.Series(features)
+    keys = tuple(features)
+    index = indexes.get(keys)
+    if index is None:
+        index = indexes[keys] = pd.Index(keys)
+    try:
+        values = np.fromiter(features.values(), dtype=np.float64, count=len(keys))
+    except (TypeError, ValueError):  # a value that is not a number
+        return pd.Series(features)
+    return pd.Series(values, index=index.view())  # a view: a new name stays on this Series
+
+
+@dataclass
+class _RunPlan:
+    """What a run() or run_rois() call computes once for its configurations: the prefix
+    keys and their user counts (see _run_loaded), the configurations that search a
+    sentinel value, the users of each source setup, the deduplication plan, and the
+    log parts that do not change between ROIs."""
+
+    prefix_keys: dict[str, list[str]]
+    users: Counter[str]
+    searching: list[str]
+    source_users: Counter[tuple[Any, Any]]
+    dedup_plan: Optional[DeduplicationPlan]
+    snapshots: dict[str, dict[str, Any]]
+    hashes: dict[str, str]
+    step_forms: dict[str, list[Any]]
+    image_options: Any
 
 
 # The largest label of an ROI map: find_objects makes a list with one entry for each label
@@ -405,7 +452,11 @@ _LABEL_LIMIT = 1 << 20
 
 def _check_largest_label(labels: npt.NDArray[Any]) -> None:
     """Raise for a label above _LABEL_LIMIT (the maps that take find_objects)."""
-    largest = int(labels.max()) if labels.size else 0
+    _check_label_limit(int(labels.max()) if labels.size else 0)
+
+
+def _check_label_limit(largest: int) -> None:
+    """Raise when the largest label of an ROI map is above _LABEL_LIMIT."""
     if largest > _LABEL_LIMIT:
         raise ValueError(
             f"The largest label of an ROI map must be at most {_LABEL_LIMIT:,}, not {largest:,}."
@@ -442,6 +493,67 @@ def _label_boxes(labels: npt.NDArray[Any]) -> list[Optional[tuple[slice, slice, 
         )
         for found in ndimage.find_objects(labels[box])
     ]
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _label_check_numba(values: npt.NDArray[np.float64]) -> tuple[bool, float]:
+    """(every value is a whole number of 0 or above, the largest value) of a float label
+    map, in one parallel pass."""
+    n = values.size
+    n_chunks = 64
+    step = (n + n_chunks - 1) // n_chunks
+    bad = np.zeros(n_chunks, dtype=np.uint8)
+    top = np.zeros(n_chunks, dtype=np.float64)
+    for c in prange(n_chunks):
+        hi = 0.0
+        b = 0
+        for i in range(c * step, min(n, (c + 1) * step)):
+            v = values[i]
+            # this order of the tests is the fastest one (3.8 ms on 52 M voxels; 6-8 ms)
+            if not (v >= 0.0) or v != math.floor(v) or v == math.inf:
+                b = 1
+            elif v > hi:
+                hi = v
+        bad[c] = b
+        top[c] = hi
+    return bad.max() == 0, top.max()
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _cast_labels_numba(values: npt.NDArray[np.float64], out: npt.NDArray[Any]) -> None:
+    """`out[i] = int(values[i])` for the whole numbers `values`, in parallel chunks."""
+    n = values.size
+    n_chunks = 64
+    step = (n + n_chunks - 1) // n_chunks
+    for c in prange(n_chunks):
+        for i in range(c * step, min(n, (c + 1) * step)):
+            out[i] = int(values[i])
+
+
+# From this many voxels on, a float64 label map takes the parallel check and cast
+_LABEL_CAST_MIN = 1 << 16
+
+
+def _whole_labels(values: npt.NDArray[Any]) -> Optional[npt.NDArray[Any]]:
+    """A float label map as integers, in the smallest type that holds its labels (uint8,
+    uint16, int64), or None when a value is not a whole number of 0 or above."""
+    contiguous = values.flags.c_contiguous or values.flags.f_contiguous
+    if not contiguous or values.dtype != np.float64 or values.size < _LABEL_CAST_MIN:
+        whole = values.astype(np.int64)
+        # min raises on an empty map, as before
+        if not np.array_equal(whole, values) or whole.min() < 0:
+            return None
+        return whole
+    flat = values.ravel(order="K")
+    ok, largest = _label_check_numba(flat)
+    if not ok:
+        return None
+    _check_label_limit(int(largest))  # before the cast: a huge label would overflow it
+    dtype = np.uint8 if largest < 256 else np.uint16 if largest < 65536 else np.int64
+    column = values.flags.f_contiguous and not values.flags.c_contiguous
+    out = np.empty(values.shape, dtype=dtype, order="F" if column else "C")
+    _cast_labels_numba(flat, out.ravel(order="K"))
+    return out
 
 
 # IBSI: "to maintain consistency between samples, we strongly recommend to always set the
@@ -530,8 +642,10 @@ def _needs_full_grid(later_steps: list[dict[str, Any]]) -> bool:
 
 
 # From this many voxels on, a discretise step cuts the arrays to the ROI box (see
-# _cut_to_roi). Measured: on smaller images, finding and cutting the box costs more than
-# the binning it saves (about 50 us a configuration).
+# _cut_to_roi), and a binarize_mask step that leaves out the value 0 compares the box only.
+# Measured: on smaller images, finding and cutting the box costs more than the binning it
+# saves (about 50 us a configuration), and the box bookkeeping of a binarize_mask step
+# costs as much as the comparison it saves from 32^3 voxels down.
 _CUT_MIN_SIZE = 1 << 16
 # From this many voxels on, a filter may filter only the ROI region. Measured: below,
 # finding the region and filling the image back costs more than it saves (+34 us on an
@@ -544,33 +658,6 @@ _FILTER_REGION_MIN = 1 << 12
 _GRID_BYTES_PER_VOXEL = 24
 
 
-@functools.cache
-def _physical_memory() -> int:
-    """The bytes of physical memory of this computer."""
-    if sys.platform == "win32":
-        import ctypes
-
-        class _MemoryStatus(ctypes.Structure):  # MEMORYSTATUSEX: 2 DWORD, 7 DWORDLONG
-            _fields_ = [("length", ctypes.c_uint32), ("load", ctypes.c_uint32)] + [
-                (name, ctypes.c_uint64)
-                for name in (
-                    "total",
-                    "free",
-                    "page",
-                    "free_page",
-                    "virtual",
-                    "free_virtual",
-                    "extended",
-                )
-            ]
-
-        status = _MemoryStatus()
-        status.length = ctypes.sizeof(status)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
-        return int(status.total)
-    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-
-
 def _check_grid_memory(shape: list[int], new_spacing: Any) -> None:
     """Raise a MemoryError before a resample to a grid of `shape` that cannot fit in the
     memory of this computer (see _GRID_BYTES_PER_VOXEL)."""
@@ -579,8 +666,8 @@ def _check_grid_memory(shape: list[int], new_spacing: Any) -> None:
     if need > memory:
         raise MemoryError(
             f"Resampling to {tuple(new_spacing)} mm makes a grid of "
-            f"{' x '.join(map(str, shape))} voxels. It needs at least {need / 2**30:.1f} GB, "
-            f"more than the {memory / 2**30:.1f} GB of memory of this computer. Use a larger "
+            f"{' x '.join(map(str, shape))} voxels. It needs at least {need / 2**30:.2f} GiB, "
+            f"more than the {memory / 2**30:.2f} GiB of memory of this computer. Use a larger "
             "spacing, or a smaller image or ROI."
         )
 
@@ -628,6 +715,29 @@ def _reads_local_peak(params: dict[str, Any]) -> bool:
     )
 
 
+def _select_mask_values(
+    part: npt.NDArray[Any], out: npt.NDArray[np.uint8], threshold: Any, mask_values: Any
+) -> None:
+    """out = 1 where a binarize_mask step selects a voxel of `part`: at or above
+    `threshold`, inside the (lo, hi) range of `mask_values`, or equal to one of its values.
+    `out` is a uint8 array of the shape of `part` (a view of the new mask). The
+    comparisons write their bool result into `out` as it is (a bool is one byte of 0 or 1,
+    as the uint8 mask holds it), so the result is not cast."""
+    flags = out.view(np.bool_)
+    if mask_values is None:
+        np.greater_equal(part, float(threshold), out=flags)
+    elif isinstance(mask_values, tuple) and len(mask_values) == 2:
+        lo, hi = mask_values
+        np.greater_equal(part, lo, out=flags)
+        flags &= part <= hi
+    else:
+        values = np.asarray(mask_values).ravel()
+        if values.size == 1:  # one value: one comparison (np.isin takes 3 to 4 passes)
+            np.equal(part, values[0], out=flags)
+        else:
+            flags[...] = np.isin(part, values)
+
+
 def _selects_background(params: dict[str, Any]) -> bool:
     """Whether a binarize_mask step keeps mask voxels of value 0."""
     values = params.get("mask_values")
@@ -644,9 +754,8 @@ def _filter_reach(
 ) -> Optional[tuple[int, int, int]]:
     """Voxels that a filter output reads on each side, per axis, for the filters whose
     values do not depend on where the image ends: separable convolutions (LoG, wavelets,
-    the Laws response). The running sums of the mean filter and the Laws energy round in
-    an order that starts at the line start, so their reach is negative: they read from
-    the image start (see _filter_crop). None for the FFT filters and Gabor (which takes
+    the Laws response). The mean filter and the Laws energy sum each window on its own, so
+    they read the box plus the support. None for the FFT filters and Gabor (which takes
     the region itself)."""
     if filter_type in ("log", "gaussian"):
         spacing_mm = np.broadcast_to(np.asarray(params["spacing_mm"], dtype=float), (3,))
@@ -661,10 +770,10 @@ def _filter_reach(
         kernels = params.get("kernel", "L5E5E5")
         half = max(int(kernels[i + 1]) for i in range(0, len(kernels), 2)) // 2 + 1
         if params.get("compute_energy", False):
-            half = -(half + params.get("energy_distance", 7) + 1)
+            half = half + params.get("energy_distance", 7) + 1
         return (half, half, half)
     if filter_type == "mean":
-        reach = -(params.get("support", 15) // 2 + 1)
+        reach = params.get("support", 15) // 2 + 1
         return (reach, reach, reach)
     return None
 
@@ -676,12 +785,11 @@ def _filter_crop(
     periodic: bool,
 ) -> tuple[slice, slice, slice]:
     """The part of the image that a filter reads for its values in `region`: the region
-    grown by the reach on both sides, or for a negative reach (running sums) from the
-    image start to the region end plus the reach. With a periodic boundary, the whole
-    axis where the part meets an image end (the filter then reads the other end)."""
+    grown by the reach on both sides. With a periodic boundary, the whole axis where the
+    part meets an image end (the filter then reads the other end)."""
     crop = []
     for r, h, n in zip(region, reach, shape, strict=True):
-        lo, hi = (0, r.stop - h) if h < 0 else (r.start - h, r.stop + h)
+        lo, hi = r.start - h, r.stop + h
         if periodic and (lo <= 0 or hi >= n):
             lo, hi = 0, n
         crop.append(slice(max(lo, 0), min(hi, n)))
@@ -713,12 +821,39 @@ def _cut_to_roi(
     region = (rs[0], rs[1], rs[2])
     if all(r.stop - r.start == n for r, n in zip(region, shape, strict=True)):
         return
+    _cut_state(state, region, cuts, boxes, images=True)
+
+
+def _cut_state(
+    state: "PipelineState",
+    region: tuple[slice, slice, slice],
+    cuts: _ArrayMemo[tuple[int, Any], npt.NDArray[Any]],
+    boxes: _Boxes,
+    images: bool,
+) -> None:
+    """Cut the masks of `state` (and its images, with `images`) to `region` of their grid;
+    grid_shape and grid_offset keep the place of the region in the whole grid. `cuts` keeps
+    each cut while its array lives (see _cut_to_roi). The box of a cut mask follows from
+    the box of the mask (`boxes`), so no cut is scanned."""
+    shape = state.morph_mask.array.shape
     bounds = tuple((r.start, r.stop) for r in region)
 
     def piece(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
         key = (id(array), bounds)
         if key not in cuts:  # a copy: a view would keep the whole array alive
-            cuts.keep(array, key, region_copy(array[region]))
+            cut = region_copy(array[region])
+            cuts.keep(array, key, cut)
+            box = boxes.get(id(array))
+            if box is not None:
+                boxes.keep(
+                    cut,
+                    id(cut),
+                    (
+                        slice(box[0].start - region[0].start, box[0].stop - region[0].start),
+                        slice(box[1].start - region[1].start, box[1].stop - region[1].start),
+                        slice(box[2].start - region[2].start, box[2].stop - region[2].start),
+                    ),
+                )
         return cuts[key]
 
     def part(image: Image) -> Image:
@@ -731,7 +866,8 @@ def _cut_to_roi(
             source_mask=None if image.source_mask is None else piece(image.source_mask),
         )
 
-    state.image, state.raw_image = part(state.image), part(state.raw_image)
+    if images:
+        state.image, state.raw_image = part(state.image), part(state.raw_image)
     state.morph_mask, state.intensity_mask = part(state.morph_mask), part(state.intensity_mask)
     if state.source_mask is not None:
         state.source_mask = part(state.source_mask)
@@ -742,6 +878,26 @@ def _cut_to_roi(
         offset[1] + region[1].start,
         offset[2] + region[2].start,
     )
+
+
+def _float64_image(image: Image) -> Image:
+    """`image` as float64 (the type of the loaders): an integer or float32 array would
+    resample in its own type (rounded, and on one core)."""
+    array = image.array
+    if array.dtype == np.float64:
+        return image
+    if (
+        array.ndim == 3
+        and array.flags.f_contiguous
+        and array.size >= _ROW_ORDER_MIN_SIZE
+        and array.dtype in _NIFTI_FUSED_DTYPES
+    ):
+        # A column-order array (nibabel's dataobj): one tiled pass casts it and writes
+        # row order, the layout of the kernels, so a resample makes no second copy.
+        flags = np.zeros(array.shape[2], dtype=np.bool_)
+        ones = np.ones(array.shape[2])
+        return replace(image, array=_float_row_order(array, ones, ones, flags, flags))
+    return replace(image, array=array.astype(np.float64))
 
 
 def _source_mask(valid: npt.NDArray[Any], grid: Image) -> Image:
@@ -1195,8 +1351,8 @@ class PipelineState:
     sentinel_value: Optional[float] = None
     # How far (mm) outside the ROI box the steps after a filter, a resample or a discretise
     # step read (see _roi_reach), so that the step computes only that region: a filter
-    # writes 0 outside it, a resample makes only that region of the new grid, a discretise
-    # step cuts the arrays to it. None: the whole image. grid_shape is the whole grid when
+    # keeps only that region (the masks are cut to it), a resample makes only that region
+    # of the new grid, a discretise step cuts the arrays to it. None: the whole image. grid_shape is the whole grid when
     # the arrays hold a region.
     roi_reach: Optional[float] = None
     grid_shape: Optional[tuple[int, int, int]] = None
@@ -1290,6 +1446,11 @@ class RadiomicsPipeline:
         # (steps, config hash) of each configuration: a configuration changes only with a
         # new steps list (add_config, merge_configs), so its hash is made once
         self._config_hashes: dict[str, tuple[Any, str]] = {}
+        # (steps, snapshot) and (steps, serialized step params) of each configuration
+        self._config_snapshots: dict[str, tuple[Any, dict[str, Any]]] = {}
+        self._step_forms: dict[str, tuple[Any, list[Any]]] = {}
+        # The Index of each set of feature names that a run gave (see _series)
+        self._series_indexes: dict[tuple[str, ...], pd.Index] = {}
         # The feature families that failed in the configuration that runs now: {family: error}
         self._family_errors: dict[str, str] = {}
 
@@ -1554,7 +1715,8 @@ class RadiomicsPipeline:
             mask: Optional path to mask (str or Path) or Image object.
                 If omitted (or passed as `None` / empty string), the pipeline will
                 treat the **entire image** as the ROI by generating a full (all-ones)
-                mask matching the input image geometry.
+                mask matching the input image geometry. A NIfTI mask in an integer type
+                with no scaling loads in its stored type (`load_image(stored_type=True)`).
             subject_id: Optional identifier for the subject (used in the
                 processing log only; not included in the returned feature Series).
             config_names: List of specific configuration names to run.
@@ -1643,8 +1805,8 @@ class RadiomicsPipeline:
     def _run_image(
         image: str | Path | Image, image_options: Optional[Mapping[str, Any]] = None
     ) -> tuple[Image, str]:
-        """The image of a run (a float64 array) and its source for the log; an image path
-        loads with the `load_image` options `image_options`."""
+        """The image of a run and its source for the log; an image path loads with the
+        `load_image` options `image_options`."""
         if isinstance(image, (str, Path)):
             orig_img = load_image(str(image), **(image_options or {}))
             img_source = str(image)
@@ -1658,10 +1820,9 @@ class RadiomicsPipeline:
                 f"image must be a path or an Image, not {type(image).__name__}; wrap an "
                 "array as Image(array, spacing, origin)."
             )
-        if orig_img.array.dtype != np.float64:
-            # The loaders give float64. An integer or float32 array would resample in its
-            # own type (rounded, and on one core), so an in-memory image gets float64 too.
-            orig_img = replace(orig_img, array=orig_img.array.astype(np.float64))
+        # The loaders give float64. An integer or float32 array is cast where it is read
+        # (see _float64_image): the ROI region of a large image, or the whole image when
+        # a configuration reads the whole grid.
         return orig_img, img_source
 
     @staticmethod
@@ -1684,6 +1845,7 @@ class RadiomicsPipeline:
                 subvoxel_tolerance=tolerance,
                 subvoxel_warning_threshold=warning_threshold,
                 min_overlap_fraction=overlap,
+                stored_type=True,  # an unscaled integer NIfTI mask keeps its type
             )
             return loaded, mask, False
         if isinstance(mask, Image):
@@ -1707,6 +1869,7 @@ class RadiomicsPipeline:
         roi_nearest: Optional[tuple[Image, int]] = None,
         image_options: Optional[Mapping[str, Any]] = None,
         known_boxes: Iterable[tuple[npt.NDArray[Any], Optional[tuple[slice, slice, slice]]]] = (),
+        plan: Optional[_RunPlan] = None,
     ) -> dict[str, pd.Series]:
         """The part of `run()` after the loading: `target_configs` run (see
         `_target_configs`), and the log records the requested `config_names` and the
@@ -1720,6 +1883,10 @@ class RadiomicsPipeline:
         self._mask_boxes.clear()
         for array, box in known_boxes:
             self._mask_boxes.keep(array, id(array), box)
+        if orig_img.array.dtype != np.float64 and (
+            orig_img.array.size < _CUT_MIN_SIZE or self._reads_whole_image(target_configs)
+        ):
+            orig_img = _float64_image(orig_img)  # a small image, or a run that reads it all
         all_results = {}
         # Every voxel that is not 0 is ROI, also a voxel of 0.05 in a probability map. The
         # box scan of this check also serves as the first ROI check of the run.
@@ -1747,8 +1914,9 @@ class RadiomicsPipeline:
                 stacklevel=3,
             )
 
-        # Create or regenerate deduplication plan if enabled
-        dedup_plan: DeduplicationPlan | None = None
+        if plan is None:
+            plan = self._run_plan(target_configs, image_options)
+        dedup_plan = plan.dedup_plan
         family_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
         # Reset deduplication statistics for this run
@@ -1757,43 +1925,10 @@ class RadiomicsPipeline:
         self._last_distance_map = None
         self._roi_cuts.clear()
 
-        if self._deduplication_enabled and len(target_configs) > 1:
-            # Get configs for analysis
-            configs_to_analyze = {name: self._configs[name] for name in target_configs}
-            config_metadata = {name: self._config_metadata.get(name, {}) for name in target_configs}
-            # The plan of an earlier run holds while the rules and the pickled configs
-            # (names in order, steps and metadata) are the same.
-            try:
-                plan_key: bytes | None = pickle.dumps((configs_to_analyze, config_metadata))
-            except Exception:  # a parameter that pickle cannot write: plan anew
-                plan_key = None
-            cached = self._plan_cache
-            if (
-                plan_key is not None
-                and cached is not None
-                and cached[0] is self._deduplication_rules
-                and cached[1] == plan_key
-            ):
-                dedup_plan = cached[2]
-            else:
-                analyzer = ConfigurationAnalyzer(
-                    configs_to_analyze,
-                    self._deduplication_rules,
-                    config_metadata=config_metadata,
-                )
-                dedup_plan = analyzer.analyze()
-                if plan_key is not None:
-                    self._plan_cache = (self._deduplication_rules, plan_key, dedup_plan)
-            self._last_deduplication_plan = dedup_plan
-            self._configs_modified_since_plan = False
-
         # Configurations share identical preprocessing: the state after a step prefix
         # that a later configuration repeats is kept until its last user.
-        prefix_keys = {
-            name: _prefix_keys(self._configs[name], self._config_metadata.get(name, {}))
-            for name in target_configs
-        }
-        users = Counter(key for name in target_configs for key in prefix_keys[name])
+        prefix_keys = plan.prefix_keys
+        users = plan.users.copy()
         shared: dict[str, tuple[PipelineState, list[dict[str, Any]]]] = {}
 
         # Every configuration starts from the same image and mask, so the first ROI check,
@@ -1802,20 +1937,9 @@ class RadiomicsPipeline:
         # until the last configuration that uses it.
         roi_checked = False
         detection: Optional[tuple[Optional[float], int]] = None
-        # The configurations that search for their sentinel value (source mode "auto"
-        # without a sentinel value) share one search and one warning
-        searching = [
-            name
-            for name in target_configs
-            if SourceMode(self._config_metadata.get(name, {}).get("source_mode", "full_image"))
-            is SourceMode.AUTO
-            and self._config_metadata.get(name, {}).get("sentinel_value") is None
-        ]
+        searching = plan.searching
         source_masks: dict[tuple[Any, Any], Image] = {}
-        source_users = Counter(
-            (metadata.get("source_mode", "full_image"), metadata.get("sentinel_value"))
-            for metadata in (self._config_metadata.get(name, {}) for name in target_configs)
-        )
+        source_users = plan.source_users.copy()
 
         # Run each configuration
         for config_name in target_configs:
@@ -1912,7 +2036,8 @@ class RadiomicsPipeline:
                 roi_nearest=roi_nearest,
             )
 
-            snapshot = self._config_snapshot(config_name)
+            snapshot = plan.snapshots[config_name]
+            step_forms = plan.step_forms[config_name]
             config_log: dict[str, Any] = {
                 "timestamp": datetime.datetime.now().isoformat(),
                 "schema_version": CONFIG_SCHEMA_VERSION,
@@ -1920,9 +2045,9 @@ class RadiomicsPipeline:
                 "environment": {**_package_versions(), "threads": numba.get_num_threads()},
                 "subject_id": subject_id,
                 "config_name": config_name,
-                "config_hash": self._hash_of(config_name),
+                "config_hash": plan.hashes[config_name],
                 "image_source": img_source,
-                "image_options": self._make_serializable(dict(image_options or {})),
+                "image_options": plan.image_options,
                 "mask_source": mask_source,
                 "source_mode": source_mode.value,
                 "sentinel_detected": sentinel_detected,
@@ -1966,6 +2091,20 @@ class RadiomicsPipeline:
                     ):
                         self._ensure_nonempty_roi(state, context="initialization")
                     roi_checked = True
+                if orig_img.array.dtype != np.float64:
+                    # Every configuration reads only the ROI region (see _reads_whole_image):
+                    # the large image is cut to it, as at a discretise step, and the cut is
+                    # cast to float64 once per array of the run (_roi_cuts keeps the cast
+                    # while it lives).
+                    state.roi_reach = _roi_reach(steps)
+                    _cut_to_roi(state, self._roi_cuts, self._mask_boxes)
+                    state.roi_reach = None
+                    array = state.image.array
+                    cast_key = (id(array), np.float64)
+                    if cast_key not in self._roi_cuts:
+                        self._roi_cuts.keep(array, cast_key, _float64_image(state.image).array)
+                    cast_array = self._roi_cuts[cast_key]
+                    state.image = state.raw_image = replace(state.image, array=cast_array)
 
                 # Continue from the longest prefix that an earlier configuration ran.
                 start = 0
@@ -2014,7 +2153,7 @@ class RadiomicsPipeline:
                     # Log
                     step_log_entry: dict[str, Any] = {
                         "step": step_name,
-                        "params": self._make_serializable(params),
+                        "params": step_forms[index],
                         "status": "completed",
                     }
                     if step_name == "discretise" and params.get("method") == "FBS":
@@ -2087,8 +2226,7 @@ class RadiomicsPipeline:
             self._log.append(config_log)
 
             # Create Series
-            series = pd.Series(config_features)
-            all_results[config_name] = series
+            all_results[config_name] = _series(config_features, self._series_indexes)
 
         self._last_distance_map = None
         self._roi_cuts.clear()
@@ -2122,7 +2260,8 @@ class RadiomicsPipeline:
             image: Path to the image, or an Image.
             rois: Path to the label map (for example a NIfTI file, a DICOM SEG, or an
                 RTSTRUCT, whose labels are its ROI Numbers), or an Image, on the grid of the
-                image.
+                image. A NIfTI label map in an integer type with no scaling loads in its
+                stored type (`load_image(stored_type=True)`).
             labels: The ROIs to run: the labels, or a mapping from ROI names to labels.
                 Default: every label in the map.
             subject_id: The subject, for the processing log.
@@ -2161,12 +2300,16 @@ class RadiomicsPipeline:
         label_map, mask_source, _ = self._run_mask(rois, orig_img, mask_settings)
         _validate_geometry(label_map, orig_img, "mask", "image")
         values = label_map.array
-        whole = values if values.dtype.kind in "ui" else values.astype(np.int64)
-        # An unsigned map has no label below 0, so it skips min, a pass over the whole map
-        # (an empty map still goes to min, which raises as before)
-        if (whole is not values and not np.array_equal(whole, values)) or (
-            (whole.dtype.kind != "u" or whole.size == 0) and whole.min() < 0
-        ):
+        whole: Optional[npt.NDArray[Any]]
+        if values.dtype.kind in "ui":
+            whole = values
+            # An unsigned map has no label below 0, so it skips min, a pass over the whole
+            # map (an empty map still goes to min, which raises as before)
+            if (whole.dtype.kind != "u" or whole.size == 0) and whole.min() < 0:
+                whole = None
+        else:
+            whole = _whole_labels(values)
+        if whole is None:
             raise ValueError("The labels of an ROI map must be whole numbers of 0 or above.")
         boxes = _label_boxes(whole)  # the box of each label 1, 2, ...
         chosen: dict[str, float]
@@ -2182,6 +2325,8 @@ class RadiomicsPipeline:
         if isinstance(config_names, str):
             config_names = [config_names]
         names = self._target_configs(config_names)
+        if self._reads_whole_image(names):
+            orig_img = _float64_image(orig_img)
         # One mask array for all ROIs: each run fills the box of its label and clears it
         # after (a run keeps no array of its masks)
         buffer: npt.NDArray[Any] = np.zeros(values.shape, dtype=np.uint8)
@@ -2193,6 +2338,7 @@ class RadiomicsPipeline:
             if splits
             else None
         )
+        plan = self._run_plan(names, image_options) if chosen else None
         all_results: dict[str, dict[str, pd.Series]] = {}
         for name, label in chosen.items():
             box = boxes[int(label) - 1] if label <= len(boxes) else None
@@ -2213,6 +2359,7 @@ class RadiomicsPipeline:
                 image_options,
                 # The buffer holds this label alone, so its nonzero box is the label box
                 [(buffer, box)] if buffer.ndim == 3 else (),
+                plan,
             )
             for entry in self._log[start:]:
                 entry["roi"] = name
@@ -2347,10 +2494,11 @@ class RadiomicsPipeline:
                 from .utilities.dicom_utils import worker_pool
 
                 threads = max(1, numba.get_num_threads() // workers)
+                processes = min(workers, len(todo))
                 with worker_pool(
-                    min(workers, len(todo)),
+                    processes,
                     initializer=_start_batch_worker,
-                    initargs=(setup, threads),
+                    initargs=(setup, threads, processes),
                     spawn=True,
                 ) as pool:
                     futures = {
@@ -2484,15 +2632,86 @@ class RadiomicsPipeline:
     def _config_snapshot(self, name: str) -> dict[str, Any]:
         """The source mode, sentinel value and steps of a configuration (JSON-ready): the
         part of its log snapshot that the config hash covers."""
-        metadata = self._config_metadata.get(name, {})
-        snapshot: dict[str, Any] = self._make_serializable(
-            {
-                "source_mode": SourceMode(metadata.get("source_mode", "full_image")).value,
-                "sentinel_value": metadata.get("sentinel_value"),
-                "steps": self._configs[name],
-            }
+        steps = self._configs[name]
+        cached = self._config_snapshots.get(name)
+        if cached is None or cached[0] is not steps:
+            metadata = self._config_metadata.get(name, {})
+            snapshot: dict[str, Any] = self._make_serializable(
+                {
+                    "source_mode": SourceMode(metadata.get("source_mode", "full_image")).value,
+                    "sentinel_value": metadata.get("sentinel_value"),
+                    "steps": steps,
+                }
+            )
+            cached = (steps, snapshot)
+            self._config_snapshots[name] = cached
+        return cached[1]
+
+    def _serialized_params(self, name: str) -> list[Any]:
+        """The serializable form of the params of each step of a configuration (see
+        _make_serializable), made once per steps list."""
+        steps = self._configs[name]
+        cached = self._step_forms.get(name)
+        if cached is None or cached[0] is not steps:
+            cached = (steps, [self._make_serializable(step.get("params", {})) for step in steps])
+            self._step_forms[name] = cached
+        return cached[1]
+
+    def _run_plan(
+        self, target_configs: list[str], image_options: Optional[Mapping[str, Any]]
+    ) -> _RunPlan:
+        """The _RunPlan of a run of `target_configs`."""
+        dedup_plan: DeduplicationPlan | None = None
+        if self._deduplication_enabled and len(target_configs) > 1:
+            configs_to_analyze = {name: self._configs[name] for name in target_configs}
+            config_metadata = {name: self._config_metadata.get(name, {}) for name in target_configs}
+            try:
+                plan_key: bytes | None = pickle.dumps((configs_to_analyze, config_metadata))
+            except Exception:  # a parameter that pickle cannot write: plan anew
+                plan_key = None
+            cached = self._plan_cache
+            if (
+                plan_key is not None
+                and cached is not None
+                and cached[0] is self._deduplication_rules
+                and cached[1] == plan_key
+            ):
+                dedup_plan = cached[2]
+            else:
+                analyzer = ConfigurationAnalyzer(
+                    configs_to_analyze,
+                    self._deduplication_rules,
+                    config_metadata=config_metadata,
+                )
+                dedup_plan = analyzer.analyze()
+                if plan_key is not None:
+                    self._plan_cache = (self._deduplication_rules, plan_key, dedup_plan)
+            self._last_deduplication_plan = dedup_plan
+            self._configs_modified_since_plan = False
+        prefix_keys = {
+            name: _prefix_keys(self._configs[name], self._config_metadata.get(name, {}))
+            for name in target_configs
+        }
+        metadata = [self._config_metadata.get(name, {}) for name in target_configs]
+        return _RunPlan(
+            prefix_keys=prefix_keys,
+            users=Counter(key for name in target_configs for key in prefix_keys[name]),
+            searching=[
+                name
+                for name, meta in zip(target_configs, metadata, strict=True)
+                if SourceMode(meta.get("source_mode", "full_image")) is SourceMode.AUTO
+                and meta.get("sentinel_value") is None
+            ],
+            source_users=Counter(
+                (meta.get("source_mode", "full_image"), meta.get("sentinel_value"))
+                for meta in metadata
+            ),
+            dedup_plan=dedup_plan,
+            snapshots={name: self._config_snapshot(name) for name in target_configs},
+            hashes={name: self._hash_of(name) for name in target_configs},
+            step_forms={name: self._serialized_params(name) for name in target_configs},
+            image_options=self._make_serializable(dict(image_options or {})),
         )
-        return snapshot
 
     def _hash_of(self, name: str) -> str:
         """The config hash of a configuration (see `_config_hash`), made again only after
@@ -2531,6 +2750,17 @@ class RadiomicsPipeline:
     def clear_log(self) -> None:
         """Clear the in-memory processing log."""
         self._log.clear()
+
+    def _reads_whole_image(self, names: list[str]) -> bool:
+        """Whether a configuration of `names` reads the whole image: a step that needs the
+        whole grid (see _roi_reach), or the sentinel search and source mask of source mode
+        auto. Otherwise every configuration reads only the ROI region."""
+        return any(
+            _roi_reach(self._configs[name]) is None
+            or SourceMode(self._config_metadata.get(name, {}).get("source_mode", "full_image"))
+            is SourceMode.AUTO
+            for name in names
+        )
 
     def _ensure_nonempty_roi(self, state: PipelineState, context: str) -> None:
         """Raise a clear error if the ROI is empty.
@@ -2722,6 +2952,10 @@ class RadiomicsPipeline:
                 state.intensity_mask = state.morph_mask
             elif apply_to in ("intensity", "both"):
                 state.intensity_mask = keep_largest_component(state.intensity_mask)
+            if apply_to == "morph":  # IBSI: the intensity mask lies inside the morphological one
+                state.intensity_mask = _intersect_mask(
+                    state.intensity_mask, state.morph_mask.array != 0
+                )
 
             self._ensure_nonempty_roi(state, context="keep_largest_component")
 
@@ -2769,31 +3003,38 @@ class RadiomicsPipeline:
             apply_to = _get_apply_to(params, "binarize_mask")
             threshold = params.get("threshold", 0.5)
             mask_values = params.get("mask_values")
+            if mask_values is None and threshold is None:
+                raise ValueError(
+                    "binarize_mask requires 'threshold' unless mask_values is provided"
+                )
+            # A mask is 0 outside the box of its nonzero voxels, so a selection that leaves
+            # out the value 0 is made on the box only, into a zeros array (a run keeps the
+            # box of each mask array, see _mask_box), and the box of the new mask is kept
+            on_box = not _selects_background(params)
 
             def _binarize(image: Image) -> Image:
-                if mask_values is not None:
-                    if isinstance(mask_values, tuple) and len(mask_values) == 2:
-                        lo, hi = mask_values
-                        mask_arr = (image.array >= lo) & (image.array <= hi)
-                    else:
-                        values = mask_values
-                        if isinstance(values, int):
-                            values = [values]
-                        mask_arr = np.isin(image.array, values)
+                array = image.array
+                new: npt.NDArray[Any]
+                if on_box and array.ndim == 3 and array.size >= _CUT_MIN_SIZE:
+                    box = _mask_box(array, self._mask_boxes)
+                    column = array.flags.f_contiguous and not array.flags.c_contiguous
+                    new = np.zeros(array.shape, dtype=np.uint8, order="F" if column else "C")
+                    new_box = None
+                    if box is not None:
+                        _select_mask_values(array[box], new[box], threshold, mask_values)
+                        inner = compute_nonzero_bbox(new[box])
+                        if inner is not None:
+                            new_box = (
+                                slice(inner[0].start + box[0].start, inner[0].stop + box[0].start),
+                                slice(inner[1].start + box[1].start, inner[1].stop + box[1].start),
+                                slice(inner[2].start + box[2].start, inner[2].stop + box[2].start),
+                            )
+                    self._mask_boxes.keep(new, id(new), new_box)
                 else:
-                    if threshold is None:
-                        raise ValueError(
-                            "binarize_mask requires 'threshold' unless mask_values is provided"
-                        )
-                    # One pass straight into the uint8 mask (same memory order)
-                    mask_arr = np.greater_equal(
-                        image.array,
-                        float(threshold),
-                        out=np.empty_like(image.array, dtype=np.uint8),
-                    )
-
+                    new = np.empty_like(array, dtype=np.uint8)
+                    _select_mask_values(array, new, threshold, mask_values)
                 return Image(
-                    array=mask_arr.astype(np.uint8, copy=False),
+                    array=new,
                     spacing=image.spacing,
                     origin=image.origin,
                     direction=image.direction,
@@ -2809,6 +3050,10 @@ class RadiomicsPipeline:
                 state.intensity_mask = state.morph_mask
             elif apply_to in ("intensity", "both"):
                 state.intensity_mask = _binarize(state.intensity_mask)
+            if apply_to == "morph":  # IBSI: the intensity mask lies inside the morphological one
+                state.intensity_mask = _intersect_mask(
+                    state.intensity_mask, state.morph_mask.array != 0
+                )
 
             self._ensure_nonempty_roi(state, context="binarize_mask")
 
@@ -2899,7 +3144,8 @@ class RadiomicsPipeline:
             # When no later step reads the image outside the ROI, a filter whose values
             # do not depend on where the image ends filters only the ROI region (grown by
             # the local intensity sphere when a later step reads it) and the part that
-            # the region reads; the rest of the image is 0. A source mask is cut the same.
+            # the region reads; the arrays then hold that region (see _cut_state). A source
+            # mask is cut the same.
             region = None
             reach = _filter_reach(filter_type, {**params, **filter_params}, state.image.spacing)
             takes_region = filter_type == "gabor"  # it filters whole slices through the region
@@ -2924,7 +3170,9 @@ class RadiomicsPipeline:
                         for b, g, n in zip(bbox, grow, shape, strict=True)
                     ]
                     region = (rs[0], rs[1], rs[2])
-                    if reach is None:  # Gabor: the result is the region
+                    if all(r.stop - r.start == n for r, n in zip(region, shape, strict=True)):
+                        region = None  # the whole grid: the plain path
+                    elif reach is None:  # Gabor: the result is the region
                         crop = region
                     else:
                         crop = _filter_crop(
@@ -2995,14 +3243,16 @@ class RadiomicsPipeline:
                 result[0] if isinstance(result, tuple) else result
             )
             if region is not None:
-                embedded: npt.NDArray[Any] = np.zeros(state.image.array.shape, filtered_array.dtype)
-                embedded[region] = filtered_array[
-                    tuple(
-                        slice(r.start - c.start, r.stop - c.start)
-                        for r, c in zip(region, crop, strict=True)
-                    )
-                ]
-                filtered_array = embedded
+                # The arrays hold the region from here on (see _cut_state): the later
+                # steps read only the ROI, and the masks are 0 outside the region.
+                filtered_array = np.ascontiguousarray(
+                    filtered_array[
+                        tuple(
+                            slice(r.start - c.start, r.stop - c.start)
+                            for r, c in zip(region, crop, strict=True)
+                        )
+                    ]
+                )
 
             # Snapshot of the parameters actually honoured by this step, for IBSI 2
             # provenance (params_requested / params_effective in the run log).
@@ -3027,11 +3277,19 @@ class RadiomicsPipeline:
             state.image = Image(
                 array=filtered_array,
                 spacing=state.image.spacing,
-                origin=state.image.origin,
+                origin=(
+                    state.image.origin
+                    if region is None
+                    else _region_origin(
+                        state.image.origin, state.image.direction, state.image.spacing, region
+                    )
+                ),
                 direction=state.image.direction,
                 modality=state.image.modality,
             )
             state.raw_image = state.image  # Update raw_image post-filter
+            if region is not None:
+                _cut_state(state, region, self._roi_cuts, self._mask_boxes, images=False)
             state.resegment_min = None
             state.is_filtered = True
             state.filter_type = filter_type
@@ -4840,11 +5098,13 @@ def _batch_pipeline(
 _BATCH_PIPELINE: Optional[RadiomicsPipeline] = None
 
 
-def _start_batch_worker(setup: tuple[Any, ...], threads: int) -> None:
+def _start_batch_worker(setup: tuple[Any, ...], threads: int, processes: int) -> None:
     """Start a run_batch worker: its share of the numba threads (all thread pools of the
-    package follow it) and its pipeline."""
+    package follow it), its share of the memory budget of the `processes` workers, and its
+    pipeline."""
     global _BATCH_PIPELINE
     numba.set_num_threads(threads)
+    _share_memory(processes)
     _BATCH_PIPELINE = _batch_pipeline(*setup)
 
 

@@ -7,7 +7,7 @@ from collections import OrderedDict, deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from functools import partial, wraps
+from functools import lru_cache, partial, wraps
 from typing import Any, Callable, Dict, Iterable, Iterator, Optional, Tuple, TypeVar, Union, cast
 
 import numpy as np
@@ -15,7 +15,19 @@ import scipy.fft
 from numba import config as numba_config
 from numba import get_num_threads, jit
 from numpy import typing as npt
-from scipy.ndimage import convolve1d, gaussian_filter1d, uniform_filter1d
+from scipy.ndimage import convolve1d, correlate1d, gaussian_filter1d, uniform_filter1d
+
+from ..threads import _memory_budget
+from ._passes import (
+    _source_line,
+    corr_axis0,
+    corr_axis1,
+    corr_axis2,
+    symmetry,
+    unif_axis0,
+    unif_axis1,
+    unif_axis2,
+)
 
 
 class BoundaryCondition(Enum):
@@ -82,10 +94,13 @@ class FilterResult:
 
 _Array = TypeVar("_Array", bound=npt.NDArray[Any])
 
-# Byte limit of each transfer-function cache: large enough for the few shapes of one
-# image (rotations, orders, levels), small enough that a cohort of images with
-# different shapes does not keep a full volume for each of them.
+# Byte limit of each transfer-function cache: the guard for one huge image (at most a
+# quarter of the memory budget, see _transfer_cache_bytes); the shape limit keeps a cohort
+# from piling up tables.
 _TRANSFER_CACHE_BYTES = 2 << 30
+# Shapes whose transfer tables stay cached: the newest image and the one before it (two
+# configurations of one run that resample to different grids alternate between them).
+_TRANSFER_CACHE_SHAPES = 2
 
 
 def _whole_number(value: Any) -> bool:
@@ -95,14 +110,26 @@ def _whole_number(value: Any) -> bool:
     )
 
 
+def _transfer_cache_bytes() -> int:
+    """Byte limit of each transfer-function cache: _TRANSFER_CACHE_BYTES, at most a quarter
+    of the memory budget (see threads._memory_budget), so the two caches of a process (Riesz
+    and Simoncelli) keep at most half of it."""
+    return min(_TRANSFER_CACHE_BYTES, _memory_budget() // 4)
+
+
 def cache_by_bytes(
-    max_bytes: int,
+    max_bytes: int | Callable[[], int], max_shapes: Optional[int] = None
 ) -> Callable[[Callable[..., _Array]], Callable[..., _Array]]:
-    """Least-recently-used cache of array results, bounded by their total bytes.
+    """Least-recently-used cache of array results, bounded by their total bytes and,
+    with `max_shapes`, by the number of distinct first arguments (the image shapes).
+    `max_bytes` is a number, or a function that gives it at each new result.
 
     The newest result always stays cached, even when it alone is larger than
-    `max_bytes`. Arguments must be hashable. `cache_clear()` drops every result. A lock
-    makes the cache safe for threads: a thread waits while another builds a result.
+    `max_bytes`. With `max_shapes`, a new result drops the results whose first
+    argument is not among the `max_shapes` newest ones: a cohort of images with
+    different shapes keeps the tables of the newest shapes only. Arguments must be
+    hashable. `cache_clear()` drops every result. A lock makes the cache safe for
+    threads: a thread waits while another builds a result.
     """
 
     def decorate(func: Callable[..., _Array]) -> Callable[..., _Array]:
@@ -120,7 +147,13 @@ def cache_by_bytes(
                 value = func(*args)
                 cache[args] = value
                 total += value.nbytes
-                while total > max_bytes and len(cache) > 1:
+                if max_shapes is not None:
+                    # the newest first arguments, in order of their newest use
+                    kept = list(dict.fromkeys(key[0] for key in reversed(cache)))[:max_shapes]
+                    for key in [key for key in cache if key[0] not in kept]:
+                        total -= cache.pop(key).nbytes
+                limit = max_bytes() if callable(max_bytes) else max_bytes
+                while total > limit and len(cache) > 1:
                     total -= cache.popitem(last=False)[1].nbytes
                 return value
 
@@ -236,8 +269,8 @@ def ensure_float32(
 def as_float32(image: npt.NDArray[Any]) -> npt.NDArray[np.float32]:
     """The image as float32: the image itself when it is float32, else a new float32 copy
     (on slabs in threads for a large array). The separable filters run their passes on
-    it: a float32 pass moves half the bytes of a float64 pass, and scipy still sums each
-    line in double. A float64 image thus changes by the float32 rounding of the passes
+    it: a float32 pass moves half the bytes of a float64 pass, and the passes still sum
+    each line in double. A float64 image thus changes by the float32 rounding of the passes
     (see `ensure_float32` for the other rule)."""
     if image.dtype == np.float32:
         return image
@@ -410,6 +443,10 @@ def _copy_pass(image: npt.NDArray[Any], axis: int, output: npt.NDArray[Any]) -> 
 # (scipy frees the GIL in its filter loops). Each line of a pass lies in one slab, so the
 # values are those of one scipy call.
 _SLAB_MIN_SIZE = 1 << 18
+# A ufunc on slabs in threads pays from this many bytes on. Measured on float32 arrays at
+# 10 threads: 4 MB x1.8-2.6 of one call, 8 MB x0.9-1.3, 16 MB x0.6; float64 adds of 2.4 MB
+# lose and of 8 MB win.
+_SLAB_UFUNC_MIN_BYTES = 6 << 20
 
 # The threads of _slab_pass, made on first use (a new pool for each pass costs about
 # 0.3 ms). A forked process makes its own: the threads of the parent are not in it.
@@ -488,7 +525,7 @@ def _slab_ufunc(ufunc: Any, inputs: Tuple[Any, ...], out: npt.NDArray[Any]) -> n
     shape of `out`, or a number), on slabs of the first axis in the slab threads for a
     large array. Each value comes from the same operation as in one call."""
     threads = get_num_threads()
-    if out.size < _SLAB_MIN_SIZE or threads < 2:
+    if out.nbytes < _SLAB_UFUNC_MIN_BYTES or threads < 2:
         return cast(npt.NDArray[Any], ufunc(*inputs, out=out, casting="same_kind"))
     edges = np.linspace(0, out.shape[0], min(threads, out.shape[0]) + 1).astype(int)
 
@@ -530,6 +567,68 @@ def _add_times(
             np.add(part, value, out=part)
 
 
+def _numba_pass(
+    kind: str,
+    image: npt.NDArray[Any],
+    axis: int,
+    output: npt.NDArray[Any],
+    threads: Optional[int],
+    mode: str,
+    cval: float = 0.0,
+    weights: Any = None,
+    size: int = 0,
+) -> npt.NDArray[Any]:
+    """One 1-D pass of a numba twin of scipy (kind "correlate" with `weights`, or "uniform"
+    with `size`) along `axis` of a 3-D row-order image into `output` (can be the image), on
+    slabs in the slab threads from _SLAB_MIN_SIZE voxels on. The values are those of the
+    scipy pass with the constant `cval`."""
+    code = _MODE_CODES[mode]
+    kernel: Callable[[int, int], None]
+    if kind == "correlate":
+        w = np.ascontiguousarray(weights, dtype=np.float64)
+        sym = symmetry(w)
+        corr = (corr_axis0, corr_axis1, corr_axis2)[axis]
+        kernel = lambda s, e: corr(image, output, w, code, cval, sym, s, e)  # noqa: E731
+    else:
+        unif = (unif_axis0, unif_axis1, unif_axis2)[axis]
+        kernel = lambda s, e: unif(image, output, size, code, cval, s, e)  # noqa: E731
+    split_len = image.shape[1] if axis == 0 else image.shape[0]
+    threads = get_num_threads() if threads is None else threads
+    parts = min(threads, split_len)
+    if image.size < _SLAB_MIN_SIZE or parts < 2:
+        kernel(0, split_len)
+        return output
+    edges = np.linspace(0, split_len, parts + 1).astype(int)
+    list(_slab_pool().map(lambda k: kernel(int(edges[k]), int(edges[k + 1])), range(parts)))
+    return output
+
+
+def _twins(image: npt.NDArray[Any], output: npt.NDArray[Any]) -> bool:
+    """Whether the numba twins run the passes: a 3-D image and output in row order."""
+    return image.ndim == 3 and image.flags.c_contiguous and output.flags.c_contiguous
+
+
+def _pass_constant(one: Callable[..., Any], c: float, dtype: Any, length: int) -> float:
+    """The constant that the 1-D pass `one` leaves on a line of the constant `c` (extension
+    `c`), as the array type: the constant of the next pass of a padded image."""
+    if c == 0.0:
+        return 0.0
+    line = np.full(length, c, dtype=dtype)
+    return float(one(line, mode="constant", cval=c)[length // 2])
+
+
+@lru_cache(maxsize=64)
+def _gaussian_weights(sigma: float, order: int, truncate: float) -> npt.NDArray[np.float64]:
+    """The weights of gaussian_filter1d as correlate1d takes them, from its impulse response
+    (bitwise the kernel of scipy: a unit impulse reads each weight once). Do not change the
+    array: the cache keeps it."""
+    radius = int(truncate * float(sigma) + 0.5)
+    impulse = np.zeros(2 * radius + 1)
+    impulse[radius] = 1.0
+    response = gaussian_filter1d(impulse, sigma, order=order, mode="constant", truncate=truncate)
+    return cast(npt.NDArray[np.float64], response[::-1])
+
+
 def _per_axis(value: Any, ndim: int) -> tuple[Any, ...]:
     """A scalar or a sequence as one value per axis (scipy's _normalize_sequence)."""
     if isinstance(value, (list, tuple, np.ndarray)):
@@ -544,24 +643,41 @@ def _gaussian_filter(
     truncate: float = 4.0,
     order: Any = 0,
     output: Optional[npt.NDArray[Any]] = None,
+    cval: float = 0.0,
 ) -> npt.NDArray[Any]:
     """`scipy.ndimage.gaussian_filter` with the same steps (one 1-D pass per axis with a
-    sigma above 1e-15, in axis order), each in `_slab_pass`: the same values."""
+    sigma above 1e-15, in axis order): the same values. A 3-D row-order image takes the
+    numba twins of the passes (`_numba_pass`), another image `_slab_pass`. With `cval` (the
+    constant of a padded image, mode constant) each pass reads the constant that the pass
+    before leaves on a constant line."""
     if output is None:  # the passes (or the copy) write every value
         output = np.empty(image.shape, dtype=image.dtype)
     sigmas = _per_axis(sigma, image.ndim)
     orders = _per_axis(order, image.ndim)
     source = image
+    twins = _twins(image, output)
     for axis in range(image.ndim):
         if sigmas[axis] > 1e-15:
-            one = partial(
-                gaussian_filter1d,
-                sigma=sigmas[axis],
-                order=orders[axis],
-                mode=mode,
-                truncate=truncate,
-            )
-            _slab_pass(one, source, axis, output)
+            if twins:
+                weights = _gaussian_weights(sigmas[axis], orders[axis], truncate)
+                _numba_pass("correlate", source, axis, output, None, mode, cval, weights=weights)
+                one = partial(correlate1d, weights=weights)
+                cval = _pass_constant(one, cval, image.dtype, weights.size)
+            else:
+                one = partial(
+                    gaussian_filter1d,
+                    sigma=sigmas[axis],
+                    order=orders[axis],
+                    mode=mode,
+                    truncate=truncate,
+                    cval=cval,
+                )
+                _slab_pass(one, source, axis, output)
+                one = partial(
+                    gaussian_filter1d, sigma=sigmas[axis], order=orders[axis], truncate=truncate
+                )
+                length = 2 * int(truncate * float(sigmas[axis]) + 0.5) + 1
+                cval = _pass_constant(one, cval, image.dtype, length)
             source = output
     if source is image:
         output[...] = image
@@ -569,7 +685,11 @@ def _gaussian_filter(
 
 
 def _gaussian_laplace(
-    image: npt.NDArray[Any], sigma: Any, mode: str, truncate: float = 4.0
+    image: npt.NDArray[Any],
+    sigma: Any,
+    mode: str,
+    truncate: float = 4.0,
+    fft_dtype: Any = np.float64,
 ) -> npt.NDArray[Any]:
     """`scipy.ndimage.gaussian_laplace` with the same steps (scipy's generic_laplace: the
     Gaussian second derivative along each axis, added in axis order), each 1-D pass in
@@ -588,14 +708,15 @@ def _gaussian_laplace(
         and ndim == 3
         and min(sigmas) > 1e-15
     ):
-        return _fft_gaussian_laplace(image, sigmas, mode, truncate)
+        return _fft_gaussian_laplace(image, sigmas, mode, truncate, fft_dtype)
     output = _gaussian_filter(image, sigmas, mode, truncate, order=_second_on(0, ndim))
     smoothed = _gaussian_filter(image, (sigmas[0],) + (0.0,) * (ndim - 1), mode, truncate)
     rest = (0.0, *sigmas[1:])
     term = np.empty_like(output)
     for axis in range(1, ndim):
         order = _second_on(axis, ndim)
-        output += _gaussian_filter(smoothed, rest, mode, truncate, order=order, output=term)
+        term = _gaussian_filter(smoothed, rest, mode, truncate, order=order, output=term)
+        _slab_ufunc(np.add, (output, term), output)
     return output
 
 
@@ -604,9 +725,10 @@ def _second_on(axis: int, ndim: int) -> tuple[int, ...]:
     return tuple(2 if a == axis else 0 for a in range(ndim))
 
 
-# From this many voxels on, the LoG of a float64 image is one FFT convolution. Measured: it
-# is faster than the 8 passes from 64^3 on, for sigma 1 to 4 voxels, at 1 and 10 threads.
-_LOG_FFT_MIN = 1 << 18
+# From this many voxels on (about 51^3), the LoG of a float64 image is one FFT convolution.
+# Measured against the numba passes: faster from 51^3 on at 1 and 10 threads (x0.92 / x0.44
+# at 51^3, x0.75 / x0.40 at 58x57x58, x0.69 / x0.33 at 63^3); below, the 1-thread gain is gone.
+_LOG_FFT_MIN = 1 << 17
 
 # The np.pad modes that extend an image as the scipy modes extend each line
 _PAD_MODES = {
@@ -618,29 +740,8 @@ _PAD_MODES = {
 }
 # The code of each np.pad mode in _source_line
 _PAD_CODES = {"constant": 0, "symmetric": 1, "reflect": 2, "edge": 3, "wrap": 4}
-
-
-@jit(nopython=True, inline="always", cache=True)  # type: ignore
-def _source_line(t: int, n: int, mode: int) -> int:
-    """The line of an axis of n lines that line t of the padded axis reads, as np.pad does
-    (`mode`: see _PAD_CODES); -1 for the constant."""
-    if 0 <= t < n:
-        return t
-    if mode == 0:
-        return -1
-    if mode == 3:
-        return 0 if t < 0 else n - 1
-    if mode == 4:
-        return t % n
-    if mode == 1:
-        period = 2 * n
-        t = t % period
-        return t if t < n else period - 1 - t
-    if n == 1:
-        return 0
-    period = 2 * n - 2
-    t = t % period
-    return t if t < n else period - t
+# The code of each scipy mode in the pass kernels (_numba_pass)
+_MODE_CODES = {mode: _PAD_CODES[pad] for mode, pad in _PAD_MODES.items()}
 
 
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
@@ -653,28 +754,27 @@ def _pad_planes_numba(
     mode: int,
     value: float,
     first: int,
-    last: int,
 ) -> None:
-    """Planes first to last of `out` = np.pad of `image` with the widths w0, w1 and w2 before
-    the axes (the shape of `out` gives the widths after them), np.pad mode `mode` (see
-    _PAD_CODES) and the constant `value`."""
+    """out[c] = plane first + c of np.pad(image, widths, mode) with the widths w0, w1 and
+    w2 before the axes (the shape of a plane of `out` gives the widths after axes 1 and
+    2), the np.pad mode `mode` (see _PAD_CODES) and the constant `value`."""
     n0, n1, n2 = image.shape
-    for i in range(first, last):
-        si = _source_line(i - w0, n0, mode)
+    for c in range(out.shape[0]):
+        si = _source_line(first + c - w0, n0, mode)
         for j in range(out.shape[1]):
             sj = _source_line(j - w1, n1, mode)
             if si < 0 or sj < 0:
                 for k in range(out.shape[2]):
-                    out[i, j, k] = value
+                    out[c, j, k] = value
                 continue
             for k in range(w2):
                 sk = _source_line(k - w2, n2, mode)
-                out[i, j, k] = value if sk < 0 else image[si, sj, sk]
+                out[c, j, k] = value if sk < 0 else image[si, sj, sk]
             for k in range(n2):
-                out[i, j, w2 + k] = image[si, sj, k]
+                out[c, j, w2 + k] = image[si, sj, k]
             for k in range(w2 + n2, out.shape[2]):
                 sk = _source_line(k - w2, n2, mode)
-                out[i, j, k] = value if sk < 0 else image[si, sj, sk]
+                out[c, j, k] = value if sk < 0 else image[si, sj, sk]
 
 
 def _padded(
@@ -690,15 +790,15 @@ def _padded(
         return _padded(image.T, [tuple(w) for w in widths][::-1], mode, value).T
     shape = tuple(n + a + b for n, (a, b) in zip(image.shape, widths, strict=True))
     out = np.empty(shape, dtype=image.dtype)
-    args = (image, out, widths[0][0], widths[1][0], widths[2][0], _PAD_CODES[mode], float(value))
+    args = (widths[0][0], widths[1][0], widths[2][0], _PAD_CODES[mode], float(value))
     threads = get_num_threads()
     if out.size < _SLAB_MIN_SIZE or threads < 2:
-        _pad_planes_numba(*args, 0, shape[0])
+        _pad_planes_numba(image, out, *args, 0)
         return out
     edges = np.linspace(0, shape[0], min(threads, shape[0]) + 1).astype(int)
     list(
         _slab_pool().map(
-            lambda k: _pad_planes_numba(*args, int(edges[k]), int(edges[k + 1])),
+            lambda k: _pad_planes_numba(image, out[edges[k] : edges[k + 1]], *args, int(edges[k])),
             range(edges.size - 1),
         )
     )
@@ -712,16 +812,41 @@ def _times_log_transfer(
     b: npt.NDArray[np.float64],
     g: npt.NDArray[np.float64],
     d: npt.NDArray[np.float64],
+    first: int,
+    last: int,
 ) -> None:
-    """spectrum[i, j, k] *= a[i, j] * g[k] + b[i, j] * d[k], in place: the LoG transfer from
-    the Gaussian (g) and the second derivative (d) of the last axis and the tables a and b of
-    the first two axes."""
-    for i in range(spectrum.shape[0]):
+    """spectrum[i, j, k] *= a[i, j] * g[k] + b[i, j] * d[k] for the planes first to last,
+    in place: the LoG transfer from the Gaussian (g) and the second derivative (d) of the
+    last axis and the tables a and b of the first two axes."""
+    for i in range(first, last):
         for j in range(spectrum.shape[1]):
             a_ij = a[i, j]
             b_ij = b[i, j]
             for k in range(spectrum.shape[2]):
                 spectrum[i, j, k] *= a_ij * g[k] + b_ij * d[k]
+
+
+def _log_transfer(
+    spectrum: npt.NDArray[np.complex128],
+    a: npt.NDArray[np.float64],
+    b: npt.NDArray[np.float64],
+    g: npt.NDArray[np.float64],
+    d: npt.NDArray[np.float64],
+) -> None:
+    """`_times_log_transfer` of the whole spectrum, on slabs of planes in the slab threads
+    from _SLAB_MIN_SIZE values on (each value is one product: the same bits)."""
+    threads = get_num_threads()
+    n = spectrum.shape[0]
+    if spectrum.size < _SLAB_MIN_SIZE or threads < 2:
+        _times_log_transfer(spectrum, a, b, g, d, 0, n)
+        return
+    edges = np.linspace(0, n, min(threads, n) + 1).astype(int)
+    list(
+        _slab_pool().map(
+            lambda k: _times_log_transfer(spectrum, a, b, g, d, int(edges[k]), int(edges[k + 1])),
+            range(edges.size - 1),
+        )
+    )
 
 
 def _kernel_spectra(
@@ -741,35 +866,114 @@ def _kernel_spectra(
     return spectra[0], spectra[1]
 
 
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _scale_cut(
+    temp: npt.NDArray[np.float64], out: npt.NDArray[Any], fct: float, r2: int, first: int
+) -> None:
+    """out[first + c] = temp[c, :, r2:r2 + n2] * fct in the type of `out` (the scale of an
+    inverse FFT, then the cast of the cut)."""
+    n2 = out.shape[2]
+    for c in range(temp.shape[0]):
+        for j in range(temp.shape[1]):
+            for k in range(n2):
+                out[first + c, j, k] = temp[c, j, r2 + k] * fct
+
+
+# From this many padded voxels on, the FFT LoG runs on slabs: no padded array, no float64
+# response, the inverse of the cropped planes only. Below, rfftn and irfftn of the padded
+# array are faster at 10 threads (the slab tasks are too small). The same bits either way.
+_LOG_SLAB_MIN = 2 << 20
+
+# Bytes of the pad buffer of one chunk of the slab tasks of the FFT LoG (the rfft of a chunk
+# is as large): a chunk of a few planes of a large image, many planes of a small one
+_FFT_CHUNK_BYTES = 1 << 20
+
+
 def _fft_gaussian_laplace(
-    image: npt.NDArray[np.float64], sigmas: Tuple[Any, ...], mode: str, truncate: float
-) -> npt.NDArray[np.float64]:
+    image: npt.NDArray[np.float64],
+    sigmas: Tuple[Any, ...],
+    mode: str,
+    truncate: float,
+    out_dtype: Any = np.float64,
+) -> npt.NDArray[Any]:
     """The LoG of the passes of `_gaussian_laplace` as one FFT convolution with the same
-    truncated kernels. The image is extended with the boundary mode (as each pass extends
-    its lines) by the kernel radius and on to a fast FFT size. Its spectrum is multiplied by
-    the transfer: on each axis the second derivative, times the Gaussian on the other axes,
-    summed over the axes. The result is cut back to the image."""
+    truncated kernels, as a new row-order array of `out_dtype`. The image is extended with
+    the boundary mode (as each pass extends its lines) by the kernel radius and on to a
+    fast FFT size. Its spectrum is multiplied by the transfer: on each axis the second
+    derivative, times the Gaussian on the other axes, summed over the axes. The result is
+    cut back to the image.
+
+    From _LOG_SLAB_MIN padded voxels on (a column-order image takes the rfftn path at
+    every size), the padded image is never built: each thread
+    makes its slab of padded planes in a small buffer, a chunk at a time, and the rfft
+    along the last axis goes into the spectrum (pocketfft transforms the last axis first,
+    then axis 0, then axis 1, so the bits are those of rfftn). The complex passes run in
+    place. The inverse transforms the cropped planes only, scaled and cut into the output
+    by a kernel."""
     radii = [int(truncate * s + 0.5) for s in sigmas]
     sizes = [
         scipy.fft.next_fast_len(n + 2 * r, real=True)
         for n, r in zip(image.shape, radii, strict=True)
     ]
-    widths = [(r, size - n - r) for n, r, size in zip(image.shape, radii, sizes, strict=True)]
-    padded = _padded(image, widths, _PAD_MODES[mode])
+    workers = get_num_threads()
     (g0, d0), (g1, d1), (g2, d2) = (
         _kernel_spectra(s, r, size, truncate, axis == 2)
         for axis, (s, r, size) in enumerate(zip(sigmas, radii, sizes, strict=True))
     )
-    workers = get_num_threads()
-    spectrum = scipy.fft.rfftn(padded, workers=workers)
-    del padded
     first_two = np.multiply.outer(d0, g1) + np.multiply.outer(g0, d1)
-    _times_log_transfer(spectrum, first_two, np.multiply.outer(g0, g1), g2, d2)
-    response = scipy.fft.irfftn(spectrum, s=sizes, workers=workers, overwrite_x=True)
-    return cast(
-        npt.NDArray[np.float64],
-        response[tuple(slice(r, r + n) for r, n in zip(radii, image.shape, strict=True))],
-    )
+    both = np.multiply.outer(g0, g1)
+    s0, s1, s2 = sizes
+    if s0 * s1 * s2 < _LOG_SLAB_MIN or image.flags.fnc:  # column order: the rfftn path
+        widths = [(r, size - n - r) for n, r, size in zip(image.shape, radii, sizes, strict=True)]
+        padded = _padded(image, widths, _PAD_MODES[mode])
+        spectrum = scipy.fft.rfftn(padded, workers=workers)
+        del padded
+        _log_transfer(spectrum, first_two, both, g2, d2)
+        response = scipy.fft.irfftn(spectrum, s=sizes, workers=workers, overwrite_x=True)
+        crop = tuple(slice(r, r + n) for r, n in zip(radii, image.shape, strict=True))
+        return np.array(response[crop], dtype=out_dtype, order="C")
+    n0, n1, n2 = image.shape
+    r0, r1, r2 = radii
+    code = _PAD_CODES[_PAD_MODES[mode]]
+    spectrum = np.empty((s0, s1, s2 // 2 + 1), dtype=np.complex128)
+    fct = 1.0 / float(s0 * s1 * s2)
+    out = np.empty(image.shape, dtype=out_dtype)
+    chunk = max(1, min(_FFT_CHUNK_BYTES // (s1 * s2 * 8), s0))
+
+    def forward(a: int, b: int) -> None:
+        temp = np.empty((min(chunk, b - a), s1, s2))
+        for first in range(a, b, chunk):
+            last = min(first + chunk, b)
+            buf = temp[: last - first]
+            _pad_planes_numba(image, buf, r0, r1, r2, code, 0.0, first)
+            spectrum[first:last] = scipy.fft.rfft(buf, axis=2, workers=1)
+
+    def inverse(a: int, b: int) -> None:
+        for first in range(a, b, chunk):
+            last = min(first + chunk, b)
+            part = spectrum[r0 + first : r0 + last, r1 : r1 + n1, :]
+            temp = scipy.fft.irfft(part, n=s2, axis=2, workers=1, norm="forward")
+            _scale_cut(temp, out, fct, r2, first)
+
+    def run(task: Callable[[int, int], None], count: int) -> None:
+        if workers < 2:
+            task(0, count)
+            return
+        edges = np.linspace(0, count, min(workers, count) + 1).astype(int)
+        list(
+            _slab_pool().map(
+                lambda k: task(int(edges[k]), int(edges[k + 1])), range(edges.size - 1)
+            )
+        )
+
+    run(forward, s0)
+    spectrum = scipy.fft.fft(spectrum, axis=0, workers=workers, overwrite_x=True)
+    spectrum = scipy.fft.fft(spectrum, axis=1, workers=workers, overwrite_x=True)
+    _log_transfer(spectrum, first_two, both, g2, d2)
+    spectrum = scipy.fft.ifft(spectrum, axis=0, workers=workers, overwrite_x=True, norm="forward")
+    spectrum = scipy.fft.ifft(spectrum, axis=1, workers=workers, overwrite_x=True, norm="forward")
+    run(inverse, n0)
+    return out
 
 
 def _uniform_filter(
@@ -777,18 +981,36 @@ def _uniform_filter(
     size: int,
     mode: str,
     output: Optional[npt.NDArray[Any]] = None,
+    cval: float = 0.0,
 ) -> npt.NDArray[Any]:
-    """`scipy.ndimage.uniform_filter` with the same steps (one running-sum pass per axis,
-    in axis order), each in `_slab_pass`: the same values. `output` may be `image`."""
+    """`scipy.ndimage.uniform_filter` (one pass per axis, in axis order). A 3-D image takes
+    the numba passes, which sum each window on its own (`_passes._direct`): a value does
+    not depend on where the image starts (a crop gives the values of the whole image), and
+    it can differ from the running sum of scipy by one float32 unit in rare voxels (towards
+    the exact mean). A 3-D image or output in another memory order goes through a row-order
+    copy. Another number of axes takes the passes of scipy. `output` may be `image`. For
+    `cval` see `_gaussian_filter`."""
     if output is None:  # the passes (or the copy) write every value
         output = np.empty(image.shape, dtype=image.dtype)
     if size <= 1:
         output[...] = image
         return output
-    source = image
-    for axis in range(image.ndim):
-        _slab_pass(partial(uniform_filter1d, size=int(size), mode=mode), source, axis, output)
-        source = output
+    one = partial(uniform_filter1d, size=int(size))
+    if image.ndim != 3:
+        source = image
+        for axis in range(image.ndim):
+            _slab_pass(partial(one, mode=mode, cval=cval), source, axis, output)
+            cval = _pass_constant(one, cval, image.dtype, size)
+            source = output
+        return output
+    source = np.ascontiguousarray(image)
+    target = output if output.flags.c_contiguous else np.empty(image.shape, dtype=output.dtype)
+    for axis in range(3):
+        _numba_pass("uniform", source, axis, target, None, mode, cval, size=int(size))
+        cval = _pass_constant(one, cval, image.dtype, size)
+        source = target
+    if target is not output:
+        output[...] = target
     return output
 
 
@@ -798,21 +1020,24 @@ def _convolve_axes(
     mode: str,
     threads: Optional[int] = None,
     output: Optional[npt.NDArray[Any]] = None,
-    last_dtype: Any = None,
+    cval: float = 0.0,
 ) -> npt.NDArray[Any]:
-    """1-D convolutions along the axes in order (kernels[axis], one per axis), the first
-    into `output` (default: a new array of the image type; may be the image) and the
-    others in place, as the filters make them with convolve1d; each pass in
-    `_slab_pass`. With `last_dtype` of another type than the passes, the last pass writes a
-    new array of that type: scipy computes in double, so the values are those of a cast
-    after the pass."""
-    first = partial(convolve1d, weights=kernels[0], mode=mode)
-    result = _slab_pass(first, image, 0, output, threads)
-    for axis in range(1, len(kernels)):
-        one = partial(convolve1d, weights=kernels[axis], mode=mode)
-        last = axis == len(kernels) - 1 and last_dtype not in (None, result.dtype)
-        target = np.empty(result.shape, dtype=last_dtype) if last else result
-        result = _slab_pass(one, result, axis, target, threads)
+    """1-D convolutions along the axes in order (kernels[axis], one per axis, of odd
+    length), the first into `output` (default: a new array of the image type; may be the
+    image) and the others in place, with the values of convolve1d. For the numba twins and
+    `cval` see `_gaussian_filter`."""
+    if output is None:  # the passes write every value
+        output = np.empty(image.shape, dtype=image.dtype)
+    twins = _twins(image, output)
+    result = image
+    for axis, kernel in enumerate(kernels):
+        if twins:  # a convolution is the correlation with the reversed kernel
+            weights = np.asarray(kernel, dtype=np.float64)[::-1]
+            result = _numba_pass("correlate", result, axis, output, threads, mode, cval, weights)
+        else:
+            one = partial(convolve1d, weights=kernel, mode=mode, cval=cval)
+            result = _slab_pass(one, result, axis, output, threads)
+        cval = _pass_constant(partial(convolve1d, weights=kernel), cval, result.dtype, len(kernel))
     return result
 
 

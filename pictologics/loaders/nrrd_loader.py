@@ -137,7 +137,9 @@ def _read_values(path: Path, fields: dict[str, str], offset: int, count: int) ->
         raise ValueError(f"'{path}': the NRRD encoding '{fields['encoding']}' is not supported.")
     if len(data) < count * dtype.itemsize:
         raise ValueError(f"'{path}': the data hold {len(data)} of {count * dtype.itemsize} bytes.")
-    return np.frombuffer(data, dtype=dtype, count=count)
+    # A writeable copy: the kernels compile for writeable arrays (a read-only array of the
+    # bytes would compile another signature at its first load)
+    return np.frombuffer(data, dtype=dtype, count=count).copy()
 
 
 def _load_nrrd(path: str | Path, dataset_index: int = 0) -> Image:

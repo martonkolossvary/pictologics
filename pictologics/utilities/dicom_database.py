@@ -326,11 +326,12 @@ class DicomDatabase:
             spacing_tolerance: Tolerance for gap detection (default 10%).
             show_progress: Whether to display progress bars.
             extract_private_tags: Whether to extract vendor-specific private tags.
-            num_workers: Number of parallel workers. None=auto (cpu_count-1),
-                        1=sequential (no multiprocessing). At most one worker
-                        runs per FILES_PER_WORKER DICOM files: each worker process
-                        imports the package first, so smaller scans run faster
-                        in this process.
+            num_workers: Number of parallel workers. None=auto: this process below
+                        POOL_MIN_FILES DICOM files, else up to MAX_WORKERS workers
+                        (cpu_count - 1 at most); 1=sequential (no multiprocessing).
+                        At most one worker runs per FILES_PER_WORKER DICOM files:
+                        each worker process imports the package first, so smaller
+                        scans run faster in this process.
             split_multiseries: Whether to split multi-phase series (e.g. cardiac)
                               into separate series based on tags or spatial duplicates.
 
@@ -843,19 +844,30 @@ def _split_series_instances(
 # default 13 workers and 0.06 s in this process. Measured break-even: 4 workers win from
 # about 4,000 files, 8 workers from about 6,000.
 FILES_PER_WORKER = 1_000
+# With num_workers None, a scan of fewer files runs in this process, and a larger one starts
+# at most MAX_WORKERS workers. Measured: 2,000 files took 1.18 s in this process and 2.72 s
+# with 2 workers (the pool starts in 2.1-2.5 s); the workers win from about 6,000 files.
+POOL_MIN_FILES = 6_000
+MAX_WORKERS = 8
 
 
 def _get_num_workers(num_workers: Optional[int], n_files: int) -> int:
     """Determine the number of workers to use for `n_files` DICOM files.
 
     Args:
-        num_workers: User-specified workers. None=auto (cpu_count - 1), 1=sequential.
+        num_workers: User-specified workers. None=auto (1 below POOL_MIN_FILES files, else
+            at most MAX_WORKERS and cpu_count - 1), 1=sequential.
         n_files: Number of files to read.
 
     Returns:
         Number of workers to use: at most one per FILES_PER_WORKER files (minimum 1).
     """
-    requested = num_workers if num_workers is not None else (os.cpu_count() or 1) - 1
+    if num_workers is None:
+        if n_files < POOL_MIN_FILES:
+            return 1
+        requested = min((os.cpu_count() or 1) - 1, MAX_WORKERS)
+    else:
+        requested = num_workers
     return max(1, min(requested, n_files // FILES_PER_WORKER))
 
 

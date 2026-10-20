@@ -23,7 +23,6 @@ spatial feature calculations.
 from __future__ import annotations
 
 import math
-import os
 import warnings
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Callable, Optional, cast
@@ -33,7 +32,8 @@ import scipy.fft
 from numba import get_num_threads, jit, prange
 from numpy import typing as npt
 
-from ._utils import PRANGE_ONLY, compute_nonzero_bbox
+from ..threads import _memory_budget
+from ._utils import PRANGE_ONLY, compute_nonzero_bbox, serial_twin, sized
 
 if TYPE_CHECKING:
     from ..loader import Image
@@ -46,6 +46,45 @@ def _sum_sq_centered(values: npt.NDArray[np.floating[Any]], mean_val: float) -> 
     for i in range(values.size):
         d = float(values[i]) - mean_val
         total += d * d
+    return total
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _sum_of_squares(values: npt.NDArray[np.floating[Any]]) -> float:
+    """The sum of the squares of `values` in a fixed order: blocks of 4096 values, each
+    summed in eight accumulators (no fastmath, so the order is the source order). The
+    same values give the same bits in every buffer; np.dot (BLAS) blocks by the address
+    of the buffer and gives values one ulp apart."""
+    n = values.shape[0]
+    total = 0.0
+    start = 0
+    while start < n:
+        stop = min(start + 4096, n)
+        a0 = 0.0
+        a1 = 0.0
+        a2 = 0.0
+        a3 = 0.0
+        a4 = 0.0
+        a5 = 0.0
+        a6 = 0.0
+        a7 = 0.0
+        i = start
+        while i + 8 <= stop:
+            a0 += values[i] * values[i]
+            a1 += values[i + 1] * values[i + 1]
+            a2 += values[i + 2] * values[i + 2]
+            a3 += values[i + 3] * values[i + 3]
+            a4 += values[i + 4] * values[i + 4]
+            a5 += values[i + 5] * values[i + 5]
+            a6 += values[i + 6] * values[i + 6]
+            a7 += values[i + 7] * values[i + 7]
+            i += 8
+        block = ((a0 + a1) + (a2 + a3)) + ((a4 + a5) + (a6 + a7))
+        while i < stop:
+            block += values[i] * values[i]
+            i += 1
+        total += block
+        start = stop
     return total
 
 
@@ -223,6 +262,12 @@ def _calculate_spatial_features_numba(
     return numer_moran, numer_geary, sum_weights
 
 
+# The serial twin of the pair loop (see serial_twin). Measured on 10 threads: below this
+# many ROI voxels, starting the threads costs more than the pairs.
+_calculate_spatial_features_numba_serial = serial_twin(_calculate_spatial_features_numba)
+_PAIRS_PARALLEL_MIN = 450
+
+
 @jit(nopython=True, parallel=PRANGE_ONLY, fastmath=True, cache=True)  # type: ignore
 def _calculate_local_mean_numba(
     data: npt.NDArray[np.floating[Any]],
@@ -260,16 +305,132 @@ def _calculate_local_mean_numba(
     return means
 
 
-@jit(nopython=True, parallel=True, cache=True)  # type: ignore
-def _row_prefix_sums_numba(data: npt.NDArray[Any], out: npt.NDArray[np.float64]) -> None:
-    """out[x, y, k] = the sum of data[x, y, :k] (float64), for the sphere sums."""
-    for x in prange(data.shape[0]):
-        for y in range(data.shape[1]):
+# The serial twin of the exact kernel, for few (ROI voxel, sphere offset) pairs (see serial_twin)
+_calculate_local_mean_numba_serial = serial_twin(_calculate_local_mean_numba)
+# Pairs from which the exact kernel and the approximate kernels run in threads
+_LOCAL_MEAN_PARALLEL_MIN = 1 << 17
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _roi_count_numba(
+    roi: npt.NDArray[np.bool_], voxels: npt.NDArray[np.int64], runs: npt.NDArray[np.int64]
+) -> None:
+    """voxels[x], runs[x]: the ROI voxels and the z-runs (ROI voxels that follow each other
+    along z) of slab x of the bool array `roi`."""
+    nx, ny, nz = roi.shape
+    for x in prange(nx):
+        nv = 0
+        nr = 0
+        for y in range(ny):
+            prev = False
+            for z in range(nz):
+                inside = roi[x, y, z]
+                if inside:
+                    nv += 1
+                    if not prev:
+                        nr += 1
+                prev = inside
+        voxels[x] = nv
+        runs[x] = nr
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _roi_fill_numba(
+    roi: npt.NDArray[np.bool_],
+    data: npt.NDArray[np.floating[Any]],
+    voxel_start: npt.NDArray[np.int64],
+    run_start: npt.NDArray[np.int64],
+    indices: npt.NDArray[np.int32],
+    values: npt.NDArray[np.float64],
+    runs: npt.NDArray[np.int64],
+) -> None:
+    """The ROI voxels of slab x from voxel_start[x] on, in row order: indices[i] = (x, y, z),
+    values[i] = data[x, y, z]; its z-runs from run_start[x] on: runs[r] = (x, y, first z,
+    last z + 1, first voxel index)."""
+    nx, ny, nz = roi.shape
+    for x in prange(nx):
+        i = voxel_start[x]
+        r = run_start[x]
+        for y in range(ny):
+            prev = False
+            for z in range(nz):
+                inside = roi[x, y, z]
+                if inside:
+                    indices[i, 0] = x
+                    indices[i, 1] = y
+                    indices[i, 2] = z
+                    values[i] = data[x, y, z]
+                    if not prev:
+                        runs[r, 0] = x
+                        runs[r, 1] = y
+                        runs[r, 2] = z
+                        runs[r, 4] = i
+                        r += 1
+                    runs[r - 1, 3] = z + 1
+                    i += 1
+                prev = inside
+
+
+_roi_count_numba_serial = serial_twin(_roi_count_numba)
+_roi_fill_numba_serial = serial_twin(_roi_fill_numba)
+# Crop voxels from which the ROI scan and the prefix sums run in threads
+_CROP_PARALLEL_MIN = 1 << 18
+
+
+def _roi_scan(
+    roi: npt.NDArray[np.bool_], data: npt.NDArray[np.floating[Any]]
+) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.float64], npt.NDArray[np.int64]]:
+    """The ROI voxels of the row-order bool array `roi` in row order: indices (n, 3) int32,
+    values (n) float64 and the z-runs (m, 5) int64 (see _roi_fill_numba)."""
+    nx = roi.shape[0]
+    voxels = np.empty(nx, dtype=np.int64)
+    nruns = np.empty(nx, dtype=np.int64)
+    count = sized(_roi_count_numba, _roi_count_numba_serial, roi.size, _CROP_PARALLEL_MIN)
+    count(roi, voxels, nruns)
+    voxel_start = np.cumsum(voxels) - voxels
+    run_start = np.cumsum(nruns) - nruns
+    n = int(voxel_start[-1] + voxels[-1])
+    indices = np.empty((n, 3), dtype=np.int32)
+    values = np.empty(n, dtype=np.float64)
+    runs = np.empty((int(run_start[-1] + nruns[-1]), 5), dtype=np.int64)
+    if n:
+        fill = sized(_roi_fill_numba, _roi_fill_numba_serial, roi.size, _CROP_PARALLEL_MIN)
+        fill(roi, data, voxel_start, run_start, indices, values, runs)
+    return indices, values, runs
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _prefix_pad_numba(
+    data: npt.NDArray[np.floating[Any]],
+    pad: int,
+    out: npt.NDArray[np.float64],
+    lo: npt.NDArray[np.float64],
+    hi: npt.NDArray[np.float64],
+) -> None:
+    """out[x, y, pad + k] = the sum of data[x, y, :k] (float64), with `pad` zeros before and
+    `pad` copies of the row total after, so a sphere row clipped to the image reads the
+    same two sums as an unclipped one. lo[x], hi[x]: the smallest and the largest value of
+    slab x (a NaN value goes into the totals, not into lo and hi)."""
+    nx, ny, nz = data.shape
+    for x in prange(nx):
+        mn = np.inf
+        mx = -np.inf
+        for y in range(ny):
             s = 0.0
-            out[x, y, 0] = 0.0
-            for z in range(data.shape[2]):
-                s += float(data[x, y, z])
-                out[x, y, z + 1] = s
+            for k in range(pad + 1):
+                out[x, y, k] = 0.0
+            for z in range(nz):
+                v = float(data[x, y, z])
+                s += v
+                out[x, y, pad + z + 1] = s
+                if v < mn:
+                    mn = v
+                if v > mx:
+                    mx = v
+            for k in range(pad):
+                out[x, y, pad + nz + 1 + k] = s
+        lo[x] = mn
+        hi[x] = mx
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
@@ -303,6 +464,55 @@ def _approximate_local_means_numba(
             count += hi - lo
         out[i] = s / count
     return out
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _approx_runs_numba(
+    prefix: npt.NDArray[np.float64],
+    pad: int,
+    nz: int,
+    runs: npt.NDArray[np.int64],
+    row_dx: npt.NDArray[np.int64],
+    row_dy: npt.NDArray[np.int64],
+    row_dz: npt.NDArray[np.int64],
+    out: npt.NDArray[np.float64],
+) -> None:
+    """out[i] = the sphere mean of ROI voxel i from the padded row prefix sums, z-run by
+    z-run: for each sphere row (dx, dy, -dz..dz) one subtraction per voxel of the run, read
+    from the row (xx, yy) of `prefix` in one piece. The terms of each voxel are those of
+    `_approximate_local_means_numba`, in the same order."""
+    nx, ny = prefix.shape[0], prefix.shape[1]
+    for q in prange(runs.shape[0]):
+        x = runs[q, 0]
+        y = runs[q, 1]
+        z0 = runs[q, 2]
+        length = runs[q, 3] - z0
+        i0 = runs[q, 4]
+        s = np.zeros(length, dtype=np.float64)
+        cnt = np.zeros(length, dtype=np.int64)
+        for r in range(row_dx.shape[0]):
+            xx = x + row_dx[r]
+            yy = y + row_dy[r]
+            if xx < 0 or yy < 0 or xx >= nx or yy >= ny:
+                continue
+            h = row_dz[r]
+            line = prefix[xx, yy]
+            base_hi = pad + z0 + h + 1
+            base_lo = pad + z0 - h
+            for k in range(length):
+                s[k] += line[base_hi + k] - line[base_lo + k]
+            for k in range(length):
+                z = z0 + k
+                cnt[k] += min(z + h + 1, nz) - max(z - h, 0)
+        for k in range(length):
+            out[i0 + k] = s[k] / cnt[k]
+
+
+_prefix_pad_numba_serial = serial_twin(_prefix_pad_numba)
+_approximate_local_means_numba_serial = serial_twin(_approximate_local_means_numba)
+_approx_runs_numba_serial = serial_twin(_approx_runs_numba)
+# Mean z-run length (ROI voxels per run) from which the run kernel beats the voxel kernel
+_RUN_MEAN_LENGTH_MIN = 8
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
@@ -360,16 +570,21 @@ def _sphere_offsets_for_radius(
     return np.ascontiguousarray(np.array(offsets, dtype=np.int32))
 
 
-def _percentile_ranks(n: int, dtype: np.dtype[Any]) -> npt.NDArray[np.intp]:
-    """0-based ranks of P10, P25, P75 and P90 among n sorted values of type `dtype`.
+@jit(nopython=True, cache=True)  # type: ignore
+def _percentile_ranks(n: int) -> npt.NDArray[np.int64]:
+    """0-based ranks of P10, P25, P75 and P90 among n sorted values.
 
     This is the index rule of `np.percentile(..., method="inverted_cdf")`, with the same
-    float steps, so the ranks are the same as numpy's.
+    float64 steps (numpy divides the percentiles by 100 in float64 for values of every
+    type), so the ranks are the same as numpy's.
     """
-    q = np.true_divide([10, 25, 75, 90], dtype.type(100) if dtype.kind == "f" else 100)
-    index = n * q - 1
-    below = np.floor(index)
-    return np.where(index - below == 0, below, below + 1).astype(np.intp)
+    ranks = np.empty(4, dtype=np.int64)
+    q = (10.0 / 100.0, 25.0 / 100.0, 75.0 / 100.0, 90.0 / 100.0)
+    for j in range(4):
+        index = n * q[j] - 1.0
+        below = math.floor(index)
+        ranks[j] = below if index - below == 0.0 else below + 1
+    return ranks
 
 
 # From this many float64 values on, the order statistics come from a radix select: the key
@@ -482,7 +697,10 @@ def _radix_select(
 # of equal width from the smallest to the largest value, a count, and a partition of the keys
 # of the buckets of the ranks only (measured on pools of new CT-like arrays: x0.65 of the
 # partition at 1,000 values, x0.09 to x0.25 from 5,000 to 50,000 values, x0.17 and x0.41 of
-# the radix select at 100,000 and 268,000 values; at 500 values it does not win).
+# the radix select at 100,000 and 268,000 values; at 500 values it does not win). Below it,
+# _small_order_statistics_numba partitions in numba (measured on pools of new arrays: x0.14
+# of the numpy partition at 5 values, x0.46 at 200, x0.70 at 500, x0.86 to x0.90 at 999; a
+# numba sort loses from about 550 values).
 _LINEAR_SELECT_MIN = 1_000
 # From this many values on, with more than one thread, the count and the copy of the linear
 # select run in threads (measured: the serial passes lose to the radix select at 2 million).
@@ -723,6 +941,46 @@ def _linear_select(
     return out.view(np.float64)
 
 
+@jit(nopython=True, cache=True)  # type: ignore
+def _small_order_statistics_numba(
+    values: npt.NDArray[np.float64],
+) -> tuple[bool, float, float, float, float, float]:
+    """P10, P25, P75, P90 and the median of float64 `values` by one partition in numba (no
+    numpy call), after a flag: False (no result, before the partition) when a rank is a
+    zero and the values hold -0.0 and +0.0 (np.partition can give either zero there). A
+    NaN makes each of them NaN, as np.partition puts NaNs last. The median is numpy's mean
+    of the middle value or values (a zero mean is +0.0, as np.mean starts its sum at +0.0)."""
+    n = values.size
+    negatives = 0
+    negative_zeros = 0
+    positive_zeros = 0
+    for i in range(n):
+        v = values[i]
+        if v != v:
+            return True, np.nan, np.nan, np.nan, np.nan, np.nan
+        if v < 0.0:
+            negatives += 1
+        elif v == 0.0:
+            if math.copysign(1.0, v) < 0.0:
+                negative_zeros += 1
+            else:
+                positive_zeros += 1
+    half = n // 2
+    low = half - 1 + n % 2
+    percentiles = _percentile_ranks(n)
+    # The ranks in ascending order: P10, P25, the middle ranks, P75, P90
+    ranks = np.array([percentiles[0], percentiles[1], low, half, percentiles[2], percentiles[3]])
+    if negative_zeros > 0 and positive_zeros > 0:
+        for j in range(6):  # the zeros sit at the ranks from `negatives` on, in sorted order
+            if negatives <= ranks[j] < negatives + negative_zeros + positive_zeros:
+                return False, 0.0, 0.0, 0.0, 0.0, 0.0
+    part = np.partition(values, ranks)
+    median = (part[low] + part[half]) / 2.0 if n % 2 == 0 else part[low]
+    if median == 0.0:
+        median = 0.0  # np.mean starts its sum at +0.0, so a zero mean of -0.0 values is +0.0
+    return True, part[ranks[0]], part[ranks[1]], part[ranks[4]], part[ranks[5]], median
+
+
 def _order_statistics(
     values: npt.NDArray[Any], bounds: Optional[tuple[Any, Any]] = None
 ) -> tuple[Any, ...]:
@@ -736,10 +994,18 @@ def _order_statistics(
 
     Float64 values take the linear select first (from _LINEAR_SELECT_MIN values), then
     the radix select (from _RADIX_SELECT_MIN values), then one partition: each gives the
-    bits of the next one, or gives way to it.
+    bits of the next one, or gives way to it. Below _LINEAR_SELECT_MIN float64 values, one
+    partition in numba gives them (no numpy call), or gives way when the values hold both
+    zeros at a rank.
     """
     n = values.size
-    ranks = _percentile_ranks(n, values.dtype)
+    if values.dtype == np.float64 and 0 < n < _LINEAR_SELECT_MIN:
+        found, p10, p25, p75, p90, median = _small_order_statistics_numba(
+            np.ascontiguousarray(values)
+        )
+        if found:
+            return p10, p25, p75, p90, median
+    ranks = _percentile_ranks(n)
     half = n // 2
     low = half - 1 + n % 2  # lower middle rank (the middle rank when n is odd)
     if values.dtype == np.float64 and n >= _LINEAR_SELECT_MIN:
@@ -770,70 +1036,416 @@ def _order_statistics(
     return p10, p25, p75, p90, np.mean(part[low : half + 1])
 
 
-def _counts_order_statistics(
-    counts: npt.NDArray[Any], origin: int, dtype: np.dtype[Any]
-) -> tuple[Any, ...]:
-    """P10, P25, P75, P90 and the median of integer values of type `dtype`, from their
-    histogram (bin i counts the value origin + i).
-
-    The same values as `_order_statistics` gives, without a partition: the value at a rank
-    is the value of the first bin whose running count is above the rank. The median is
-    numpy's float64 mean of the middle value or values.
-    """
-    running = np.cumsum(counts)
-    n = int(running[-1])
-    half = n // 2
-    ranks = np.concatenate((_percentile_ranks(n, dtype), [half - 1 + n % 2, half]))
-    p10, p25, p75, p90, low, high = origin + np.searchsorted(running, ranks, side="right")
-    return p10, p25, p75, p90, (float(low) + float(high)) / 2.0
-
-
 def _range_error(n_bins: int, low: int, high: int) -> str:
     """The error of discretised values outside [1, n_bins]."""
     return f"discretised values must lie in [1, n_bins={n_bins}]; got range [{low}, {high}]"
 
 
-def _bin_counts(
-    disc: npt.NDArray[np.integer[Any]], n_bins: int
-) -> tuple[npt.NDArray[np.int64], int, int]:
-    """The counts of the levels 1 to n_bins of the integer values `disc` (one bincount, with
-    no int64 copy), and the minimum and the maximum value. A value outside [1, n_bins]
-    raises the ValueError of the values. The largest value is checked first, so a stray
-    value cannot make bincount allocate a table of its size."""
-    high = int(np.max(disc))
-    try:
-        counts: Optional[npt.NDArray[np.int64]] = (
-            np.bincount(disc, minlength=n_bins + 1) if high <= n_bins else None
-        )
-    except ValueError:  # a negative value
-        counts = None
-    if counts is None or counts[0]:
-        raise ValueError(_range_error(n_bins, int(np.min(disc)), high))
-    occupied = np.flatnonzero(counts)
-    return counts[1:], int(occupied[0]), high
+# The histogram features, in the order of calculate_intensity_histogram_features
+_HISTOGRAM_FEATURES = (
+    "mean_discretised_intensity_X6K6",
+    "discretised_intensity_variance_CH89",
+    "discretised_intensity_skewness_88K1",
+    "discretised_intensity_kurtosis_C3I7",
+    "median_discretised_intensity_WIFQ",
+    "minimum_discretised_intensity_1PR8",
+    "10th_discretised_intensity_percentile_1PR",
+    "90th_discretised_intensity_percentile_GPMT",
+    "maximum_discretised_intensity_3NCY",
+    "intensity_histogram_mode_AMMC",
+    "discretised_intensity_interquartile_range_WR0O",
+    "discretised_intensity_range_5Z3W",
+    "intensity_histogram_mean_absolute_deviation_D2ZX",
+    "intensity_histogram_robust_mean_absolute_deviation_WRZB",
+    "intensity_histogram_median_absolute_deviation_4RNL",
+    "intensity_histogram_coefficient_of_variation_CWYJ",
+    "intensity_histogram_quartile_coefficient_of_dispersion_SLWD",
+    "discretised_intensity_entropy_TLU2",
+    "discretised_intensity_uniformity_BJ5W",
+    "maximum_histogram_gradient_12CE",
+    "maximum_histogram_gradient_intensity_8E6O",
+    "minimum_histogram_gradient_VQB3",
+    "minimum_histogram_gradient_intensity_RHQZ",
+)
 
 
-def _counted_deviations(
-    levels: npt.NDArray[np.int64],
+@jit(nopython=True, cache=True)  # type: ignore
+def _level_counts_numba(
+    values: npt.NDArray[Any], n_bins: int
+) -> tuple[npt.NDArray[np.int64], Any, Any, bool]:
+    """The counts of the levels 0 to n_bins of the 1-D `values` (a value below 0 counts as
+    level 0, one above n_bins as level n_bins), the smallest and the largest value, and
+    whether every value is a whole number (an integer always is, a NaN never): the count
+    stops at the first value that is not, and then the counts and the range are partial.
+    A NaN counts as level 0 until then (max keeps its first argument), so int() never
+    reads one. Four tables take the values in turn, so a run of equal values does not wait
+    on one table."""
+    n = values.size
+    tables = np.zeros((4, n_bins + 1), dtype=np.int64)
+    low = values[0]
+    high = values[0]
+    whole = True
+    i = 0
+    while whole and i + 4 <= n:
+        v0 = values[i]
+        v1 = values[i + 1]
+        v2 = values[i + 2]
+        v3 = values[i + 3]
+        k0 = int(min(max(0, v0), n_bins))
+        k1 = int(min(max(0, v1), n_bins))
+        k2 = int(min(max(0, v2), n_bins))
+        k3 = int(min(max(0, v3), n_bins))
+        whole &= (math.floor(v0) == v0) & (math.floor(v1) == v1)
+        whole &= (math.floor(v2) == v2) & (math.floor(v3) == v3)
+        low = min(low, min(min(v0, v1), min(v2, v3)))
+        high = max(high, max(max(v0, v1), max(v2, v3)))
+        tables[0, k0] += 1
+        tables[1, k1] += 1
+        tables[2, k2] += 1
+        tables[3, k3] += 1
+        i += 4
+    while whole and i < n:
+        v0 = values[i]
+        k0 = int(min(max(0, v0), n_bins))
+        whole &= math.floor(v0) == v0
+        low = min(low, v0)
+        high = max(high, v0)
+        tables[0, k0] += 1
+        i += 1
+    counts = np.empty(n_bins + 1, dtype=np.int64)
+    for k in range(n_bins + 1):
+        counts[k] = tables[0, k] + tables[1, k] + tables[2, k] + tables[3, k]
+    return counts, low, high, whole
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _level_counts_threads_numba(
+    values: npt.NDArray[Any],
+    n_bins: int,
     counts: npt.NDArray[np.int64],
-    n: int,
-    mean: float,
-    median: float,
-    lower: float,
-    upper: float,
-) -> tuple[float, float, float]:
-    """The mean, the robust mean and the median absolute deviations of integer values, from
-    their bin counts: the terms of _mean_abs_dev and _robust_mean_abs_dev, each level once
-    with its count. The robust one reads the levels from lower to upper (inclusive): P10 and
-    P90 are values, so at least one level is there."""
-    mad = float(np.sum(counts * np.abs(levels - mean))) / n
-    median_ad = float(np.sum(counts * np.abs(levels - median))) / n
-    inside = (levels >= lower) & (levels <= upper)
-    sub_levels, sub_counts = levels[inside], counts[inside]
-    sub_n = int(sub_counts.sum())
-    sub_mean = int(sub_levels @ sub_counts) / sub_n
-    robust = float(np.sum(sub_counts * np.abs(sub_levels - sub_mean))) / sub_n
-    return mad, robust, median_ad
+    lows: npt.NDArray[Any],
+    highs: npt.NDArray[Any],
+    wholes: npt.NDArray[np.bool_],
+) -> None:
+    """_level_counts_numba of each of counts.shape[0] parts of `values`, in threads: the
+    counts of part c into counts[c], its smallest and largest value into lows[c] and
+    highs[c], its whole-number flag into wholes[c] (the tables of a part are its own)."""
+    n = values.size
+    parts = counts.shape[0]
+    for c in prange(parts):
+        start = c * n // parts
+        stop = (c + 1) * n // parts
+        tables = np.zeros((4, n_bins + 1), dtype=np.int64)
+        low = values[start]
+        high = values[start]
+        whole = True
+        i = start
+        while whole and i + 4 <= stop:
+            v0 = values[i]
+            v1 = values[i + 1]
+            v2 = values[i + 2]
+            v3 = values[i + 3]
+            k0 = int(min(max(0, v0), n_bins))
+            k1 = int(min(max(0, v1), n_bins))
+            k2 = int(min(max(0, v2), n_bins))
+            k3 = int(min(max(0, v3), n_bins))
+            whole &= (math.floor(v0) == v0) & (math.floor(v1) == v1)
+            whole &= (math.floor(v2) == v2) & (math.floor(v3) == v3)
+            low = min(low, min(min(v0, v1), min(v2, v3)))
+            high = max(high, max(max(v0, v1), max(v2, v3)))
+            tables[0, k0] += 1
+            tables[1, k1] += 1
+            tables[2, k2] += 1
+            tables[3, k3] += 1
+            i += 4
+        while whole and i < stop:
+            v0 = values[i]
+            k0 = int(min(max(0, v0), n_bins))
+            whole &= math.floor(v0) == v0
+            low = min(low, v0)
+            high = max(high, v0)
+            tables[0, k0] += 1
+            i += 1
+        for k in range(n_bins + 1):
+            counts[c, k] = tables[0, k] + tables[1, k] + tables[2, k] + tables[3, k]
+        lows[c] = low
+        highs[c] = high
+        wholes[c] = whole
+
+
+# From this many values on, the level count runs in threads (measured: below, one thread is
+# as fast, and the start of the threads costs about 70 us)
+_PARALLEL_LEVEL_MIN = 1 << 19
+
+
+def _level_counts(
+    values: npt.NDArray[Any], n_bins: int
+) -> tuple[npt.NDArray[np.int64], Any, Any, bool]:
+    """The counts of the levels 0 to n_bins of the integer or float64 `values` (see
+    _level_counts_numba), the smallest and the largest value, and whether every value is a
+    whole number. int32 (the pipeline), int64 and float64 values go as they are; other
+    integers as an int64 copy."""
+    data = values if values.dtype in (np.int32, np.int64, np.float64) else values.astype(np.int64)
+    data = np.ascontiguousarray(data)
+    if data.size >= _PARALLEL_LEVEL_MIN and get_num_threads() > 1:
+        parts = get_num_threads()
+        counts = np.empty((parts, n_bins + 1), dtype=np.int64)
+        lows = np.empty(parts, dtype=data.dtype)
+        highs = np.empty(parts, dtype=data.dtype)
+        wholes = np.empty(parts, dtype=np.bool_)
+        _level_counts_threads_numba(data, n_bins, counts, lows, highs, wholes)
+        return counts.sum(axis=0), lows.min(), highs.max(), bool(wholes.all())
+    return cast(tuple[npt.NDArray[np.int64], Any, Any, bool], _level_counts_numba(data, n_bins))
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _pairwise_sum_numba(terms: npt.NDArray[np.float64], start: int, stop: int) -> float:
+    """The sum of terms[start:stop] in the order of np.sum (numpy's pairwise summation: a
+    plain loop below 8 terms, 8 partial sums up to 128 terms, above that the sum of the two
+    halves, the first a multiple of 8), so the bits of np.sum. The halves wait on a stack of
+    frames (a cached kernel cannot call a recursive one): a frame holds the range of a
+    half and, once its first half is summed, that sum."""
+    starts = np.empty(64, dtype=np.int64)
+    stops = np.empty(64, dtype=np.int64)
+    firsts = np.empty(64, dtype=np.float64)
+    summed = np.zeros(64, dtype=np.bool_)  # the first half of the frame is summed
+    depth = 0
+    starts[0] = start
+    stops[0] = stop
+    while True:
+        a = starts[depth]
+        b = stops[depth]
+        n = b - a
+        if n > 128:
+            half = n // 2
+            half -= half % 8
+            depth += 1
+            if summed[depth - 1]:
+                starts[depth] = a + half
+                stops[depth] = b
+            else:
+                starts[depth] = a
+                stops[depth] = a + half
+            summed[depth] = False
+            continue
+        if n < 8:
+            value = 0.0
+            for i in range(a, b):
+                value += terms[i]
+        else:
+            r0 = terms[a]
+            r1 = terms[a + 1]
+            r2 = terms[a + 2]
+            r3 = terms[a + 3]
+            r4 = terms[a + 4]
+            r5 = terms[a + 5]
+            r6 = terms[a + 6]
+            r7 = terms[a + 7]
+            i = a + 8
+            end = b - n % 8
+            while i < end:
+                r0 += terms[i]
+                r1 += terms[i + 1]
+                r2 += terms[i + 2]
+                r3 += terms[i + 3]
+                r4 += terms[i + 4]
+                r5 += terms[i + 5]
+                r6 += terms[i + 6]
+                r7 += terms[i + 7]
+                i += 8
+            value = ((r0 + r1) + (r2 + r3)) + ((r4 + r5) + (r6 + r7))
+            while i < b:
+                value += terms[i]
+                i += 1
+        # The value goes up: a frame whose first half this is keeps it and takes its second
+        # half next; a frame with both halves summed passes their sum up
+        while True:
+            depth -= 1
+            if depth < 0:
+                return value
+            if summed[depth]:
+                value = firsts[depth] + value
+            else:
+                firsts[depth] = value
+                summed[depth] = True
+                break
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _rank_numba(n: int, q: float) -> int:
+    """The 0-based rank of the q quantile among n sorted values: the index rule of
+    np.percentile(..., method="inverted_cdf"), as _percentile_ranks computes it."""
+    index = n * q - 1.0
+    below = math.floor(index)
+    return int(below) if index - below == 0.0 else int(below) + 1
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _counted_statistics_numba(
+    counts: npt.NDArray[np.int64], origin: int, out: npt.NDArray[np.float64]
+) -> None:
+    """The histogram features (_HISTOGRAM_FEATURES, in that order) of integer values from
+    their bin counts (bin i counts the value origin + i), into `out`. The sums of terms
+    over the bins run in the order of np.sum (_pairwise_sum_numba), the sums of integers
+    in int64, so the values are the bits of the numpy steps that this kernel replaces."""
+    nb = counts.size
+    n = 0
+    total = 0
+    for i in range(nb):
+        n += counts[i]
+        total += (origin + i) * counts[i]
+    mean = total / n
+    terms = np.empty(nb, dtype=np.float64)
+    for i in range(nb):
+        d = (origin + i) - mean
+        terms[i] = counts[i] * (d * d)
+    var = _pairwise_sum_numba(terms, 0, nb) / n
+    if var == 0.0:  # IBSI: skewness and kurtosis 0 when the variance is 0
+        skew = 0.0
+        kurt = 0.0
+    else:
+        inv_n = 1.0 / n
+        for i in range(nb):
+            d = (origin + i) - mean
+            d2 = d * d
+            terms[i] = counts[i] * (d2 * d)
+        m3 = _pairwise_sum_numba(terms, 0, nb) * inv_n
+        for i in range(nb):
+            d = (origin + i) - mean
+            d2 = d * d
+            terms[i] = counts[i] * (d2 * d2)
+        m4 = _pairwise_sum_numba(terms, 0, nb) * inv_n
+        skew = m3 / var**1.5
+        kurt = (m4 / (var * var)) - 3.0
+    # The order statistics: the value at a rank is the value of the first bin whose running
+    # count is above the rank. The ranks in ascending order: P10, P25, the middle rank or
+    # ranks, P75, P90; the median is the float64 mean of the middle value or values.
+    half = n // 2
+    ranks = (
+        _rank_numba(n, 0.1),
+        _rank_numba(n, 0.25),
+        half - 1 + n % 2,
+        half,
+        _rank_numba(n, 0.75),
+        _rank_numba(n, 0.9),
+    )
+    picked = np.empty(6, dtype=np.int64)
+    j = 0
+    running = 0
+    for i in range(nb):
+        running += counts[i]
+        while j < 6 and running > ranks[j]:
+            picked[j] = origin + i
+            j += 1
+    p10 = picked[0]
+    p25 = picked[1]
+    median = (float(picked[2]) + float(picked[3])) / 2.0
+    p75 = picked[4]
+    p90 = picked[5]
+    # The smallest and the largest value, and the mode: of the most frequent values the one
+    # closest to the mean (the lower one of two at the same distance)
+    low = origin
+    high = origin
+    largest = 0
+    for i in range(nb):
+        if counts[i] > 0:
+            if largest == 0:
+                low = origin + i
+            high = origin + i
+            largest = max(largest, counts[i])
+    mode = origin
+    best = math.inf
+    for i in range(nb):
+        if counts[i] == largest:
+            distance = abs((origin + i) - mean)
+            if distance < best:
+                best = distance
+                mode = origin + i
+    # The mean, the median and the robust (values from P10 to P90) absolute deviations
+    for i in range(nb):
+        terms[i] = counts[i] * abs((origin + i) - mean)
+    mad = _pairwise_sum_numba(terms, 0, nb) / n
+    for i in range(nb):
+        terms[i] = counts[i] * abs((origin + i) - median)
+    median_ad = _pairwise_sum_numba(terms, 0, nb) / n
+    sub_n = 0
+    sub_total = 0
+    for i in range(nb):
+        level = origin + i
+        if level >= p10 and level <= p90:
+            sub_n += counts[i]
+            sub_total += level * counts[i]
+    sub_mean = sub_total / sub_n
+    k = 0
+    for i in range(nb):
+        level = origin + i
+        if level >= p10 and level <= p90:
+            terms[k] = counts[i] * abs(level - sub_mean)
+            k += 1
+    robust = _pairwise_sum_numba(terms, 0, k) / sub_n
+    # The entropy and the uniformity over the occupied bins
+    k = 0
+    for i in range(nb):
+        if counts[i] > 0:
+            p = counts[i] / float(n)
+            terms[k] = p * np.log2(p)
+            k += 1
+    entropy = -_pairwise_sum_numba(terms, 0, k)
+    k = 0
+    for i in range(nb):
+        if counts[i] > 0:
+            p = counts[i] / float(n)
+            terms[k] = p * p
+            k += 1
+    uniformity = _pairwise_sum_numba(terms, 0, k)
+    # The histogram gradient (np.gradient: one-sided at the ends, central inside), its
+    # largest and smallest value and their first bins
+    if nb < 2:
+        max_gradient = np.nan
+        max_gradient_at = np.nan
+        min_gradient = np.nan
+        min_gradient_at = np.nan
+    else:
+        max_gradient = -math.inf
+        min_gradient = math.inf
+        max_gradient_at = 0.0
+        min_gradient_at = 0.0
+        for i in range(nb):
+            if i == 0:
+                gradient = float(counts[1]) - float(counts[0])
+            elif i == nb - 1:
+                gradient = float(counts[nb - 1]) - float(counts[nb - 2])
+            else:
+                gradient = (float(counts[i + 1]) - float(counts[i - 1])) / 2.0
+            if gradient > max_gradient:
+                max_gradient = gradient
+                max_gradient_at = float(origin + i)
+            if gradient < min_gradient:
+                min_gradient = gradient
+                min_gradient_at = float(origin + i)
+    out[0] = mean
+    out[1] = var
+    out[2] = skew
+    out[3] = kurt
+    out[4] = median
+    out[5] = low
+    out[6] = p10
+    out[7] = p90
+    out[8] = high
+    out[9] = mode
+    out[10] = p75 - p25
+    out[11] = float(high) - float(low)
+    out[12] = mad
+    out[13] = robust
+    out[14] = median_ad
+    out[15] = math.sqrt(var) / mean if mean != 0 else np.nan
+    out[16] = (p75 - p25) / (p75 + p25) if (p75 + p25) != 0 else np.nan
+    out[17] = entropy
+    out[18] = uniformity
+    out[19] = max_gradient
+    out[20] = max_gradient_at
+    out[21] = min_gradient
+    out[22] = min_gradient_at
 
 
 def calculate_intensity_features(
@@ -959,7 +1571,7 @@ def calculate_intensity_features(
         features["intensity_quartile_coefficient_of_dispersion_9S40"] = np.nan
 
     # 4.1.17 Energy (N8CA)
-    energy = float(np.dot(values, values))
+    energy = float(_sum_of_squares(values))  # a fixed order: the same bits in every buffer
     features["intensity_energy_N8CA"] = energy
 
     # 4.1.18 Root mean square (5ZWQ)
@@ -1009,49 +1621,68 @@ def calculate_intensity_histogram_features(
     if len(discretised_values) == 0:
         return {}
 
-    features: dict[str, float] = {}
-
     disc = np.asarray(discretised_values)
+    if disc.ndim != 1:
+        raise ValueError(f"discretised_values must be a 1-D array; got shape {disc.shape}")
     n = disc.size
-    # Integer values (but uint64, which bincount does not read) take the moments and the
-    # deviations from their bin counts; other types read every value with the kernels.
+    # Integer values (but uint64, which bincount does not read) take every feature from
+    # their bin counts, and so do float64 values that are whole numbers in [1, n_bins]:
+    # the levels themselves. Other values are read by the kernels.
     counted = disc.dtype.kind in "iu" and disc.dtype != np.uint64
 
-    if counted and n_bins is not None:
-        # IBSI: histogram over the full discretisation range [1, N_g].
-        hist_origin = 1
-        counts_full, min_val_i, max_val_i = _bin_counts(disc, n_bins)
-    else:
-        min_val_i = int(np.min(disc))
-        max_val_i = int(np.max(disc))
-        if n_bins is not None:
-            if min_val_i < 1 or max_val_i > n_bins:
-                raise ValueError(_range_error(n_bins, min_val_i, max_val_i))
-            hist_origin = 1
-            counts_full = np.bincount(disc.astype(np.int64) - 1, minlength=n_bins)
+    counts: Optional[npt.NDArray[np.int64]] = None
+    if n_bins is not None and (counted or disc.dtype == np.float64):
+        # IBSI: histogram over the full discretisation range [1, N_g]
+        counts, low, high, whole = _level_counts(disc, n_bins)
+        if not whole:
+            counts = None
+        elif low < 1 or high > n_bins:
+            raise ValueError(_range_error(n_bins, int(low), int(high)))
         else:
-            # Observed value range; shifting also supports negative values
-            # for bincount compatibility.
-            hist_origin = min_val_i
-            counts_full = np.bincount(
-                disc.astype(np.int64) - min_val_i, minlength=(max_val_i - min_val_i + 1)
-            )
+            counts, hist_origin = counts[1:], 1
+    elif counted:
+        # Observed value range; shifting also supports negative values for bincount
+        hist_origin = int(np.min(disc))
+        counts = np.bincount(
+            disc.astype(np.int64) - hist_origin, minlength=int(np.max(disc)) - hist_origin + 1
+        )
+    if counts is not None:
+        out = np.empty(len(_HISTOGRAM_FEATURES))
+        _counted_statistics_numba(counts, hist_origin, out)
+        return dict(zip(_HISTOGRAM_FEATURES, out.tolist(), strict=True))
+
+    # Discretised values are whole numbers (a float array holds them too); a value that is
+    # not whole, NaN or infinite is a caller error (a pipeline passes int32)
+    if not (np.all(np.isfinite(disc)) and np.array_equal(disc, np.rint(disc))):
+        raise ValueError(
+            "discretised_values must be finite whole numbers (bin numbers); a value "
+            "that is not whole, NaN or infinite was given."
+        )
+    # One float64 copy of another type (float32, float16, uint64, bool): the mean, the
+    # variance, the moments, the percentiles and the deviations then sum in float64
+    if disc.dtype != np.float64:
+        disc = disc.astype(np.float64)
+    features: dict[str, float] = {}
+    min_val_i = int(np.min(disc))
+    max_val_i = int(np.max(disc))
+    if n_bins is not None:
+        if min_val_i < 1 or max_val_i > n_bins:
+            raise ValueError(_range_error(n_bins, min_val_i, max_val_i))
+        hist_origin = 1
+        counts_full = np.bincount(disc.astype(np.int64) - 1, minlength=n_bins)
+    else:
+        # Observed value range; shifting also supports negative values
+        # for bincount compatibility.
+        hist_origin = min_val_i
+        counts_full = np.bincount(
+            disc.astype(np.int64) - min_val_i, minlength=(max_val_i - min_val_i + 1)
+        )
     total = float(n)
     p = counts_full[counts_full > 0].astype(np.float64) / total
-    levels = np.arange(hist_origin, hist_origin + len(counts_full), dtype=np.int64)
 
-    # 4.2.1 Mean discretised intensity (X6K6) and 4.2.2 variance (CH89). From the counts,
-    # the sum of the values is exact in int64; np.mean of integers sums them in float64,
-    # which is exact while the sums stay below 2**53, so the two means are the same bits.
-    if counted:
-        mean_disc = int(levels @ counts_full) / n
-        d = levels - mean_disc
-        d2 = d * d
-        var_disc = float(np.sum(counts_full * d2)) / n
-    else:
-        kernel_disc = disc if disc.dtype == np.float64 else disc.astype(np.float64)
-        mean_disc = float(np.mean(disc))
-        var_disc = float(np.var(disc, ddof=0))
+    # 4.2.1 Mean discretised intensity (X6K6) and 4.2.2 variance (CH89)
+    mean_disc = float(np.mean(disc))
+    var_disc = float(np.var(disc, ddof=0))
     features["mean_discretised_intensity_X6K6"] = float(mean_disc)
     features["discretised_intensity_variance_CH89"] = float(var_disc)
 
@@ -1061,13 +1692,7 @@ def calculate_intensity_histogram_features(
         features["discretised_intensity_skewness_88K1"] = 0.0
         features["discretised_intensity_kurtosis_C3I7"] = 0.0
     else:
-        if counted:  # the central moments of _central_moments_2_3_4, from the counts
-            inv_n = 1.0 / n
-            m2 = var_disc
-            m3 = float(np.sum(counts_full * (d2 * d))) * inv_n
-            m4 = float(np.sum(counts_full * (d2 * d2))) * inv_n
-        else:
-            m2, m3, m4 = _central_moments_2_3_4(kernel_disc, float(mean_disc))
+        m2, m3, m4 = _central_moments_2_3_4(disc, float(mean_disc))
         denom = m2**1.5
         if denom != 0.0:
             features["discretised_intensity_skewness_88K1"] = float(m3 / denom)
@@ -1077,14 +1702,8 @@ def calculate_intensity_histogram_features(
             features["discretised_intensity_kurtosis_C3I7"] = np.nan
 
     # IBSI nearest-rank percentiles (see calculate_intensity_features); the
-    # discretised median (WIFQ) is the conventional sample median. Integer values
-    # get them from the histogram counts.
-    if disc.dtype.kind in "iu":
-        p10, p25, p75, p90, median_val = _counts_order_statistics(
-            counts_full, hist_origin, disc.dtype
-        )
-    else:
-        p10, p25, p75, p90, median_val = _order_statistics(disc)
+    # discretised median (WIFQ) is the conventional sample median.
+    p10, p25, p75, p90, median_val = _order_statistics(disc)
 
     features["median_discretised_intensity_WIFQ"] = float(median_val)
     features["minimum_discretised_intensity_1PR8"] = float(min_val_i)
@@ -1106,14 +1725,9 @@ def calculate_intensity_histogram_features(
         - features["minimum_discretised_intensity_1PR8"]
     )
 
-    if counted:
-        mad, robust_mad, median_ad = _counted_deviations(
-            levels, counts_full, n, mean_disc, float(median_val), float(p10), float(p90)
-        )
-    else:
-        mad = _mean_abs_dev(kernel_disc, float(mean_disc))
-        robust_mad = _robust_mean_abs_dev(kernel_disc, float(p10), float(p90))
-        median_ad = _mean_abs_dev(kernel_disc, float(median_val))
+    mad = _mean_abs_dev(disc, float(mean_disc))
+    robust_mad = _robust_mean_abs_dev(disc, float(p10), float(p90))
+    median_ad = _mean_abs_dev(disc, float(median_val))
     features["intensity_histogram_mean_absolute_deviation_D2ZX"] = float(mad)
     features["intensity_histogram_robust_mean_absolute_deviation_WRZB"] = float(robust_mad)
     features["intensity_histogram_median_absolute_deviation_4RNL"] = float(median_ad)
@@ -1152,6 +1766,24 @@ def calculate_intensity_histogram_features(
         features["minimum_histogram_gradient_intensity_RHQZ"] = float(hist_origin + min_grad_idx)
 
     return features
+
+
+class _Grid:
+    """The candidate values base + (i + shift) * step, i in range(n), one at a time: the
+    float64 operations of the np.arange grid without an array of the whole value range."""
+
+    __slots__ = ("n", "base", "step", "shift")
+
+    def __init__(self, n: int, base: Any, step: Any, shift: float) -> None:
+        # Python floats: a float32 base or step would otherwise round the candidates
+        self.n, self.base, self.step, self.shift = n, float(base), float(step), shift
+
+    def __len__(self) -> int:
+        return self.n
+
+    def __getitem__(self, i: int) -> float:
+        f = float(i if i >= 0 else self.n + i)
+        return self.base + (f + self.shift) * self.step
 
 
 def calculate_ivh_features(
@@ -1205,7 +1837,7 @@ def calculate_ivh_features(
     features: dict[str, float] = {}
     N = len(discretised_values)
 
-    vals = np.asarray(discretised_values)
+    vals = np.ascontiguousarray(discretised_values)  # one layout for the numba kernels
     count_below, kth, unique_vals, below_unique = _sorted_view(vals)
 
     # -------------------------------------------------------------------------
@@ -1303,11 +1935,9 @@ def calculate_ivh_features(
                 num_steps = max(int(np.round((g_max - g_min) / bin_width)), 1)
                 if min_val is not None:
                     # Candidates are bin centers
-                    idx = np.arange(num_steps, dtype=np.float64)
-                    candidates = g_min + (idx + 0.5) * bin_width
+                    candidates: _Grid | npt.NDArray[Any] = _Grid(num_steps, g_min, bin_width, 0.5)
                 else:
-                    idx = np.arange(num_steps + 1, dtype=np.float64)
-                    candidates = g_min + idx * bin_width
+                    candidates = _Grid(num_steps + 1, g_min, bin_width, 0.0)
             else:
                 # The values that occur: the first one that meets the condition below is
                 # the first such value of all the sorted values
@@ -1397,21 +2027,108 @@ def _value_counts_numba(values: npt.NDArray[Any], low: int, counts: npt.NDArray[
             row[values[i] - low] += 1
 
 
-# From this many whole-number values on, the IVH counts the values in threads instead of
-# sorting them. Measured: below, the sort is as fast (starting the threads costs about
-# 80 us, and numpy's bincount is slow on runs of equal values).
-_PARALLEL_COUNT_MIN = 1 << 17
+@jit(nopython=True, cache=True)  # type: ignore
+def _count_values_numba(values: npt.NDArray[Any], low: int, counts: npt.NDArray[np.int64]) -> None:
+    """counts[c, v - low] += 1 for each value v, on one core. Four rows take the values
+    in turn, so a run of one value waits on no earlier add; one row where the range is
+    long (the rows are the memory)."""
+    n = values.size
+    if counts.shape[0] == 1:
+        row = counts[0]
+        for i in range(n):
+            row[values[i] - low] += 1
+        return
+    i = 0
+    while i + 4 <= n:
+        counts[0, values[i] - low] += 1
+        counts[1, values[i + 1] - low] += 1
+        counts[2, values[i + 2] - low] += 1
+        counts[3, values[i + 3] - low] += 1
+        i += 4
+    while i < n:
+        counts[0, values[i] - low] += 1
+        i += 1
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _whole_as_int32_numba(values: npt.NDArray[Any], out: npt.NDArray[np.int32]) -> bool:
+    """out[i] = values[i] as int32 when every value is a whole number; False at the first
+    other value (`out` is then partial). The caller checks the int32 range first."""
+    for i in range(values.size):
+        v = values[i]
+        k = np.int32(v)
+        if k != v:
+            return False
+        out[i] = k
+    return True
+
+
+# From this many values on, the IVH counts whole-number values instead of sorting them
+# (measured: below, the sort is as fast). From _PARALLEL_COUNT_MIN on, the count runs in
+# threads (below, one core with four count rows is as fast; a thread start costs 70 us).
+_COUNT_MIN = 1 << 12
+_PARALLEL_COUNT_MIN = 1 << 20
 
 
 def _value_counts(values: npt.NDArray[Any], low: int, size: int) -> npt.NDArray[np.int64]:
     """The number of times each value low + j occurs in the 1-D integer `values`, for j in
     range(size): parts in threads, each part into its own row (a row per thread only
-    where `size` is small next to the values)."""
-    data = values if values.dtype in (np.int32, np.int64) else values.astype(np.int64)
+    where `size` is small next to the values), or one core below _PARALLEL_COUNT_MIN."""
+    if values.dtype in (np.int32, np.int64):
+        data = values
+    else:  # int32 copies of the 1- and 2-byte types: numpy casts them 6 times faster
+        data = values.astype(np.int32 if values.dtype.itemsize <= 2 else np.int64)
     parts = max(1, min(get_num_threads(), values.size // max(size, 1 << 14)))
-    counts = np.zeros((parts, size), dtype=np.int64)
-    _value_counts_numba(data, low, counts)
-    return cast(npt.NDArray[np.int64], counts.sum(axis=0))
+    if parts == 1 or values.size < _PARALLEL_COUNT_MIN:
+        counts = np.zeros((4 if size <= 1 << 16 else 1, size), dtype=np.int64)
+        _count_values_numba(data, low, counts)
+    else:
+        counts = np.zeros((parts, size), dtype=np.int64)
+        _value_counts_numba(data, low, counts)
+    return counts.sum(axis=0)
+
+
+def _counted_view(
+    values: npt.NDArray[Any],
+) -> Optional[
+    tuple[Callable[[Any], Any], Callable[[int], Any], npt.NDArray[Any], npt.NDArray[np.intp]]
+]:
+    """The `_sorted_view` from one count per value: from _COUNT_MIN values on, integers
+    (not uint64) and float32 or float64 values that are all whole numbers of the int32
+    range, over a range not much longer than the values. None for all other values."""
+    n = values.size
+    if n < _COUNT_MIN:
+        return None
+    if values.dtype.kind in "iu" and values.dtype != np.uint64:
+        lo, hi = values.min(), values.max()
+    elif values.dtype in (np.float32, np.float64) and values[0] == np.floor(values[0]):
+        lo, hi = values.min(), values.max()
+        if not (lo >= -2147483648.0 and hi <= 2147483647.0):  # NaN and inf fail too
+            return None
+    else:
+        return None
+    low = min(int(lo), 0)  # counts from 0, or from a negative minimum
+    size = int(hi) - low + 1
+    if size >= 2 * n + 65536:
+        return None
+    if values.dtype.kind == "f":
+        ints = np.empty(n, dtype=np.int32)
+        if not _whole_as_int32_numba(values, ints):
+            return None
+    else:
+        ints = values
+    counts = _value_counts(ints, low, size)
+    cum = np.cumsum(counts)  # the values at or below low + j
+    occur = np.flatnonzero(counts)
+
+    def count_below_int(t: Any) -> int:
+        j = math.ceil(t) - low  # the integers below t are those below ceil(t)
+        return 0 if j <= 0 else int(cum[min(j, cum.size) - 1])
+
+    def kth_int(k: int) -> int:
+        return low + int(np.searchsorted(cum, k, side="right"))
+
+    return count_below_int, kth_int, occur + low, cum[occur] - counts[occur]
 
 
 def _sorted_view(
@@ -1419,27 +2136,11 @@ def _sorted_view(
 ) -> tuple[Callable[[Any], Any], Callable[[int], Any], npt.NDArray[Any], npt.NDArray[np.intp]]:
     """What the IVH reads from the sorted 1-D `values`: count_below(t), the number of
     values below t; kth(k), the k-th smallest value (from 0); the values that occur,
-    ascending; and the number of values below each of them. Many integer values over a
-    range not much longer than the values take one count per value instead of a sort."""
-    if (
-        values.dtype.kind in "iu"
-        and values.dtype != np.uint64
-        and values.size >= _PARALLEL_COUNT_MIN
-    ):
-        low = min(int(values.min()), 0)  # counts from 0, or from a negative minimum
-        if int(values.max()) - low < 2 * values.size + 65536:
-            counts = _value_counts(values, low, int(values.max()) - low + 1)
-            cum = np.cumsum(counts)  # the values at or below low + j
-            occur = np.flatnonzero(counts)
-
-            def count_below_int(t: Any) -> int:
-                j = math.ceil(t) - low  # the integers below t are those below ceil(t)
-                return 0 if j <= 0 else int(cum[min(j, cum.size) - 1])
-
-            def kth_int(k: int) -> int:
-                return low + int(np.searchsorted(cum, k, side="right"))
-
-            return count_below_int, kth_int, occur + low, cum[occur] - counts[occur]
+    ascending; and the number of values below each of them. Many whole-number values over
+    a range not much longer than the values take one count per value instead of a sort."""
+    counted = _counted_view(values)
+    if counted is not None:
+        return counted
     sorted_vals = np.sort(values)
     # np.searchsorted converts an integer array to float64 on each call with a float
     # threshold. Convert it one time; the comparisons stay the same.
@@ -1453,27 +2154,217 @@ def _sorted_view(
     return sorted_f.searchsorted, sorted_vals.__getitem__, sorted_vals[starts], starts
 
 
-# The FFT sums use about 27 bytes per point of their grid (measured peak); 32 leaves a
-# margin.
+# Peak memory of the FFT sums: 24 to 28 bytes per point of their grid (measured); 32 leaves
+# a margin. The slab sums (see _spatial_sums_slabs) hold more spectra at a time: 40 to 55
+# bytes per point of the slab grid (measured); 64 leaves a margin.
 _FFT_BYTES_PER_POINT = 32
-# Measured crossover: with fewer than 100 voxel pairs per FFT grid point, the pair loop
-# is faster.
-_FFT_MIN_PAIRS_PER_POINT = 100
-# Measured pair loop speed: about 2.5 ns per voxel pair on one thread.
-_PAIR_SECONDS_PER_THREAD = 2.5e-9
+_SLAB_BYTES_PER_POINT = 64
+# The time model that chooses the faster method (measured on an M4 Pro, 1 to 10 threads):
+# the pair loop takes about 1.05 ns per voxel pair and thread, and its parallel form about
+# 45 us + 2.5 us per thread to start. The FFT sums take about 12.5 ns per grid point on one
+# worker, of which 15 % does not split into workers (30 % below _SPATIAL_FFT_PARALLEL_MIN
+# points, where the numba passes run on one thread), and about 47 us + 38 us per worker to
+# start. So a small grid runs faster on one worker: below about 45,000 points on 10
+# threads, 19,000 on 4 (measured: 32,768 points 0.45 ms on 1 worker, 0.54 ms on 10;
+# 64,000 points 0.81 ms on 1, 0.65 ms on 10). The slab sums with s slabs make 2 s (s + 1)
+# FFTs of the slab grid, each 0.27 of the time per point of the FFT sums (measured on 10
+# threads: 0.78 to 0.83 ns per point and FFT, against 3.2 to 3.4 ns).
+_PAIR_SECONDS = 1.05e-9
+_PAIR_START_SECONDS = (45e-6, 2.5e-6)
+_FFT_SECONDS_PER_POINT = 12.5e-9
+_FFT_SERIAL_PART = (0.3, 0.15)
+_FFT_START_SECONDS = (47e-6, 38e-6)
+_SLAB_FFT_UNITS = 0.27
 
 
-def _fft_memory_cap() -> int:
-    """Memory limit of the FFT sums: 16 GB, but at most half of the physical memory.
+def _fft_seconds(points: int, units: float, workers: int) -> float:
+    """Model time of FFT work on `workers` workers: `units` times the work per point of the
+    FFT sums, on a grid of `points` points (see _PAIR_SECONDS)."""
+    serial = _FFT_SERIAL_PART[points >= _SPATIAL_FFT_PARALLEL_MIN]
+    share = serial + (1.0 - serial) / workers
+    start = _FFT_START_SECONDS[0] + _FFT_START_SECONDS[1] * workers
+    return start + units * points * _FFT_SECONDS_PER_POINT * share
 
-    When the system does not report its memory (for example on Windows), the limit
-    assumes 8 GB of memory.
+
+def _fft_workers(points: int) -> int:
+    """The FFT workers of the spatial sums on a grid of `points` points: numba's thread
+    count, or one when the model gives one worker less time (a small grid)."""
+    threads = int(get_num_threads())
+    if _fft_seconds(points, 1.0, threads) < _fft_seconds(points, 1.0, 1):
+        return threads
+    return 1
+
+
+def _pair_seconds(n: int) -> float:
+    """Model time of the pair loop of `n` ROI voxels (see _PAIR_SECONDS)."""
+    threads = get_num_threads() if n >= _PAIRS_PARALLEL_MIN else 1
+    start = _PAIR_START_SECONDS[0] + _PAIR_START_SECONDS[1] * threads if threads > 1 else 0.0
+    return start + n * (n - 1) / 2 * _PAIR_SECONDS / threads
+
+
+def _spatial_plan(n: int, box: tuple[int, ...]) -> tuple[str, int, int, tuple[int, ...]]:
+    """The fastest method of the spatial sums of `n` ROI voxels in a box of shape `box`, by
+    the time model (see _PAIR_SECONDS), within the memory budget (half of the memory, see
+    threads._memory_budget).
+
+    Returns ("fft", 0, 0, grid) for the FFT sums on the whole grid, ("slabs", axis, rows,
+    slab grid) for the slab sums with slabs of `rows` planes along `axis` (when the whole
+    grid does not fit; the fewest slabs that fit, as the work grows with their number), or
+    ("pairs", 0, 0, ()) for the pair loop. When not even slabs of one plane fit, the pair
+    loop runs with a warning that gives its expected time.
     """
-    try:
-        physical = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    except (AttributeError, OSError, ValueError):
-        physical = 8 << 30
-    return min(16 << 30, physical // 2)
+    budget = _memory_budget()
+    pairs = _pair_seconds(n)
+    fshape = tuple(scipy.fft.next_fast_len(2 * k - 1, real=True) for k in box)
+    grid = math.prod(fshape)
+    if _FFT_BYTES_PER_POINT * grid <= budget:
+        fft = _fft_seconds(grid, 1.0, _fft_workers(grid))
+        return ("fft", 0, 0, fshape) if fft < pairs else ("pairs", 0, 0, ())
+    # Cut the longest axis (it allows the thinnest slabs) into the fewest slabs that fit
+    axis = max(range(len(box)), key=box.__getitem__)
+    count = rows = 2
+    while rows > 1:
+        rows = -(-box[axis] // count)
+        slab = scipy.fft.next_fast_len(2 * rows - 1, real=True)
+        sshape = (*fshape[:axis], slab, *fshape[axis + 1 :])
+        points = math.prod(sshape)
+        if _SLAB_BYTES_PER_POINT * points <= budget:
+            count = -(-box[axis] // rows)
+            units = _SLAB_FFT_UNITS * 2 * count * (count + 1)
+            slabs = _fft_seconds(points, units, _fft_workers(points))
+            return ("slabs", axis, rows, sshape) if slabs < pairs else ("pairs", 0, 0, ())
+        count += 1
+    warnings.warn(
+        f"Moran's I and Geary's C: the FFT method needs about "
+        f"{_SLAB_BYTES_PER_POINT * points / 2**30:.2f} GiB even in slabs of one plane, more "
+        f"than its limit of {budget / 2**30:.2f} GiB (half of the memory). The pair loop runs "
+        f"instead. Expected run time: about {pairs / 60:.1f} min.",
+        stacklevel=3,
+    )
+    return ("pairs", 0, 0, ())
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _inverse_distance_numba(
+    out: npt.NDArray[np.float64],
+    ax: npt.NDArray[np.float64],
+    ay: npt.NDArray[np.float64],
+    az: npt.NDArray[np.float64],
+) -> None:
+    """out[i, j, k] = 1 / sqrt(ax[i]^2 + ay[j]^2 + az[k]^2), and 0 at a distance of 0."""
+    nx, ny, nz = out.shape
+    for i in prange(nx):
+        x2 = ax[i] * ax[i]
+        for j in range(ny):
+            xy = x2 + ay[j] * ay[j]
+            for k in range(nz):
+                r2 = xy + az[k] * az[k]
+                out[i, j, k] = 1.0 / np.sqrt(r2) if r2 > 0.0 else 0.0
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _multiply_spectrum_numba(
+    spectrum: npt.NDArray[np.complex128],
+    kernel: npt.NDArray[np.float64],
+    fold0: npt.NDArray[np.int64],
+    fold1: npt.NDArray[np.int64],
+) -> None:
+    """spectrum[i, j, k] *= kernel[fold0[i], fold1[j], k]: the real kernel spectrum."""
+    for i in prange(spectrum.shape[0]):
+        a = fold0[i]
+        for j in range(spectrum.shape[1]):
+            row = kernel[a, fold1[j]]
+            for k in range(spectrum.shape[2]):
+                spectrum[i, j, k] = spectrum[i, j, k] * row[k]
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _weighted_power_numba(
+    spectrum: npt.NDArray[np.complex128],
+    kernel: npt.NDArray[np.float64],
+    fold0: npt.NDArray[np.int64],
+    fold1: npt.NDArray[np.int64],
+    n_last: int,
+    partial: npt.NDArray[np.float64],
+) -> None:
+    """partial[i] = sum over j, k of w_k kernel[fold0[i], fold1[j], k] |spectrum[i, j, k]|^2.
+
+    The half spectrum of the last axis (length n_last) holds bins 0 and n_last / 2 once
+    (w_k = 1) and every other bin for itself and its conjugate (w_k = 2).
+    """
+    n0, n1, n2 = spectrum.shape
+    for i in prange(n0):
+        a = fold0[i]
+        s = 0.0
+        for j in range(n1):
+            row = kernel[a, fold1[j]]
+            for k in range(n2):
+                c = spectrum[i, j, k]
+                p = (c.real * c.real + c.imag * c.imag) * row[k]
+                s += p if (k == 0 or 2 * k == n_last) else 2.0 * p
+        partial[i] = s
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _cross_power_numba(
+    a: npt.NDArray[np.complex128],
+    kernel: npt.NDArray[np.complex128],
+    b: npt.NDArray[np.complex128],
+    n_last: int,
+    partial: npt.NDArray[np.float64],
+) -> None:
+    """partial[i] = sum over j, k of w_k Re(conj(a[i, j, k]) kernel[i, j, k] b[i, j, k]),
+    with the weights w_k of _weighted_power_numba (half spectra of length n_last)."""
+    n0, n1, n2 = a.shape
+    for i in prange(n0):
+        s = 0.0
+        for j in range(n1):
+            for k in range(n2):
+                x = a[i, j, k]
+                y = kernel[i, j, k] * b[i, j, k]
+                p = x.real * y.real + x.imag * y.imag
+                s += p if (k == 0 or 2 * k == n_last) else 2.0 * p
+        partial[i] = s
+
+
+# Serial twins of the four FFT kernels (see serial_twin). Measured on 10 threads: below
+# this many grid points, starting the threads costs more than the work.
+_inverse_distance_numba_serial = serial_twin(_inverse_distance_numba)
+_multiply_spectrum_numba_serial = serial_twin(_multiply_spectrum_numba)
+_weighted_power_numba_serial = serial_twin(_weighted_power_numba)
+_cross_power_numba_serial = serial_twin(_cross_power_numba)
+_SPATIAL_FFT_PARALLEL_MIN = 1 << 20
+
+
+def _kernel_spectrum(
+    fshape: tuple[int, ...], spacing: tuple[float, float, float], workers: int
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """The real spectrum of the kernel 1 / |r| on the FFT grid, read as kernel[fold0[i], fold1[j], k].
+
+    The kernel is even along each axis, so its spectrum is real. With even grid lengths it
+    is the DCT-I of the half grid (n / 2 + 1 points per axis), read with folded indices.
+    Else it is the real part of the full rfftn, read with the plain indices.
+    """
+    grid = math.prod(fshape)
+    build = sized(
+        _inverse_distance_numba, _inverse_distance_numba_serial, grid, _SPATIAL_FFT_PARALLEL_MIN
+    )
+    # Distance in mm along each axis, with the offsets wrapped around the grid.
+    axes = [
+        np.minimum(np.arange(n), n - np.arange(n)) * s for n, s in zip(fshape, spacing, strict=True)
+    ]
+    if all(n % 2 == 0 for n in fshape):
+        half = tuple(n // 2 + 1 for n in fshape)
+        kernel = np.empty(half)
+        build(kernel, axes[0][: half[0]], axes[1][: half[1]], axes[2][: half[2]])
+        kernel = scipy.fft.dctn(kernel, type=1, workers=workers, overwrite_x=True)
+        fold0, fold1 = (np.minimum(np.arange(n), n - np.arange(n)) for n in fshape[:2])
+    else:
+        kernel = np.empty(fshape)
+        build(kernel, axes[0], axes[1], axes[2])
+        kernel = np.ascontiguousarray(scipy.fft.rfftn(kernel, workers=workers).real)
+        fold0, fold1 = (np.arange(n) for n in fshape[:2])
+    return kernel, fold0, fold1
 
 
 def _spatial_sums_fft(
@@ -1489,33 +2380,137 @@ def _spatial_sums_fft(
     So the sum of weights is roi . (K * roi), the Moran numerator is diff . (K * diff), and
     the Geary numerator is 2 diff^2 . (K * roi) - 2 times the Moran numerator. `diff` holds
     the intensity minus the ROI mean (0 outside the ROI), and `fshape` is the FFT grid.
+
+    The kernel spectrum is real, so the Moran numerator is the kernel-weighted power of the
+    spectrum of `diff` (Parseval), with no inverse transform. One padded buffer serves both
+    forward transforms.
     """
-    # Distance in mm along each axis, with the offsets wrapped around the grid.
-    axes = [
-        np.minimum(np.arange(n), n - np.arange(n)) * s for n, s in zip(fshape, spacing, strict=True)
-    ]
-    kernel = (axes[0] ** 2)[:, None, None] + (axes[1] ** 2)[None, :, None] + (axes[2] ** 2)
-    kernel[0, 0, 0] = 1.0  # a voxel has no weight to itself (set to 0 below)
-    np.sqrt(kernel, out=kernel)
-    np.divide(1.0, kernel, out=kernel)
-    kernel[0, 0, 0] = 0.0
-    workers = get_num_threads()
-    kernel_f = scipy.fft.rfftn(kernel, workers=workers)
-    del kernel
+    grid = math.prod(fshape)
+    workers = _fft_workers(grid)
+    kernel, fold0, fold1 = _kernel_spectrum(fshape, spacing, workers)
     box = tuple(slice(0, n) for n in roi.shape)
-
-    def convolve(a: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """K * a at the ROI voxels."""
-        spectrum = scipy.fft.rfftn(a, fshape, workers=workers)
-        spectrum *= kernel_f
-        full = scipy.fft.irfftn(spectrum, fshape, workers=workers, overwrite_x=True)
-        return np.asarray(full[box][roi])
-
-    weights = convolve(roi.astype(np.float64))
     d = diff[roi]
-    numer_moran = float(np.sum(d * convolve(diff)))
+    buffer = np.zeros(fshape)
+    view = buffer[box]
+    view[roi] = d
+    spectrum = scipy.fft.rfftn(buffer, workers=workers)
+    partial = np.empty(fshape[0])
+    power = sized(
+        _weighted_power_numba, _weighted_power_numba_serial, grid, _SPATIAL_FFT_PARALLEL_MIN
+    )
+    power(spectrum, kernel, fold0, fold1, fshape[2], partial)
+    del spectrum
+    numer_moran = float(np.sum(partial)) / grid
+    view[...] = roi
+    spectrum = scipy.fft.rfftn(buffer, workers=workers)
+    del buffer, view
+    multiply = sized(
+        _multiply_spectrum_numba, _multiply_spectrum_numba_serial, grid, _SPATIAL_FFT_PARALLEL_MIN
+    )
+    multiply(spectrum, kernel, fold0, fold1)
+    del kernel
+    full = scipy.fft.irfftn(spectrum, fshape, workers=workers, overwrite_x=True)
+    del spectrum
+    weights = np.asarray(full[box][roi])
+    del full
     numer_geary = 2.0 * float(np.sum(d * d * weights)) - 2.0 * numer_moran
     return numer_moran, numer_geary, float(np.sum(weights))
+
+
+def _spatial_sums_slabs(
+    roi: npt.NDArray[np.bool_],
+    diff: npt.NDArray[np.float64],
+    spacing: tuple[float, float, float],
+    axis: int,
+    rows: int,
+    fshape: tuple[int, ...],
+) -> tuple[float, float, float]:
+    """The three sums of `_spatial_sums_fft` for a box whose FFT grid does not fit in the
+    memory budget: the box is cut along `axis` into slabs of `rows` planes, and `fshape` is
+    the FFT grid of one slab (at least 2 rows - 1 points along `axis`).
+
+    Each sum is a form a . (K * b) of two arrays of the box (diff, the ROI, diff^2) and the
+    kernel 1 / |r|: over the slabs P and Q = P + k, the sum of a_P . (K_k * b_Q), where K_k
+    holds the kernel at the offsets between the planes of P and those of Q (k * rows planes
+    apart, plus -(rows - 1) to rows - 1). On the slab grid these offsets do not wrap
+    around, so each term is a weighted product of three spectra (Parseval), with no inverse
+    transform. The kernel is symmetric, so the pairs (P, Q) and (Q, P) give the same Moran
+    and weight terms, and the loop visits each pair once. The work grows with the square
+    of the number of slabs.
+    """
+    order = (axis, *(a for a in range(3) if a != axis))
+    roi, diff = roi.transpose(order), diff.transpose(order)
+    sizes = tuple(fshape[a] for a in order)
+    n0, n1, n2 = roi.shape
+    count = -(-n0 // rows)
+    points = math.prod(sizes)
+    workers = _fft_workers(points)
+    build = sized(
+        _inverse_distance_numba, _inverse_distance_numba_serial, points, _SPATIAL_FFT_PARALLEL_MIN
+    )
+    cross = sized(_cross_power_numba, _cross_power_numba_serial, points, _SPATIAL_FFT_PARALLEL_MIN)
+    # Signed plane offsets along the cut axis (offset k * rows apart in mm for slab pairs
+    # k apart), and the distances along the other axes, wrapped around the grid
+    index = np.arange(sizes[0])
+    lag = np.where(index <= sizes[0] // 2, index, index - sizes[0]) * spacing[order[0]]
+    across = [
+        np.minimum(np.arange(n), n - np.arange(n)) * spacing[a]
+        for n, a in zip(sizes[1:], order[1:], strict=True)
+    ]
+    buffer = np.zeros(sizes)
+    view = buffer[:rows, :n1, :n2]
+    partial = np.empty(sizes[0])
+
+    def spectrum(p: int, kind: str) -> npt.NDArray[np.complex128]:
+        """The spectrum of slab p of diff ("d"), the ROI ("r") or diff^2 ("q")."""
+        part = slice(p * rows, min(p * rows + rows, n0))
+        filled = view[: part.stop - part.start]
+        if kind == "q":
+            np.square(diff[part], out=filled)
+        else:
+            np.copyto(filled, diff[part] if kind == "d" else roi[part])
+        view[part.stop - part.start :] = 0.0
+        return cast(npt.NDArray[np.complex128], scipy.fft.rfftn(buffer, workers=workers))
+
+    def kernel(k: int) -> npt.NDArray[np.complex128]:
+        """The spectrum of the kernel between slabs k apart (the buffer is zero after)."""
+        build(buffer, lag - k * rows * spacing[order[0]], *across)
+        spec = scipy.fft.rfftn(buffer, workers=workers)
+        buffer.fill(0.0)
+        return cast(npt.NDArray[np.complex128], spec)
+
+    def form(
+        a: npt.NDArray[np.complex128],
+        kern: npt.NDArray[np.complex128],
+        b: npt.NDArray[np.complex128],
+    ) -> float:
+        cross(a, kern, b, sizes[2], partial)
+        return float(np.sum(partial))
+
+    moran = weights = squares = 0.0  # squares: diff^2 . (K * roi)
+    for p in range(count):
+        d_p, r_p, q_p = spectrum(p, "d"), spectrum(p, "r"), spectrum(p, "q")
+        for k in range(count - p):
+            kern = kernel(k)
+            if k == 0:
+                moran += form(d_p, kern, d_p)
+                weights += form(r_p, kern, r_p)
+                squares += form(q_p, kern, r_p)
+            else:
+                # One spectrum of slab p + k at a time
+                other = spectrum(p + k, "r")
+                weights += 2.0 * form(r_p, kern, other)
+                squares += form(q_p, kern, other)
+                del other
+                other = spectrum(p + k, "q")
+                squares += form(r_p, kern, other)
+                del other
+                other = spectrum(p + k, "d")
+                moran += 2.0 * form(d_p, kern, other)
+                del other
+            del kern
+        del d_p, r_p, q_p
+    return moran / points, 2.0 * (squares - moran) / points, weights / points
 
 
 def calculate_spatial_intensity_features(
@@ -1528,11 +2523,13 @@ def calculate_spatial_intensity_features(
     Calculate spatial intensity features: Moran's I and Geary's C (IBSI 4.4).
 
     These features measure spatial autocorrelation of intensity values within the ROI.
-    Small ROIs use a loop over all voxel pairs, whose time grows with N² (N = number of
-    ROI voxels). Large ROIs use FFT convolutions: the same values to about 1e-14
-    (relative) in much less time. The FFT needs about 32 bytes per point of a grid that
-    is twice the ROI box along each axis. Above 16 GB, or above half of the memory, the
-    pair loop runs instead, with a warning that gives the expected run time.
+    A time model picks the faster of two methods (see _spatial_plan): a loop over all
+    voxel pairs, whose time grows with N² (N = number of ROI voxels), or FFT convolutions,
+    whose time grows with the ROI box. Both give the same values to about 1e-14
+    (relative). The FFT needs about 32 bytes per point of a grid that is twice the ROI box
+    along each axis, and it uses at most half of the memory (shared by the workers of
+    run_batch). When the grid needs more, the FFT runs on slabs of the box: a few times
+    longer, within the memory.
 
     Args:
         image: Image object containing intensity data.
@@ -1578,7 +2575,7 @@ def calculate_spatial_intensity_features(
     # voxels keep their full-image order, so `intensities` is the same as data[mask != 0].
     bbox = compute_nonzero_bbox(mask_array) or (slice(0, 0),) * 3
     roi = mask_array[bbox] != 0
-    intensities = np.ascontiguousarray(data[bbox][roi].astype(np.float64))
+    intensities = np.ascontiguousarray(data[bbox][roi].astype(np.float64, copy=False))
 
     N = len(intensities)
     if N < 2:
@@ -1589,32 +2586,30 @@ def calculate_spatial_intensity_features(
     mean_int = np.mean(intensities)
     denom = _sum_sq_centered(intensities, float(mean_int))
 
-    # The FFT grid is at least 2 n - 1 along each axis of the box, so no pair wraps around.
-    fshape = tuple(scipy.fft.next_fast_len(2 * n - 1, real=True) for n in roi.shape)
-    grid = math.prod(fshape)
-    use_fft = N * N >= _FFT_MIN_PAIRS_PER_POINT * grid
-    if use_fft and _FFT_BYTES_PER_POINT * grid > (cap := _fft_memory_cap()):
-        use_fft = False
-        minutes = N * (N - 1) / 2 * _PAIR_SECONDS_PER_THREAD / get_num_threads() / 60
-        warnings.warn(
-            f"Moran's I and Geary's C: the FFT method needs about "
-            f"{_FFT_BYTES_PER_POINT * grid / 2**30:.1f} GB, more than its limit of "
-            f"{cap / 2**30:.1f} GB (16 GB, or half of the memory). The pair loop runs "
-            f"instead. Expected run time: about {minutes:.1f} min.",
-            stacklevel=2,
-        )
-
-    if use_fft:
+    # The FFT grid is at least 2 n - 1 along each axis of the box (of a slab, along its cut
+    # axis), so no pair wraps around.
+    method, axis, rows, fshape = _spatial_plan(N, roi.shape)
+    if method != "pairs":
         diff = np.zeros(roi.shape)
         diff[roi] = intensities - mean_int
-        numer_moran, numer_geary, sum_weights = _spatial_sums_fft(roi, diff, (sx, sy, sz), fshape)
+        numer_moran, numer_geary, sum_weights = (
+            _spatial_sums_fft(roi, diff, (sx, sy, sz), fshape)
+            if method == "fft"
+            else _spatial_sums_slabs(roi, diff, (sx, sy, sz), axis, rows, fshape)
+        )
     else:
         # Full-image voxel indices, as the pair loop used before the crop.
         x_idx, y_idx, z_idx = (
             np.ascontiguousarray((idx + box.start).astype(np.int32))
             for idx, box in zip(np.nonzero(roi), bbox, strict=True)
         )
-        numer_moran, numer_geary, sum_weights = _calculate_spatial_features_numba(
+        pairs = sized(
+            _calculate_spatial_features_numba,
+            _calculate_spatial_features_numba_serial,
+            N,
+            _PAIRS_PARALLEL_MIN,
+        )
+        numer_moran, numer_geary, sum_weights = pairs(
             x_idx, y_idx, z_idx, intensities, float(mean_int), sx, sy, sz
         )
 
@@ -1645,13 +2640,57 @@ _LOCAL_CROP_MIN_SIZE = 1 << 15
 
 
 # From this many (ROI voxel, sphere offset) pairs on, the local peaks take two stages.
-_TWO_STAGE_MIN_WORK = 1 << 24
+_TWO_STAGE_MIN_WORK = 1 << 16
+
+
+@lru_cache(maxsize=32)
+def _sphere_rows(
+    spacing: tuple[float, float, float],
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """The rows (dx, dy, -dz..dz) of the sphere of the local peaks: row_dx, row_dy, row_dz."""
+    rows: dict[tuple[int, int], int] = {}
+    for dx, dy, dz in _sphere_offsets_for_radius(spacing, _LOCAL_PEAK_RADIUS_MM).tolist():
+        rows[(dx, dy)] = max(rows.get((dx, dy), 0), abs(dz))
+    row_dx = np.array([dx for dx, _ in rows], dtype=np.int64)
+    row_dy = np.array([dy for _, dy in rows], dtype=np.int64)
+    row_dz = np.array(list(rows.values()), dtype=np.int64)
+    return row_dx, row_dy, row_dz
+
+
+# Non-finite voxels of the crop from which the two-stage search gives way to the exact kernel
+# (each one costs a test of its sphere offsets)
+_NON_FINITE_MAX = 4096
+
+
+def _without_unreached(
+    data: npt.NDArray[Any], roi: npt.NDArray[np.bool_], offsets: npt.NDArray[np.int32]
+) -> Optional[npt.NDArray[Any]]:
+    """A copy of `data` with its non-finite voxels set to 0 when no sphere of an ROI voxel
+    reaches one (the sphere is symmetric, so the test reads `roi` at each voxel plus the
+    offsets), else None; None also above _NON_FINITE_MAX such voxels. No exact sphere mean
+    of an ROI voxel reads a changed voxel."""
+    bad = np.argwhere(~np.isfinite(data))
+    if bad.shape[0] > _NON_FINITE_MAX:
+        return None
+    shape = np.array(data.shape)
+    for voxel in bad:
+        reached = voxel + offsets
+        reached = reached[np.all((reached >= 0) & (reached < shape), axis=1)]
+        if roi[reached[:, 0], reached[:, 1], reached[:, 2]].any():
+            return None
+    out = data.copy()
+    out[tuple(bad.T)] = 0.0
+    return out
 
 
 def _local_peaks_two_stage(
     data: npt.NDArray[Any],
-    mask_indices: npt.NDArray[np.int32],
+    indices: npt.NDArray[np.int32],
+    values: npt.NDArray[np.float64],
+    runs: npt.NDArray[np.int64],
     offsets: npt.NDArray[np.int32],
+    spacing: tuple[float, float, float],
+    roi: npt.NDArray[np.bool_],
 ) -> Optional[tuple[float, float]]:
     """The global and the local intensity peak, the values of `_calculate_local_mean_numba`
     and `_calculate_local_peaks_numba` bit for bit, with the exact kernel on few voxels.
@@ -1663,28 +2702,63 @@ def _local_peaks_two_stage(
     differences and the kernel sum, in any order). So the voxel with the largest exact
     mean has an approximate mean within 2 t of the largest one, and stage 2 runs the
     exact kernel only on those voxels and on the maximum-intensity voxels (the local
-    peak). None (use the kernel on all voxels) when an intensity is not finite.
+    peak). A non-finite intensity that no ROI sphere reaches is set to 0 in a copy (see
+    _without_unreached); None (use the kernel on all voxels) when one is in reach.
     """
-    largest = max(abs(float(data.max())), abs(float(data.min())))
-    if not math.isfinite(largest):
-        return None
-    rows: dict[tuple[int, int], int] = {}
-    for dx, dy, dz in offsets.tolist():
-        rows[(dx, dy)] = max(rows.get((dx, dy), 0), abs(dz))
-    row_dx = np.array([dx for dx, _ in rows], dtype=np.int64)
-    row_dy = np.array([dy for _, dy in rows], dtype=np.int64)
-    row_dz = np.array(list(rows.values()), dtype=np.int64)
-    prefix = np.empty(data.shape[:2] + (data.shape[2] + 1,), dtype=np.float64)
-    _row_prefix_sums_numba(data, prefix)
-    approx = _approximate_local_means_numba(prefix, mask_indices, row_dx, row_dy, row_dz)
+    row_dx, row_dy, row_dz = _sphere_rows(spacing)
+    nx, ny, nz = data.shape
+    n = indices.shape[0]
+    # Long z-runs: the run kernel, on prefix sums padded by the reach of the sphere rows (a
+    # row past the whole z extent reads the same two sums as one clipped to it, so the pad
+    # stays within the extent). Short runs (a thin ROI): the voxel kernel, with no pad.
+    by_run = n >= _RUN_MEAN_LENGTH_MIN * runs.shape[0]
+    pad = min(int(row_dz.max()), nz - 1) if by_run else 0
+    if by_run and pad < row_dz.max():
+        row_dz = np.minimum(row_dz, pad)
+    prefix = np.empty((nx, ny, nz + 1 + 2 * pad), dtype=np.float64)
+    lo = np.empty(nx, dtype=np.float64)
+    hi = np.empty(nx, dtype=np.float64)
+    prefix_sums = sized(_prefix_pad_numba, _prefix_pad_numba_serial, data.size, _CROP_PARALLEL_MIN)
+    prefix_sums(data, pad, prefix, lo, hi)
+    if not np.isfinite(prefix[:, :, pad + nz]).all():  # a NaN or infinite value: the row totals
+        finite = _without_unreached(data, roi, offsets)
+        if finite is None:
+            return None
+        data = finite
+        prefix_sums(data, pad, prefix, lo, hi)
+    largest = max(abs(float(hi.max())), abs(float(lo.min())))
+    work = n * row_dx.shape[0]
+    if by_run:
+        approx = np.empty(n, dtype=np.float64)
+        run_means = sized(
+            _approx_runs_numba, _approx_runs_numba_serial, work, _LOCAL_MEAN_PARALLEL_MIN
+        )
+        run_means(prefix, pad, nz, runs, row_dx, row_dy, row_dz, approx)
+    else:
+        voxel_means = sized(
+            _approximate_local_means_numba,
+            _approximate_local_means_numba_serial,
+            work,
+            _LOCAL_MEAN_PARALLEL_MIN,
+        )
+        approx = voxel_means(prefix, indices, row_dx, row_dy, row_dz)
     del prefix
-    length = data.shape[2] + 1
-    bound = 2.0**-52 * largest * (len(rows) * (2.0 * length * length + 4.0) + offsets.shape[0] ** 2)
+    length = nz + 1
+    bound = (
+        2.0**-52
+        * largest
+        * (row_dx.shape[0] * (2.0 * length * length + 4.0) + offsets.shape[0] ** 2)
+    )
     near_best = np.flatnonzero(approx >= approx.max() - 2.0 * bound)
-    values = data[mask_indices[:, 0], mask_indices[:, 1], mask_indices[:, 2]]
     brightest = np.flatnonzero(values == values.max())
     selected = np.union1d(near_best, brightest)  # sorted
-    exact = _calculate_local_mean_numba(data, np.ascontiguousarray(mask_indices[selected]), offsets)
+    exact_mean = sized(
+        _calculate_local_mean_numba,
+        _calculate_local_mean_numba_serial,
+        selected.shape[0] * offsets.shape[0],
+        _LOCAL_MEAN_PARALLEL_MIN,
+    )
+    exact = exact_mean(data, np.ascontiguousarray(indices[selected]), offsets)
     global_peak = exact[np.searchsorted(selected, near_best)].max()
     local_peak = exact[np.searchsorted(selected, brightest)].max()
     return float(global_peak), float(local_peak)
@@ -1762,25 +2836,31 @@ def calculate_local_intensity_features(
     # of another type goes as a float64 copy (the same values). A column-order image (a small
     # one, without the crop) goes as a row-order copy, the layout that the import compiles.
     if data.dtype not in (np.float64, np.float32):
-        data = data.astype(np.float64)
+        data = data.astype(np.float64, order="C")
     elif data.flags.f_contiguous and not data.flags.c_contiguous:
         data = np.ascontiguousarray(data)
 
-    # Get ROI indices
-    x_idx, y_idx, z_idx = np.where(mask_array != 0)
-    if len(x_idx) == 0:
+    # The ROI scan reads a row-order bool array (one kernel signature per image type).
+    roi = np.ascontiguousarray(mask_array != 0)
+    indices, values, runs = _roi_scan(roi, data)
+    n = indices.shape[0]
+    if n == 0:
         return features
 
-    mask_indices = np.ascontiguousarray(np.stack([x_idx, y_idx, z_idx], axis=1).astype(np.int32))
-
     peaks = None
-    if mask_indices.shape[0] * offsets.shape[0] >= _TWO_STAGE_MIN_WORK:
-        peaks = _local_peaks_two_stage(data, mask_indices, offsets)
+    if n * offsets.shape[0] >= _TWO_STAGE_MIN_WORK:
+        peaks = _local_peaks_two_stage(data, indices, values, runs, offsets, spacing_tuple, roi)
     if peaks is None:
-        # Calculate local means only for ROI voxels
-        roi_means = _calculate_local_mean_numba(data, mask_indices, offsets)
+        # The exact sphere mean of every ROI voxel, in threads from _LOCAL_MEAN_PARALLEL_MIN pairs
+        exact_mean = sized(
+            _calculate_local_mean_numba,
+            _calculate_local_mean_numba_serial,
+            n * offsets.shape[0],
+            _LOCAL_MEAN_PARALLEL_MIN,
+        )
+        roi_means = exact_mean(data, indices, offsets)
         # Compute both peaks without allocating ROI intensity arrays.
-        peaks = _calculate_local_peaks_numba(data, mask_indices, roi_means)
+        peaks = _calculate_local_peaks_numba(data, indices, roi_means)
     features["global_intensity_peak_0F91"] = float(peaks[0])
     features["local_intensity_peak_VJGA"] = float(peaks[1])
 

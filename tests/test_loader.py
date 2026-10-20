@@ -230,11 +230,11 @@ class TestLoader(unittest.TestCase):
         # load_image uses `path.lower().endswith` on the input string, which isn't mocked.
 
         load_image("image.nii")
-        mock_load_nifti.assert_called_once_with("image.nii", 0)
+        mock_load_nifti.assert_called_once_with("image.nii", 0, False)
 
         mock_load_nifti.reset_mock()
-        load_image("image.nii.gz", dataset_index=2)
-        mock_load_nifti.assert_called_once_with("image.nii.gz", 2)
+        load_image("image.nii.gz", dataset_index=2, stored_type=True)
+        mock_load_nifti.assert_called_once_with("image.nii.gz", 2, True)
 
     @patch("pictologics.loader.Path")
     @patch("pictologics.loader._load_dicom_file")
@@ -2471,6 +2471,71 @@ def test_nifti_loads_the_values_of_get_fdata_in_one_pass(tmp_path: "os.PathLike[
     assert nib.load(str(Path(tmp_path) / "offset.nii")).dataobj.inter == 5.0
 
 
+def test_stored_type_keeps_the_integer_type_of_an_unscaled_nifti_file(
+    tmp_path: "os.PathLike[str]",
+) -> None:
+    # With stored_type, a NIfTI file of an unscaled native integer type keeps its type (row
+    # order above the size limit, column order below), also a 4D volume and a 2D image;
+    # scaled, offset, float, int64 and big-endian files load as float64. The values are
+    # those of get_fdata, and the default is still float64.
+    from pathlib import Path
+
+    import nibabel as nib
+
+    from pictologics.loader import _nifti_float64, _unscaled_integer
+
+    rng = np.random.default_rng(14)
+    affine = np.diag([0.5, 0.75, 2.0, 1.0])
+    folder = Path(tmp_path)
+    kept = {
+        "uint8.nii.gz": np.uint8,
+        "int16.nii": np.int16,
+        "int32.nii.gz": np.int32,
+        "uint32.nii": np.uint32,
+        "int8.nii": np.int8,
+    }
+    for name, dtype in kept.items():
+        data = rng.integers(0, 4, (7, 6, 5)).astype(dtype)
+        nib.save(nib.Nifti1Image(data, affine, dtype=dtype), folder / name)
+    nib.save(nib.Nifti1Image(rng.integers(0, 4, (7, 6, 5, 2)).astype(np.uint8), affine, dtype=np.uint8), folder / "4d.nii")  # fmt: skip
+    nib.save(nib.Nifti1Image(rng.integers(0, 4, (7, 6)).astype(np.uint8), affine, dtype=np.uint8), folder / "2d.nii")  # fmt: skip
+    scaled = nib.Nifti1Image(rng.normal(0.0, 500.0, (7, 6, 5)), affine)
+    scaled.set_data_dtype(np.int16)
+    nib.save(scaled, folder / "scaled.nii")
+    nib.save(nib.Nifti1Image(rng.integers(0, 4, (7, 6, 5)).astype(np.int16), affine, dtype=np.int16), folder / "offset.nii")  # fmt: skip
+    with open(folder / "offset.nii", "r+b") as fh:
+        fh.seek(112)
+        fh.write(np.array([1.0, 5.0], dtype="<f4").tobytes())
+    nib.save(nib.Nifti1Image(rng.normal(size=(7, 6, 5)).astype(np.float32), affine), folder / "float32.nii")  # fmt: skip
+    nib.save(nib.Nifti1Image(rng.integers(0, 4, (7, 6, 5)).astype(np.int64), affine, dtype=np.int64), folder / "int64.nii")  # fmt: skip
+    big = nib.Nifti1Image(
+        rng.integers(0, 4, (7, 6, 5)).astype(">i2"), affine, nib.Nifti1Header(endianness=">")
+    )
+    nib.save(big, folder / "big.nii")
+    with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
+        for name, dtype in kept.items():
+            path = str(folder / name)
+            array = load_image(path, stored_type=True).array
+            assert array.dtype == dtype and array.flags.c_contiguous, name
+            np.testing.assert_array_equal(array, nib.load(path).get_fdata())
+            assert load_image(path).array.dtype == np.float64
+        volume = load_image(str(folder / "4d.nii"), dataset_index=1, stored_type=True).array
+        assert volume.dtype == np.uint8
+        np.testing.assert_array_equal(volume, nib.load(str(folder / "4d.nii")).get_fdata()[..., 1])
+        flat = load_image(str(folder / "2d.nii"), stored_type=True).array
+        assert flat.dtype == np.uint8 and flat.shape == (7, 6, 1)
+        for name in ("scaled.nii", "offset.nii", "float32.nii", "int64.nii", "big.nii"):
+            path = str(folder / name)
+            array = load_image(path, stored_type=True).array
+            assert array.dtype == np.float64, name
+            np.testing.assert_array_equal(array, nib.load(path).get_fdata())
+    small = load_image(str(folder / "uint8.nii.gz"), stored_type=True).array
+    assert small.dtype == np.uint8 and small.flags.f_contiguous  # below the limit
+    assert not _unscaled_integer(np.zeros(3))
+    with pytest.raises(ValueError, match="out of bounds"):
+        _nifti_float64(nib.load(str(folder / "4d.nii")), 2, True)
+
+
 def test_gzip_nifti_inflates_in_one_pass(tmp_path: "os.PathLike[str]") -> None:
     # A gzip NIfTI file inflates in one pass into its stored values (no nibabel read),
     # with the values of get_fdata, bit for bit. A file that is not one gzip member of the
@@ -2521,6 +2586,211 @@ def test_gzip_nifti_inflates_in_one_pass(tmp_path: "os.PathLike[str]") -> None:
         with pytest.raises(EOFError):  # nibabel's error of a cut file
             loader._load_nifti(str(folder / "cut.nii.gz"))
     assert loader._gzip_values(str(folder / "none.nii.gz"), *stored) is None
+
+
+def test_save_image_writes_gzip_blocks_with_an_index(tmp_path: "os.PathLike[str]") -> None:
+    # A large column-order array saves as one gzip member of deflate blocks made on
+    # threads: the inflated bytes are those of the .nii file, the gzip header holds the
+    # index of the blocks (the nibabel header, then whole planes) and load_image reads
+    # the file back. A small array, an int16 array and a .nii file go to nibabel. With
+    # more than 5460 blocks the index does not fit the gzip header: a plain header.
+    import gzip
+    import math
+    from pathlib import Path
+
+    from pictologics import loader, save_image
+
+    rng = np.random.default_rng(16)
+    values = rng.normal(0.0, 100.0, (6, 5, 4))
+    arrays = (
+        values,
+        values.astype(np.float32),
+        (values > 0).astype(np.uint8),
+        values > 0,
+        np.round(values).astype(np.int64),
+        np.round(values).astype(np.int32),
+        rng.normal(size=(2, 2, 300)),  # thin planes: many planes in a block
+    )
+    folder = Path(tmp_path)
+
+    def same_bytes(array: np.ndarray, block: int) -> np.ndarray:
+        image = Image(array, (0.7, 1.3, 2.5), (-12.5, 33.0, 7.25))
+        with patch("pictologics.loader._GZIP_BLOCK", block):
+            save_image(image, folder / "a.nii.gz")
+        save_image(image, folder / "a.nii")
+        plain = (folder / "a.nii").read_bytes()
+        assert gzip.decompress((folder / "a.nii.gz").read_bytes()) == plain
+        np.testing.assert_array_equal(
+            load_image(folder / "a.nii.gz").array, load_image(folder / "a.nii").array
+        )
+        return plain
+
+    with (
+        patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8),
+        patch("pictologics.loader.get_num_threads", return_value=1),  # 2 blocks in flight
+    ):
+        for array in arrays:
+            plain = same_bytes(array, 480)
+            index = loader._gzip_index(str(folder / "a.nii.gz"))
+            assert index is not None
+            n = len(plain) - 352
+            plane = n // array.shape[2]
+            block = max(1, 480 // plane) * plane
+            assert len(index) == 2 + math.ceil(n / block)  # the offset row and the header
+            assert index[1, 1] == 352 and index[1:, 1].sum() == len(plain)
+        same_bytes(values, 64)  # a plane above the block: one plane in each block
+        index = loader._gzip_index(str(folder / "a.nii.gz"))
+        assert index is not None and list(index[2:, 1]) == [240] * 4
+        many = (rng.random((2, 2, 6000)) > 0.5).astype(np.uint8)
+        same_bytes(many, 4)  # 6000 blocks: no index
+        assert (folder / "a.nii.gz").read_bytes()[:10] == loader._GZIP_HEADER
+        assert loader._gzip_index(str(folder / "a.nii.gz")) is None
+        with patch.object(loader, "_write_gzip_nifti") as writer:
+            save_image(
+                Image(np.round(values).astype(np.int16), (1.0,) * 3, (0.0,) * 3),
+                folder / "b.nii.gz",
+            )
+            save_image(Image(values, (1.0,) * 3, (0.0,) * 3), folder / "b.nii")
+        writer.assert_not_called()
+    save_image(Image(values, (1.0,) * 3, (0.0,) * 3), folder / "small.nii.gz")  # below the gate
+    assert loader._gzip_index(str(folder / "small.nii.gz")) is None
+
+
+def test_gzip_reader_of_indexed_files(tmp_path: "os.PathLike[str]") -> None:
+    # A file with the block index of save_image inflates on threads, each block checked
+    # against its size and CRC-32, with the values of nibabel. Below 4 MB of compressed
+    # data, with an extra field of another tool, or with an index that does not fit the
+    # file, the file inflates in one pass with the same values; a cut file goes to
+    # nibabel. The threads stop when the consumer stops early.
+    import threading
+    from pathlib import Path
+
+    import nibabel as nib
+
+    from pictologics import loader, save_image
+
+    rng = np.random.default_rng(17)
+    values = rng.normal(0.0, 100.0, (6, 5, 12)).astype(np.float32)
+    folder = Path(tmp_path)
+    path, mask = str(folder / "f.nii.gz"), str(folder / "m.nii.gz")
+    with (
+        patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8),
+        patch("pictologics.loader._GZIP_BLOCK", 240),  # two planes in each block
+    ):
+        save_image(Image(values, (1.0,) * 3, (0.0,) * 3), path)
+        save_image(Image((values > 0).astype(np.uint8), (1.0,) * 3, (0.0,) * 3), mask)
+    expected = nib.load(path).get_fdata()
+    index = loader._gzip_index(path)
+    assert index is not None and index.shape == (8, 3)  # the offset, the header, 6 blocks
+    raw = (folder / "f.nii.gz").read_bytes()
+    with (
+        patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8),
+        patch("pictologics.loader._GZIP_INDEX_MIN_BYTES", 0),
+    ):
+        with (
+            patch.object(
+                loader, "_gzip_indexed_pieces", wraps=loader._gzip_indexed_pieces
+            ) as indexed,  # fmt: skip
+            patch.object(loader, "_gzip_pieces", wraps=loader._gzip_pieces) as one_pass,
+            patch("pictologics.loader.get_num_threads", return_value=1),  # 2 blocks in flight
+        ):
+            np.testing.assert_array_equal(load_image(path).array, expected)
+            stored = load_image(mask, stored_type=True).array
+        assert indexed.call_count == 2 and one_pass.call_count == 0
+        assert stored.dtype == np.uint8
+        np.testing.assert_array_equal(stored, nib.load(mask).get_fdata())
+        row = 12 + 8 + 12 * 2  # the row of the second data block in the gzip header
+        other = bytearray(raw)
+        other[12:14] = b"XX"  # the extra field of another tool
+        size = bytearray(raw)
+        size[row + 4] ^= 1
+        crc = bytearray(raw)
+        crc[row + 8] ^= 1
+        damaged = {"other": other, "size": size, "crc": crc, "long": raw + bytes(4)}
+        for name, content in damaged.items():
+            (folder / f"{name}.nii.gz").write_bytes(bytes(content))
+            with patch.object(loader, "_gzip_pieces", wraps=loader._gzip_pieces) as one_pass:
+                array = load_image(folder / f"{name}.nii.gz").array
+            assert one_pass.call_count == 1, name
+            np.testing.assert_array_equal(array, expected)
+        mask_crc = bytearray((folder / "m.nii.gz").read_bytes())
+        mask_crc[row - 12 + 8] ^= 1  # the CRC of the first data block of the mask
+        (folder / "mask_crc.nii.gz").write_bytes(bytes(mask_crc))
+        stored = load_image(folder / "mask_crc.nii.gz", stored_type=True).array
+        np.testing.assert_array_equal(stored, nib.load(mask).get_fdata())
+        (folder / "cut.nii.gz").write_bytes(raw[:-20])
+        with pytest.raises(ValueError, match="ended before"):  # nibabel's error of a cut file
+            load_image(folder / "cut.nii.gz")
+        plane = 6 * 5 * 4
+        with pytest.raises(ValueError, match="does not fit"):  # blocks of part planes
+            list(loader._gzip_indexed_pieces(path, index, 352, plane + 4, 352 + values.nbytes))
+        before = threading.active_count()
+        pieces = loader._gzip_indexed_pieces(path, index, 352, plane, 352 + values.nbytes)
+        assert next(pieces).size == 2 * plane
+        pieces.close()
+        assert threading.active_count() == before
+    with patch.object(loader, "_gzip_indexed_pieces") as indexed:
+        np.testing.assert_array_equal(load_image(path).array, expected)  # below 4 MB
+    indexed.assert_not_called()
+    plain = folder / "plain.nii.gz"
+    nib.save(nib.Nifti1Image(values, np.eye(4)), plain)
+    header = b"\x1f\x8b\x08\x04\x00\x00\x00\x00\x04\xff"
+    for name, content in {
+        "plain": plain.read_bytes(),
+        "short": header[:6],
+        "bgzf": header + b"\x06\x00BC\x02\x00\x10\x00",
+        "truncated": header + b"\x40\x00PI",
+        "payload": header + b"\x14\x00PI\x10\x00\x02\x00\x00\x00" + bytes(12),
+    }.items():
+        (folder / f"{name}.gz").write_bytes(content)
+        assert loader._gzip_index(str(folder / f"{name}.gz")) is None, name
+
+
+def test_gzip_reader_paths(tmp_path: "os.PathLike[str]") -> None:
+    # A gzip file without a block index inflates in one pass into its stored values, which
+    # the kernel then converts; a uint8 file of the package (a mask) also inflates into its
+    # stored values. The threads of the indexed path stop when the kernel raises. A
+    # two-member file whose first member inflates past 16 MB returns None at once (the
+    # loop of 0.7.1 did not stop).
+    import gzip
+    import threading
+    import time
+    from pathlib import Path
+
+    import nibabel as nib
+
+    from pictologics import loader, save_image
+
+    rng = np.random.default_rng(18)
+    folder = Path(tmp_path)
+    path, mask, blocks = (str(folder / name) for name in ("s.nii.gz", "m.nii.gz", "b.nii.gz"))
+    stored = rng.integers(-1000, 1000, (4, 4, 70)).astype(np.int16)
+    nib.save(nib.Nifti1Image(stored, np.eye(4)), path)
+    with patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8):
+        save_image(Image(stored.astype(np.uint8), (1.0,) * 3, (0.0,) * 3), mask)
+        save_image(Image(stored.astype(np.float32), (1.0,) * 3, (0.0,) * 3), blocks)
+        for name in (path, mask):
+            with (
+                patch.object(loader, "_gzip_values", wraps=loader._gzip_values) as one_pass,
+                patch.object(loader, "_gzip_float64", wraps=loader._gzip_float64) as fused,
+            ):
+                np.testing.assert_array_equal(load_image(name).array, nib.load(name).get_fdata())
+            one_pass.assert_called_once()
+            fused.assert_not_called()
+    index = loader._gzip_index(blocks)
+    assert index is not None
+    before = threading.active_count()
+    with (
+        patch.object(loader, "_to_float_row_order_numba", side_effect=RuntimeError("kernel")),
+        pytest.raises(RuntimeError, match="kernel"),
+    ):
+        loader._gzip_float64(blocks, index, 352, (4, 4, 70), np.dtype(np.float32), 1.0, 0.0)
+    assert threading.active_count() == before
+    two = folder / "two.gz"
+    two.write_bytes(gzip.compress(bytes(2**24 + 4096), 1) + gzip.compress(b"x"))
+    start = time.perf_counter()
+    assert loader._gzip_values(str(two), 0, (2**24 + 4097,), np.dtype(np.uint8)) is None
+    assert time.perf_counter() - start < 5.0
 
 
 def test_load_image_accepts_path_objects(tmp_path: "os.PathLike[str]") -> None:
@@ -2783,7 +3053,9 @@ def test_save_image_writes_nifti_that_loads_back(tmp_path: "os.PathLike[str]") -
 def test_save_image_writes_the_bytes_of_a_column_order_copy(tmp_path: "os.PathLike[str]") -> None:
     # A large row-order array goes to nibabel as a column-order copy (whole slices), with
     # the file bytes of the row-order array: float64, float32, uint8, bool and int64
-    # (saved as int32) arrays, .nii and .nii.gz; another type keeps the row-order array.
+    # (saved as int32) arrays, .nii and .nii.gz (the inflated bytes: the package writes
+    # its own deflate blocks); another type keeps the row-order array.
+    import gzip
     from pathlib import Path
 
     from pictologics import loader, save_image
@@ -2812,7 +3084,10 @@ def test_save_image_writes_the_bytes_of_a_column_order_copy(tmp_path: "os.PathLi
                 save_image(image, folder / f"columns{suffix}")
             assert copy.call_count == (0 if array.dtype == np.int16 else 1)
             rows = (folder / f"rows{suffix}").read_bytes()
-            assert (folder / f"columns{suffix}").read_bytes() == rows
+            columns = (folder / f"columns{suffix}").read_bytes()
+            if suffix == ".nii.gz":
+                rows, columns = gzip.decompress(rows), gzip.decompress(columns)
+            assert columns == rows
 
 
 def test_frame_of_reference_of_dicom_images(tmp_path: "os.PathLike[str]") -> None:
@@ -3468,3 +3743,36 @@ def test_equal_geometry_passes_with_no_tolerance_check() -> None:
     wrong = image((1.0, 2.0, 3.0), (0.0, 0.0, 0.0), np.eye(2))
     with pytest.raises(ValueError, match="3x3"):
         _validate_geometry(wrong, wrong)
+
+
+def test_a_text_slice_position_sorts_the_series_by_instance_number(
+    tmp_path: "os.PathLike[str]",
+) -> None:
+    # A slice whose ImagePositionPatient is not numeric makes the series sort by the
+    # instance numbers, with no error; the origin is the position of the first slice, and
+    # get_dicom_phases finds one phase. A text, short or missing position reads as None.
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from pictologics.loader import _slice_position
+    from pictologics.utilities import get_dicom_phases
+    from pictologics.utilities.dicom_utils import _series_metadata
+
+    folder = Path(tmp_path) / "ct"
+    folder.mkdir()
+    for k, (number, z) in enumerate(((2, 9.75), (1, 1.5), (3, 3.0))):
+        pixels = np.full((4, 3), number, np.int16)
+        _write_slice(folder / f"{k}.dcm", number=number, position=(0.0, 0.0, z), pixels=pixels)
+    data = (folder / "0.dcm").read_bytes()
+    assert data.count(b"0.0\\0.0\\9.75") == 1
+    (folder / "0.dcm").write_bytes(data.replace(b"0.0\\0.0\\9.75", b"abc\\0.0\\9.75"))
+    image = load_image(folder)
+    np.testing.assert_array_equal(image.array[0, 0, :], [1.0, 2.0, 3.0])
+    assert image.origin == (0.0, 0.0, 1.5)
+    assert [phase.num_slices for phase in get_dicom_phases(folder)] == [3]
+    for position in (["abc", "1.0", "2.0"], [1.0, 2.0], 3.0):
+        # pydicom checks a DS on assignment (a file read does not): a plain object
+        fake = SimpleNamespace(ImagePositionPatient=position, get_item=lambda keyword: None)
+        assert _series_metadata(fake, "x.dcm")["ImagePositionPatient"] is None
+        assert _slice_position(fake) is None
+    assert _slice_position(SimpleNamespace()) is None

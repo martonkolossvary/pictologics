@@ -107,7 +107,7 @@ def mean_filter(
     problem = _padding_value_problem(boundary, padding_value)
     if problem:
         raise ValueError(problem)
-    if padding_value:
+    if padding_value and source_mask is not None:
         return _constant_padded(
             mean_filter, image, source_mask, padding_value, support // 2, support=support, boundary=boundary
         )  # fmt: skip
@@ -117,5 +117,7 @@ def mean_filter(
         # Use normalized convolution for source masking
         return _normalized_uniform_filter(image, source_mask, size=support, mode=mode)
     else:
-        # A float32 response: each pass sums its lines in double and writes float32
-        return _uniform_filter(image, support, mode)
+        # A float32 response: each pass sums its lines in double and writes float32. The
+        # passes read the padding value beyond the image (no padded copy).
+        cval = float(image.dtype.type(padding_value))
+        return _uniform_filter(image, support, mode, cval=cval)

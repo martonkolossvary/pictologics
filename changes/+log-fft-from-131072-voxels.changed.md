@@ -1,0 +1,1 @@
+The LoG of a float64 image of 131,072 voxels (about 51³) or more is now one float64 FFT convolution; before, images below 64³ voxels ran eight float32 passes. The values of these images move by up to 2e-7 of the largest response, toward the float64 values. At 10 threads such an image takes x0.31 to x0.51 of the time (58×57×58: 1.8 instead of 4.0 ms), at 1 thread x0.68 to x0.97.

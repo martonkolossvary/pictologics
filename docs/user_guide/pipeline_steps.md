@@ -31,7 +31,7 @@ Resamples the image and the masks to a new voxel spacing, with the IBSI "align g
 | `new_spacing` | *(required)* | The new spacing (x, y, z) in mm: three positive numbers |
 | `interpolation` | `"linear"` | The image interpolation: `"linear"`, `"cubic"` or `"nearest"` |
 | `mask_interpolation` | `"nearest"` | The mask interpolation: `"nearest"`, `"linear"` or `"cubic"` |
-| `mask_threshold` | `0.5` | With a mask interpolation other than `"nearest"`: a voxel with an interpolated value of this or more is in the ROI |
+| `mask_threshold` | `0.5` | With a mask interpolation other than `"nearest"`: a voxel with an interpolated value of this or more is in the ROI (the value is rounded at the threshold, value + 1 - threshold >= 1, for every mask type) |
 | `round_intensities` | `False` | Round the intensities to whole numbers after the resampling (IBSI does this for CT) |
 
 - **Masks**: a mask interpolation other than `"nearest"` gives a mask of 0 and 1, so a label map loses its labels. Select the label with a `binarize_mask` step before the `resample` step.
@@ -68,6 +68,8 @@ Keeps the largest connected part of the ROI. Voxels that touch at a face, an edg
 | Parameter | Default | Description |
 |:--|:--|:--|
 | `apply_to` | `"both"` | `"both"`, `"morph"` or `"intensity"` |
+
+With `apply_to="morph"`, the intensity mask then keeps only the voxels of the new morphological mask: in IBSI, the intensity mask lies inside the morphological mask.
 
 ## `grow_mask`
 
@@ -117,12 +119,16 @@ Makes a mask of 0 and 1 from a label mask or a probability mask. Without this st
 | `threshold` | `0.5` | Without `mask_values`: a voxel of this value or more is in the ROI |
 | `apply_to` | `"both"` | `"both"`, `"morph"` or `"intensity"` |
 
+With `apply_to="morph"`, the intensity mask then keeps only the voxels of the new morphological mask: in IBSI, the intensity mask lies inside the morphological mask.
+
 ```python
 {"step": "binarize_mask", "params": {"mask_values": 5}}        # label 5
 {"step": "binarize_mask", "params": {"mask_values": [1, 3]}}   # labels 1 and 3
 {"step": "binarize_mask", "params": {"mask_values": (2, 4)}}   # labels 2, 3 and 4
 {"step": "binarize_mask", "params": {"threshold": 0.5}}        # a probability of 0.5 or more
 ```
+
+- **Speed**: when the step leaves out the value 0, it compares only the box of the ROI, so a small ROI in a large image costs little. A step that keeps the value 0 (for example a threshold of 0) reads the whole mask.
 
 For many labels of one label map, [`run_rois`](pipeline.md#many-rois-run_rois) is faster than one configuration for each label.
 
@@ -233,5 +239,5 @@ The feature families:
 
 - `"texture_glcm"` and the other `"texture_..."` names are the same as `"glcm"` and the others.
 - Each texture family uses the 3D merged matrix of IBSI. Ask only for the texture families that you need: the pipeline computes only their matrices.
-- The spatial and local intensity features take more time on large ROIs. The spatial features use an FFT on large ROIs. When the FFT needs more than 16 GB, or more than half of the memory, a slower loop runs, with a warning.
+- The spatial and local intensity features take more time on large ROIs. The spatial features take the faster of two methods: a loop over the voxel pairs for small ROIs, an FFT for large ones. The FFT uses at most half of the memory of the computer. When its grid needs more, it cuts the ROI box into slabs, which takes a few times longer but keeps within the memory.
 - A configuration can have more than one `extract_features` step, for example one before and one after a filter. The feature names of the steps must differ, because a later value replaces an earlier one with the same name.

@@ -10,7 +10,7 @@ from numba import get_num_threads
 from numpy import typing as npt
 
 from .base import (
-    _TRANSFER_CACHE_BYTES,
+    _TRANSFER_CACHE_SHAPES,
     BoundaryCondition,
     _apply_with_boundary_padding,
     _float32_cut,
@@ -19,6 +19,7 @@ from .base import (
     _prepare_masked_image,
     _slabs,
     _times_mirrored,
+    _transfer_cache_bytes,
     _whole_number,
     cache_by_bytes,
     ensure_float32,
@@ -29,15 +30,19 @@ from .base import (
 # via pad-filter-crop. The Riesz transfer function has unit magnitude everywhere
 # (an all-pass, phase-only filter, IBSI 2 Eq. 34), so unlike the band-limited
 # Simoncelli kernel its real-space kernel is not compactly supported: it decays
-# as a power law, similar to a generalised Hilbert transform. Empirically (via
-# `np.fft.irfftn` of the transfer function on a 64^3 grid), 16 voxels captures
-# ~92-100% of a first/second-order kernel's L2 energy depending on direction; no
-# finite pad removes truncation error entirely for this kernel, so 16 is a
-# practical balance between accuracy and the cost of enlarging the FFT array.
+# as a power law, similar to a generalised Hilbert transform. 16 voxels hold 92-100 %
+# of the L2 energy of a first- or second-order kernel (97.8 % for the order (1, 0, 0)),
+# but the L2 energy is the wrong measure of the error: the tail adds up over a large
+# uniform object. Measured against a 64-voxel pad, the 16-voxel pad of the order
+# (1, 0, 0) differs by up to 1.2e-1 of the response range with the mirror boundary and
+# by up to 5.2e-2 with the zero boundary, at the border of a CT scan; farther than 16
+# voxels from the border, by at most 1.0e-2 (5.8e-4 on average). No finite pad removes
+# the truncation error, so 16 is a balance between accuracy and the cost of a larger FFT
+# array. The periodic boundary (the IBSI default) takes no pad.
 _RIESZ_BASE_PAD = 16
 
 
-@cache_by_bytes(_TRANSFER_CACHE_BYTES)
+@cache_by_bytes(_transfer_cache_bytes, _TRANSFER_CACHE_SHAPES)
 def _riesz_transfer(
     shape: Tuple[int, ...], order: Tuple[int, ...]
 ) -> npt.NDArray[np.complexfloating[Any, Any]]:

@@ -52,10 +52,16 @@ reference image when it loads.
 
 from __future__ import annotations
 
+import io
 import math
+import os
+import struct
 import warnings
 import zlib
-from collections.abc import Sequence
+from collections import deque
+from collections.abc import Generator, Iterator, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, cast
@@ -68,6 +74,8 @@ from nibabel.nifti1 import Nifti1Image
 from numba import jit, prange
 from numpy import typing as npt
 from numpy.typing import DTypeLike
+
+from .threads import get_num_threads
 
 
 def _direction_matrix(direction: Any) -> npt.NDArray[np.float64]:
@@ -835,6 +843,7 @@ def load_image(
     min_overlap_fraction: float = 0.5,
     series_uid: Optional[str] = None,
     suv: Optional[str] = None,
+    stored_type: bool = False,
 ) -> Image:
     """
     Load a medical image from a file path or directory.
@@ -919,6 +928,12 @@ def load_image(
             injection and scan times from the header; the lean body mass and the body
             surface area also need the height (and the lean body mass the sex). None
             (default): no conversion.
+        stored_type (bool): Keep the stored type of a NIfTI file that has an integer type
+            (int8, uint8, int16, uint16, int32, uint32), native byte order and no scaling
+            (slope 1, intercept 0), for a mask or a label map: the array is then that type
+            instead of float64. Any other NIfTI file, and every other format, loads as
+            without the keyword. The pipeline loads its masks and label maps with it.
+            Default False.
 
     Returns:
         Image: An `Image` object containing the 3D numpy array and metadata (spacing, origin, etc.).
@@ -1034,7 +1049,7 @@ def load_image(
         ):
             raise ValueError(f"suv needs a DICOM PET image, not the file '{path}'.")
         elif path.lower().endswith((".nii", ".nii.gz")):
-            loaded_image = _load_nifti(path, dataset_index)
+            loaded_image = _load_nifti(path, dataset_index, stored_type)
         elif path.lower().endswith((".nrrd", ".nhdr")):
             from pictologics.loaders.nrrd_loader import _load_nrrd
 
@@ -1195,7 +1210,86 @@ def save_image(image: Image, path: str | Path) -> None:
     nifti.set_sform(affine, code=1)  # type: ignore[no-untyped-call]
     nifti.header.set_xyzt_units("mm")  # type: ignore[no-untyped-call]
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    nifti.to_filename(path)
+    if (
+        path.lower().endswith(".gz")
+        and array.ndim == 3
+        and array.flags.f_contiguous
+        and array.size >= _ROW_ORDER_MIN_SIZE
+        and array.dtype in _COLUMN_ORDER_DTYPES
+    ):
+        _write_gzip_nifti(nifti, array, path)
+    else:
+        nifti.to_filename(path)
+
+
+# The gzip header nibabel writes: deflate, no flags, time 0, the fastest level, unknown OS
+_GZIP_HEADER = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x04\xff"
+_GZIP_BLOCK = 1 << 20  # about this many bytes per deflate block (whole planes)
+_GZIP_INDEX_ID = b"PI"  # the extra field of the gzip header that holds the block index
+
+
+def _write_gzip_nifti(nifti: Nifti1Image, array: npt.NDArray[Any], path: str) -> None:
+    """Write `nifti`, whose data is the column-order `array`, as one gzip member (zlib
+    level 1, as nibabel writes) whose deflate blocks are compressed on the threads of the
+    package. The first block holds nibabel's header bytes; each other block holds whole
+    planes (about 1 MB) and is an independent deflate fragment (a fresh compressor, a
+    sync flush at its end), so a gzip reader inflates the file as any other and the
+    package inflates the blocks on threads: the gzip header carries the index of the
+    blocks (the extra field `_GZIP_INDEX_ID`: the count, then the compressed size, the
+    size and the CRC-32 of each block). Other readers ignore the extra field."""
+    nifti.update_header()  # type: ignore[no-untyped-call]
+    header = nifti.header.copy()  # type: ignore[no-untyped-call]
+    header.set_data_offset(header.single_vox_offset)  # type: ignore[no-untyped-call]
+    header.set_slope_inter(1.0, 0.0)  # type: ignore[no-untyped-call]  # as nibabel writes
+    head = io.BytesIO()
+    header.write_to(head)  # type: ignore[no-untyped-call]
+    head_bytes = head.getvalue()
+    body = array.T.reshape(-1).view(np.uint8)  # the bytes in column order, no copy
+    n = body.size
+    plane = array.shape[0] * array.shape[1] * array.dtype.itemsize
+    block = max(1, _GZIP_BLOCK // plane) * plane
+    starts = range(0, n, block)
+    extra_length = 4 + 4 + 12 * (1 + len(starts))  # id, length, count, 12 bytes per block
+    indexed = extra_length <= 0xFFFF
+
+    def deflate(buffer: Any, start: int, end: int, last: bool) -> tuple[bytes, int, int]:
+        z = zlib.compressobj(1, zlib.DEFLATED, -15)
+        part = z.compress(buffer[start:end]) + z.flush(zlib.Z_FINISH if last else zlib.Z_SYNC_FLUSH)
+        return part, end - start, zlib.crc32(buffer[start:end])
+
+    threads = get_num_threads()
+    index: list[tuple[int, int, int]] = []
+    pending: deque[Future[tuple[bytes, int, int]]] = deque()
+
+    def write_next(file: Any) -> None:
+        part, size, crc = pending.popleft().result()
+        file.write(part)
+        index.append((len(part), size, crc))
+
+    with open(path, "wb") as file, ThreadPoolExecutor(threads) as pool:
+        file.write(bytes(12 + extra_length) if indexed else _GZIP_HEADER)  # filled below
+        pending.append(pool.submit(deflate, head_bytes, 0, len(head_bytes), False))
+        for start in starts:
+            if len(pending) == 2 * threads:  # at most 2 blocks per thread in flight
+                write_next(file)
+            last = start + block >= n
+            pending.append(pool.submit(deflate, body, start, min(start + block, n), last))
+        while pending:
+            write_next(file)
+        crc = zlib.crc32(body, zlib.crc32(head_bytes))
+        file.write(struct.pack("<II", crc, (len(head_bytes) + n) & 0xFFFFFFFF))
+        if indexed:
+            payload = struct.pack("<I", len(index)) + b"".join(
+                struct.pack("<III", *entry) for entry in index
+            )
+            file.seek(0)
+            file.write(
+                b"\x1f\x8b\x08\x04\x00\x00\x00\x00\x04\xff"  # the extra-field flag set
+                + struct.pack("<H", extra_length)
+                + _GZIP_INDEX_ID
+                + struct.pack("<H", len(payload))
+                + payload
+            )
 
 
 def load_and_merge_images(
@@ -1482,9 +1576,7 @@ def load_and_merge_images(
     )
 
 
-def _ensure_3d(
-    array: npt.NDArray[np.floating[Any]], dataset_index: int = 0
-) -> npt.NDArray[np.floating[Any]]:
+def _ensure_3d(array: npt.NDArray[Any], dataset_index: int = 0) -> npt.NDArray[Any]:
     """
     Ensure the input array is strictly 3D (x, y, z).
 
@@ -1580,8 +1672,9 @@ def _to_float_row_order_numba(
 _ROW_ORDER_MIN_SIZE = 1 << 20
 
 # Types that take the tiled copy (warmed in warmup._warmup_filters): NIfTI data (float64),
-# rescaled DICOM (float64), stored DICOM pixels (int16, uint16) and SEG masks (uint8).
-_ROW_ORDER_DTYPES = (np.float64, np.int16, np.uint16, np.uint8)
+# rescaled DICOM (float64), stored DICOM pixels (int16, uint16), SEG masks (uint8) and
+# stored-type NIfTI masks (int8, int32, uint32).
+_ROW_ORDER_DTYPES = (np.float64, np.int16, np.uint16, np.uint8, np.int8, np.int32, np.uint32)
 # Types that save_image copies into column order: images (float64), response maps
 # (float32), masks (uint8, also bool) and label maps (int32, also int64)
 _COLUMN_ORDER_DTYPES = (np.float64, np.float32, np.uint8, np.int32)
@@ -1622,7 +1715,22 @@ _NIFTI_FUSED_DTYPES = tuple(
 )
 
 
-def _nifti_float64(nii_img: Any, dataset_index: int) -> npt.NDArray[Any]:
+def _unscaled_integer(proxy: Any) -> bool:
+    """Whether a NIfTI file holds a native integer type of the fused load with no scaling
+    (slope 1, intercept 0): the stored type that `load_image(stored_type=True)` keeps."""
+    if not isinstance(proxy, ArrayProxy):
+        return False
+    dtype = np.dtype(proxy.dtype)
+    return (
+        dtype.kind in "iu"
+        and dtype in _NIFTI_FUSED_DTYPES
+        and dtype.isnative
+        and float(proxy.slope) == 1.0
+        and float(proxy.inter) == 0.0
+    )
+
+
+def _nifti_float64(nii_img: Any, dataset_index: int, stored_type: bool = False) -> npt.NDArray[Any]:
     """The values of nibabel's `get_fdata()`, in row order for large images.
 
     nibabel returns column-order (Fortran) arrays. The kernels read in row order, and the
@@ -1630,9 +1738,11 @@ def _nifti_float64(nii_img: Any, dataset_index: int) -> npt.NDArray[Any]:
     image in a native stored type goes through one pass: the stored values, scaled as
     `get_fdata` scales them (float64(x), times the slope unless it is 1, plus the
     intercept unless it is 0), written in row order. The float64 column-order array and
-    its copy are not made.
+    its copy are not made. With `stored_type`, an unscaled integer file keeps its type (see
+    `_unscaled_integer`).
     """
     proxy = nii_img.dataobj
+    keep = stored_type and _unscaled_integer(proxy)
     if isinstance(proxy, ArrayProxy) and len(proxy.shape) == 4:
         # Read only the requested volume, scaled as get_fdata scales (nibabel keeps the
         # slope and intercept in float64): the other volumes are never read or kept.
@@ -1641,7 +1751,8 @@ def _nifti_float64(nii_img: Any, dataset_index: int) -> npt.NDArray[Any]:
                 f"Dataset index {dataset_index} is out of bounds for 4D image "
                 f"with {proxy.shape[3]} volumes."
             )
-        return _row_order(np.asarray(proxy[..., dataset_index], dtype=np.float64))
+        volume = proxy[..., dataset_index]  # the stored type when the file has no scaling
+        return _row_order(volume if keep else np.asarray(volume, dtype=np.float64))
     if (
         isinstance(proxy, ArrayProxy)
         and len(proxy.shape) == 3
@@ -1652,62 +1763,231 @@ def _nifti_float64(nii_img: Any, dataset_index: int) -> npt.NDArray[Any]:
         slope, inter = np.asanyarray(proxy.slope), np.asanyarray(proxy.inter)
         if np.can_cast(slope, np.float64) and np.can_cast(inter, np.float64):
             s, b = float(slope), float(inter)
+            if keep:
+                return _row_order(_stored_values(proxy))
+            dtype = np.dtype(proxy.dtype)
+            fused = dtype.itemsize >= _GZIP_FUSED_MIN_ITEMSIZE and _inflates(proxy)
+            index = _large_index(proxy.file_like) if fused else None
+            if index is not None:  # the blocks convert as they inflate: no stored array
+                path, offset = proxy.file_like, int(proxy.offset)
+                values = _gzip_float64(path, index, offset, proxy.shape, dtype, s, b)
+                if values is not None:
+                    return values
             nz = proxy.shape[2]
             return _float_row_order(
-                _stored_values(proxy),
+                _stored_values(proxy, indexed=not fused),
                 np.full(nz, s),
                 np.full(nz, b),
                 np.full(nz, s != 1.0),
                 np.full(nz, b != 0.0),
             )
+    if keep:
+        return _row_order(_ensure_3d(_stored_values(proxy), dataset_index))
     return _row_order(_ensure_3d(nii_img.get_fdata(), dataset_index))
 
 
-def _stored_values(proxy: ArrayProxy) -> npt.NDArray[Any]:
-    """`proxy.get_unscaled()`: the stored values of a NIfTI file. A gzip file is inflated
-    in one pass into the array (nibabel inflates it in 128 KB steps, with one more copy
-    and one more CRC pass). A file that is not one gzip member of the expected size goes
-    to nibabel, which reads it, or reports the error, as before."""
+def _inflates(proxy: ArrayProxy) -> bool:
+    """Whether the package inflates the data of a NIfTI file itself: a gzip file in column
+    order."""
     path = proxy.file_like
-    if isinstance(path, str) and path.lower().endswith(".gz") and proxy.order == "F":
-        values = _gzip_values(path, int(proxy.offset), proxy.shape, np.dtype(proxy.dtype))
+    return isinstance(path, str) and path.lower().endswith(".gz") and proxy.order == "F"
+
+
+def _stored_values(proxy: ArrayProxy, indexed: bool = True) -> npt.NDArray[Any]:
+    """`proxy.get_unscaled()`: the stored values of a NIfTI file. A gzip file is inflated
+    into the array: in one pass (nibabel inflates it in 128 KB steps, with one more copy
+    and one more CRC pass), or on threads from its block index (see _gzip_values). A file
+    that is not one gzip member of the expected size goes to nibabel, which reads it, or
+    reports the error, as before."""
+    if _inflates(proxy):
+        dtype = np.dtype(proxy.dtype)
+        path, offset = proxy.file_like, int(proxy.offset)
+        values = _gzip_values(path, offset, proxy.shape, dtype, indexed)
         if values is not None:
             return values
     return cast(npt.NDArray[Any], proxy.get_unscaled())  # type: ignore[no-untyped-call]
 
 
-def _gzip_values(
-    path: str, offset: int, shape: tuple[int, ...], dtype: np.dtype[Any]
-) -> Optional[npt.NDArray[Any]]:
-    """The column-order array of `shape` and `dtype` after `offset` bytes of the gzip file
-    `path` (zlib checks the CRC of the data), or None when the file is not one gzip member
-    of exactly that size, or zlib cannot read it."""
-    size = math.prod(shape) * dtype.itemsize
-    end = offset + size
-    data = np.empty(size, dtype=np.uint8)
+# Stored types of 2 bytes or more convert block by block as the blocks of an indexed file
+# inflate; a uint8 file (a mask) inflates into its stored array, then converts
+_GZIP_FUSED_MIN_ITEMSIZE = 2
+# A file with a block index inflates on threads from this many compressed bytes on: a
+# sparse int32 label map of 1 MB compressed loads x1.87 slower on the threads
+_GZIP_INDEX_MIN_BYTES = 4 << 20
+
+
+def _gzip_pieces(path: str, offset: int, end: int) -> Generator[npt.NDArray[np.uint8], None, None]:
+    """The inflated bytes of the gzip file `path` from byte `offset` to byte `end`, as
+    uint8 arrays of at most 16 MB (zlib checks the CRC of the data). Raises ValueError
+    when the file is not one gzip member of exactly `end` bytes; zlib.error and OSError
+    pass through."""
     inflate = zlib.decompressobj(wbits=31)  # the gzip format
     position = 0  # the inflated bytes so far
-    try:
-        with open(path, "rb") as file:
-            while not inflate.eof and (chunk := file.read(1 << 24)):
-                while chunk:
-                    # At most 16 MB at a time, and one byte past the end shows a longer file
-                    piece = inflate.decompress(chunk, min(end + 1 - position, 1 << 24))
-                    if position + len(piece) > end:
-                        return None
-                    skip = max(offset - position, 0)  # the bytes of the header
-                    if skip < len(piece):
-                        start = position + skip - offset
-                        piece_values = np.frombuffer(piece, dtype=np.uint8, offset=skip)
-                        data[start : start + piece_values.size] = piece_values
-                    position += len(piece)
-                    chunk = inflate.unconsumed_tail
-            rest = file.read(1)
-    except (OSError, zlib.error):
-        return None
+    with open(path, "rb") as file:
+        while not inflate.eof and (chunk := file.read(1 << 24)):
+            while chunk:
+                # At most 16 MB at a time, and one byte past the end shows a longer file
+                piece = inflate.decompress(chunk, min(end + 1 - position, 1 << 24))
+                if position + len(piece) > end:
+                    raise ValueError("longer than the array")
+                skip = max(offset - position, 0)  # the bytes of the header
+                if skip < len(piece):
+                    yield np.frombuffer(piece, dtype=np.uint8, offset=skip)
+                position += len(piece)
+                if inflate.eof:  # the member ended: then zlib gives the rest of the chunk
+                    break  # in unconsumed_tail again and again (a loop with no end)
+                chunk = inflate.unconsumed_tail
+        rest = file.read(1)
     if not inflate.eof or inflate.unused_data or rest or position != end:
+        raise ValueError("not one gzip member of the size of the array")
+
+
+def _gzip_index(path: str) -> Optional[npt.NDArray[np.uint32]]:
+    """The block index of a gzip file that `save_image` wrote (see `_write_gzip_nifti`):
+    the rows (compressed size, size, CRC-32) of its blocks, with the file offset of the
+    first block as the first value of row 0, or None for any other gzip file."""
+    with open(path, "rb") as file:
+        head = file.read(12)
+        if len(head) < 12 or head[:4] != b"\x1f\x8b\x08\x04":  # deflate, the extra field only
+            return None
+        length = int.from_bytes(head[10:12], "little")
+        extra = file.read(length)
+    if len(extra) != length:
+        return None
+    position = 0
+    while position + 4 <= length:
+        size = int.from_bytes(extra[position + 2 : position + 4], "little")
+        if extra[position : position + 2] == _GZIP_INDEX_ID:
+            payload = extra[position + 4 : position + 4 + size]
+            count = int.from_bytes(payload[:4], "little")
+            if len(payload) == size == 4 + 12 * count:
+                blocks = np.frombuffer(payload, dtype="<u4", offset=4).reshape(count, 3)
+                return np.concatenate([[[12 + length, 0, 0]], blocks]).astype(np.uint32)
+            return None
+        position += 4 + size
+    return None
+
+
+def _gzip_indexed_pieces(
+    path: str, index: npt.NDArray[np.uint32], offset: int, plane: int, end: int
+) -> Generator[npt.NDArray[np.uint8], None, None]:
+    """The inflated data of the gzip file `path` from byte `offset` to byte `end`, as
+    writeable uint8 arrays of whole `plane`s in order: the blocks of its `index` (see
+    `_gzip_index`), inflated on the threads of the package, each checked against its
+    size and CRC-32. Raises ValueError when the index does not describe the array in
+    whole planes, or a block does not match it."""
+    start = int(index[0, 0])
+    blocks = index[1:].astype(np.int64)
+    if (
+        len(blocks) < 2
+        or blocks[0, 1] != offset
+        or int(blocks[:, 1].sum()) != end
+        or np.any(blocks[1:, 1] % plane)
+        or start + int(blocks[:, 0].sum()) + 8 != os.path.getsize(path)
+    ):
+        raise ValueError("the block index does not fit the array")
+    offsets = start + np.cumsum(blocks[:, 0]) - blocks[:, 0]
+
+    def inflate(i: int) -> npt.NDArray[np.uint8]:
+        with open(path, "rb") as file:  # a file object for each block: no shared position
+            file.seek(int(offsets[i]))
+            data = file.read(int(blocks[i, 0]))
+        piece = zlib.decompressobj(-15).decompress(data)
+        if len(piece) != blocks[i, 1] or zlib.crc32(piece) != blocks[i, 2]:
+            raise ValueError("a block does not match its index")
+        out = np.empty(len(piece), dtype=np.uint8)  # writeable: the kernel's signature
+        out[:] = np.frombuffer(piece, dtype=np.uint8)
+        return out
+
+    threads = get_num_threads()
+    pending: deque[Future[npt.NDArray[np.uint8]]] = deque()
+    with ThreadPoolExecutor(threads) as pool:
+        for i in range(1, len(blocks)):
+            if len(pending) == 2 * threads:
+                yield pending.popleft().result()
+            pending.append(pool.submit(inflate, i))
+        while pending:
+            yield pending.popleft().result()
+
+
+def _large_index(path: str) -> Optional[npt.NDArray[np.uint32]]:
+    """The block index of the gzip file `path` (see _gzip_index) when its blocks hold at
+    least _GZIP_INDEX_MIN_BYTES compressed bytes, else None."""
+    index = _gzip_index(path)
+    if index is None or int(index[1:, 0].sum()) < _GZIP_INDEX_MIN_BYTES:
+        return None
+    return index
+
+
+def _fill(data: npt.NDArray[np.uint8], pieces: Iterator[npt.NDArray[np.uint8]]) -> None:
+    """Copy the uint8 `pieces` into `data`, one after the other."""
+    start = 0
+    for piece in pieces:
+        data[start : start + piece.size] = piece
+        start += piece.size
+
+
+def _gzip_values(
+    path: str, offset: int, shape: tuple[int, ...], dtype: np.dtype[Any], indexed: bool = True
+) -> Optional[npt.NDArray[Any]]:
+    """The column-order array of `shape` and `dtype` after `offset` bytes of the gzip file
+    `path`, or None when the file is not one gzip member of exactly that size, or zlib
+    cannot read it. With `indexed`, a file with a large block index (see _large_index)
+    inflates on threads; when the index does not fit the file, or a block does not match
+    it, the stream is still one standard member and inflates in one pass."""
+    data = np.empty(math.prod(shape) * dtype.itemsize, dtype=np.uint8)
+    try:
+        index = _large_index(path) if indexed else None
+        if index is not None:
+            plane = shape[0] * shape[1] * dtype.itemsize if len(shape) == 3 else data.size
+            try:
+                end = offset + data.size
+                with closing(_gzip_indexed_pieces(path, index, offset, plane, end)) as pieces:
+                    _fill(data, pieces)
+                return data.view(dtype).reshape(shape, order="F")
+            except ValueError:
+                pass
+        with closing(_gzip_pieces(path, offset, offset + data.size)) as pieces:
+            _fill(data, pieces)
+    except (OSError, zlib.error, ValueError):
         return None
     return data.view(dtype).reshape(shape, order="F")
+
+
+def _gzip_float64(
+    path: str,
+    index: npt.NDArray[np.uint32],
+    offset: int,
+    shape: tuple[int, ...],
+    dtype: np.dtype[Any],
+    slope: float,
+    inter: float,
+) -> Optional[npt.NDArray[np.float64]]:
+    """The float64 row-order array of the stored values of the gzip NIfTI file `path`,
+    scaled as `get_fdata` scales them, from its block `index` (see _gzip_index): the kernel
+    converts the planes of each block as the blocks inflate on threads, so the stored
+    array is never made. None when the index does not fit the file, a block does not match
+    it or zlib cannot read it (the caller inflates the file in one pass)."""
+    nx, ny, nz = shape
+    plane = nx * ny * dtype.itemsize
+    slopes, inters = np.full(nz, slope), np.full(nz, inter)
+    scale, shift = np.full(nz, slope != 1.0), np.full(nz, inter != 0.0)
+    out = np.empty(shape, dtype=np.float64)
+    try:
+        end = offset + plane * nz
+        with closing(_gzip_indexed_pieces(path, index, offset, plane, end)) as pieces:
+            z0 = 0
+            for piece in pieces:
+                k = piece.size // plane
+                z1 = z0 + k
+                planes = piece.view(dtype).reshape((nx, ny, k), order="F")
+                _to_float_row_order_numba(
+                    planes, slopes[z0:z1], inters[z0:z1], scale[z0:z1], shift[z0:z1], out, z0
+                )
+                z0 = z1
+    except (OSError, zlib.error, ValueError):
+        return None
+    return out
 
 
 def _float64_volume(
@@ -1743,7 +2023,7 @@ def _float64_volume(
     return cast(npt.NDArray[np.float64], _row_order(array.astype(np.float64)))
 
 
-def _load_nifti(path: str, dataset_index: int = 0) -> Image:
+def _load_nifti(path: str, dataset_index: int = 0, stored_type: bool = False) -> Image:
     """
     Load a NIfTI file (.nii or .nii.gz) using the nibabel library.
 
@@ -1753,6 +2033,7 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
     Args:
         path (str): Path to the NIfTI file.
         dataset_index (int): The volume index to load if the file is 4D.
+        stored_type (bool): Keep the type of an unscaled integer file (see load_image).
 
     Returns:
         Image: A standardized `Image` object.
@@ -1766,7 +2047,7 @@ def _load_nifti(path: str, dataset_index: int = 0) -> Image:
         raise ValueError(f"Could not load NIfTI file '{path}': {e}") from e
 
     # Load image data as float64 to preserve precision
-    array = _nifti_float64(nii_img, dataset_index)
+    array = _nifti_float64(nii_img, dataset_index, stored_type)
 
     # Extract metadata
     header = nii_img.header  # type: ignore
@@ -1936,18 +2217,17 @@ def _load_dicom_series(
         slice_normal = np.array([0, 0, 1.0])
 
     # Sort slices by projection of position onto the normal vector
-    try:
-        slices.sort(
-            key=lambda s: np.dot(np.array(s.ImagePositionPatient, dtype=float), slice_normal)
-        )
-    except AttributeError:
-        # Fallback to InstanceNumber if ImagePositionPatient is missing
+    if all(_slice_position(s) is not None for s in slices):
+        position = cast(Any, _slice_position)
+        slices.sort(key=lambda s: float(np.dot(position(s), slice_normal)))
+    else:
+        # Fallback to InstanceNumber if ImagePositionPatient is missing or not numeric
         slices.sort(key=lambda s: int(getattr(s, "InstanceNumber", 0)))
 
     # Extract metadata from the first slice (reference), and the positions, before the
     # slices are freed while their pixels are stacked
     ref = slices[0]
-    positions = [getattr(s, "ImagePositionPatient", None) for s in slices]
+    positions = [_slice_position(s) for s in slices]
     if all(p is not None for p in positions):
         _warn_on_uneven_slices(positions, slice_normal, source)
     factor = None
@@ -1980,14 +2260,7 @@ def _load_dicom_series(
         spacing = (1.0, 1.0, 1.0)
 
     # Origin
-    try:
-        origin = (
-            float(ref.ImagePositionPatient[0]),
-            float(ref.ImagePositionPatient[1]),
-            float(ref.ImagePositionPatient[2]),
-        )
-    except AttributeError:
-        origin = (0.0, 0.0, 0.0)
+    origin = positions[0] if positions[0] is not None else (0.0, 0.0, 0.0)
 
     # Direction
     try:
@@ -2007,6 +2280,16 @@ def _load_dicom_series(
         modality=getattr(ref, "Modality", "DICOM"),
         frame_of_reference_uid=_frame_uid(ref),
     )
+
+
+def _slice_position(dcm: Any) -> Optional[tuple[float, float, float]]:
+    """The ImagePositionPatient of a slice as three floats; None when it is missing, short
+    or not numeric (such a series sorts by the instance numbers)."""
+    try:
+        x, y, z = (float(v) for v in dcm.ImagePositionPatient)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return x, y, z
 
 
 def _warn_on_uneven_slices(positions: list[Any], normal: npt.NDArray[Any], source: Any) -> None:

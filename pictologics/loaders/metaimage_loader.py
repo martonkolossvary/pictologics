@@ -123,4 +123,6 @@ def _read_values(
         return np.array(words[:count], dtype=np.float64)
     if len(data) < count * dtype.itemsize:
         raise ValueError(f"'{path}': the data hold {len(data)} of {count * dtype.itemsize} bytes.")
-    return np.frombuffer(data, dtype=dtype, count=count)
+    # A writeable copy: the kernels compile for writeable arrays (a read-only array of the
+    # bytes would compile another signature at its first load)
+    return np.frombuffer(data, dtype=dtype, count=count).copy()

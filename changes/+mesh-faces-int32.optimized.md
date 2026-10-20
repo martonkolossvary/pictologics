@@ -1,0 +1,1 @@
+The marching cubes mesh stores its faces and its work planes as int32: the morphology features take 35 % less peak memory (a 150^3 ROI 19 MB instead of 30 MB, an STS CT lesion 9.5 MB instead of 14.7 MB, a 160x430x390 body 97 MB instead of 149 MB) with the same mesh, bit for bit.

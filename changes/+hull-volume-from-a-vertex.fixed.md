@@ -1,0 +1,1 @@
+The convex hull volume adds its tetrahedra from a hull vertex, not from the origin, so a region deep in a large grid no longer loses digits: `volume_density_convex_hull` was off by up to 4e-11 (relative) for a region 500 voxels from the origin and by 1e-3 for one 100,000 voxels away. It is now exact to 3e-15. The IBSI reference values still pass.

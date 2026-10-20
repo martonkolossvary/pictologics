@@ -47,7 +47,7 @@ if __name__ == "__main__":  # the worker processes import this script again
 - **Cases**: a list of dicts, or a pandas DataFrame with one row for each case. A case holds the `run()` arguments of one image: `subject_id` and `image` (required), `mask`, the mask settings, and `image_options`.
 - **Result files**: `results/cases/<subject_id>.json` holds the status, the error, the warnings, the time, the features and the processing log of a case.
 - **Resume**: a later call with the same folder skips each case whose file has the same image, image options, mask and configurations. A failed case runs again. To run a case again, delete its file.
-- **Workers**: with `workers=4`, four processes run the cases, and each one uses a quarter of the numba threads. Each worker holds one case at a time, so the memory need grows with the number of workers.
+- **Workers**: with `workers=4`, four processes run the cases, and each one uses a quarter of the numba threads. Each worker holds one case at a time, so the memory need grows with the number of workers. The workers share the memory limit of the spatial features (half of the memory).
 - **Status**: the returned table has one row for each case: `"completed"`, `"incomplete"` (a configuration ended with an empty ROI or an error) or `"failed"` (the case did not run, for example because its image did not load).
 
 ## 3. Label Maps in a Batch

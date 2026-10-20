@@ -8,10 +8,11 @@ import pywt
 import scipy.fft
 from numba import get_num_threads
 from numpy import typing as npt
-from scipy.ndimage import convolve1d
 
+from ._wavelet_pass import wavelet_pass
 from .base import (
-    _TRANSFER_CACHE_BYTES,
+    _SLAB_MIN_SIZE,
+    _TRANSFER_CACHE_SHAPES,
     BoundaryCondition,
     _add_times,
     _apply_with_boundary_padding,
@@ -20,10 +21,11 @@ from .base import (
     _ordered_map,
     _padding_value_problem,
     _prepare_masked_image,
-    _slab_pass,
+    _slab_pool,
     _slab_ufunc,
     _slabs,
     _times_mirrored,
+    _transfer_cache_bytes,
     _whole_number,
     as_float32,
     cache_by_bytes,
@@ -41,14 +43,15 @@ _PARALLEL_THRESHOLD = 15_000
 # threads: 8 to 30 % faster than depth first from 64^3 to 128^3, with 3.4 times its arrays.
 _FLIP_LEVELS_BYTES = 64 << 20
 
-# From this size (voxels), a mixed decomposition (such as LHL) with average pooling also
-# takes the tree of _rotation_tree, depth first. Measured (db2, float32, 10 threads):
-# 300 x 300 x 100 x0.80, 220^3 x0.76, 400 x 400 x 80 x0.65, 256^3 x0.50; at 1 thread x0.4 to
-# x0.6 at every size. Below it the 24 rotations side by side win at 10 threads (200 x 200 x
-# 100: the tree x1.22), as they do with max and min pooling (one call for each rotation,
-# hidden behind the passes; 300 x 300 x 100 max: the tree x1.11). The choice must not
-# depend on the threads (other bits).
-_MIXED_TREE_MIN = 1 << 23
+# From this size (voxels), a mixed decomposition (such as LHL) with any pooling takes the
+# tree of _rotation_tree, depth first. Measured with the numba passes (10 threads): the
+# tree against the 24 rotations db2 L1 104^3 x1.00, 120^3 x0.80, 128^3 x0.70, 160^3 x0.64,
+# 256 x 256 x 100 x0.57; coif3 L1 128^3 x0.70; db2 L2 100^3 x1.28, 128^3 x0.82; max pooling
+# 128^3 x0.91, 200 x 200 x 100 x0.85, 256^3 x0.64; at 4 threads x0.55-0.85 from 900k voxels,
+# at 1 thread x0.55-0.70 at every size; with 30 % less memory. Below it the 24 rotations
+# side by side win at 10 threads (100^3: the tree x1.22). The choice must not depend on
+# the threads (other bits).
+_MIXED_TREE_MIN = 1 << 21
 
 # From this size (voxels), half as many rotations run at once, each pass in two threads.
 # Measured (db2, 10 threads): as fast at 96^3, faster from 128^3 on (256^3: 649 against
@@ -144,7 +147,9 @@ def wavelet_transform(
         )  # fmt: skip
         return cast(npt.NDArray[np.floating[Any]], padded)
 
-    # The passes run in float32 (scipy sums each line in double)
+    # The passes run in float32 (the numba passes sum each line in double, the bits of
+    # scipy's convolve1d; a NaN or inf voxel spreads over the non-zero taps of an a trous
+    # kernel only)
     image = as_float32(image)
 
     # Apply source_mask preprocessing (zero out invalid voxels)
@@ -165,7 +170,7 @@ def wavelet_transform(
     if rotation_invariant:
         if pooling not in ("max", "average", "min"):
             raise ValueError(f"Unknown pooling: {pooling}")
-        mixed_tree = pooling == "average" and image.size >= _MIXED_TREE_MIN
+        mixed_tree = image.size >= _MIXED_TREE_MIN
         if decomposition in ("LLL", "HHH") or mixed_tree:
             threads = get_num_threads() if use_parallel else 1
             return _rotation_tree(image, lo, hi, level, decomposition, mode, pooling, threads)
@@ -248,9 +253,9 @@ def _apply_undecimated_wavelet_3d(
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply undecimated 3D wavelet decomposition using à trous algorithm. The passes run
-    in `_slab_pass` with `threads` threads. With `last_dtype` of another type than the
-    passes, the last pass writes a new array of that type (scipy computes in double:
-    the values of a cast after it).
+    in `wavelet_pass` with `threads` threads. With `last_dtype` of another type than the
+    passes, the last pass writes a new array of that type (the passes sum each line in
+    double: the values of a cast after it).
 
     For level j, filters are upsampled by inserting 2^(j-1) - 1 zeros.
 
@@ -261,8 +266,8 @@ def _apply_undecimated_wavelet_3d(
     boundary modes are symmetric under a flip). The reversed kernel adds its taps in the
     other order, so a value can differ in the last float32 digit.
     """
-    # The first pass writes a new array; the later passes write into it. convolve1d
-    # copies each line before it writes that line, so the in-place result is the same.
+    # The first pass writes a new array; the later passes write into it. The kernels copy
+    # the extended tail before they write, so the in-place result is the same.
     result: npt.NDArray[np.floating[Any]] | None = None
     for j in range(1, level + 1):
         # À trous: insert zeros into filters for this level
@@ -289,10 +294,7 @@ def _apply_undecimated_wavelet_3d(
                 source, target = result, np.empty(result.shape, dtype=last_dtype)
             else:
                 source, target = result, result
-            result = _slab_pass(
-                convolve1d, source, perm[axis], target, threads,
-                weights=weights, mode=mode, origin=origin,
-            )  # fmt: skip
+            result = wavelet_pass(source, perm[axis], target, threads, weights, mode, origin)
     return cast(npt.NDArray[np.floating[Any]], result)
 
 
@@ -316,17 +318,16 @@ def _axis_chain(
     flip: bool,
     mode: str,
     threads: int,
+    out: Optional[npt.NDArray[np.floating[Any]]] = None,
 ) -> npt.NDArray[np.floating[Any]]:
-    """The level kernels along `axis`, one pass each in `_slab_pass`: the first into a new
-    array, the others in place. A flipped axis takes each kernel reversed (origin -1 for
+    """The level kernels along `axis`, one pass each (`wavelet_pass`): the first into `out`
+    (None: a new array), the others in place. A flipped axis takes each kernel reversed (origin -1 for
     an even length, 0 for an odd one; the boundary modes are symmetric under a flip)."""
     result = image
     for kernel in kernels:
         weights, origin = (kernel[::-1], -1 if kernel.size % 2 == 0 else 0) if flip else (kernel, 0)
-        target = None if result is image else result
-        result = _slab_pass(
-            convolve1d, result, axis, target, threads, weights=weights, mode=mode, origin=origin
-        )
+        target = out if result is image else result
+        result = wavelet_pass(result, axis, target, threads, weights, mode, origin)
     return result
 
 
@@ -342,6 +343,24 @@ def _leaf_counts(decomposition: str) -> dict[tuple[tuple[str, bool], ...], int]:
             spec[perm[a]] = (decomposition[a], flips[a])
         counts[tuple(spec)] = counts.get(tuple(spec), 0) + 1
     return counts
+
+
+def _pool_reduce(reduce: Any, total: npt.NDArray[Any], response: npt.NDArray[Any]) -> None:
+    """`reduce(total, response, out=total)` in chunks of planes of about _SLAB_MIN_SIZE values,
+    in the slab threads for a large array; the chunks are the same at any thread count, so
+    the bits do not depend on the threads."""
+    planes = max(1, _SLAB_MIN_SIZE // max(1, total.shape[1] * total.shape[2]))
+    starts = range(0, total.shape[0], planes)
+
+    def run(start: int) -> None:
+        part = slice(start, start + planes)
+        reduce(total[part], response[part], out=total[part], casting="same_kind")
+
+    if total.size >= _SLAB_MIN_SIZE and get_num_threads() > 1:
+        list(_slab_pool().map(run, starts))
+    else:
+        for start in starts:
+            run(start)
 
 
 def _rotation_tree(
@@ -366,10 +385,12 @@ def _rotation_tree(
     The filters pool depth first, in the order of their (letter, flip) on each axis (each
     as often as its rotations for the average); the passes and the sums give the same
     values in any number of threads, so the result does not depend on the threads. Max
-    and min run in one call, as numpy orders -0.0 and +0.0 by the part of its loop. A
+    and min run in fixed chunks of planes (the same chunks at any thread count, so the bits
+    do not depend on the threads; the sign of an exact zero can differ from one numpy call,
+    which orders -0.0 and +0.0 by the part of its loop). A
     small LLL or HHH image (_FLIP_LEVELS_BYTES) runs the chains of each axis at once, each
-    pass with a share of the threads; else depth first, each pass in all threads, with an
-    array for each axis only.
+    pass with a share of the threads; else depth first, each pass in all threads, with one
+    buffer for each axis, reused by the siblings.
     """
     chains = _level_chains(lo, hi, level)
     leaves = _leaf_counts(decomposition)
@@ -379,7 +400,10 @@ def _rotation_tree(
         nonlocal total
         if pooling != "average":
             reduce = np.maximum if pooling == "max" else np.minimum
-            total = response.copy() if total is None else reduce(total, response, out=total)
+            if total is None:
+                total = response.copy()
+            else:
+                _pool_reduce(reduce, total, response)
             return
         first = total is None
         if total is None:
@@ -404,6 +428,10 @@ def _rotation_tree(
         for pattern in arrays:
             pool(pattern, 3)
     else:
+        # One buffer for each depth: a chain is walked before its sibling starts, so the
+        # sibling takes the same buffer (macOS returns a freed block to the OS and faults the
+        # pages of a new array in again: 0.014 ms/MB at 10 threads)
+        buffers = [np.empty(image.shape, dtype=image.dtype) for _ in range(3)]
 
         def walk(array: npt.NDArray[Any], prefix: tuple[tuple[str, bool], ...]) -> None:
             axis = len(prefix)
@@ -411,13 +439,13 @@ def _rotation_tree(
                 pool(array, leaves[prefix])
                 return
             for letter, flip in sorted({key[axis] for key in leaves if key[:axis] == prefix}):
-                # each chain freed once walked
                 walk(
-                    _axis_chain(array, axis, chains[letter], flip, mode, threads),
+                    _axis_chain(array, axis, chains[letter], flip, mode, threads, buffers[axis]),
                     (*prefix, (letter, flip)),
                 )
 
         walk(image, ())
+        del buffers
     result = cast(npt.NDArray[Any], total)
     if pooling == "average":
         _slab_ufunc(np.true_divide, (result, 24.0), result)
@@ -448,7 +476,7 @@ def _get_rotation_perms() -> List[Tuple[Tuple[int, int, int], Tuple[bool, bool, 
     return _get_rotation_permutations_3d()
 
 
-@cache_by_bytes(_TRANSFER_CACHE_BYTES)
+@cache_by_bytes(_transfer_cache_bytes, _TRANSFER_CACHE_SHAPES)
 def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.floating[Any]]:
     """Frequency-domain Simoncelli band-pass transfer function (IBSI 2 Eq. 27), in the
     rfftn layout (the last axis keeps its s // 2 + 1 non-negative frequencies).
@@ -474,8 +502,9 @@ def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.f
     grids = []
     for i, s in enumerate(shape):
         center = (s - 1.0) / 2.0
-        # Normalize to [-1, 1] relative to center, then shift DC to index 0 (fftn layout)
-        grid = np.fft.ifftshift((np.arange(s) - center) / center)
+        # Normalize to [-1, 1] relative to center, then shift DC to index 0 (fftn layout).
+        # A singleton axis has no frequency: its grid is [0.0] (no division by 0).
+        grid = np.zeros(1) if s == 1 else np.fft.ifftshift((np.arange(s) - center) / center)
         grids.append(grid[: s // 2 + 1 if i == len(shape) - 1 else s])
     vectors = np.meshgrid(*grids, indexing="ij", sparse=True)
     table_shape = tuple(len(g) for g in grids)
@@ -537,10 +566,14 @@ def _simoncelli_pad_width(level: int) -> int:
     [max_freq/4, max_freq] with max_freq = 1 / 2**(level - 1) (Nyquist = 1), so its
     real-space kernel decays quickly, and — because the frequency band is a fixed
     *fraction* of Nyquist — the kernel's voxel extent depends only on `level`, not
-    on the image shape. Empirically (via `np.fft.ifftn` of the transfer function),
-    an 8-voxel radius captures ~99.9% of the level-1 kernel's L2 energy; each extra
-    level halves the bandwidth (doubling the spatial extent), so the pad doubles
-    too.
+    on the image shape. An 8-voxel radius holds 99.94 % of the L2 energy of the
+    level-1 kernel, but the L2 energy is the wrong measure of the error: the small tail
+    of the kernel (up to 1.1e-3 of its peak) adds up over a large uniform object.
+    Measured against a 64-voxel pad (level 1, mirror boundary), the 8-voxel pad differs
+    by up to 6.9e-2 of the response range at the border of a CT scan and by up to
+    1.2e-1 at the centre of a 64^3 sphere phantom. Each extra level halves the
+    bandwidth (doubling the spatial extent), so the pad doubles too. The periodic
+    boundary (the IBSI default) takes no pad.
     """
     return 8 * (1 << (level - 1))
 

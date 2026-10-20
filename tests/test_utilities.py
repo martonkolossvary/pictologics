@@ -1833,13 +1833,17 @@ class TestParallelProcessing:
     """Tests for parallel processing functionality."""
 
     def test_get_num_workers_auto(self) -> None:
-        """Automatic worker count: cpu_count - 1 for a large scan, one below 2 x
-        FILES_PER_WORKER files."""
-        from pictologics.utilities.dicom_database import FILES_PER_WORKER
-
-        cpu_count = os.cpu_count() or 1
-        assert _get_num_workers(None, 10**9) == max(1, cpu_count - 1)
-        assert _get_num_workers(None, 2 * FILES_PER_WORKER - 1) == 1
+        """Automatic worker count: this process below POOL_MIN_FILES files, then one
+        worker per FILES_PER_WORKER files, at most MAX_WORKERS and cpu_count - 1; an
+        explicit count keeps one worker per FILES_PER_WORKER files at most."""
+        with patch("os.cpu_count", return_value=14):
+            assert _get_num_workers(None, 5_999) == 1
+            assert _get_num_workers(None, 6_000) == 6
+            assert _get_num_workers(None, 13_000) == 8
+            assert _get_num_workers(4, 2_000) == 2
+            assert _get_num_workers(1, 20_000) == 1
+        with patch("os.cpu_count", return_value=4):
+            assert _get_num_workers(None, 10**9) == 3
 
     def test_get_num_workers_explicit(self) -> None:
         """Explicit worker count, at most one per FILES_PER_WORKER files."""

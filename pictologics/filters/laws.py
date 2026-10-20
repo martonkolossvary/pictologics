@@ -53,9 +53,10 @@ LAWS_KERNELS = _LAWS_KERNELS
 _PARALLEL_THRESHOLD = 20_000
 
 # Rotation-invariant bases computed at a time, each with its share of the threads.
-# Measured at 1.1M-7.1M voxels on 14 threads: 3 at a time (4 threads each) is as fast as
-# or faster than 6 at a time, with 40-45 % less memory; 2 at a time is up to 7 % slower.
-_BASES_IN_FLIGHT = 3
+# Measured with the numba passes at 128^3-256^3 and 240x190x156 on 10 threads: 2 at a time
+# is as fast as 3 (within 10 %, often faster) with 20 % less peak memory (256^3: 325 -> 261
+# MB); 1 at a time costs 8-30 %.
+_BASES_IN_FLIGHT = 2
 
 
 def _separable_convolve_3d(
@@ -65,12 +66,12 @@ def _separable_convolve_3d(
     g3: npt.NDArray[np.floating[Any]],
     mode: str = "constant",
     threads: Optional[int] = None,
-    last_dtype: Any = None,
+    cval: float = 0.0,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Apply separable 3D convolution using three 1D kernels, each pass in `threads`
-    threads (default: numba's thread count). With `last_dtype`, the result has that
-    type (see `_convolve_axes`).
+    threads (default: numba's thread count). With `cval`, the passes read the constant
+    beyond the image (see `_convolve_axes`).
 
     This is ~8x faster than full 3D convolution for 5x5x5 kernels:
     - Full 3D: 125 operations per voxel
@@ -87,7 +88,7 @@ def _separable_convolve_3d(
     # Apply 1D convolutions sequentially along each axis. The first pass makes the
     # output array; the others write into it (convolve1d copies each line before it
     # writes that line, so the values are those of passes that make new arrays).
-    result = _convolve_axes(image, (g1, g2, g3), mode, threads, last_dtype=last_dtype)
+    result = _convolve_axes(image, (g1, g2, g3), mode, threads, cval=cval)
     return cast(npt.NDArray[np.floating[Any]], result)
 
 
@@ -102,8 +103,8 @@ def _pool_rotations(
     `bases` yields one response per key, in the order of the key's first step. For max
     and min pooling, a base changes its sign in place when a step needs the other sign
     (negation is exact); average pooling subtracts it instead. A base is freed after
-    the last step of its key. The steps run in the calling thread, while the pool makes
-    the next bases (the slab threads are busy with their passes).
+    the last step of its key. The steps run on slabs in the slab threads from
+    `_SLAB_UFUNC_MIN_BYTES` on (see `_slab_ufunc`), while the pool makes the next bases.
     """
     last = {key: i for i, (key, _sign) in enumerate(steps)}
     held: Dict[Tuple[str, str, str], Tuple[npt.NDArray[np.floating[Any]], int]] = {}
@@ -114,20 +115,16 @@ def _pool_rotations(
             if result is None:  # the first step, the identity rotation, has sign 1
                 kept = base.dtype == np.float64 and last[key] == i
                 result = base if kept else base.astype(np.float64)
-            elif sign > 0:
-                result += base
             else:
-                result -= base
+                _slab_ufunc(np.add if sign > 0 else np.subtract, (result, base), result)
         else:
             if base_sign != sign:
-                np.negative(base, out=base)
+                _slab_ufunc(np.negative, (base,), base)
                 base_sign = sign
             if result is None:
                 result = base if last[key] == i else base.copy()
-            elif pooling == "max":
-                np.maximum(result, base, out=result)
-            else:  # "min"
-                np.minimum(result, base, out=result)
+            else:
+                _slab_ufunc(np.maximum if pooling == "max" else np.minimum, (result, base), result)
         if last[key] > i:
             held[key] = (base, base_sign)
         del base
@@ -316,9 +313,13 @@ def laws_filter(
     problem = _padding_value_problem(boundary, padding_value)
     if problem:
         raise ValueError(problem)
-    if padding_value:
-        # The convolution reads the constant; the energy step then pads the response
-        # with 0 by the boundary, as with a padding value of 0
+    # The convolution reads the constant beyond the image; the energy step then pads the
+    # response with 0 by the boundary, as with a padding value of 0. A source mask takes a
+    # padded copy.
+    cval = 0.0
+    if padding_value and source_mask is None:
+        cval = float(image.dtype.type(padding_value))
+    elif padding_value:
         padded = _constant_padded(
             laws_filter, image, source_mask, padding_value, max(g1.size, g2.size, g3.size) // 2,
             kernels=kernels, boundary=boundary, rotation_invariant=rotation_invariant,
@@ -388,6 +389,7 @@ def laws_filter(
                 kernel_arrays[perm[2]],
                 mode,
                 threads=threads // workers,
+                cval=cval,
             )
 
         bases = _ordered_map(_base, base_perms.values(), workers)
@@ -403,9 +405,8 @@ def laws_filter(
                 image, source_mask, g1, g2, g3, mode
             )
         else:
-            # Without the energy step, the last pass gives the float32 response
-            last_dtype = None if compute_energy else np.float32
-            result = _separable_convolve_3d(image, g1, g2, g3, mode, last_dtype=last_dtype)
+            # The passes of the float32 image give the float32 response
+            result = _separable_convolve_3d(image, g1, g2, g3, mode, cval=cval)
             valid_mask = None
 
     # Compute energy image if requested
@@ -432,9 +433,8 @@ def _laws_energy(
 ) -> npt.NDArray[np.float32]:
     """The texture energy (PQSD) of the response `result`, a new array of laws_filter that
     the steps write into: the mean of |result| over the energy support. A float32 response
-    keeps float32: scipy sums each line in double, so the running sum does not drift (at
-    most 1 float32 unit of the largest value, measured on 512 x 512 x 60). A float64
-    response (average pooling) is cut to float32 at the end."""
+    keeps float32: the passes sum each window in double (the exact mean of float32 values).
+    A float64 response (average pooling) is cut to float32 at the end."""
     _slab_ufunc(np.abs, (result,), result)
     _uniform_filter(result, 2 * energy_distance + 1, mode, output=result)
     if result.dtype == np.float32:

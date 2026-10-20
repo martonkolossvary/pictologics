@@ -82,6 +82,16 @@ def _warmup_texture() -> None:
     for kind in (np.uint8, np.uint16, np.int32, np.int64):
         tables = np.empty((1, 2, 6), dtype=np.int64)
         _utils._label_extents_numba(mask.astype(kind), edges, tables, np.empty(1, np.int64))
+    # The check and the cast of a float64 label map of run_rois (also a read-only map)
+    from . import pipeline
+
+    flat = np.array([0.0, 1.0, 2.0])
+    read_only = flat.copy()
+    read_only.setflags(write=False)
+    for labels in (flat, read_only):
+        pipeline._label_check_numba(labels)
+        for kind in (np.uint8, np.uint16, np.int64):
+            pipeline._cast_labels_numba(labels, np.empty(3, dtype=kind))
 
     # ROI min/max scan. The FBS bin count reads the discretised image (int32) with the mask
     # of the run (each type of the box scan). Discretise reads float64 data with a uint8
@@ -163,17 +173,39 @@ def _warmup_intensity() -> None:
     mean_val = 4.6
 
     intensity._sum_sq_centered(values, mean_val)
+    intensity._sum_of_squares(values)
     intensity._central_moments_2_3_4(values, mean_val)
     intensity._mean_abs_dev(values, mean_val)
     intensity._robust_mean_abs_dev(values, lower=0.0, upper=10.0)
-    # The value counts of the IVH: int32 binned values (other integers go to int64)
+    intensity._percentile_ranks(values.size)
+    intensity._small_order_statistics_numba(values)
+    # The value counts of the IVH: int32 binned values and int32 copies of whole floats and
+    # small integers (other integers go to int64), in threads or on one core; the check of
+    # whole float32 and float64 values
     for dtype in (np.int32, np.int64):
-        intensity._value_counts_numba(
-            np.array([1, 2, 2], dtype=dtype), 0, np.zeros((1, 3), np.int64)
-        )
+        ints = np.array([1, 2, 2], dtype=dtype)
+        intensity._value_counts_numba(ints, 0, np.zeros((1, 3), np.int64))
+        intensity._count_values_numba(ints, 0, np.zeros((4, 3), np.int64))
+    for float_kind in (np.float32, np.float64):
+        whole = np.array([1.0, 2.0], dtype=float_kind)
+        intensity._whole_as_int32_numba(whole, np.empty(2, np.int32))
 
     # The histogram features of integer values come from their bin counts, so these
-    # helpers read float64 values only.
+    # helpers read float64 values only. The level count of the histogram reads int32 (the
+    # pipeline), int64 and float64 values, alone and in threads; the statistics kernel
+    # reads the int64 counts.
+    for kind in (np.int32, np.int64, np.float64):
+        levels = np.array([1, 2, 2], dtype=kind)
+        intensity._level_counts_numba(levels, 3)
+        intensity._level_counts_threads_numba(
+            levels,
+            3,
+            np.zeros((1, 4), np.int64),
+            np.empty(1, kind),
+            np.empty(1, kind),
+            np.empty(1, np.bool_),
+        )
+    intensity._counted_statistics_numba(np.array([1, 2, 0], dtype=np.int64), 1, np.empty(23))
 
     # 2. Spatial Features
     # Minimal 3-voxel structure. int32 to match the production caller in
@@ -183,16 +215,28 @@ def _warmup_intensity() -> None:
     z_idx = np.array([0, 0, 0], dtype=np.int32)
     intensities = np.array([1.0, 2.0, 3.0], dtype=np.float64)
 
-    intensity._calculate_spatial_features_numba(
-        x_idx,
-        y_idx,
-        z_idx,
-        intensities,
-        mean_int=2.0,
-        sx=1.0,
-        sy=1.0,
-        sz=1.0,
-    )
+    for pairs in (
+        intensity._calculate_spatial_features_numba,
+        intensity._calculate_spatial_features_numba_serial,
+    ):
+        pairs(x_idx, y_idx, z_idx, intensities, 2.0, 1.0, 1.0, 1.0)
+    # The FFT sums of a large ROI: the kernel build, the spectrum multiply, the weighted
+    # power and the cross power of the slab sums, each in its parallel and its serial form
+    # (float64 and complex128 C arrays, int64 folds, a Python int for the length of the
+    # last axis).
+    kernel = np.empty((2, 2, 2))
+    axis = np.array([0.0, 1.0])
+    for build in (intensity._inverse_distance_numba, intensity._inverse_distance_numba_serial):
+        build(kernel, axis, axis, axis)
+    spectrum = np.ones((2, 2, 2), dtype=np.complex128)
+    fold = np.array([0, 1], dtype=np.int64)
+    for multiply in (intensity._multiply_spectrum_numba, intensity._multiply_spectrum_numba_serial):
+        multiply(spectrum, kernel, fold, fold)
+    partial = np.empty(2)
+    for power in (intensity._weighted_power_numba, intensity._weighted_power_numba_serial):
+        power(spectrum, kernel, fold, fold, 2, partial)
+    for cross in (intensity._cross_power_numba, intensity._cross_power_numba_serial):
+        cross(spectrum, spectrum, spectrum, 2, partial)
 
     # 3. Local Mean / Peaks
     # 5x5x5 volume
@@ -205,16 +249,47 @@ def _warmup_intensity() -> None:
 
     # calculate_local_intensity_features passes a crop of the image: a strided view, or
     # the C-contiguous array itself when the crop covers all of it. Compile both layouts.
-    # float32 data: the responses of the filters. The two-stage search reads the row
-    # prefix sums (float64) of the same crops.
+    # float32 data: the responses of the filters. The ROI scan reads a row-order bool array
+    # of the crop's shape; the two-stage search reads the padded row prefix sums (float64)
+    # of the same crops. Each parallel kernel has a serial twin (see _utils.serial_twin).
     rows = np.zeros(1, dtype=np.int64)
     data32 = data.astype(np.float32)
+    roi = np.zeros((5, 5, 5), dtype=np.bool_)
+    roi[2, 2, 2:4] = True  # one z-run of the two mask voxels
     for local_data in (data, data[1:, 1:, 1:], data32, data32[1:, 1:, 1:]):
-        roi_means = intensity._calculate_local_mean_numba(local_data, mask_indices, offsets)
+        shape = local_data.shape
+        roi_crop = np.ascontiguousarray(roi[-shape[0] :, -shape[1] :, -shape[2] :])
+        voxels = np.empty(shape[0], dtype=np.int64)
+        nruns = np.empty(shape[0], dtype=np.int64)
+        for count in (intensity._roi_count_numba, intensity._roi_count_numba_serial):
+            count(roi_crop, voxels, nruns)
+        voxel_start = np.cumsum(voxels) - voxels
+        run_start = np.cumsum(nruns) - nruns
+        indices = np.empty((2, 3), dtype=np.int32)
+        roi_values = np.empty(2, dtype=np.float64)
+        runs = np.empty((1, 5), dtype=np.int64)
+        for fill in (intensity._roi_fill_numba, intensity._roi_fill_numba_serial):
+            fill(roi_crop, local_data, voxel_start, run_start, indices, roi_values, runs)
+        for mean in (
+            intensity._calculate_local_mean_numba,
+            intensity._calculate_local_mean_numba_serial,
+        ):
+            roi_means = mean(local_data, mask_indices, offsets)
         intensity._calculate_local_peaks_numba(local_data, mask_indices, roi_means)
-        prefix = np.empty(local_data.shape[:2] + (local_data.shape[2] + 1,), dtype=np.float64)
-        intensity._row_prefix_sums_numba(local_data, prefix)
-    intensity._approximate_local_means_numba(prefix, mask_indices, rows, rows, rows)
+        prefix = np.empty(shape[:2] + (shape[2] + 3,), dtype=np.float64)  # pad 1
+        lo = np.empty(shape[0], dtype=np.float64)
+        hi = np.empty(shape[0], dtype=np.float64)
+        for prefix_sums in (intensity._prefix_pad_numba, intensity._prefix_pad_numba_serial):
+            prefix_sums(local_data, 1, prefix, lo, hi)
+    # The approximate means: voxel by voxel (no pad) and run by run (padded)
+    for voxel_means in (
+        intensity._approximate_local_means_numba,
+        intensity._approximate_local_means_numba_serial,
+    ):
+        voxel_means(prefix, mask_indices, rows, rows, rows)
+    approx = np.empty(2, dtype=np.float64)
+    for run_means in (intensity._approx_runs_numba, intensity._approx_runs_numba_serial):
+        run_means(prefix, 1, shape[2], runs, rows, rows, rows, approx)
     # Order statistics of large ROIs: the radix select kernels
     bits = values.view(np.uint64)
     intensity._bucket_counts_numba(bits, 48, np.uint64(0), np.zeros((1, 1 << 16), dtype=np.int64))
@@ -319,15 +394,22 @@ def _warmup_morphology() -> None:
     morphology._max_pairwise_distance_numba(verts)
     # The serial twin of the morphology worker thread (see pipeline._MorphologyAhead)
     morphology._max_pairwise_distance_serial_numba(verts)
-    morphology._hull_candidates_numba(verts, np.ones(3, dtype=np.float64))
-    found, _, triangles = morphology._exact_hull_numba(np.rint(2.0 * verts).astype(np.int64))
-    morphology._hull_area_volume_numba(verts, triangles)
+    # The convex hull from the padded box: the row ends (the parallel kernel and its twin),
+    # the lattice kernels, the exact hull with its area and volume, and the hull function
+    offset, spacing = np.zeros(3), np.ones(3)
+    rows = morphology._row_ends_numba(padded, 2)
+    morphology._row_ends_numba_serial(padded, 1)
+    lattice, points = morphology._hull_lattice_numba(padded, *rows, offset, spacing)
+    morphology._hull_lattice_serial_numba(padded, offset, spacing)
+    found, _, triangles = morphology._exact_hull_numba(lattice)
+    morphology._hull_area_volume_numba(points, triangles)
+    morphology._get_convex_hull_features(padded, offset, 1.0, 1.0, (1.0, 1.0, 1.0))
 
     tet_verts = verts[:4]  # First 4 verts form a tet
     tet_faces = np.ascontiguousarray(
         np.array(
             [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
-            dtype=np.int64,
+            dtype=np.int32,  # the int32 faces of the marching cubes mesh
         )
     )
     morphology._mesh_area_volume_numba(tet_verts, tet_faces)
@@ -335,15 +417,15 @@ def _warmup_morphology() -> None:
     mvee_points = np.ascontiguousarray(
         np.concatenate([verts, [[1.0, 1.0, 0.0], [1.0, 0.0, 1.0]]], axis=0)
     )
-    morphology._mvee_khachiyan_numba(mvee_points)  # production omits tol
+    morphology._mvee_khachiyan_numba(mvee_points)  # production omits eps and max_iter
 
 
 def _warmup_filters() -> None:
     """Warmup filter, preprocessing and loader operations."""
     # Import here to avoid circular dependencies
     from . import loader, preprocessing
+    from .filters import _passes, _wavelet_pass, gabor
     from .filters import base as filter_base
-    from .filters import gabor
 
     # 0. Loader: the column-order to row-order copy for NIfTI, DICOM and SEG data, and
     # the float64 copy with rescale of stored DICOM pixels and NIfTI data.
@@ -414,15 +496,65 @@ def _warmup_filters() -> None:
             out_d = np.empty((3, 3, 3), dtype=s_dtype)
             nearest(src.astype(s_dtype), scale, shift, start, out_d)
         masked(src, valid, scale, shift, start, 0.5, out3, out_valid)
+    # The cubic resample: the pad, the three prefilter sweeps and the tricubic kernel
+    padded = np.empty((28, 28, 28))
+    coef = np.ones((28, 28, 28))
+    z = preprocessing._SPLINE_POLE
+    gain = (1.0 - z) * (1.0 - 1.0 / z)
+    for pad in (preprocessing._pad_edge_numba, preprocessing._pad_edge_numba_serial):
+        pad(src, 12, padded)
+    for sweep0 in (
+        preprocessing._prefilter_axis0_numba,
+        preprocessing._prefilter_axis0_numba_serial,
+    ):
+        sweep0(padded, z, gain, z**28, 4)
+    for sweep in (
+        preprocessing._prefilter_axis1_numba,
+        preprocessing._prefilter_axis1_numba_serial,
+        preprocessing._prefilter_axis2_numba,
+        preprocessing._prefilter_axis2_numba_serial,
+    ):
+        sweep(padded, z, gain, z**28)
+    for cubic in (
+        preprocessing._resample_tricubic_numba,
+        preprocessing._resample_tricubic_numba_serial,
+    ):
+        cubic(coef, scale, shift, start, 12.0, out3)
+    # The cubic resample with a source mask
+    valid_f = np.empty((28, 28, 28))
+    for pad in (preprocessing._pad_edge_masked_numba, preprocessing._pad_edge_masked_numba_serial):
+        pad(src, valid, 12, padded, valid_f)
+    for cubic in (
+        preprocessing._resample_tricubic_masked_numba,
+        preprocessing._resample_tricubic_masked_numba_serial,
+    ):
+        cubic(coef, coef, scale, shift, start, 12.0, 0.5, out3, out_valid)
 
-    # 2. The LoG transfer of the FFT path of large float64 images
+    # 1b. The 1-D pass twins of the separable filters: float32 and float64 images, in place,
+    # on each axis (the correlation and the uniform kernels)
+    w3 = np.array([0.25, 0.5, 0.25])
+    for kind in (np.float32, np.float64):
+        cube = np.ones((2, 3, 4), dtype=kind)
+        _passes.corr_axis0(cube, cube, w3, 1, 0.0, 1, 0, 3)
+        _passes.corr_axis1(cube, cube, w3, 1, 0.0, 1, 0, 2)
+        _passes.corr_axis2(cube, cube, w3, 1, 0.0, 1, 0, 2)
+        _passes.unif_axis0(cube, cube, 3, 1, 0.0, 0, 3)
+        _passes.unif_axis1(cube, cube, 3, 1, 0.0, 0, 2)
+        _passes.unif_axis2(cube, cube, 3, 1, 0.0, 0, 2)
+
+    # 2. The LoG transfer of the FFT path of large float64 images (on slabs of planes), and
+    # the scale and cut of the inverse planes of the slab path into a float32 or float64 out
     filter_base._times_log_transfer(
         np.ones((2, 2, 2), dtype=np.complex128),
         np.ones((2, 2)),
         np.ones((2, 2)),
         np.ones(2),
         np.ones(2),
+        0,
+        2,
     )
+    for kind in (np.float32, np.float64):
+        filter_base._scale_cut(np.ones((2, 2, 4)), np.empty((2, 2, 2), dtype=kind), 0.5, 1, 0)
 
     # The pad of the padded filters (np.pad): float32 and float64 images, in row order and
     # strided (a column-order image goes as the row-order view of its transpose)
@@ -430,8 +562,16 @@ def _warmup_filters() -> None:
         strided = np.ones((2, 2, 4), dtype=kind)[:, :, :2]
         for image in (strided, strided.copy()):
             filter_base._pad_planes_numba(
-                image, np.empty((4, 4, 4), dtype=kind), 1, 1, 1, 2, 0.0, 0, 4
+                image, np.empty((4, 4, 4), dtype=kind), 1, 1, 1, 2, 0.0, 0
             )
+
+    # The wavelet passes: one float32 row-order kernel for each axis, in place (the same
+    # signature as a new output), with the mode code 2 (scipy reflect) and a 2-tap kernel
+    cube32 = np.ones((4, 5, 6), dtype=np.float32)
+    taps = np.array([0.5, 0.5])
+    _wavelet_pass._pass_axis0(cube32, cube32, taps, 0, 2, 0, 5)
+    _wavelet_pass._pass_axis1(cube32, cube32, taps, 0, 2, 0, 4)
+    _wavelet_pass._pass_axis2(cube32, cube32, taps, 0, 2, 0, 4)
 
     # 3. The Gabor slices: the pad of float32 and float64 blocks in row, column and other
     # orders, the products and the pooled parts (complex64)

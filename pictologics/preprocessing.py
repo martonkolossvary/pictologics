@@ -29,7 +29,20 @@ from numpy import typing as npt
 from scipy.ndimage import affine_transform, distance_transform_edt, generate_binary_structure, label
 
 from .features._utils import PRANGE_ONLY, compute_nonzero_bbox, roi_min_max, serial_twin, sized
-from .loader import Image, _direction_matrix, _validate_geometry
+from .filters._passes import fma as _fma
+from .loader import Image, _direction_matrix, _row_order, _validate_geometry
+from .threads import get_num_threads
+
+
+def _row_order_copy(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """`array` in row order: a large column-order array of a loader type takes the tiled
+    parallel copy of the loader (see _row_order; a bool source mask as its uint8 bytes),
+    the others np.ascontiguousarray (no copy of a row-order array)."""
+    if array.dtype == np.bool_:
+        return _row_order_copy(array.view(np.uint8)).view(np.bool_)
+    array = _row_order(array)
+    return array if array.flags.c_contiguous else np.ascontiguousarray(array)
+
 
 # Common sentinel values used in medical imaging to denote "no data" or "background"
 COMMON_SENTINEL_VALUES: tuple[float, ...] = (
@@ -59,6 +72,14 @@ _MASKED_KERNEL_MIN_SIZE = 1_800
 _NEAREST_PARALLEL_MIN = 160_000
 _LINEAR_PARALLEL_MIN = 50_000
 _MASKED_PARALLEL_MIN = 36_000
+# scipy's affine_transform(order=3, mode='nearest') pads 12 edge voxels before the spline
+# prefilter (_prepad_for_spline_filter); the pole of the cubic B-spline filter
+_SPLINE_NPAD = 12
+_SPLINE_POLE = -0.267949192431122706472553658494127633
+# Measured crossovers (14-core M4 Pro): output voxels from which the tricubic kernel runs in
+# parallel; padded voxels from which the pad and the prefilter sweeps do
+_CUBIC_PARALLEL_MIN = 5_000
+_PREFILTER_PARALLEL_MIN = 1 << 17
 
 # Measured crossovers (14-core M4 Pro), in voxels: below these sizes the kernels'
 # start-up cost (0.07-0.2 ms) is more than the numpy code's whole run.
@@ -336,7 +357,7 @@ def _resample_trilinear_numba(
     Replicates scipy's zoom_shift path bit for bit: the per-axis indices and weights
     of `_linear_axis_numba`, and the 8 support terms added in scipy's point order,
     each with left-to-right weight products. A `threshold` (not NaN) stores 1 where
-    the value reaches it, else 0 (see `_mask_threshold`). Else, with `unsigned_out`,
+    the value rounds to 1 at it, else 0 (see `_mask_threshold`). Else, with `unsigned_out`,
     the value is stored as scipy stores it in an unsigned integer output: t + 0.5 for
     t > 0, else 0, truncated.
     """
@@ -366,10 +387,7 @@ def _resample_trilinear_numba(
                 acc += src[z1, y1, x0] * wz1 * wy1 * wx0
                 acc += src[z1, y1, x1] * wz1 * wy1 * wx1
                 if threshold == threshold:
-                    if unsigned_out:
-                        out[k, j, i] = 1 if acc + (1.0 - threshold) >= 1.0 else 0
-                    else:
-                        out[k, j, i] = 1 if acc >= threshold else 0
+                    out[k, j, i] = 1 if acc + (1.0 - threshold) >= 1.0 else 0
                 elif unsigned_out:
                     out[k, j, i] = acc + 0.5 if acc > 0 else 0.0
                 else:
@@ -452,6 +470,333 @@ def _resample_trilinear_masked_numba(
 
 
 _resample_trilinear_masked_numba_serial = serial_twin(_resample_trilinear_masked_numba)
+
+
+# Cubic spline resampling: scipy's affine_transform(order=3, mode='nearest') bit for bit.
+# scipy's wheels compile with contraction on, so the C code fuses a * b + c into one rounding
+# (FMA) in an expression. numba never fuses, so the kernels fuse with _fma at the sites where
+# scipy's C code fuses. Every other operation keeps scipy's order.
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _pad_edge_numba(src: npt.NDArray[Any], npad: int, out: npt.NDArray[np.float64]) -> None:
+    """out = np.pad(src, npad, mode='edge'), as float64."""
+    nz, ny, nx = src.shape
+    oz, oy, ox = out.shape
+    for k in prange(oz):
+        kk = min(max(k - npad, 0), nz - 1)
+        for j in range(oy):
+            jj = min(max(j - npad, 0), ny - 1)
+            for i in range(ox):
+                ii = min(max(i - npad, 0), nx - 1)
+                out[k, j, i] = src[kk, jj, ii]
+
+
+_pad_edge_numba_serial = serial_twin(_pad_edge_numba)
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _pad_edge_masked_numba(
+    src: npt.NDArray[np.float64],
+    valid: npt.NDArray[np.bool_],
+    npad: int,
+    out: npt.NDArray[np.float64],
+    out_valid: npt.NDArray[np.float64],
+) -> None:
+    """out = np.pad(np.where(valid, src, 0.0), npad, mode='edge') and out_valid = the same pad
+    of valid as float64: the two arrays of the normalized interpolation, in one pass."""
+    nz, ny, nx = src.shape
+    oz, oy, ox = out.shape
+    for k in prange(oz):
+        kk = min(max(k - npad, 0), nz - 1)
+        for j in range(oy):
+            jj = min(max(j - npad, 0), ny - 1)
+            for i in range(ox):
+                ii = min(max(i - npad, 0), nx - 1)
+                if valid[kk, jj, ii]:
+                    out[k, j, i] = src[kk, jj, ii]
+                    out_valid[k, j, i] = 1.0
+                else:
+                    out[k, j, i] = 0.0
+                    out_valid[k, j, i] = 0.0
+
+
+_pad_edge_masked_numba_serial = serial_twin(_pad_edge_masked_numba)
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _prefilter_axis0_numba(
+    c: npt.NDArray[np.float64], z: float, gain: float, z_n: float, n_chunks: int
+) -> None:
+    """scipy's spline_filter1d (order 3, the reflect start of mode 'nearest') along axis 0,
+    in place: the lines of a slab of rows advance together, so the inner loop is contiguous."""
+    nz, ny, nx = c.shape
+    step = (ny + n_chunks - 1) // n_chunks
+    for ch in prange(n_chunks):
+        j0 = ch * step
+        j1 = min(ny, (ch + 1) * step)
+        if j0 >= j1:
+            continue
+        c0 = np.empty((j1 - j0, nx))
+        for k in range(nz):
+            for j in range(j0, j1):
+                for i in range(nx):
+                    c[k, j, i] *= gain
+        for j in range(j0, j1):
+            for i in range(nx):
+                c0[j - j0, i] = c[0, j, i]
+                c[0, j, i] = _fma(z_n, c[nz - 1, j, i], c[0, j, i])
+        z_i = z
+        for q in range(1, nz):
+            for j in range(j0, j1):
+                for i in range(nx):
+                    c[0, j, i] = _fma(z_i, _fma(z_n, c[nz - 1 - q, j, i], c[q, j, i]), c[0, j, i])
+            z_i *= z
+        scale0 = z / _fma(-z_n, z_n, 1.0)
+        for j in range(j0, j1):
+            for i in range(nx):
+                c[0, j, i] = c[0, j, i] * scale0
+                c[0, j, i] += c0[j - j0, i]
+        for q in range(1, nz):
+            for j in range(j0, j1):
+                for i in range(nx):
+                    c[q, j, i] = _fma(z, c[q - 1, j, i], c[q, j, i])
+        scale1 = z / (z - 1.0)
+        for j in range(j0, j1):
+            for i in range(nx):
+                c[nz - 1, j, i] = c[nz - 1, j, i] * scale1
+        for q in range(nz - 2, -1, -1):
+            for j in range(j0, j1):
+                for i in range(nx):
+                    c[q, j, i] = z * (c[q + 1, j, i] - c[q, j, i])
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _prefilter_axis1_numba(c: npt.NDArray[np.float64], z: float, gain: float, z_n: float) -> None:
+    """As _prefilter_axis0_numba, along axis 1 (one plane per thread)."""
+    nz, ny, nx = c.shape
+    scale0 = z / _fma(-z_n, z_n, 1.0)
+    scale1 = z / (z - 1.0)
+    for k in prange(nz):
+        c0 = np.empty(nx)
+        for j in range(ny):
+            for i in range(nx):
+                c[k, j, i] *= gain
+        for i in range(nx):
+            c0[i] = c[k, 0, i]
+            c[k, 0, i] = _fma(z_n, c[k, ny - 1, i], c[k, 0, i])
+        z_i = z
+        for q in range(1, ny):
+            for i in range(nx):
+                c[k, 0, i] = _fma(z_i, _fma(z_n, c[k, ny - 1 - q, i], c[k, q, i]), c[k, 0, i])
+            z_i *= z
+        for i in range(nx):
+            c[k, 0, i] = c[k, 0, i] * scale0
+            c[k, 0, i] += c0[i]
+        for q in range(1, ny):
+            for i in range(nx):
+                c[k, q, i] = _fma(z, c[k, q - 1, i], c[k, q, i])
+        for i in range(nx):
+            c[k, ny - 1, i] = c[k, ny - 1, i] * scale1
+        for q in range(ny - 2, -1, -1):
+            for i in range(nx):
+                c[k, q, i] = z * (c[k, q + 1, i] - c[k, q, i])
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _prefilter_axis2_numba(c: npt.NDArray[np.float64], z: float, gain: float, z_n: float) -> None:
+    """As _prefilter_axis0_numba, along axis 2 (the lines of one plane per thread)."""
+    nz, ny, nx = c.shape
+    scale0 = z / _fma(-z_n, z_n, 1.0)
+    scale1 = z / (z - 1.0)
+    for k in prange(nz):
+        for j in range(ny):
+            line = c[k, j]
+            for i in range(nx):
+                line[i] *= gain
+            z_i = z
+            c0 = line[0]
+            line[0] = _fma(z_n, line[nx - 1], line[0])
+            for i in range(1, nx):
+                line[0] = _fma(z_i, _fma(z_n, line[nx - 1 - i], line[i]), line[0])
+                z_i *= z
+            line[0] = line[0] * scale0
+            line[0] += c0
+            for i in range(1, nx):
+                line[i] = _fma(z, line[i - 1], line[i])
+            line[nx - 1] = line[nx - 1] * scale1
+            for i in range(nx - 2, -1, -1):
+                line[i] = z * (line[i + 1] - line[i])
+
+
+_prefilter_axis0_numba_serial = serial_twin(_prefilter_axis0_numba)
+_prefilter_axis1_numba_serial = serial_twin(_prefilter_axis1_numba)
+_prefilter_axis2_numba_serial = serial_twin(_prefilter_axis2_numba)
+
+
+def _prefilter(c: npt.NDArray[np.float64]) -> None:
+    """scipy's spline_filter(order 3, mode 'nearest') of the padded float64 array `c`, in
+    place and bit for bit: one sweep per axis."""
+    z = _SPLINE_POLE
+    gain = 1.0
+    gain *= (1.0 - z) * (1.0 - 1.0 / z)
+    sweeps = (
+        (_prefilter_axis0_numba, _prefilter_axis0_numba_serial),
+        (_prefilter_axis1_numba, _prefilter_axis1_numba_serial),
+        (_prefilter_axis2_numba, _prefilter_axis2_numba_serial),
+    )
+    for axis, (kernel, twin) in enumerate(sweeps):
+        sweep = sized(kernel, twin, c.size, _PREFILTER_PARALLEL_MIN)
+        if axis == 0:
+            sweep(c, z, gain, math.pow(z, c.shape[0]), 4 * get_num_threads())
+        else:
+            sweep(c, z, gain, math.pow(z, c.shape[axis]))
+
+
+def _padded(shape: tuple[int, ...]) -> npt.NDArray[np.float64]:
+    """An empty float64 array of `shape` with _SPLINE_NPAD more voxels on each side."""
+    return np.empty(tuple(n + 2 * _SPLINE_NPAD for n in shape), dtype=np.float64)
+
+
+def _spline_coefficients(array: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """The cubic B-spline coefficients of `array` padded by _SPLINE_NPAD edge voxels: what
+    scipy's affine_transform(order=3, mode='nearest') interpolates, bit for bit."""
+    c = _padded(array.shape)
+    pad = sized(_pad_edge_numba, _pad_edge_numba_serial, c.size, _PREFILTER_PARALLEL_MIN)
+    pad(array, _SPLINE_NPAD, c)
+    _prefilter(c)
+    return c
+
+
+def _spline_coefficients_masked(
+    array: npt.NDArray[np.float64], valid: npt.NDArray[np.bool_]
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """The coefficients of the zeroed image (invalid voxels 0) and of the validity mask as
+    float64: the two arrays _resample_with_source_mask transforms, bit for bit."""
+    c = _padded(array.shape)
+    w = _padded(array.shape)
+    pad = sized(
+        _pad_edge_masked_numba, _pad_edge_masked_numba_serial, c.size, _PREFILTER_PARALLEL_MIN
+    )
+    pad(array, valid, _SPLINE_NPAD, c, w)
+    _prefilter(c)
+    _prefilter(w)
+    return c, w
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _cubic_axis_numba(
+    n_out: int, n_pad: int, shift: float, scale: float, start: int, npad: float
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.float64]]:
+    """Support indices (clamped to the padded array) and cubic B-spline weights of one axis,
+    as scipy's zoom_shift computes them (the coordinate is not clamped in mode 'nearest')."""
+    idx = np.empty((n_out, 4), np.int64)
+    w = np.empty((n_out, 4), np.float64)
+    for k in range(n_out):
+        cc = float(k + start)
+        cc += shift
+        cc *= scale
+        cc += npad
+        fl = np.floor(cc)
+        s = int(fl) - 1
+        y = cc - fl
+        z = 1.0 - y
+        w1 = _fma(y * y * (y - 2.0), 3.0, 4.0) / 6.0
+        w2 = _fma(z * z * (z - 2.0), 3.0, 4.0) / 6.0
+        w0 = z * z * z / 6.0
+        w3 = 1.0 - w0
+        w3 -= w1
+        w3 -= w2
+        w[k, 0] = w0
+        w[k, 1] = w1
+        w[k, 2] = w2
+        w[k, 3] = w3
+        for a in range(4):
+            idx[k, a] = min(max(s + a, 0), n_pad - 1)
+    return idx, w
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _resample_tricubic_numba(
+    coef: npt.NDArray[np.float64],
+    scale: npt.NDArray[np.float64],
+    shift: npt.NDArray[np.float64],
+    start: npt.NDArray[np.int64],
+    npad: float,
+    out: npt.NDArray[np.float64],
+) -> None:
+    """Tricubic spline resampling of the coefficients `coef` (see _spline_coefficients) for a
+    diagonal transform, 'nearest' boundary: scipy's zoom_shift, order 3, bit for bit (the 64
+    support terms added in scipy's order, each value times the weights left to right)."""
+    nz, ny, nx = coef.shape
+    oz, oy, ox = out.shape
+    zi, zw = _cubic_axis_numba(oz, nz, shift[0], scale[0], start[0], npad)
+    yi, yw = _cubic_axis_numba(oy, ny, shift[1], scale[1], start[1], npad)
+    xi, xw = _cubic_axis_numba(ox, nx, shift[2], scale[2], start[2], npad)
+    for k in prange(oz):
+        for j in range(oy):
+            for i in range(ox):
+                t = 0.0
+                for a in range(4):
+                    wz = zw[k, a]
+                    za = zi[k, a]
+                    for b in range(4):
+                        wy = yw[j, b]
+                        yb = yi[j, b]
+                        for c in range(4):
+                            t += coef[za, yb, xi[i, c]] * wz * wy * xw[i, c]
+                out[k, j, i] = t
+
+
+_resample_tricubic_numba_serial = serial_twin(_resample_tricubic_numba)
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _resample_tricubic_masked_numba(
+    coef: npt.NDArray[np.float64],
+    wcoef: npt.NDArray[np.float64],
+    scale: npt.NDArray[np.float64],
+    shift: npt.NDArray[np.float64],
+    start: npt.NDArray[np.int64],
+    npad: float,
+    weight_threshold: float,
+    out: npt.NDArray[np.float64],
+    out_valid: npt.NDArray[np.bool_],
+) -> None:
+    """Normalized tricubic resampling: the two sums of _resample_with_source_mask (the zeroed
+    image and the validity weights, see _spline_coefficients_masked) in one pass, each as
+    _resample_tricubic_numba computes it. The value is their quotient where the weight
+    reaches weight_threshold, else 0 and invalid."""
+    nz, ny, nx = coef.shape
+    oz, oy, ox = out.shape
+    zi, zw = _cubic_axis_numba(oz, nz, shift[0], scale[0], start[0], npad)
+    yi, yw = _cubic_axis_numba(oy, ny, shift[1], scale[1], start[1], npad)
+    xi, xw = _cubic_axis_numba(ox, nx, shift[2], scale[2], start[2], npad)
+    for k in prange(oz):
+        for j in range(oy):
+            for i in range(ox):
+                t = 0.0
+                u = 0.0
+                for a in range(4):
+                    wz = zw[k, a]
+                    za = zi[k, a]
+                    for b in range(4):
+                        wy = yw[j, b]
+                        yb = yi[j, b]
+                        for c in range(4):
+                            xc = xi[i, c]
+                            wx = xw[i, c]
+                            t += coef[za, yb, xc] * wz * wy * wx
+                            u += wcoef[za, yb, xc] * wz * wy * wx
+                if u >= weight_threshold:
+                    out[k, j, i] = t / u
+                    out_valid[k, j, i] = True
+                else:
+                    out[k, j, i] = 0.0
+                    out_valid[k, j, i] = False
+
+
+_resample_tricubic_masked_numba_serial = serial_twin(_resample_tricubic_masked_numba)
 
 
 @jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
@@ -711,11 +1056,12 @@ def _resample_with_source_mask(
 
 
 def _mask_threshold(values: npt.NDArray[Any], threshold: float, rounded: bool) -> npt.NDArray[Any]:
-    """1 where an interpolated mask value reaches `threshold`, else 0.
+    """1 where a mask value reaches `threshold`, else 0.
 
-    A float64 mask compares the value itself. A uint8 or bool mask (`rounded`) rounds
-    it at the threshold, value + (1 - threshold) >= 1: at 0.5 this is the rounding that
-    uint8 masks always had, which keeps a value that is one half up to rounding error.
+    An interpolated value (`rounded`: a linear or cubic resample, of every mask type) is
+    rounded at the threshold, value + (1 - threshold) >= 1: at 0.5 this is the rounding
+    that uint8 masks always had, which keeps a value that is one half up to rounding
+    error. A value of a nearest resample compares itself.
     """
     if rounded:
         return (values + (1.0 - threshold) >= 1.0).astype(np.uint8)
@@ -826,7 +1172,7 @@ def resample_image(
     """
     Resample image to new voxel spacing using IBSI-compliant 'Align grid centers' method.
 
-    The common cases (3D float64 or uint8 image, 'nearest' boundary, nearest/linear
+    The common cases (3D float64 or uint8 image, 'nearest' boundary, nearest/linear/cubic
     interpolation) run on parallel numba kernels that give scipy's output bit for bit;
     everything else uses scipy.ndimage.affine_transform.
 
@@ -836,7 +1182,7 @@ def resample_image(
         interpolation: Interpolation method.
             'nearest': Nearest neighbour (order 0).
             'linear': Trilinear (order 1).
-            'cubic': Tricubic spline (order 3).
+            'cubic': Tricubic spline (order 3), with the spline prefilter of scipy.
         boundary_mode: Padding mode for extrapolation.
             'nearest' (default): Replicates edge values (aaaa|abcd|dddd).
             'constant': Pads with constant value (0).
@@ -845,9 +1191,9 @@ def resample_image(
         round_intensities: If True, round resulting intensities to nearest integer.
         mask_threshold: If provided, treat output as a binary mask.
                         Interpolated values >= threshold become 1, others 0.
-                        A float64 mask compares the value itself; another mask
-                        type rounds it at the threshold (value + 1 - threshold
-                        >= 1), as a uint8 mask always did at 0.5.
+                        An interpolated value of every mask type is rounded at
+                        the threshold (value + 1 - threshold >= 1), as a uint8
+                        mask always did at 0.5.
                         Commonly 0.5 for partial volume correction.
         source_mask: Optional source validity mask. If provided (or if image.source_mask
                      is set), only valid voxels are used for interpolation. This prevents
@@ -868,7 +1214,8 @@ def resample_image(
         When source_mask is active, the function uses normalized interpolation:
         the contribution of each input voxel is weighted by its validity, and the
         result is normalized by the sum of valid weights. This ensures that sentinel
-        voxels do not affect the output.
+        voxels do not affect the output. A float64 image with linear or cubic
+        interpolation runs this on the numba kernels.
 
     Raises:
         ValueError: If any element of `new_spacing` is not positive, if
@@ -973,6 +1320,7 @@ def resample_image(
                 (order == 1 and dtype == np.float64)
                 or (effective_source is None and order == 1 and dtype == np.uint8)
                 or (effective_source is None and order == 0 and dtype in _NEAREST_DTYPES)
+                or (order == 3 and dtype == np.float64)
             )
         ):
             # No kernel for this case: cut the whole grid
@@ -1001,7 +1349,7 @@ def resample_image(
             and image.array.dtype in (np.float64, np.uint8)
             and (n_out >= _LINEAR_KERNEL_MIN_SIZE or region is not None)
         ):
-            src = np.ascontiguousarray(image.array)
+            src = _row_order_copy(image.array)
             thresholded = mask_threshold is not None
             resampled_array = np.empty(
                 out_shape, dtype=np.uint8 if thresholded else image.array.dtype
@@ -1027,7 +1375,7 @@ def resample_image(
             and image.array.dtype in _NEAREST_DTYPES
             and (n_out >= _NEAREST_KERNEL_MIN_SIZE or region is not None)
         ):
-            src = np.ascontiguousarray(image.array)
+            src = _row_order_copy(image.array)
             resampled_array = np.empty(out_shape, dtype=image.array.dtype)
             nearest = sized(
                 _resample_nearest_numba,
@@ -1036,6 +1384,17 @@ def resample_image(
                 _NEAREST_PARALLEL_MIN,
             )
             nearest(src, matrix, kernel_shift, start, resampled_array)
+        elif kernel_ok and order == 3 and image.array.dtype == np.float64:
+            coef = _spline_coefficients(np.ascontiguousarray(image.array))
+            resampled_array = np.empty(out_shape, dtype=np.float64)
+            cubic = sized(
+                _resample_tricubic_numba,
+                _resample_tricubic_numba_serial,
+                resampled_array.size,
+                _CUBIC_PARALLEL_MIN,
+            )
+            cubic(coef, matrix, kernel_shift, start, float(_SPLINE_NPAD), resampled_array)
+            del coef
         else:
             # A mask threshold needs the interpolated value, so a non-float64 mask is
             # interpolated in float64. A uint8 mask at the threshold 0.5 keeps scipy's
@@ -1065,8 +1424,8 @@ def resample_image(
         and (n_out >= _MASKED_KERNEL_MIN_SIZE or region is not None)
     ):
         # Masked resampling: one fused pass instead of two affine_transforms
-        src = np.ascontiguousarray(image.array)
-        valid = np.ascontiguousarray(effective_source)
+        src = _row_order_copy(image.array)
+        valid = _row_order_copy(effective_source)
         resampled_array = np.empty(out_shape, dtype=np.float64)
         new_source_mask = np.empty(out_shape, dtype=np.bool_)
         masked = sized(
@@ -1085,6 +1444,31 @@ def resample_image(
             resampled_array,
             new_source_mask,
         )
+    elif kernel_ok and order == 3 and image.array.dtype == np.float64:
+        # Masked cubic resampling: the two sums of the normalized interpolation in one pass
+        src = np.ascontiguousarray(image.array)
+        valid = np.ascontiguousarray(effective_source)
+        coef, wcoef = _spline_coefficients_masked(src, valid)
+        resampled_array = np.empty(out_shape, dtype=np.float64)
+        new_source_mask = np.empty(out_shape, dtype=np.bool_)
+        masked_cubic = sized(
+            _resample_tricubic_masked_numba,
+            _resample_tricubic_masked_numba_serial,
+            resampled_array.size,
+            _CUBIC_PARALLEL_MIN,
+        )
+        masked_cubic(
+            coef,
+            wcoef,
+            matrix,
+            kernel_shift,
+            start,
+            float(_SPLINE_NPAD),
+            float(weight_threshold),
+            resampled_array,
+            new_source_mask,
+        )
+        del coef, wcoef
     else:
         # Masked resampling using normalized interpolation
         resampled_array, new_source_mask = _resample_with_source_mask(
@@ -1101,9 +1485,7 @@ def resample_image(
     # Post-processing
     if mask_threshold is not None and not thresholded:
         # Binarize mask
-        resampled_array = _mask_threshold(
-            resampled_array, mask_threshold, image.array.dtype != np.float64 and order > 0
-        )
+        resampled_array = _mask_threshold(resampled_array, mask_threshold, order > 0)
     elif round_intensities:
         # Round intensities, in place: the resampled array is always a new one
         np.round(resampled_array, out=resampled_array)

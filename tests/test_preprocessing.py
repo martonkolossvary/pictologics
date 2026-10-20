@@ -10,6 +10,7 @@ warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 os.environ["NUMBA_DISABLE_JIT"] = "1"
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
+from typing import Any
 from unittest.mock import patch
 
 import numpy as np
@@ -848,7 +849,7 @@ def test_resample_kernels_match_scipy() -> None:
                 out = resample_image(
                     Image(arr, spacing, (0, 0, 0)), new_spacing, mask_threshold=0.5
                 )
-                assert same(out.array, (scipy_out(arr) >= 0.5).astype(np.uint8))
+                assert same(out.array, (scipy_out(arr) + 0.5 >= 1.0).astype(np.uint8))
             uint8_out = resample_image(Image(uint8_img, spacing, (0, 0, 0)), new_spacing).array
             assert same(uint8_out, scipy_out(uint8_img))
             nearest = resample_image(img, new_spacing, interpolation="nearest").array
@@ -856,6 +857,142 @@ def test_resample_kernels_match_scipy() -> None:
             out = resample_image(masked, new_spacing)
             assert same(out.array, ref)
             assert_array_equal(out.source_mask, ref_valid)
+
+    # The cubic kernels (no size gate) give scipy's bits where scipy's C code fuses a * b + c
+    # (FMA), as the arm64 wheels do: a probe of one line shows it. Else they agree to 1e-9.
+    from scipy.ndimage import spline_filter1d
+
+    from pictologics import preprocessing as module
+
+    line = rng.normal(0.0, 1.0, 8)
+    probe = line.reshape(1, 1, 8).copy()
+    z = module._SPLINE_POLE
+    module._prefilter_axis2_numba(probe, z, (1.0 - z) * (1.0 - 1.0 / z), z**8)
+    fuses = probe.tobytes() == spline_filter1d(line, 3, mode="nearest").tobytes()
+    rule = "bitwise, scipy fuses" if fuses else "rtol 1e-9, scipy does not fuse"
+
+    def close(a: np.ndarray, b: np.ndarray) -> bool:
+        return same(a, b) if fuses else a.dtype == b.dtype and np.allclose(a, b, 1e-9, 0.0)
+
+    cubic = resample_image(img, new_spacing, "cubic").array
+    assert close(cubic, scipy_out(image, order=3)), rule
+    rounded = resample_image(img, new_spacing, "cubic", round_intensities=True).array
+    assert close(rounded, np.round(scipy_out(image, order=3))), rule
+    float_mask = mask.astype(np.float64)
+    out = resample_image(
+        Image(float_mask, spacing, (0, 0, 0)), new_spacing, "cubic", mask_threshold=0.5
+    )
+    assert same(out.array, (scipy_out(float_mask, order=3) + 0.5 >= 1.0).astype(np.uint8)), rule
+    # With a source mask: the values under the same rule and the same validity, also for
+    # the weight threshold 1.0 and for a mask with no valid voxel
+    for valid, threshold in ((source, 0.5), (source, 1.0), (np.zeros_like(source), 0.5)):
+        ref, ref_valid = _resample_with_source_mask(
+            image, valid, matrix, offset, shape, 3, "nearest", threshold
+        )
+        out = resample_image(
+            img, new_spacing, "cubic", source_mask=valid, weight_threshold=threshold
+        )
+        assert close(out.array, ref), rule
+        assert_array_equal(out.source_mask, ref_valid)
+    assert not out.source_mask.any() and not out.array.any()
+    # A float32 image and another boundary stay on scipy, also with a source mask
+    with (
+        patch_attrs.object(module, "affine_transform", wraps=affine_transform) as scipy,
+        patch_attrs.object(
+            module, "_resample_with_source_mask", wraps=_resample_with_source_mask
+        ) as masked_scipy,
+    ):
+        resample_image(Image(image.astype(np.float32), spacing, (0, 0, 0)), new_spacing, "cubic")
+        resample_image(img, new_spacing, "cubic", boundary_mode="constant")
+        float32 = Image(image.astype(np.float32), spacing, (0, 0, 0))
+        resample_image(float32, new_spacing, "cubic", source_mask=source)
+    assert scipy.call_count == 4 and masked_scipy.call_count == 1
+
+
+def test_resample_cubic_region_is_the_cut_of_the_whole_grid() -> None:
+    # A region of the cubic grid has the bits of the whole grid's cut: the coefficients come
+    # once and scipy never runs. Also a region of one voxel and a region at the far border,
+    # and with a source mask (the same values and validity).
+    from pictologics import preprocessing as module
+
+    rng = np.random.default_rng(22)
+    img = Image(rng.normal(0.0, 100.0, (7, 9, 8)), (1.3, 0.9, 2.1), (5.0, -3.0, 1.0))
+    valid = rng.random(img.array.shape) < 0.7
+    spacing = (0.7, 0.8, 1.1)
+    whole = resample_image(img, spacing, "cubic").array
+    whole_masked = resample_image(img, spacing, "cubic", source_mask=valid)
+    depth, height, width = whole.shape
+    regions = [
+        (slice(2, depth - 1), slice(0, 5), slice(3, width)),
+        (slice(4, 5), slice(6, 7), slice(0, 1)),
+        (slice(depth - 2, depth), slice(height - 3, height), slice(width - 1, width)),
+    ]
+    for region in regions:
+        with (
+            patch.object(module, "_spline_coefficients", wraps=module._spline_coefficients) as coef,
+            patch.object(
+                module, "_spline_coefficients_masked", wraps=module._spline_coefficients_masked
+            ) as coef_masked,
+            patch.object(module, "affine_transform") as scipy,
+        ):
+            part = resample_image(img, spacing, "cubic", region=region).array
+            masked = resample_image(img, spacing, "cubic", source_mask=valid, region=region)
+        assert coef.call_count == 1 and coef_masked.call_count == 1 and scipy.call_count == 0
+        assert part.shape == whole[region].shape
+        assert part.tobytes() == np.ascontiguousarray(whole[region]).tobytes()
+        assert masked.array.tobytes() == np.ascontiguousarray(whole_masked.array[region]).tobytes()
+        assert_array_equal(masked.source_mask, whole_masked.source_mask[region])
+
+
+def test_resample_copies_a_column_order_image_with_the_tiled_kernel() -> None:
+    # A large column-order image (and a bool source mask, as its uint8 bytes) takes the tiled
+    # copy of the loaders before the linear, nearest and masked kernels: the bits of the
+    # row-order run. A strided view and a row-order image do not take it.
+    from pictologics import loader
+    from pictologics.preprocessing import _row_order_copy
+
+    rng = np.random.default_rng(14)
+    values = rng.normal(0.0, 50.0, (6, 7, 8))
+    labels = (rng.random(values.shape) < 0.5).astype(np.uint8)
+    valid = rng.random(values.shape) < 0.8
+    spacing, new_spacing = (1.0, 1.1, 1.2), (0.7, 0.8, 0.9)
+
+    def resample(arr: np.ndarray, **kw: Any) -> Any:
+        gates = {f"_{name}_KERNEL_MIN_SIZE": 1 for name in ("LINEAR", "NEAREST", "MASKED")}
+        with patch.multiple("pictologics.preprocessing", **gates):
+            return resample_image(Image(arr, spacing, (0, 0, 0)), new_spacing, **kw)
+
+    cases = [
+        (values, {"interpolation": "linear"}, 1),
+        (values, {"interpolation": "nearest"}, 1),
+        (labels, {"interpolation": "nearest"}, 1),
+        (labels, {"interpolation": "linear", "mask_threshold": 0.5}, 1),
+        (values, {"interpolation": "linear", "source_mask": valid}, 2),
+    ]
+    for arr, kw, copies in cases:
+        expected = resample(arr, **kw)
+        column_kw = {**kw, "source_mask": np.asfortranarray(valid)} if "source_mask" in kw else kw
+        with (
+            patch.object(loader, "_ROW_ORDER_MIN_SIZE", 8),
+            patch.object(loader, "_to_row_order_numba", wraps=loader._to_row_order_numba) as tiled,
+        ):
+            got = resample(np.asfortranarray(arr), **column_kw)
+            assert tiled.call_count == copies
+            strided = resample(np.repeat(arr, 2, axis=2)[:, :, ::2], **kw)
+            row = resample(arr, **kw)
+            assert tiled.call_count == copies
+        for out in (got, strided, row):
+            assert out.array.tobytes() == expected.array.tobytes()
+        if "source_mask" in kw:
+            assert_array_equal(got.source_mask, expected.source_mask)
+    # The helper: a row-order bool array stays (a view), a small column-order one is copied
+    row_bool = np.zeros((3, 4, 5), dtype=bool)
+    assert np.shares_memory(_row_order_copy(row_bool), row_bool)
+    small = np.asfortranarray(valid)
+    copied = _row_order_copy(small)
+    assert copied.flags.c_contiguous and copied.dtype == np.bool_
+    assert_array_equal(copied, small)
+    assert _row_order_copy(values) is values
 
 
 def test_resample_masked_linear_kernel() -> None:
@@ -993,11 +1130,11 @@ def test_resegment_kernel_keeps_array_order() -> None:
 
 
 def test_resample_mask_threshold_every_type() -> None:
-    # A mask threshold applies to the interpolated value, on the kernel path and on
-    # scipy's path (linear and cubic). A float64 mask compares the value itself; a uint8
-    # or bool mask rounds it at the threshold, which at 0.5 is the rounding a uint8 mask
-    # always had. Before, a uint8 mask ignored the threshold and a bool mask kept only
-    # voxels with every neighbour inside.
+    # A mask threshold applies to the interpolated value, on the kernel paths and on
+    # scipy's path (linear and cubic). Every mask type (float64, uint8, bool) rounds it at
+    # the threshold, which at 0.5 is the rounding a uint8 mask always had. Before, a
+    # float64 mask compared the value itself, a uint8 mask ignored the threshold and a bool
+    # mask kept only voxels with every neighbour inside.
     rng = np.random.default_rng(21)
     labels = rng.random((12, 11, 10)) < 0.5
     spacing = (1.7, 1.6, 1.5)
@@ -1007,20 +1144,22 @@ def test_resample_mask_threshold_every_type() -> None:
         return resample_image(img, spacing, how, mask_threshold=thr).array
 
     for how in ("linear", "cubic"):
-        for limit in (1, 1 << 30):  # the kernel path (linear only), then scipy's path
+        for limit in (1, 1 << 30):  # the linear kernel, then scipy (float64 cubic: its kernel)
             with patch("pictologics.preprocessing._LINEAR_KERNEL_MIN_SIZE", limit):
                 values = resample(labels.astype(np.float64), how, None)
                 for thr in (0.3, 0.5, 0.7):
-                    ref = resample(labels.astype(np.float64), how, thr)
-                    assert_array_equal(ref, (values >= thr).astype(np.uint8))
                     rounded = (values + (1.0 - thr) >= 1.0).astype(np.uint8)
-                    for arr in (labels.astype(np.uint8), labels):
+                    for arr in (labels.astype(np.float64), labels.astype(np.uint8), labels):
                         out = resample(arr, how, thr)
                         assert out.dtype == np.uint8
                         assert_array_equal(out, rounded)
                     if how == "linear" and thr == 0.5:  # the old uint8 result
                         old = resample(labels.astype(np.uint8), how, None)
                         assert_array_equal(rounded, (old >= 0.5).astype(np.uint8))
+    # A nearest resample compares the value itself (a probability mask of 0.2 and 0.8)
+    probability = labels * 0.6 + 0.2
+    nearest = resample(probability, "nearest", None)
+    assert_array_equal(resample(probability, "nearest", 0.5), (nearest >= 0.5).astype(np.uint8))
 
 
 def test_resample_grid_stays_for_each_input() -> None:
@@ -1042,8 +1181,9 @@ def test_resample_grid_stays_for_each_input() -> None:
 
 def test_resample_region_matches_the_whole_grid() -> None:
     # A region of the new grid has the values of the whole grid bit for bit: with the
-    # kernels (linear, nearest, uint8 masks with a threshold, a source mask, rounding) and
-    # with the cut of the whole grid (cubic). Its origin is the region's first voxel.
+    # kernels (linear, nearest, cubic, uint8 masks with a threshold, a source mask, rounding)
+    # and with the cut of the whole grid (a float32 cubic). Its origin is the region's first
+    # voxel.
     from pictologics.loader import _direction_matrix
 
     rng = np.random.default_rng(21)
@@ -1058,6 +1198,7 @@ def test_resample_region_matches_the_whole_grid() -> None:
         (img, {"interpolation": "linear"}),
         (img, {"interpolation": "nearest"}),
         (img, {"interpolation": "cubic"}),
+        (Image(arr.astype(np.float32), img.spacing, img.origin), {"interpolation": "cubic"}),
         (img, {"interpolation": "linear", "round_intensities": True}),
         (img, {"interpolation": "linear", "source_mask": source}),
         (mask, {"interpolation": "linear", "mask_threshold": 0.5}),
@@ -1329,8 +1470,21 @@ def test_the_resample_kernels_take_their_serial_twins_below_their_gates() -> Non
         "_resample_trilinear_numba",
         "_resample_nearest_numba",
         "_resample_trilinear_masked_numba",
+        "_resample_tricubic_numba",
+        "_pad_edge_numba",
+        "_prefilter_axis0_numba",
+        "_prefilter_axis1_numba",
+        "_prefilter_axis2_numba",
+        "_resample_tricubic_masked_numba",
+        "_pad_edge_masked_numba",
     ]
-    gates = ["_LINEAR_PARALLEL_MIN", "_NEAREST_PARALLEL_MIN", "_MASKED_PARALLEL_MIN"]
+    gates = [
+        "_LINEAR_PARALLEL_MIN",
+        "_NEAREST_PARALLEL_MIN",
+        "_MASKED_PARALLEL_MIN",
+        "_CUBIC_PARALLEL_MIN",
+        "_PREFILTER_PARALLEL_MIN",
+    ]
     rng = np.random.default_rng(5)
     image = Image(rng.normal(40.0, 10.0, (20, 21, 22)), (0.7, 0.7, 1.25), (0.0, 0.0, 0.0))
     mask = Image(
@@ -1357,11 +1511,15 @@ def test_the_resample_kernels_take_their_serial_twins_below_their_gates() -> Non
                 resample_image(image, (1.0, 1.0, 1.0)).array,
                 resample_image(mask, (1.0, 1.0, 1.0), interpolation="nearest").array,
                 resample_image(image, (1.0, 1.0, 1.0), source_mask=valid).array,
+                resample_image(image, (1.0, 1.0, 1.0), interpolation="cubic").array,
+                resample_image(image, (1.0, 1.0, 1.0), "cubic", source_mask=valid).array,
             ]
         return out, {name: spy.call_count for name, spy in spies.items()}
 
-    small, calls = run(1)
-    assert all(calls[name] == 0 and calls[name + "_serial"] == 1 for name in names)
+    # The prefilter runs on the plain coefficients and on the two masked ones
+    expected = {name: 3 if name.startswith("_prefilter") else 1 for name in names}
+    small, calls = run(1 << 10)  # every gate far above the work
+    assert all(calls[name] == 0 and calls[name + "_serial"] == expected[name] for name in names)
     large, calls = run(0)  # every gate at 0: the parallel kernels
-    assert all(calls[name] == 1 and calls[name + "_serial"] == 0 for name in names)
+    assert all(calls[name] == expected[name] and calls[name + "_serial"] == 0 for name in names)
     assert all(a.tobytes() == b.tobytes() for a, b in zip(small, large, strict=True))

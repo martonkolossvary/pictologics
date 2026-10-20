@@ -237,3 +237,29 @@ def test_nrrd_channel_axes_raise(tmp_path: Path) -> None:
     path = _write(tmp_path / "rgb.nrrd", header, _raw(np.zeros((2, 3, 4, 3), np.int16)))
     with pytest.raises(ValueError, match="an axis of kind 'rgb-color' holds channels"):
         load_image(path)
+
+
+def test_nrrd_values_are_writeable(tmp_path: Path) -> None:
+    # The stored values come as a writeable array (raw, gzip and text data), so the float64
+    # kernel compiles no second, read-only signature at the first load.
+    from unittest.mock import patch
+
+    from pictologics.loaders import nrrd_loader
+
+    lines = _without("encoding", "endian")
+    cases = {
+        "raw": (["encoding: raw", "endian: little"], _raw(VALUES)),
+        "gzip": (["encoding: gzip", "endian: little"], gzip.compress(_raw(VALUES))),
+        "text": (["encoding: text"], " ".join(map(str, VALUES.transpose().ravel())).encode()),
+    }
+    read = nrrd_loader._read_values
+    returned: list[np.ndarray] = []
+
+    def capture(*args: object) -> np.ndarray:
+        returned.append(read(*args))
+        return returned[-1]
+
+    for name, (extra, data) in cases.items():
+        with patch.object(nrrd_loader, "_read_values", side_effect=capture):
+            load_image(_write(tmp_path / f"{name}.nrrd", lines + extra, data))
+        assert returned[-1].flags.writeable, name

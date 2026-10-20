@@ -14,6 +14,7 @@ from numba import get_num_threads, jit, types
 from numba.extending import intrinsic
 from numpy import typing as npt
 
+from ._passes import _source_line
 from .base import (
     _PAD_CODES,
     _PAD_MODES,
@@ -24,7 +25,6 @@ from .base import (
     _prepare_masked_image,
     _slab_pass,
     _slab_ufunc,
-    _source_line,
     ensure_float32,
     get_scipy_mode,
     resolve_boundary,
@@ -118,8 +118,10 @@ def gabor_filter(
     Raises:
         ValueError: If `pooling` is not "max", "average", or "min", if
             `rotation_invariant=True` is set without providing `delta_theta`, if
-            `response` is not one of the four parts, or if `padding_value` is not 0
-            with another boundary than ZERO.
+            `response` is not one of the four parts, if `padding_value` is not 0
+            with another boundary than ZERO, if `sigma_mm`, `lambda_mm` or `gamma` is
+            not a finite positive number, if an entry of `spacing_mm` is not, or if
+            `delta_theta` (with `rotation_invariant=True`) is not in (0, 2 pi].
         RuntimeError: Defensive check raised if plane averaging fails to
             produce a result; not expected to occur in normal use.
 
@@ -157,18 +159,29 @@ def gabor_filter(
           with a per-axis radius, giving a rectangular kernel that is
           physically correct rather than warning and guessing.
     """
+    # Handle spacing. The mm -> voxel/physical conversion is deferred to
+    # _apply_gabor_to_plane, which is per-plane: each plane's in-plane axes
+    # (and therefore in-plane spacings) depend on plane_axis.
+    if isinstance(spacing_mm, (int, float)):
+        spacing_mm = (float(spacing_mm),) * 3
+    for name, value in (("sigma_mm", sigma_mm), ("lambda_mm", lambda_mm), ("gamma", gamma)):
+        if not (math.isfinite(value) and value > 0):
+            raise ValueError(f"{name} must be a positive number, not {value!r}")
+    if not all(math.isfinite(s) and s > 0 for s in spacing_mm):
+        raise ValueError(f"spacing_mm must hold positive numbers, not {spacing_mm!r}")
+    if (
+        rotation_invariant
+        and delta_theta is not None
+        and not (math.isfinite(delta_theta) and 0 < delta_theta <= 2 * np.pi)
+    ):
+        raise ValueError(f"delta_theta must lie in (0, 2 pi] radians, not {delta_theta!r}")
+
     # Convert to float32
     image = ensure_float32(image)
 
     # Apply source_mask preprocessing (zero out invalid voxels for FFT-based filter)
     if source_mask is not None:
         image = _prepare_masked_image(image, source_mask)
-
-    # Handle spacing. The mm -> voxel/physical conversion is deferred to
-    # _apply_gabor_to_plane, which is per-plane: each plane's in-plane axes
-    # (and therefore in-plane spacings) depend on plane_axis.
-    if isinstance(spacing_mm, (int, float)):
-        spacing_mm = (float(spacing_mm),) * 3
 
     # Handle boundary
     boundary = resolve_boundary(boundary)
@@ -647,7 +660,9 @@ def _apply_gabor_to_plane(
             list(executor.map(lambda s: run(s, min(s + step, n_slices)), starts))
     else:
         run(0, n_slices)
-    return np.moveaxis(out, 0, plane_axis)
+    # The slices were filtered along the plane axis: the result in row order, as every
+    # other filter returns it (no copy when the plane axis is 0)
+    return np.ascontiguousarray(np.moveaxis(out, 0, plane_axis))
 
 
 def _create_gabor_kernel_2d(
