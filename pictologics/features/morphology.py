@@ -1105,7 +1105,7 @@ def _mesh_block_sums(
 
 @jit(nopython=True, nogil=True, fastmath=True, cache=True)  # type: ignore
 def _mvee_khachiyan_numba(
-    points: npt.NDArray[np.floating[Any]], eps: float = 1e-3, max_iter: int = 200000
+    points: npt.NDArray[np.floating[Any]], eps: float = 3e-3, max_iter: int = 200000
 ) -> tuple[Optional[npt.NDArray[np.floating[Any]]], Optional[npt.NDArray[np.floating[Any]]]]:
     """
     Find Minimum Volume Enclosing Ellipsoid (MVEE) using the Khachiyan algorithm.

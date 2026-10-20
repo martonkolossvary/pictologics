@@ -653,7 +653,7 @@ def test_the_mvee_kernel_takes_the_steps_of_the_quadratic_form() -> None:
     rng = np.random.default_rng(21)
     for case in range(40):
         points = rng.normal(0.0, 1.0, (int(rng.integers(8, 40)), 3)) * rng.uniform(0.5, 3.0, 3)
-        eps = 1e-3 if case < 4 else 1e-2  # the default, and fewer steps (Python is slow)
+        eps = 3e-3 if case < 4 else 1e-2  # the default, and fewer steps (Python is slow)
         A, c = _mvee_khachiyan_numba(points, eps)
         A_ref, c_ref, _ = _khachiyan_reference(points, eps)
         np.testing.assert_allclose(A, A_ref, rtol=1e-9, atol=1e-12)
@@ -988,14 +988,16 @@ def test_the_parallel_marching_cubes_in_any_number_of_blocks() -> None:
 
 def test_the_mvee_of_few_points_encloses_them() -> None:
     # The MVEE takes four points at a time and then the rest: for 4 to 9 points (every
-    # remainder), the ellipsoid encloses every point (to the eps of the stop rule).
+    # remainder), the ellipsoid encloses every point to the eps of the stop rule: every
+    # point lies within (1 + eps) (d + 1) in the lifted form, so within 1 + (d + 1) / d eps
+    # of the ellipsoid (eps 3e-3, the default; measured up to 1.31 eps).
     rng = np.random.default_rng(44)
     for n in (4, 5, 6, 7, 8, 9):
         points = rng.normal(0.0, 1.0, (n, 3))
         A, c = _mvee_khachiyan_numba(points)
         assert A is not None and c is not None
         d = points - c
-        assert np.all(np.einsum("ki,ij,kj->k", d, A, d) <= 1.0 + 2e-3)
+        assert np.all(np.einsum("ki,ij,kj->k", d, A, d) <= 1.0 + 4 / 3 * 3e-3)
 
 
 def test_the_padded_roi_is_one_copy_with_a_zero_border() -> None:
