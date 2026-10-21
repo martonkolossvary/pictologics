@@ -1,1 +1,0 @@
-The local intensity peaks keep the fast two-stage search when the image crop holds a NaN or an infinite voxel out of reach. No sphere of an ROI voxel reaches such a voxel. The search then runs on a copy with that voxel set to 0, and the peaks are the same, bit for bit. A 643,000-voxel ROI with such a voxel takes 12 ms instead of 60 ms.

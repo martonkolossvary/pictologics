@@ -10,7 +10,7 @@ import numba
 import numpy as np
 import scipy.fft
 from llvmlite import ir
-from numba import get_num_threads, jit, types
+from numba import get_num_threads, jit, prange, types
 from numba.extending import intrinsic
 from numpy import typing as npt
 
@@ -271,7 +271,7 @@ def gabor_filter(
     else:
         # Apply only to axial plane (axis 2 = k3 slices): the result in row order, as every
         # other filter returns it
-        return np.ascontiguousarray(_plane(2))
+        return _axial_row_order(_plane(2))
 
 
 @intrinsic  # type: ignore
@@ -431,6 +431,42 @@ def _pooled_parts_numba(
             if pooling == 0 and last:
                 for j in range(w):
                     out[s, i, j] = acc[s, i, j] / total
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _slices_to_row_order_numba(src: npt.NDArray[np.float32], out: npt.NDArray[np.float32]) -> None:
+    """Copy the slice stack `src` (one slice per index of its first axis) into `out`,
+    whose last axis is the slice index: out[i, j, s] = src[s, i, j]. Tiles of 32 rows and
+    32 slices keep the reads (fast along j) and the writes (fast along s) in cache. numpy's
+    copy of the moved view reads one value per cache line: 34 ms at 256^3, the tiles 5 ms."""
+    n_slices, height, width = src.shape
+    tile = 32
+    for block in prange((height + tile - 1) // tile):
+        i0 = block * tile
+        i1 = min(i0 + tile, height)
+        for s0 in range(0, n_slices, tile):
+            s1 = min(s0 + tile, n_slices)
+            for i in range(i0, i1):
+                for s in range(s0, s1):
+                    row = src[s, i]
+                    for j in range(width):
+                        out[i, j, s] = row[j]
+
+
+# From this many values on, the axial result copies on the tiled parallel kernel; below,
+# numpy's copy of the view costs less than the start of the threads
+_ROW_ORDER_COPY_MIN = 1 << 18
+
+
+def _axial_row_order(view: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
+    """The axial response `view` (a moved view of the slice stack, the slices along its
+    last axis) as a row-order array. numpy's copy reads the view one value per cache line,
+    so a large view takes the tiled parallel kernel (see _slices_to_row_order_numba)."""
+    if view.size < _ROW_ORDER_COPY_MIN:
+        return np.ascontiguousarray(view)
+    out = np.empty(view.shape, dtype=view.dtype)
+    _slices_to_row_order_numba(np.moveaxis(view, 2, 0), out)
+    return out
 
 
 def _check_values(special: Tuple[float, ...]) -> Tuple[npt.NDArray[Any], npt.NDArray[Any]]:

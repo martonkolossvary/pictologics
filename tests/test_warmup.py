@@ -237,6 +237,7 @@ for kind in (np.float32, np.float64):  # the Gabor slices in each order, each pa
     for part in ("real", "imaginary", "angle"):
         gabor_filter(cube, 1.5, 3.0, rotation_invariant=True, delta_theta=np.pi / 4, pooling="max",
                      response=part, region=(slice(2, 9), slice(3, 12), slice(1, 8)))
+gabor_filter(values, 1.5, 3.0)  # a large axial result: the tiled row-order copy
 from pictologics.filters import gaussian_filter, laws_filter, mean_filter
 for kind in (np.float64, np.float32):  # the pass twins of the separable filters (and masked)
     cube = values.astype(kind)

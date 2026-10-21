@@ -1,1 +1,0 @@
-The mean, Gaussian and Laws filters with a `padding_value` read the constant at the image borders instead of filtering a padded copy. The values are the same bits. The peak memory is about half (232x182x148: 99-109 -> 50-53 MB). The filters are 1.5-1.9 times faster (mean 6.9 -> 3.9 ms, Gaussian 13.5 -> 7.3 ms). A source mask still takes the padded copy.

@@ -1,1 +1,0 @@
-`load_image(stored_type=True)` keeps the integer type of a NIfTI mask or label map with no scaling. The pipeline loads its masks and label maps with it. A 512x512x200 uint8 mask loads in less time, with 100 MB instead of 450 MB of peak memory. `run_rois` with a uint8 label map file takes a third of the time, with 100 MB instead of 850 MB.

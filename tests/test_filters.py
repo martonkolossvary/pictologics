@@ -3112,8 +3112,18 @@ def test_gabor_returns_a_row_order_array() -> None:
     with patch.object(gabor_module.np, "ascontiguousarray", wraps=np.ascontiguousarray) as copy:
         averaged = gabor_filter(image, 2.0, 4.0, average_over_planes=True)
         assert averaged.flags.c_contiguous and copy.call_count == 0
-        gabor_filter(image, 2.0, 4.0)
+        small = gabor_filter(image, 2.0, 4.0)
         assert copy.call_count == 1
+        # A large axial result takes the tiled parallel kernel instead of numpy's copy of
+        # the moved view: the same bytes, in row order
+        with patch.object(gabor_module, "_ROW_ORDER_COPY_MIN", 0):
+            large = gabor_filter(image, 2.0, 4.0)
+        assert copy.call_count == 1
+    assert large.flags.c_contiguous and large.tobytes() == small.tobytes()
+    stack = np.random.default_rng(59).normal(size=(3, 5, 4)).astype(np.float32)
+    out = np.empty((5, 4, 3), dtype=np.float32)
+    gabor_module._slices_to_row_order_numba(stack, out)
+    assert out.tobytes() == np.ascontiguousarray(np.moveaxis(stack, 0, 2)).tobytes()
 
 
 def test_cache_by_bytes_keeps_the_newest_shapes() -> None:

@@ -1,1 +1,0 @@
-A `binarize_mask` step with its mask values in a NumPy array of two or more values raised an error at the planning of a run. This occurred when a filter, resample or discretise step came before it ('truth value of an array is ambiguous'). It now runs.

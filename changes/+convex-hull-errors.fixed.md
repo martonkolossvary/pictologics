@@ -1,1 +1,0 @@
-The convex hull features no longer hide errors: only points in one plane (where Qhull raises) give no hull features. Any other error now reaches the morphology family, which reports it, instead of dropping the maximum 3-D diameter and the MVEE features silently.

@@ -1,1 +1,0 @@
-The ten filters that take a `source_mask` read a mask of any type as `source_mask != 0`. Before, a uint8 mask raised an `IndexError` in `laws_filter` and a `TypeError` in `mean_filter` and `laplacian_of_gaussian`.

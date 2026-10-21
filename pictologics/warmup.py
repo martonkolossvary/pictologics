@@ -589,6 +589,10 @@ def _warmup_filters() -> None:
         for block in (cube, cube.copy(), np.asfortranarray(cube)):
             gabor._pad_slices_numba(block, buf, 1, 1, 2, 0.0)
     gabor._products_numba(buf, buf[:1], np.empty((2, 4, 4), dtype=np.complex64))
+    # The row-order copy of a large axial result (the slice stack into the moved layout)
+    gabor._slices_to_row_order_numba(
+        np.zeros((2, 3, 4), dtype=np.float32), np.empty((3, 4, 2), dtype=np.float32)
+    )
     gabor._pooled_parts_numba(
         buf,
         1,

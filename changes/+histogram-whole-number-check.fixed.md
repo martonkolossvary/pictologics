@@ -1,1 +1,0 @@
-`calculate_intensity_histogram_features` raises a clear `ValueError` when a discretised value is not a finite whole number. Before, the function truncated values such as 1.6 silently. The mode and the entropy came from truncated counts, the mean and the median from the values. A NaN or an infinite value raised an unclear error. The check reads the values once.

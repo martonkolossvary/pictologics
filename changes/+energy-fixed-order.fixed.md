@@ -1,1 +1,0 @@
-`intensity_energy_N8CA` and `root_mean_square_intensity_5ZWQ` no longer depend on the memory address of the values. A fixed-order sum of squares replaces `np.dot`. The BLAS blocks of `np.dot` gave values one unit in the last place apart for the same values in another buffer. The values move by at most 3e-14 (relative). The first-order family of 643,000 values takes 0.1 ms more.

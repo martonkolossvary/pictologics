@@ -1,1 +1,0 @@
-`gabor_filter` and `laplacian_of_gaussian` raise a `ValueError` that names a bad parameter. A sigma, a wavelength, an aspect ratio, a spacing and a truncation must be finite positive numbers. The Gabor rotation step must be in (0, 2 pi]. Before, some of these gave an all-NaN or a wrong map silently, and others failed with unclear errors.

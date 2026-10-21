@@ -1,1 +1,0 @@
-The FFT of Moran's I and Geary's C may use half of the memory on every computer, with no 16 GiB ceiling. The workers of `run_batch` share this half, so four workers do not use four halves. Each of the Riesz and Simoncelli table caches keeps at most 2 GiB, and at most a quarter of this half.
