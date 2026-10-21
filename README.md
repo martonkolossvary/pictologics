@@ -31,14 +31,16 @@ Documentation (user guide, tutorials, API, benchmarks): https://martonkolossvary
 *   **🛡️ Predictable results**: each configuration gives all its feature columns, also when a step fails (the values are then `NaN`). A study table never has missing columns.
 *   **🛠️ Maintained**: Pictologics is developed to give robust radiomic features that describe the morphology of diseases on radiological images.
 
-## What Is New in 0.7.0
+## What Is New in 0.8.0
 
-- **Speed**: on a 512×512×200 CT, timed by turns with 0.6.0 on one computer, the configuration `standard_fbn_32` takes 48 % less time, the six standard configurations 30 % less, and `run_rois` with 20 ROIs 60 % less.
-- **Threads**: Pictologics uses the fast cores by default, for example the performance cores of Apple silicon. `set_num_threads()`, `get_num_threads()` and `PICTOLOGICS_NUM_THREADS` set one number for all parallel parts.
-- **First run**: the import compiles every numba kernel that a run can use, so no code compiles during a run.
-- **Installation**: Intel Macs, and 3D Slicer under Rosetta, can install Pictologics again (with numba 0.62). Matplotlib is now the optional extra `viz`: `pip install "pictologics[viz]"`. pandas 3, Pillow 12, SciPy 1.18 and numba 0.68 work.
-- **Fixes**: the DICOM database scan, big-endian and multi-frame DICOM series, the frame positions of DICOM SEG files, NRRD byte skips, and the percentiles of large ROIs (a rare case).
-- **Changes**: merged masks keep the type of their inputs (uint8 with `binarize`), and `save_slices` writes one pixel per voxel, with `dpi` as the tag of the file. Some texture and histogram values change in their last digits; the IBSI compliance is the same. See the [Changelog](https://martonkolossvary.github.io/pictologics/CHANGELOG/).
+- **Speed**: on a 512×512×200 CT, timed by turns with 0.7.1 on one computer, the configuration `standard_fbn_32` takes 11 % less time, the six standard configurations 20 % less, and `run_rois` with 20 ROIs 12 % less. Against 0.6.0 that is 64 %, 56 % and 89 % less.
+- **Resampling**: cubic resampling runs on numba kernels that give the output of scipy bit for bit: the IBSI 2 CT phantom to 1 mm takes about 20 ms instead of 900 ms. A column-order image, for example from nibabel's `get_fdata()`, resamples up to 10 times faster. The pipeline casts an in-memory float32 or integer image where it reads it: `run()` of a float32 CT with the intensity features takes 1 ms instead of 34 ms, with 1.8 MB instead of 400 MB.
+- **Filters**: the mean, Gaussian, Laws and wavelet filters run their 1-D passes in numba kernels with the arithmetic of scipy: the same bits, 2 to 5 times faster on a 256³ image. A large LoG runs its FFT in slabs, 30 % faster with 30 % less memory. A filter that computes only the ROI region keeps that region, so a small ROI in a large CT costs much less time and memory.
+- **Files**: `save_image` writes a 512×512×200 `.nii.gz` file in 0.8 s instead of 6.8 s, and `load_image` reads it 4 times faster. A mask keeps its stored integer type: 100 MB instead of 450 MB for a uint8 mask of that size. The DICOM database and SR scans of small batches run in the calling process: 1.2 s instead of 2.7 s for 2,000 files.
+- **Features**: the histogram, the intensity-volume histogram, the local intensity peaks, the percentiles of small ROIs, Moran's I and Geary's C (a real-spectrum FFT, in slabs when the grid does not fit half of the memory), the GLCM and GLRLM row passes, and the morphology kernels (a third less peak memory, the convex hull from the voxel grid) run faster with the same bits.
+- **Memory**: on Windows, the FFT of Moran's I and Geary's C no longer assumes 8 GiB of memory: a body ROI of a 512×512×200 CT takes 0.9 s instead of about 10 hours. Every computer may use half of its memory for it. The Simoncelli and Riesz table caches keep two image shapes: 182 MB instead of 872 MB after 21 scans.
+- **Fixes**: the intensity mask stays inside the morphological mask after `keep_largest_component` or `binarize_mask` on the morphological mask only; the GLDZM raises on voxels outside the distance mask instead of dropping zones; a DICOM position written as text no longer fails the loader; a `.nii.gz` file of two gzip members no longer hangs; the convex hull volume no longer loses digits deep in a large grid; the histogram features of float32 values sum in float64; the filters check their parameters; and more (55 entries).
+- **Changes**: every mask type takes one threshold rule in a linear mask resample (a few phase 3 values near zero move, with no verdict change); the MVEE stop rule moves `volume_density_mvee` and `area_density_mvee` by 0.2 to 0.5 %; the mean filter and the Laws energy sum each window on its own (within one float32 unit); the LoG of a float64 image is one FFT from 131,072 voxels; the energy sums in a fixed order. The IBSI compliance is the same. See the [Changelog](https://martonkolossvary.github.io/pictologics/CHANGELOG/).
 
 ## Installation
 
@@ -85,12 +87,12 @@ For MR or PET images, use the FBN configurations (`config_names=["standard_fbn_3
 
 | Task | Size | Time (median) |
 |:--|:--|--:|
-| run(): one standard configuration (standard_fbn_32) | CT of 512 × 512 × 200 | 11.7 ms |
-| run(): the 6 standard configurations | CT of 512 × 512 × 200 | 44.5 ms |
-| Texture (all 6 families) | 2,311,384 ROI voxels | 27.4 ms |
-| Morphology | 2,311,384 ROI voxels | 9.6 ms |
-| LoG (sigma 2 mm) | 256³ voxels | 50.3 ms |
-| Gabor (axial, rotation invariant) | 256³ voxels | 48.3 ms |
+| run(): one standard configuration (standard_fbn_32) | CT of 512 × 512 × 200 | 9.8 ms |
+| run(): the 6 standard configurations | CT of 512 × 512 × 200 | 34.3 ms |
+| Texture (all 6 families) | 2,311,384 ROI voxels | 20.0 ms |
+| Morphology | 2,311,384 ROI voxels | 4.5 ms |
+| LoG (sigma 2 mm) | 256³ voxels | 37.5 ms |
+| Gabor (axial, rotation invariant) | 256³ voxels | 52.4 ms |
 
 The median of 5 runs on one computer, after a warm-up run. See the [benchmark page](https://martonkolossvary.github.io/pictologics/benchmarks/) for all results, plots and the computer.
 

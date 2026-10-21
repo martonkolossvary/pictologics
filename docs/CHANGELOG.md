@@ -32,7 +32,7 @@
 - The ten filters that take a `source_mask` read a mask of any type as `source_mask != 0`. Before, a uint8 mask raised an `IndexError` in `laws_filter` and a `TypeError` in `mean_filter` and `laplacian_of_gaussian`.
 - `calculate_intensity_histogram_features` raises a clear `ValueError` when a discretised value is not a finite whole number. Before, the function truncated values such as 1.6 silently. The mode and the entropy came from truncated counts, the mean and the median from the values. A NaN or an infinite value raised an unclear error. The check reads the values once.
 - `gabor_filter` and `laplacian_of_gaussian` raise a `ValueError` that names a bad parameter. A sigma, a wavelength, an aspect ratio, a spacing and a truncation must be finite positive numbers. The Gabor rotation step must be in (0, 2 pi]. Before, some of these gave an all-NaN or a wrong map silently, and others failed with unclear errors.
-- `gabor_filter` returns a row-order (C-contiguous) array on every plane, as every other filter does. On the default axial plane it returned a strided view before. Only the axial result is copied.
+- `gabor_filter` returns a row-order (C-contiguous) array on every plane, as every other filter does. On the default axial plane it returned a strided view before. Only the axial result is copied. A tiled parallel kernel makes the copy: 5 ms at 256^3, where numpy's copy of the view took 34 ms.
 - `intensity_energy_N8CA` and `root_mean_square_intensity_5ZWQ` no longer depend on the memory address of the values. A fixed-order sum of squares replaces `np.dot`. The BLAS blocks of `np.dot` gave values one unit in the last place apart for the same values in another buffer. The values move by at most 3e-14 (relative). The first-order family of 643,000 values takes 0.1 ms more.
 - `load_image` no longer stops responding on a `.nii.gz` file of two or more gzip members whose first member decompresses to more than 16 MB. The read loop did not stop, and the memory use increased without limit. Now nibabel reads such a file.
 - `simoncelli_wavelet` and `riesz_simoncelli` of a volume with one slice (a singleton axis) now give the 2-D response of the slice. Before, they gave zeros with a RuntimeWarning (a division by zero in the frequency grid).
@@ -577,6 +577,7 @@
 
 ---
 
+[0.8.0]: https://github.com/martonkolossvary/pictologics/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/martonkolossvary/pictologics/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/martonkolossvary/pictologics/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/martonkolossvary/pictologics/compare/v0.5.1...v0.6.0
