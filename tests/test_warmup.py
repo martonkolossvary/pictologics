@@ -380,14 +380,24 @@ for n in (3, 5, 8, 11, 16, 23, 31, 40, 52, 64):
     for kernel, args, outs in cases:
         module = next(m for m in (morphology, preprocessing, intensity) if hasattr(m, kernel.__name__))
         twin = getattr(module, kernel.__name__ + "_serial")
-        twins_same = twins_same and outputs(kernel, args(), outs) == outputs(twin, args(), outs)
-# The compiled cubic kernels give scipy's bits (the arm64 wheels fuse as the kernels do)
-from scipy.ndimage import affine_transform
+        if kernel is intensity._calculate_spatial_features_numba:
+            # The pair loop runs with fast math: the vectorized sums of the kernel and of
+            # its twin can differ in the last bits (x86-64), so the twin matches to 1e-12
+            twins_same = twins_same and bool(np.allclose(kernel(*args()), twin(*args()), rtol=1e-12, atol=0.0))
+        else:
+            twins_same = twins_same and outputs(kernel, args(), outs) == outputs(twin, args(), outs)
+# The compiled cubic kernels give scipy's bits where the scipy build fuses the multiply-add
+# as the kernels do (the arm64 wheels); elsewhere (the x86-64 wheels) the values lie within
+# 1e-13 of scipy's largest value
+from scipy.ndimage import affine_transform, correlate1d
+
+weight = 1.0 - 2.0**-30  # the probe of the scipy_fuses fixture of conftest.py
+fuses = correlate1d(np.array([1.0, 1.0, 2.0**-30]), np.array([weight, -1.0, weight]), mode="constant")[1] != 0.0
 
 cubic_shape, cubic_scale, cubic_shift, _ = preprocessing._output_grid(vals.shape, (1.0,) * 3, (1.25,) * 3)
 cubic_ref = affine_transform(vals, np.array(cubic_scale), np.array(cubic_shift), output_shape=cubic_shape, order=3, mode="nearest")
 cubic_new = preprocessing.resample_image(Image(vals, (1.0,) * 3, (0.0,) * 3), (1.25,) * 3, "cubic").array
-cubic_same = cubic_new.tobytes() == cubic_ref.tobytes()
+cubic_same = cubic_new.tobytes() == cubic_ref.tobytes() if fuses else bool(np.abs(cubic_new - cubic_ref).max() <= 1e-13 * np.abs(cubic_ref).max())
 statuses = {entry["status"] for entry in pipeline.get_log()}
 after = signatures()
 new = {name: [s for s in after[name] if s not in before.get(name, [])] for name in after}
@@ -413,7 +423,9 @@ def test_a_pipeline_run_after_the_import_compiles_no_kernel(tmp_path: Path) -> N
     # features of the FFT LoG to 1e-6), and a new thread starts with the default. The check
     # runs in its own numba cache, so it never writes into a cache that another process
     # builds at the same time. Each serial twin of a parallel kernel gives the bits of its
-    # kernel on 10 sizes, and the compiled cubic resample gives scipy's bits.
+    # kernel on 10 sizes (the fast-math pair loop of Moran's I within 1e-12), and the
+    # compiled cubic resample gives scipy's bits where the scipy build fuses the
+    # multiply-add as the kernels do, else values within 1e-13 of scipy's largest one.
     cache = os.environ.get("NUMBA_CACHE_DIR")
     env = {
         **os.environ,

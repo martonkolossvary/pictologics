@@ -4,7 +4,7 @@ import os
 import signal
 import time
 from contextlib import ExitStack
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import patch
 
 import numpy as np
@@ -45,6 +45,46 @@ from pictologics.filters.gabor import (
     _create_gabor_kernel_2d,
     _create_gabor_kernel_2d_anisotropic,
 )
+
+# The bound of a value against scipy's where the scipy build does not fuse the multiply-add
+# (relative to the scale of the sums): the kernels fuse, so a pass differs by one rounding
+_SCIPY_BOUND = {np.dtype(np.float64): 1e-13, np.dtype(np.float32): 1e-5}
+
+
+def _scipy_bits(
+    got: np.ndarray,
+    expected: np.ndarray,
+    fuses: bool,
+    context: Any = None,
+    scale: Optional[float] = None,
+) -> None:
+    """`got` holds scipy's bits where the scipy build fuses the multiply-add as the kernels
+    do; elsewhere its values lie within _SCIPY_BOUND of scipy's, relative to `scale` (the
+    largest sum of a pass; the largest value when None), see the scipy_fuses fixture of
+    conftest.py."""
+    assert got.dtype == expected.dtype, context
+    if fuses:
+        assert got.tobytes() == expected.tobytes(), context
+    else:
+        bound = _SCIPY_BOUND[expected.dtype] * (float(np.abs(expected).max()) if scale is None else scale)  # fmt: skip
+        assert_allclose(got, expected, rtol=0.0, atol=bound, err_msg=str(context))
+
+
+def test_the_scipy_bits_check_asks_for_the_bits_only_where_scipy_fuses(scipy_fuses: bool) -> None:
+    # Where scipy fuses, the bytes must be the same; elsewhere a value may differ from
+    # scipy's by up to the bound, and more is an error. This machine's scipy fuses or not.
+    expected = np.array([1.0, -2.0, 4.0])
+    _scipy_bits(expected.copy(), expected, True)
+    with pytest.raises(AssertionError):
+        _scipy_bits(expected + 1e-15, expected, True, "bits")
+    _scipy_bits(expected + 1e-15, expected, False)
+    with pytest.raises(AssertionError):
+        _scipy_bits(expected + 1e-12, expected, False, "bound")
+    _scipy_bits(expected + 1e-12, expected, False, "scale", scale=1e5)
+    with pytest.raises(AssertionError):
+        _scipy_bits(expected.astype(np.float32), expected, scipy_fuses, "dtype")
+    assert isinstance(scipy_fuses, bool)
+
 
 # =============================================================================
 # Test Fixtures
@@ -341,7 +381,7 @@ class TestBaseInternalHelpers:
         assert_allclose(in_place, uniform_filter(image, size=3, mode="reflect"), rtol=1e-6)
         assert_allclose(window_sums, uniform_filter(image, size=5, mode="nearest"), rtol=1e-6)
 
-    def test_laplace_terms_share_the_first_pass(self):
+    def test_laplace_terms_share_the_first_pass(self, scipy_fuses: bool):
         # The terms after the first share the plain pass along axis 0 and one temporary:
         # scipy's values bit for bit, for 3 sizes, every boundary mode, float64 and float32
         # images, and sigmas with a zero on axis 0 or on another axis.
@@ -360,8 +400,7 @@ class TestBaseInternalHelpers:
                         for sigma in (1.2, (1.5, 1.0, 2.0), (0.0, 1.0, 2.0), (1.0, 0.0, 1.5)):
                             got = base._gaussian_laplace(image, sigma, mode)
                             expected = gaussian_laplace(image, sigma=sigma, mode=mode)
-                            assert got.dtype == expected.dtype
-                            assert got.tobytes() == expected.tobytes()
+                            _scipy_bits(got, expected, scipy_fuses, (shape, dtype, mode, sigma))
         # The output, the shared pass and one temporary: three arrays of the image size.
         image = rng.normal(0.0, 10.0, (32, 32, 32))
         tracemalloc.start()
@@ -370,7 +409,7 @@ class TestBaseInternalHelpers:
         tracemalloc.stop()
         assert 3 * image.nbytes <= peak < 3.1 * image.nbytes
 
-    def test_a_large_float64_laplace_is_one_fft_convolution(self):
+    def test_a_large_float64_laplace_is_one_fft_convolution(self, scipy_fuses: bool):
         # From _LOG_FFT_MIN voxels on, a float64 image takes one FFT convolution with the
         # kernels of the passes: within 1e-13 of scipy's largest value (measured: 2.3e-14 for
         # wrap with a kernel longer than an axis, else 2e-15), for 3 shapes, every boundary
@@ -395,7 +434,7 @@ class TestBaseInternalHelpers:
             for passes, sigma in ((image.astype(np.float32), 1.2), (image, (0.0, 1.0, 1.5))):
                 got = base._gaussian_laplace(passes, sigma, "nearest")
                 expected = gaussian_laplace(passes, sigma=sigma, mode="nearest")
-                assert got.tobytes() == expected.tobytes()
+                _scipy_bits(got, expected, scipy_fuses, sigma)
 
     def test_ordered_map_keeps_the_item_order(self):
         # Later items end first in the pool, but the results come in item order; one
@@ -2486,7 +2525,7 @@ def test_the_fma_of_the_pass_kernels_rounds_once() -> None:
     assert _fma_python(2.0, 0.5, -1.0) == 0.0
 
 
-def test_pass_twins_match_scipy() -> None:
+def test_pass_twins_match_scipy(scipy_fuses: bool) -> None:
     """The numba twins of the correlation passes give the bits of correlate1d: float32 and
     float64 arrays with an axis of 1 and 3 lines, Gaussian kernels of 1, 9 and 10 pairs (the
     plain pairs of the block of scipy from 10 pairs on), an antisymmetric kernel, general
@@ -2522,9 +2561,11 @@ def test_pass_twins_match_scipy() -> None:
                             )
                             for w in kernels
                         ]
-                        for a, b in zip(got, expected, strict=True):
-                            assert a.dtype == b.dtype
-                            assert a.tobytes() == b.tobytes(), (shape, dtype, axis, mode, cval)
+                        for a, b, w in zip(got, expected, kernels, strict=True):
+                            # An antisymmetric kernel on one line sums to roundoff: the
+                            # bound follows the largest sum of a pass, not the values
+                            scale = float(np.abs(image).max() * np.abs(w).sum() + abs(cval))
+                            _scipy_bits(a, b, scipy_fuses, (shape, dtype, axis, mode, cval), scale)
 
 
 def test_uniform_passes_sum_each_window_on_its_own() -> None:
@@ -2577,7 +2618,7 @@ def test_uniform_passes_sum_each_window_on_its_own() -> None:
     assert uniform_filter1d(line, 3, 2, mode="constant").tobytes() != exact.tobytes()
 
 
-def test_pass_twins_in_threads_and_the_scipy_passes_agree() -> None:
+def test_pass_twins_in_threads_and_the_scipy_passes_agree(scipy_fuses: bool) -> None:
     """A twin pass in threads gives the bits of one call. For an image in column order the
     Gaussian and the convolutions take the scipy passes, with the same values; the uniform
     passes copy it to row order (also in place) for the same window sums. Also with the
@@ -2606,7 +2647,7 @@ def test_pass_twins_in_threads_and_the_scipy_passes_agree() -> None:
                 columns = call(np.asfortranarray(image))
             assert twin.call_count == twin_passes
             assert one.tobytes() == threaded.tobytes()
-            assert one.tobytes() == np.ascontiguousarray(columns).tobytes()
+            _scipy_bits(one, np.ascontiguousarray(columns), scipy_fuses)  # scipy's passes
         in_place = np.asfortranarray(image)
         base._uniform_filter(in_place, 5, "constant", output=in_place, cval=cval)
         assert in_place.flags.f_contiguous

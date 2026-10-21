@@ -1076,8 +1076,10 @@ def _level_counts_numba(
 ) -> tuple[npt.NDArray[np.int64], Any, Any, bool]:
     """The counts of the levels 0 to n_bins of the 1-D `values` (a value below 0 counts as
     level 0, one above n_bins as level n_bins), the smallest and the largest value, and
-    whether every value is a whole number (an integer always is, a NaN never): the count
-    stops at the first value that is not, and then the counts and the range are partial.
+    whether every value is a whole number (an integer always is, a NaN or an infinite value
+    never: it minus its floor is NaN; a compiled `math.floor(v) == v` is not defined for an
+    infinite v): the count stops at the first value that is not, and then the counts and
+    the range are partial.
     A NaN counts as level 0 until then (max keeps its first argument), so int() never
     reads one. Four tables take the values in turn, so a run of equal values does not wait
     on one table."""
@@ -1096,8 +1098,8 @@ def _level_counts_numba(
         k1 = int(min(max(0, v1), n_bins))
         k2 = int(min(max(0, v2), n_bins))
         k3 = int(min(max(0, v3), n_bins))
-        whole &= (math.floor(v0) == v0) & (math.floor(v1) == v1)
-        whole &= (math.floor(v2) == v2) & (math.floor(v3) == v3)
+        whole &= (v0 - np.floor(v0) == 0.0) & (v1 - np.floor(v1) == 0.0)
+        whole &= (v2 - np.floor(v2) == 0.0) & (v3 - np.floor(v3) == 0.0)
         low = min(low, min(min(v0, v1), min(v2, v3)))
         high = max(high, max(max(v0, v1), max(v2, v3)))
         tables[0, k0] += 1
@@ -1108,7 +1110,7 @@ def _level_counts_numba(
     while whole and i < n:
         v0 = values[i]
         k0 = int(min(max(0, v0), n_bins))
-        whole &= math.floor(v0) == v0
+        whole &= v0 - np.floor(v0) == 0.0
         low = min(low, v0)
         high = max(high, v0)
         tables[0, k0] += 1
@@ -1162,7 +1164,7 @@ def _level_counts_threads_numba(
         while whole and i < stop:
             v0 = values[i]
             k0 = int(min(max(0, v0), n_bins))
-            whole &= math.floor(v0) == v0
+            whole &= v0 - np.floor(v0) == 0.0
             low = min(low, v0)
             high = max(high, v0)
             tables[0, k0] += 1
