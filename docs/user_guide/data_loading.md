@@ -55,7 +55,7 @@ image = load_image("scan.nii.gz")
 print(image.array.shape, image.spacing, image.origin)
 ```
 
-A mask or a label map in an integer type (int8 to uint32) with no scaling can keep that type: `load_image("mask.nii.gz", stored_type=True)`. This takes less memory and time than float64; the pipeline loads its masks so.
+A mask or a label map in an integer type (int8 to uint32) with no scaling can keep that type: `load_image("mask.nii.gz", stored_type=True)`. This takes less memory and time than float64; the pipeline loads its masks so. With `stored_type=True`, a `fill_value` must fit the stored type (0 for a mask): a value outside it casts to a wrong number or raises OverflowError.
 
 ### NRRD and MetaImage
 

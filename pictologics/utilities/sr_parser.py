@@ -33,11 +33,11 @@ SR_MAX_WORKERS = 8
 
 def _sr_workers(total_bytes: int, num_workers: Optional[int]) -> int:
     """The worker processes of SRDocument.from_folders for SR files of `total_bytes` bytes:
-    an explicit `num_workers` (1 = this process); with None, this process below
-    SR_POOL_BYTES, else one per SR_BYTES_PER_WORKER bytes, at most SR_MAX_WORKERS and
-    cpu_count - 1."""
+    an explicit `num_workers` (1 = this process; a number below 1 means 1); with None, this
+    process below SR_POOL_BYTES, else one per SR_BYTES_PER_WORKER bytes, at most
+    SR_MAX_WORKERS and cpu_count - 1."""
     if num_workers is not None:
-        return num_workers
+        return max(1, num_workers)
     if total_bytes < SR_POOL_BYTES:
         return 1
     per_size = total_bytes // SR_BYTES_PER_WORKER

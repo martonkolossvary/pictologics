@@ -145,13 +145,17 @@ def _maybe_crop_to_bbox(
 
 
 def _level_form(data: npt.NDArray[Any]) -> npt.NDArray[Any]:
-    """The grey levels of a direct call as a type that the import compiles for the texture
-    kernels: int32 (from discretise_image), int64 or float64. Another integer or bool type
-    becomes int64, another float type float64: the same values, so the same features."""
+    """The grey levels of a direct call as a type and order that the import compiles for the
+    texture kernels: int32 (from discretise_image), int64 or float64, in row order. Another
+    integer or bool type becomes int64, another float type float64: the same values, so the
+    same features. A column-order array becomes a row-order copy. A strided crop stays as it
+    is (the import compiles that form too)."""
     if data.dtype.kind in "biu" and data.dtype not in (np.int32, np.int64):
-        return data.astype(np.int64)
+        return data.astype(np.int64, order="C")
     if data.dtype.kind == "f" and data.dtype != np.float64:
-        return data.astype(np.float64)
+        return data.astype(np.float64, order="C")
+    if data.flags.f_contiguous and not data.flags.c_contiguous:
+        return np.ascontiguousarray(data)
     return data
 
 
@@ -565,9 +569,9 @@ def _pairs_and_runs_row(
 ) -> None:
     """Add the GLCM pairs and the GLRLM runs of the n ROI voxels of the row segment from
     flat index `start` (no voxel of the segment is 0) in each direction to the tables of
-    thread tid. The GLCM tables are 1-based with a dummy row
-    and column 0 (the pairs with a voxel outside the ROI land there); the pairs of the
-    even and the odd x alternate between the two tables of the thread. A run starts where
+    thread tid. The GLCM tables are 1-based with a dummy row and column 0 (the pairs with
+    a voxel outside the ROI land there). The pairs of the even and the odd x alternate
+    between the two tables of the thread. A run starts where
     the voxel before has another level. Runs of length 1 and 2 count from three row
     slices (the voxel before, after and two after), in one loop without a branch; a walk
     counts the longer runs. With `merged` (one table for all directions), the runs of
@@ -739,7 +743,8 @@ def _local_tables_numba(
 
     The slice blocks `blocks` run in parallel. Direction d adds to table `dir_table[d]`
     of the GLCM and the GLRLM: the GLCM pairs step `pair_off[d]` in the flat index (the
-    GLCM distance), the GLRLM runs step `dir_off[d]` (see `_pairs_and_runs`). The NGTDM
+    GLCM distance), the GLRLM runs step `dir_off[d]` (see `_pairs_and_runs_row` and
+    `_pairs_and_runs_voxel`). The NGTDM
     and the NGLDM read the voxels at the flat steps `neighbours`; for the 26 neighbours of
     distance 1, each row is cut to its first and last ROI voxel and row passes give the
     sums (`_neighbour_rows`). The NGTDM keeps whole numbers: for a voxel of level g whose
@@ -1141,6 +1146,9 @@ def calculate_all_texture_matrices(
             - 'glszm' (npt.NDArray[np.floating[Any]]): Grey Level Size Zone Matrix. Shape: (n_bins, max_zone_size).
             - 'gldzm' (npt.NDArray[np.floating[Any]]): Grey Level Distance Zone Matrix. Shape: (n_bins, max_distance).
 
+    Raises:
+        ValueError: a mask voxel lies outside `distance_mask`.
+
     Example:
         Calculate all texture matrices:
 
@@ -1291,8 +1299,9 @@ def _texture_matrices(
                     # A texture voxel outside the distance mask would get distance 0 and
                     # its whole zone would leave the GLDZM (the distance of a zone is 1 or
                     # more): the distance mask must hold the mask
+                    outside = int(np.count_nonzero(roi & ~d_roi))
                     raise ValueError(
-                        f"{int(np.count_nonzero(roi & ~d_roi))} mask voxels lie outside "
+                        f"{outside} mask voxel{' lies' if outside == 1 else 's lie'} outside "
                         "distance_mask; the GLDZM needs the mask inside the distance mask."
                     )
                 distance_map = _distance_map(d_roi, planar)
@@ -2427,6 +2436,9 @@ def calculate_gldzm_features(
     Returns:
         dict[str, float]: A dictionary of calculated GLDZM features.
             Example keys: 'small_distance_emphasis_0GBI', 'zone_distance_entropy_GBDU'.
+
+    Raises:
+        ValueError: a mask voxel lies outside `distance_mask`.
     """
     if gldzm_matrix is None:
         # Standalone path: crop to the bbox of mask ∪ distance_mask and rebind. The
@@ -2796,6 +2808,7 @@ def calculate_all_texture_features(
 
     Raises:
         ValueError: If a family name is not one of the six.
+        ValueError: a mask voxel lies outside `distance_mask_array`.
 
     Example:
         ```python

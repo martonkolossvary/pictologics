@@ -1229,14 +1229,14 @@ _GZIP_INDEX_ID = b"PI"  # the extra field of the gzip header that holds the bloc
 
 
 def _write_gzip_nifti(nifti: Nifti1Image, array: npt.NDArray[Any], path: str) -> None:
-    """Write `nifti`, whose data is the column-order `array`, as one gzip member (zlib
-    level 1, as nibabel writes) whose deflate blocks are compressed on the threads of the
-    package. The first block holds nibabel's header bytes; each other block holds whole
-    planes (about 1 MB) and is an independent deflate fragment (a fresh compressor, a
-    sync flush at its end), so a gzip reader inflates the file as any other and the
-    package inflates the blocks on threads: the gzip header carries the index of the
-    blocks (the extra field `_GZIP_INDEX_ID`: the count, then the compressed size, the
-    size and the CRC-32 of each block). Other readers ignore the extra field."""
+    """Write `nifti`, whose data is the column-order `array`, as one gzip member. The level
+    is zlib 1, as nibabel writes. The threads of the package compress its deflate blocks.
+    The first block holds nibabel's header bytes. Each other block holds whole planes
+    (about 1 MB) and is an independent deflate fragment: a fresh compressor, with a sync
+    flush at its end. So a gzip reader inflates the file as any other, and the package
+    inflates the blocks on threads. The extra field `_GZIP_INDEX_ID` of the gzip header
+    holds the index of the blocks. The index is the count, then the compressed size, the
+    size and the CRC-32 of each block. Other readers ignore the extra field."""
     nifti.update_header()  # type: ignore[no-untyped-call]
     header = nifti.header.copy()  # type: ignore[no-untyped-call]
     header.set_data_offset(header.single_vox_offset)  # type: ignore[no-untyped-call]
@@ -1872,8 +1872,8 @@ def _gzip_indexed_pieces(
     path: str, index: npt.NDArray[np.uint32], offset: int, plane: int, end: int
 ) -> Generator[npt.NDArray[np.uint8], None, None]:
     """The inflated data of the gzip file `path` from byte `offset` to byte `end`, as
-    writeable uint8 arrays of whole `plane`s in order: the blocks of its `index` (see
-    `_gzip_index`), inflated on the threads of the package, each checked against its
+    writeable uint8 arrays of whole `plane`s in order. The threads of the package inflate
+    the blocks of its `index` (see `_gzip_index`). A check compares each block with its
     size and CRC-32. Raises ValueError when the index does not describe the array in
     whole planes, or a block does not match it."""
     start = int(index[0, 0])
@@ -1931,10 +1931,11 @@ def _gzip_values(
     path: str, offset: int, shape: tuple[int, ...], dtype: np.dtype[Any], indexed: bool = True
 ) -> Optional[npt.NDArray[Any]]:
     """The column-order array of `shape` and `dtype` after `offset` bytes of the gzip file
-    `path`, or None when the file is not one gzip member of exactly that size, or zlib
-    cannot read it. With `indexed`, a file with a large block index (see _large_index)
-    inflates on threads; when the index does not fit the file, or a block does not match
-    it, the stream is still one standard member and inflates in one pass."""
+    `path`. It is None when the file is not one gzip member of exactly that size, or when
+    zlib cannot read it. With `indexed`, a file with a large block index (see
+    _large_index) inflates on threads. When the index does not fit the file, or a block
+    does not match it, the stream is still one standard member. It then inflates in one
+    pass."""
     data = np.empty(math.prod(shape) * dtype.itemsize, dtype=np.uint8)
     try:
         index = _large_index(path) if indexed else None

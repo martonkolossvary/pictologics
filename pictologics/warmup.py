@@ -206,6 +206,11 @@ def _warmup_intensity() -> None:
             np.empty(1, np.bool_),
         )
     intensity._counted_statistics_numba(np.array([1, 2, 0], dtype=np.int64), 1, np.empty(23))
+    # The float path of the histogram checks the float64 copy of its values in one pass, in
+    # threads or on one core
+    floats = np.array([1.0, 2.0, 2.0])
+    for check in (intensity._all_whole_numba, intensity._all_whole_numba_serial):
+        check(floats, np.empty(1, np.bool_))
 
     # 2. Spatial Features
     # Minimal 3-voxel structure. int32 to match the production caller in
@@ -310,14 +315,17 @@ def _warmup_intensity() -> None:
         values, 0.0, 409.6, order, np.zeros(4096, dtype=np.int64), np.empty(6, dtype=np.uint64)
     )
     intensity._linear_counts_numba(values, 0.0, 409.6, np.empty((1, 4096), dtype=np.int64))
-    intensity._linear_keys_numba(
-        values,
-        0.0,
-        409.6,
-        np.full(4096, -1, dtype=np.int64),
-        np.zeros((1, 1), dtype=np.int64),
-        np.empty(1, dtype=np.uint64),
-    )
+    # The table of the bucket starts is row-order with one bucket and column-order with two
+    # or more (a slice of the cumulative counts of the threads)
+    for table in (np.zeros((1, 1), dtype=np.int64), np.zeros((2, 2), dtype=np.int64, order="F")):
+        intensity._linear_keys_numba(
+            values,
+            0.0,
+            409.6,
+            np.full(4096, -1, dtype=np.int64),
+            table,
+            np.empty(1, dtype=np.uint64),
+        )
 
 
 def _warmup_morphology() -> None:

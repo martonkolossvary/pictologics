@@ -788,30 +788,33 @@ class TestIntensityFeatures(unittest.TestCase):
             self.assertEqual(calculate_spatial_intensity_features(image, roi), pair)
 
     def test_fft_and_pair_time_models(self) -> None:
-        # The FFT: a start of 47 us + 38 us per worker, and 12.5 ns per grid point, of which
-        # 30 % is serial below _SPATIAL_FFT_PARALLEL_MIN points and 15 % from there on. On
-        # 10 threads, a grid of 32,768 points runs on one worker and one of 64,000 on all
-        # (as measured). The parallel pair loop: a start of 45 us + 2.5 us per thread, and
-        # 1.05 ns per pair and thread; below _PAIRS_PARALLEL_MIN voxels it runs serially.
+        # The behaviour of the model, not its constants: the FFT time grows with the grid
+        # points, and a large grid splits into workers while a small grid runs on one; the
+        # pair time grows with the square of the voxels, and from _PAIRS_PARALLEL_MIN voxels
+        # it splits into threads; the plan takes the method with less model time.
+        import scipy.fft
+
         from pictologics.features import intensity as module
 
-        self.assertAlmostEqual(module._fft_seconds(1000, 2.0, 1), 85e-6 + 2 * 1000 * 12.5e-9)
-        share = 0.3 + 0.7 / 10
-        self.assertAlmostEqual(
-            module._fft_seconds(1 << 16, 1.0, 10), 427e-6 + (1 << 16) * 12.5e-9 * share
-        )
-        share = 0.15 + 0.85 / 10
-        self.assertAlmostEqual(
-            module._fft_seconds(1 << 20, 1.0, 10), 427e-6 + (1 << 20) * 12.5e-9 * share
-        )
-        with patch.object(module, "get_num_threads", return_value=10):
-            self.assertEqual(module._fft_workers(32_768), 1)
-            self.assertEqual(module._fft_workers(64_000), 10)
-            self.assertAlmostEqual(module._pair_seconds(449), 449 * 448 / 2 * 1.05e-9)
-            self.assertAlmostEqual(module._pair_seconds(450), 70e-6 + 450 * 449 / 2 * 0.105e-9)
-        with patch.object(module, "get_num_threads", return_value=1):
-            self.assertEqual(module._fft_workers(1 << 20), 1)
-            self.assertAlmostEqual(module._pair_seconds(450), 450 * 449 / 2 * 1.05e-9)
+        fft = [module._fft_seconds(points, 1.0, 1) for points in (1000, 10_000, 1 << 20)]
+        self.assertTrue(fft[0] < fft[1] < fft[2])
+        self.assertLess(module._fft_seconds(1 << 20, 2.0, 1), 2 * fft[2])
+        self.assertLess(module._fft_seconds(1 << 20, 1.0, 10), fft[2])
+        self.assertEqual(module._fft_workers(1000, 10), 1)  # the start costs more than it saves
+        self.assertEqual(module._fft_workers(1 << 20, 10), 10)
+        self.assertEqual(module._fft_workers(1 << 20, 1), 1)
+        small = module._pair_seconds(400, 1)
+        self.assertAlmostEqual(module._pair_seconds(800, 1) / small, 800 * 799 / (400 * 399))
+        self.assertEqual(module._pair_seconds(400, 10), small)  # serial below the gate
+        many = module._PAIRS_PARALLEL_MIN * 8
+        self.assertLess(module._pair_seconds(many, 10), module._pair_seconds(many, 1))
+        box = (10, 10, 10)
+        grid = math.prod(scipy.fft.next_fast_len(2 * k - 1, real=True) for k in box)
+        fft_time = module._fft_seconds(grid, 1.0, 1)
+        with patch.object(module.threads, "_default", 1):
+            for n, method in ((100, "pairs"), (1000, "fft")):
+                self.assertEqual(fft_time < module._pair_seconds(n, 1), method == "fft")
+                self.assertEqual(module._spatial_plan(n, box)[0], method)
 
     def test_calculate_spatial_intensity_features_small_input(self) -> None:
         # < 2 voxels -> NaN
@@ -1636,23 +1639,48 @@ def test_histogram_values_must_be_finite_whole_numbers() -> None:
 
     message = "finite whole numbers"
     for bad in ([1.0, 2.5, 3.0], [1.0, np.nan, 3.0], [1.0, np.inf, 3.0]):
-        with pytest.raises(ValueError, match=message):
+        # inf minus its floor is NaN: the Python form of the check warns, the kernel does not
+        with pytest.raises(ValueError, match=message), np.errstate(invalid="ignore"):
             calculate_intensity_histogram_features(np.array(bad))
     with pytest.raises(ValueError, match=message):
         calculate_intensity_histogram_features(np.array([1.0, 2.5, 3.0]), n_bins=4)
     with (
-        patch.object(numba.config, "DISABLE_JIT", False),  # the kernel compiles at its call
+        patch.object(numba.config, "DISABLE_JIT", False),  # the kernels compile at their call
         patch.object(
             intensity_module,
             "_level_counts_numba",
             numba.njit(intensity_module._level_counts_numba),
         ),
+        patch.object(
+            intensity_module,
+            "_all_whole_numba_serial",
+            numba.njit(intensity_module._all_whole_numba),
+        ),
     ):
-        for bad in ([1.0, np.nan, 3.0], [1.0, np.inf, 3.0]):
+        for bad in ([1.0, np.nan, 3.0], [1.0, np.inf, 3.0], [1.0, 2.0, 3.0, 4.0, -np.inf]):
             with pytest.raises(ValueError, match=message):
                 calculate_intensity_histogram_features(np.array(bad), n_bins=4)
+            with pytest.raises(ValueError, match=message):
+                calculate_intensity_histogram_features(np.array(bad, dtype=np.float32))
+        assert calculate_intensity_histogram_features(np.array([1.0, 2.0, 2.0, 7.0, 3.0]))
     levels = np.random.default_rng(52).integers(1, 9, 300).astype(np.float64)
     expected = calculate_intensity_histogram_features(levels)
+    # The check in threads (the gate at 1, four parts) gives the features of one part, and a
+    # value that is not whole in any part raises
+    from pictologics.features import _utils
+
+    for threads in (1, 4):
+        with (
+            patch.object(intensity_module, "_PARALLEL_WHOLE_MIN", 1),
+            patch.object(intensity_module, "get_num_threads", return_value=threads),
+            patch.object(_utils, "get_num_threads", return_value=threads),
+        ):
+            assert calculate_intensity_histogram_features(levels) == expected
+            for position in (0, 150, 299):
+                bad = levels.copy()
+                bad[position] = 2.5
+                with pytest.raises(ValueError, match=message):
+                    calculate_intensity_histogram_features(bad)
     for kind in (np.float32, np.float16, np.uint64):
         got = calculate_intensity_histogram_features(levels.astype(kind))
         assert list(got) == list(expected)
@@ -1671,7 +1699,8 @@ def test_local_peaks_keep_two_stages_with_an_unreached_nan() -> None:
     # A non-finite voxel that no sphere of an ROI voxel reaches is set to 0 in a copy, and
     # the two stages give the peaks of the exact kernel bit for bit; one in reach, or more
     # than _NON_FINITE_MAX of them, gives way to the exact kernel; finite images run as
-    # before.
+    # before. Finite values near the float64 limit overflow the row totals: the exact
+    # kernel gives peaks of inf, as in 0.7.1.
     from pictologics.features import intensity as intensity_module
     from pictologics.loader import Image
 
@@ -1706,3 +1735,52 @@ def test_local_peaks_keep_two_stages_with_an_unreached_nan() -> None:
         assert intensity_module._without_unreached(far, mask != 0, offsets) is None
     exact, _ = peaks(near, 1 << 62)
     assert peaks(near, 0)[0] == exact  # the exact kernel on every voxel
+    huge = np.full(data.shape, 9e307)
+    assert intensity_module._without_unreached(huge, mask != 0, offsets) is None
+    with np.errstate(over="ignore"):
+        exact, _ = peaks(huge, 1 << 62)
+        got, calls = peaks(huge, 0)
+    assert got == exact and len(calls) == 1
+    assert exact == {"global_intensity_peak_0F91": np.inf, "local_intensity_peak_VJGA": np.inf}
+
+
+def test_the_spatial_method_does_not_depend_on_the_thread_count() -> None:
+    # The choice of pairs, FFT or slabs uses the thread count of the import. So a call at
+    # one thread and a call at the default take the same method, and Moran's I and Geary's C
+    # keep their bits. A run() with the morphology family, whose worker can leave the calling
+    # thread one thread less, gives the values of the direct call.
+    from pictologics import RadiomicsPipeline, set_num_threads
+    from pictologics.features import intensity as module
+    from pictologics.loader import Image
+
+    shape = (15, 15, 15)
+    zz, yy, xx = np.indices(shape)
+    sphere = ((zz - 7) ** 2 + (yy - 7) ** 2 + (xx - 7) ** 2 <= 6.2**2).astype(np.uint8)
+    rng = np.random.default_rng(1)
+    image = Image(rng.normal(40.0, 10.0, shape), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    roi = Image(sphere, image.spacing, image.origin)  # 1,021 voxels
+    plans: dict[int, list[object]] = {}
+    features = []
+    try:
+        for count in (1, None):
+            set_num_threads(count)
+            for n in (750, 1000, 2000, 3400):
+                side = round(n ** (1 / 3))
+                box = (side, side, -(-n // (side * side)))
+                plans.setdefault(n, []).append(module._spatial_plan(n, box))
+            features.append(calculate_spatial_intensity_features(image, roi))
+    finally:
+        set_num_threads()
+    assert all(first == second for first, second in plans.values()), plans
+    assert features[0] == features[1]
+    compact = np.zeros((17, 17, 16), dtype=np.uint8)
+    compact[2:15, 2:15, 2:14] = 1
+    compact[5:8, 5:11, 5:11] = 0  # 1,920 voxels in a box of 13 x 13 x 12
+    image = Image(rng.normal(40.0, 10.0, compact.shape), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    mask = Image(compact, image.spacing, image.origin)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    families = ["spatial_intensity", "morphology"]
+    pipeline.add_config("spatial", [{"step": "extract_features", "params": {"families": families}}])
+    result = pipeline.run(image, mask)["spatial"]
+    direct = calculate_spatial_intensity_features(image, mask)
+    assert all(result[key] == value for key, value in direct.items())

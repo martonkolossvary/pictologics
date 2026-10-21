@@ -142,7 +142,7 @@ from .preprocessing import (
 )
 from .results import _json_safe, format_results
 from .templates import _load_yaml, get_standard_templates, list_template_files, load_template_file
-from .threads import _make_room, _physical_memory, _share_memory
+from .threads import _make_room, _memory_share, _share_memory
 
 # Schema version for config serialization - increment when format changes
 CONFIG_SCHEMA_VERSION = "1.0"
@@ -509,7 +509,7 @@ def _label_check_numba(values: npt.NDArray[np.float64]) -> tuple[bool, float]:
         b = 0
         for i in range(c * step, min(n, (c + 1) * step)):
             v = values[i]
-            # this order of the tests is the fastest one (3.8 ms on 52 M voxels; 6-8 ms)
+            # this order of the tests is the fastest one (3.8 ms on 52 M voxels; the other orders 6-8 ms)
             if not (v >= 0.0) or v != math.floor(v) or v == math.inf:
                 b = 1
             elif v > hi:
@@ -611,11 +611,23 @@ def _canonical(value: Any) -> Any:
     return value
 
 
-def _prefix_keys(steps: list[dict[str, Any]], metadata: dict[str, Any]) -> list[str]:
+def _prefix_keys(
+    steps: list[dict[str, Any]], metadata: dict[str, Any], start_reach: bool = False
+) -> list[str]:
     """One key per prefix of the leading preprocessing steps (those before the first
-    extract_features step). Equal keys give equal states after the prefix: the start
-    state depends only on the source mode and the sentinel value."""
-    parts = [repr((metadata.get("source_mode", "full_image"), metadata.get("sentinel_value")))]
+    extract_features step). Equal keys give equal states after the prefix. The start
+    state depends on the source mode and the sentinel value. With `start_reach`, it also
+    depends on how far the steps read outside the ROI: a large image that is not float64
+    is cut to the ROI region at the start (see _run_loaded)."""
+    parts = [
+        repr(
+            (
+                metadata.get("source_mode", "full_image"),
+                metadata.get("sentinel_value"),
+                _roi_reach(steps) if start_reach else None,
+            )
+        )
+    ]
     keys = []
     for index, step in enumerate(steps):
         if step["step"] == "extract_features":
@@ -660,15 +672,17 @@ _GRID_BYTES_PER_VOXEL = 24
 
 def _check_grid_memory(shape: list[int], new_spacing: Any) -> None:
     """Raise a MemoryError before a resample to a grid of `shape` that cannot fit in the
-    memory of this computer (see _GRID_BYTES_PER_VOXEL)."""
+    memory of this process: the memory of this computer, or the share of a run_batch worker
+    (see threads._memory_share and _GRID_BYTES_PER_VOXEL)."""
     need = math.prod(shape) * _GRID_BYTES_PER_VOXEL
-    memory = _physical_memory()
+    memory = _memory_share()
     if need > memory:
         raise MemoryError(
             f"Resampling to {tuple(new_spacing)} mm makes a grid of "
             f"{' x '.join(map(str, shape))} voxels. It needs at least {need / 2**30:.2f} GiB, "
-            f"more than the {memory / 2**30:.2f} GiB of memory of this computer. Use a larger "
-            "spacing, or a smaller image or ROI."
+            f"more than the {memory / 2**30:.2f} GiB of memory of this process (the memory of "
+            "this computer, shared by the run_batch workers). Use a larger spacing, a smaller "
+            "image or ROI, or fewer workers."
         )
 
 
@@ -746,7 +760,8 @@ def _selects_background(params: dict[str, Any]) -> bool:
         return threshold is not None and float(threshold) <= 0
     if isinstance(values, tuple) and len(values) == 2:
         return bool(values[0] <= 0 <= values[1])
-    return 0 in (values if isinstance(values, (list, tuple)) else [values])
+    # The values as _select_mask_values reads them: a number, a list or an array
+    return bool(np.any(np.asarray(values).ravel() == 0))
 
 
 def _filter_reach(
@@ -880,6 +895,15 @@ def _cut_state(
     )
 
 
+def _writeable(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """`array`, or a writeable copy of it (the same type and order) when it is read-only. The
+    kernels compile a second form for a read-only array at its first use, so a run copies
+    a read-only in-memory array once at its start."""
+    if array.flags.writeable:
+        return array
+    return np.array(array, copy=True)
+
+
 def _float64_image(image: Image) -> Image:
     """`image` as float64 (the type of the loaders): an integer or float32 array would
     resample in its own type (rounded, and on one core)."""
@@ -976,6 +1000,27 @@ def _intersect_mask(mask: Image, valid_mask: npt.NDArray[Any]) -> Image:
         direction=mask.direction,
         modality=mask.modality,
     )
+
+
+def _intersect_on_box(mask: Image, morph: npt.NDArray[Any], boxes: _Boxes) -> Image:
+    """`mask` with only the voxels of `morph`, in the type of `mask`. `morph` is a mask,
+    so it is 0 outside its box, and the intersection reads that box only. `boxes` keeps
+    the box of the new mask (see _mask_box), so the ROI check after the step reads no
+    array."""
+    box = _mask_box(morph, boxes)
+    new = np.zeros_like(mask.array)
+    new_box = None
+    if box is not None:
+        new[box] = np.where(morph[box] != 0, mask.array[box], 0)
+        inner = compute_nonzero_bbox(new[box])
+        if inner is not None:
+            new_box = (
+                slice(inner[0].start + box[0].start, inner[0].stop + box[0].start),
+                slice(inner[1].start + box[1].start, inner[1].stop + box[1].start),
+                slice(inner[2].start + box[2].start, inner[2].stop + box[2].start),
+            )
+    boxes.keep(new, id(new), new_box)
+    return replace(mask, array=new)
 
 
 def _family_uses_morph_mask(family: str) -> bool:
@@ -1822,7 +1867,16 @@ class RadiomicsPipeline:
             )
         # The loaders give float64. An integer or float32 array is cast where it is read
         # (see _float64_image): the ROI region of a large image, or the whole image when
-        # a configuration reads the whole grid.
+        # a configuration reads the whole grid. A read-only float64 array and a read-only
+        # source mask are copied once (see _writeable).
+        array = orig_img.array
+        if array.dtype == np.float64:
+            array = _writeable(array)
+        valid = orig_img.source_mask
+        if valid is not None:
+            valid = _writeable(valid)
+        if array is not orig_img.array or valid is not orig_img.source_mask:
+            orig_img = replace(orig_img, array=array, source_mask=valid)
         return orig_img, img_source
 
     @staticmethod
@@ -1849,7 +1903,8 @@ class RadiomicsPipeline:
             )
             return loaded, mask, False
         if isinstance(mask, Image):
-            return mask, "InMemory", False
+            array = _writeable(mask.array)  # see _writeable
+            return (mask if array is mask.array else replace(mask, array=array)), "InMemory", False
         raise TypeError(
             f"mask must be a path, an Image or None, not {type(mask).__name__}; wrap an "
             "array as Image(array, spacing, origin)."
@@ -1915,7 +1970,7 @@ class RadiomicsPipeline:
             )
 
         if plan is None:
-            plan = self._run_plan(target_configs, image_options)
+            plan = self._run_plan(target_configs, image_options, orig_img.array.dtype != np.float64)
         dedup_plan = plan.dedup_plan
         family_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -2338,7 +2393,15 @@ class RadiomicsPipeline:
             if splits
             else None
         )
-        plan = self._run_plan(names, image_options) if chosen else None
+        plan = (
+            self._run_plan(
+                names,
+                image_options,
+                orig_img.array.dtype != np.float64 and orig_img.array.size >= _CUT_MIN_SIZE,
+            )
+            if chosen
+            else None
+        )
         all_results: dict[str, dict[str, pd.Series]] = {}
         for name, label in chosen.items():
             box = boxes[int(label) - 1] if label <= len(boxes) else None
@@ -2658,9 +2721,12 @@ class RadiomicsPipeline:
         return cached[1]
 
     def _run_plan(
-        self, target_configs: list[str], image_options: Optional[Mapping[str, Any]]
+        self,
+        target_configs: list[str],
+        image_options: Optional[Mapping[str, Any]],
+        start_reach: bool = False,
     ) -> _RunPlan:
-        """The _RunPlan of a run of `target_configs`."""
+        """The _RunPlan of a run of `target_configs` (`start_reach`: see _prefix_keys)."""
         dedup_plan: DeduplicationPlan | None = None
         if self._deduplication_enabled and len(target_configs) > 1:
             configs_to_analyze = {name: self._configs[name] for name in target_configs}
@@ -2689,7 +2755,9 @@ class RadiomicsPipeline:
             self._last_deduplication_plan = dedup_plan
             self._configs_modified_since_plan = False
         prefix_keys = {
-            name: _prefix_keys(self._configs[name], self._config_metadata.get(name, {}))
+            name: _prefix_keys(
+                self._configs[name], self._config_metadata.get(name, {}), start_reach
+            )
             for name in target_configs
         }
         metadata = [self._config_metadata.get(name, {}) for name in target_configs]
@@ -2953,9 +3021,12 @@ class RadiomicsPipeline:
             elif apply_to in ("intensity", "both"):
                 state.intensity_mask = keep_largest_component(state.intensity_mask)
             if apply_to == "morph":  # IBSI: the intensity mask lies inside the morphological one
-                state.intensity_mask = _intersect_mask(
-                    state.intensity_mask, state.morph_mask.array != 0
-                )
+                if masks_in_sync:  # as with "both": the masks stay one array
+                    state.intensity_mask = state.morph_mask
+                else:
+                    state.intensity_mask = _intersect_on_box(
+                        state.intensity_mask, state.morph_mask.array, self._mask_boxes
+                    )
 
             self._ensure_nonempty_roi(state, context="keep_largest_component")
 
@@ -3051,9 +3122,12 @@ class RadiomicsPipeline:
             elif apply_to in ("intensity", "both"):
                 state.intensity_mask = _binarize(state.intensity_mask)
             if apply_to == "morph":  # IBSI: the intensity mask lies inside the morphological one
-                state.intensity_mask = _intersect_mask(
-                    state.intensity_mask, state.morph_mask.array != 0
-                )
+                if masks_in_sync:  # as with "both": the masks stay one array
+                    state.intensity_mask = state.morph_mask
+                else:
+                    state.intensity_mask = _intersect_on_box(
+                        state.intensity_mask, state.morph_mask.array, self._mask_boxes
+                    )
 
             self._ensure_nonempty_roi(state, context="binarize_mask")
 

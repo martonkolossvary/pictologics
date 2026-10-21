@@ -128,7 +128,7 @@ With `apply_to="morph"`, the intensity mask then keeps only the voxels of the ne
 {"step": "binarize_mask", "params": {"threshold": 0.5}}        # a probability of 0.5 or more
 ```
 
-- **Speed**: when the step leaves out the value 0, it compares only the box of the ROI, so a small ROI in a large image costs little. A step that keeps the value 0 (for example a threshold of 0) reads the whole mask.
+- **Speed**: when the step leaves out the value 0, it compares only the box of the ROI. So a small ROI in a large image costs little. A step that keeps the value 0 (for example a threshold of 0) reads the whole mask.
 
 For many labels of one label map, [`run_rois`](pipeline.md#many-rois-run_rois) is faster than one configuration for each label.
 
@@ -239,5 +239,5 @@ The feature families:
 
 - `"texture_glcm"` and the other `"texture_..."` names are the same as `"glcm"` and the others.
 - Each texture family uses the 3D merged matrix of IBSI. Ask only for the texture families that you need: the pipeline computes only their matrices.
-- The spatial and local intensity features take more time on large ROIs. The spatial features take the faster of two methods: a loop over the voxel pairs for small ROIs, an FFT for large ones. The FFT uses at most half of the memory of the computer. When its grid needs more, it cuts the ROI box into slabs, which takes a few times longer but keeps within the memory.
+- The spatial and local intensity features take more time on large ROIs. The spatial features take the faster of two methods: a loop over the voxel pairs for small ROIs, an FFT for large ones. The FFT uses at most half of the memory of the computer. When its grid needs more, it cuts the ROI box into slabs, which takes a few times longer but keeps within the memory. When not even slabs of one plane fit, the pair loop runs with a warning.
 - A configuration can have more than one `extract_features` step, for example one before and one after a filter. The feature names of the steps must differ, because a later value replaces an earlier one with the same name.

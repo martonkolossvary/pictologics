@@ -8,6 +8,7 @@ from numpy import typing as npt
 
 from .base import (
     BoundaryCondition,
+    _bool_mask,
     _constant_padded,
     _gaussian_filter,
     _normalized_gaussian,
@@ -89,6 +90,7 @@ def gaussian_filter(
         - σ is converted from mm to voxels: σ_voxels = σ_mm / spacing_mm
         - The kernel of each axis has the radius ⌊truncate × σ_voxels + 0.5⌋ and sums to 1
     """
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     # The passes run in float32. The normalized convolution of a source mask keeps the
     # image type: it divides two filtered sums.
     image = ensure_float32(image) if source_mask is not None else as_float32(image)

@@ -16,6 +16,7 @@ from .base import (
     BoundaryCondition,
     _add_times,
     _apply_with_boundary_padding,
+    _bool_mask,
     _constant_padded,
     _float32_cut,
     _ordered_map,
@@ -75,7 +76,8 @@ def wavelet_transform(
     Apply 3D separable wavelet transform (undecimated/stationary).
 
     Uses the à trous algorithm for undecimated wavelet decomposition.
-    The transform is translation-invariant (unlike decimated transform).
+    The transform is translation-invariant (unlike decimated transform). A NaN or inf
+    voxel spreads over the non-zero taps of the kernel only, not over its whole span.
 
     Supported wavelets:
         - "haar" (UOUE): Haar wavelet
@@ -127,6 +129,7 @@ def wavelet_transform(
         )
         ```
     """
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     problem = _wavelet_problem(level, decomposition)
     if problem:
         raise ValueError(problem)
@@ -564,8 +567,8 @@ def _simoncelli_pad_width(level: int) -> int:
 
     The Simoncelli transfer function (IBSI 2 Eq. 27) is smooth and band-limited to
     [max_freq/4, max_freq] with max_freq = 1 / 2**(level - 1) (Nyquist = 1), so its
-    real-space kernel decays quickly, and — because the frequency band is a fixed
-    *fraction* of Nyquist — the kernel's voxel extent depends only on `level`, not
+    real-space kernel decays quickly, and, because the frequency band is a fixed
+    *fraction* of Nyquist, the kernel's voxel extent depends only on `level`, not
     on the image shape. An 8-voxel radius holds 99.94 % of the L2 energy of the
     level-1 kernel, but the L2 energy is the wrong measure of the error: the small tail
     of the kernel (up to 1.1e-3 of its peak) adds up over a large uniform object.
@@ -629,6 +632,7 @@ def simoncelli_wavelet(
         response = simoncelli_wavelet(image, level=1)
         ```
     """
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     problem = _wavelet_problem(level)
     if problem:
         raise ValueError(problem)

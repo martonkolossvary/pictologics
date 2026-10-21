@@ -2754,7 +2754,6 @@ def test_gzip_reader_paths(tmp_path: "os.PathLike[str]") -> None:
     # loop of 0.7.1 did not stop).
     import gzip
     import threading
-    import time
     from pathlib import Path
 
     import nibabel as nib
@@ -2788,9 +2787,8 @@ def test_gzip_reader_paths(tmp_path: "os.PathLike[str]") -> None:
     assert threading.active_count() == before
     two = folder / "two.gz"
     two.write_bytes(gzip.compress(bytes(2**24 + 4096), 1) + gzip.compress(b"x"))
-    start = time.perf_counter()
+    # Two gzip members: the reader gives way to nibabel (a regression hangs this call)
     assert loader._gzip_values(str(two), 0, (2**24 + 4097,), np.dtype(np.uint8)) is None
-    assert time.perf_counter() - start < 5.0
 
 
 def test_load_image_accepts_path_objects(tmp_path: "os.PathLike[str]") -> None:

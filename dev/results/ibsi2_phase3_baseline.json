@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-07T23:00:39.187907",
+  "timestamp": "2026-10-21T17:44:44.351682",
   "agreement_rule": "team's range for each modality, filter and feature (max - min over the patients)",
   "scans_processed": 153,
   "scans_failed": 0,
@@ -7,22 +7,22 @@
   "pipeline_errors": 0,
   "patients": 51,
   "teams_compared": 9,
-  "total_time_seconds": 430.07569116796367,
-  "wall_time_seconds": 57.73801245901268,
+  "total_time_seconds": 133.51565196600114,
+  "wall_time_seconds": 18.84282829199998,
   "memory_metric": "largest worker peak resident memory",
-  "memory_mb": 2595.203125,
+  "memory_mb": 1750.296875,
   "team_results": {
     "CERR": {
       "total": 16524,
       "matches_1pct": 14775,
-      "matches_5pct": 16108,
+      "matches_5pct": 16109,
       "matches_10pct": 16329,
       "mismatch_count": 195
     },
     "Cardiff University": {
       "total": 24786,
-      "matches_1pct": 23089,
-      "matches_5pct": 24303,
+      "matches_1pct": 23091,
+      "matches_5pct": 24304,
       "matches_10pct": 24505,
       "mismatch_count": 281
     },
@@ -57,20 +57,20 @@
     "USZ": {
       "total": 16524,
       "matches_1pct": 16395,
-      "matches_5pct": 16490,
-      "matches_10pct": 16511,
-      "mismatch_count": 13
+      "matches_5pct": 16491,
+      "matches_10pct": 16512,
+      "mismatch_count": 12
     },
     "UdeS": {
       "total": 24786,
-      "matches_1pct": 20184,
+      "matches_1pct": 20183,
       "matches_5pct": 20324,
       "matches_10pct": 20361,
       "mismatch_count": 4425
     },
     "Veneto Institute of Oncology": {
       "total": 24786,
-      "matches_1pct": 19621,
+      "matches_1pct": 19622,
       "matches_5pct": 21277,
       "matches_10pct": 22285,
       "mismatch_count": 2501

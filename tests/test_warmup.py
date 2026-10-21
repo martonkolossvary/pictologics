@@ -195,16 +195,20 @@ import nibabel
 for kind in (np.int32, np.uint8):  # stored-type masks of 2^20 voxels (the tiled row-order copy)
     nibabel.save(nibabel.Nifti1Image(roi.astype(kind)[:, :, :64], np.eye(4), dtype=kind), "m.nii")
     pictologics.load_image("m.nii", stored_type=True)
-for kind in (np.float64, np.float32, np.uint8, np.int32):  # the gzip writer; indexed, slab, one pass
+for kind in (np.float64, np.float32, np.uint8, np.int32):  # the gzip writer; indexed, one pass
     pictologics.save_image(Image(values.astype(kind), image.spacing, image.origin), "x.nii.gz")
     pictologics.load_image("x.nii.gz")
     pictologics.load_image("x.nii.gz", stored_type=True)
-nibabel.save(nibabel.Nifti1Image(values.astype(np.int16), np.eye(4)), "s.nii.gz")  # the slab reader
+nibabel.save(nibabel.Nifti1Image(values.astype(np.int16), np.eye(4)), "s.nii.gz")  # nibabel's file: one pass
 pictologics.load_image("s.nii.gz")
-levels =np.asarray(discretise_image(values, "FBN", roi_mask=mask.array, n_bins=16))
+levels = np.asarray(discretise_image(values, "FBN", roi_mask=mask.array, n_bins=16))
 for kind in (np.uint8, np.int64, np.float32):  # direct calls with other types
     texture.calculate_all_texture_features(levels.astype(kind), mask.array, 16)
     intensity.calculate_intensity_histogram_features(levels[roi].astype(kind))
+for kind in (np.uint8, np.int64):  # column-order levels: a row-order copy (see _level_form)
+    texture.calculate_all_texture_features(np.asfortranarray(levels.astype(kind)), np.asfortranarray(mask.array), 16)
+    texture.calculate_zone_features(np.asfortranarray(levels.astype(kind)), mask.array, np.zeros(shape, np.int32), 16)
+intensity.calculate_intensity_features(np.random.default_rng(3).normal(40.0, 20.0, 1_500_000))  # the threaded select: a column-order table
 big = np.tile(levels[roi], 5)  # from 2^19 values on, the level count runs in threads
 for kind in (np.int32, np.int64, np.float64):
     intensity.calculate_intensity_histogram_features(big.astype(kind), n_bins=16)
@@ -244,7 +248,7 @@ from pictologics.filters import laplacian_of_gaussian
 laplacian_of_gaussian(values, 2.0)  # padded 144x144x112: the FFT slabs, a float32 output
 laplacian_of_gaussian(values, 2.0, source_mask=roi)  # the masked FFT: a float64 output
 from pictologics.filters import wavelet_transform
-wavelet_transform(values, "db2", 2, "LHL", rotation_invariant=True)  # the tree, slabs, in place
+wavelet_transform(values, "db2", 2, "LHL", rotation_invariant=True)  # the 24 rotations, slabs, in place
 wavelet_transform(values.astype(np.float32), "coif1", 1, "HHH", "mirror", rotation_invariant=True, pooling="max")
 wavelet_transform(values[:20, :18, :16], "haar", 1, "LHL")  # the serial path
 column = Image(np.asfortranarray(values.astype(np.float32)), image.spacing, image.origin)  # one pass
@@ -252,6 +256,14 @@ resample_run = RadiomicsPipeline(load_standard=False)
 resample_run.add_config("im1", [{"step": "resample", "params": {"new_spacing": (1.5, 1.5, 1.5)}},
                                 {"step": "extract_features", "params": {"families": ["intensity"]}}])
 resample_run.run(column, mask, config_names=["im1"])
+read_only = values.copy()  # read-only in-memory arrays: one copy at the start of a run
+read_only.setflags(write=False)
+fixed = roi.astype(np.uint8)
+fixed.setflags(write=False)
+resample_run.add_config("cubic", [{"step": "resample", "params": {"new_spacing": (1.5, 1.5, 1.5), "interpolation": "cubic"}},
+                                  {"step": "extract_features", "params": {"families": ["intensity"]}}])
+resample_run.run(Image(read_only, image.spacing, image.origin), Image(fixed, image.spacing, image.origin), config_names=["im1", "cubic"])
+pipeline.run(Image(read_only, image.spacing, image.origin), Image(fixed, image.spacing, image.origin), config_names=["fbs"])
 ct = Image(values.astype(np.int16), image.spacing, image.origin)
 intensity.calculate_local_intensity_features(ct, mask)
 morphology.calculate_morphology_features(mask, ct)
@@ -362,6 +374,7 @@ for n in (3, 5, 8, 11, 16, 23, 31, 40, 52, 64):
         (intensity._multiply_spectrum_numba, lambda: (spectrum.copy(), grid, *folds), (0,)),
         (intensity._weighted_power_numba, lambda: (spectrum, grid, *folds, box.shape[2], np.empty(fold_shape[0])), (5,)),
         (intensity._cross_power_numba, lambda: (spectrum, spectrum * (0.5 - 0.25j), spectrum.conj(), box.shape[2], np.empty(fold_shape[0])), (4,)),
+        (intensity._all_whole_numba, lambda: (np.round(vals).ravel(), np.zeros(3, np.bool_)), (1,)),
     ]
     for kernel, args, outs in cases:
         module = next(m for m in (morphology, preprocessing, intensity) if hasattr(m, kernel.__name__))

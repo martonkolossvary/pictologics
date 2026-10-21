@@ -235,17 +235,39 @@ def _physical_memory() -> int:
 
 
 def _memory_limit() -> int:
-    """The memory limit of a Linux container in bytes (cgroup v2, then v1), or 0 for none."""
-    words = _words("/sys/fs/cgroup/memory.max") or _words(
-        "/sys/fs/cgroup/memory/memory.limit_in_bytes"
-    )
-    return int(words[0]) if words and words[0].isdigit() else 0
+    """The memory limit of this process in a Linux cgroup in bytes, or 0 for none: the
+    smallest limit of its cgroup and of every group above it (cgroup v2 memory.max, v1
+    memory.limit_in_bytes). /proc/self/cgroup names the group, for example the group of
+    a Slurm job; a container with its own cgroup namespace sees its limit at the root."""
+    limits = []
+    for line in _words("/proc/self/cgroup"):
+        if line.count(":") < 2:
+            continue
+        hierarchy, controllers, path = line.split(":", 2)
+        if hierarchy == "0" and not controllers:
+            base, name = "/sys/fs/cgroup", "memory.max"
+        elif "memory" in controllers.split(","):
+            base, name = "/sys/fs/cgroup/memory", "memory.limit_in_bytes"
+        else:
+            continue
+        parts = [part for part in path.split("/") if part]
+        for depth in range(len(parts), -1, -1):
+            words = _words("/".join([base, *parts[:depth], name]))
+            if words and words[0].isdigit():
+                limits.append(int(words[0]))
+    return min(limits) if limits else 0
+
+
+def _memory_share() -> int:
+    """The bytes of memory of this process: the memory of this computer (see
+    _physical_memory), shared by the worker processes that run at the same time."""
+    return _physical_memory() // _memory_shares
 
 
 def _memory_budget() -> int:
-    """The bytes that one large step may use: half of the memory of this computer (see
-    _physical_memory), shared by the worker processes that run at the same time."""
-    return _physical_memory() // 2 // _memory_shares
+    """The bytes that one large step may use: half of the memory of this process (see
+    _memory_share)."""
+    return _memory_share() // 2
 
 
 def _share_memory(processes: int) -> None:

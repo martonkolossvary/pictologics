@@ -19,6 +19,7 @@ from .base import (
     _PAD_CODES,
     _PAD_MODES,
     BoundaryCondition,
+    _bool_mask,
     _copy_pass,
     _float32_cut,
     _padding_value_problem,
@@ -159,6 +160,7 @@ def gabor_filter(
           with a per-axis radius, giving a rectangular kernel that is
           physically correct rather than warning and guessing.
     """
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     # Handle spacing. The mm -> voxel/physical conversion is deferred to
     # _apply_gabor_to_plane, which is per-plane: each plane's in-plane axes
     # (and therefore in-plane spacings) depend on plane_axis.
@@ -267,8 +269,9 @@ def gabor_filter(
         _slab_ufunc(np.true_divide, (result, 3.0), result)
         return _float32_cut(result, None)
     else:
-        # Apply only to axial plane (axis 2 = k3 slices)
-        return _plane(2)
+        # Apply only to axial plane (axis 2 = k3 slices): the result in row order, as every
+        # other filter returns it
+        return np.ascontiguousarray(_plane(2))
 
 
 @intrinsic  # type: ignore
@@ -660,9 +663,8 @@ def _apply_gabor_to_plane(
             list(executor.map(lambda s: run(s, min(s + step, n_slices)), starts))
     else:
         run(0, n_slices)
-    # The slices were filtered along the plane axis: the result in row order, as every
-    # other filter returns it (no copy when the plane axis is 0)
-    return np.ascontiguousarray(np.moveaxis(out, 0, plane_axis))
+    # The moved view; gabor_filter copies the axial result into row order
+    return np.moveaxis(out, 0, plane_axis)
 
 
 def _create_gabor_kernel_2d(

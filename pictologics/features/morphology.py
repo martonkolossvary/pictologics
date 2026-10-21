@@ -383,15 +383,12 @@ def _mark_plane_hull(
 
 
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
-def _plane_hull_candidates_numba(
-    first: npt.NDArray[np.int64], grid: npt.NDArray[np.int32]
-) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int32]]:
-    """The indices of `first` (candidates, with their grid coordinates `grid`) that are
-    vertices of the 2-D convex hull of the candidates of each of their three axis planes,
-    and their grid coordinates.
+def _plane_hull_candidates_numba(grid: npt.NDArray[np.int32]) -> npt.NDArray[np.int32]:
+    """The grid coordinates of the candidates (rows of `grid`) that are vertices of the 2-D
+    convex hull of the candidates of each of their three axis planes.
     A 3-D hull vertex is extreme in every plane through it, so no hull vertex is lost. Each
     axis orders the candidates by plane, row and column with three counting sorts."""
-    m = first.shape[0]  # a mesh has at least one line end
+    m = grid.shape[0]  # a non-empty ROI gives at least one candidate
     marks = np.zeros((3, m), dtype=np.bool_)
     coords = np.empty((3, m), dtype=np.int32)
     size = np.empty(3, dtype=np.int64)
@@ -422,15 +419,13 @@ def _plane_hull_candidates_numba(
                 n += 1
             _mark_plane_hull(us[:n], vs[:n], ids[:n], marks[a], stack)
             start += n
-    keep = np.empty(m, dtype=np.int64)
     kept = np.empty(m, dtype=np.int64)
     k = 0
     for t in range(m):
         if marks[0, t] and marks[1, t] and marks[2, t]:
-            keep[k] = first[t]
             kept[k] = t
             k += 1
-    return keep[:k], grid[kept[:k]]
+    return grid[kept[:k]]
 
 
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
@@ -1178,7 +1173,6 @@ def _mvee_khachiyan_numba(
     # Pre-allocate work arrays
     tmp_vec = np.zeros(d1, dtype=np.float64)
 
-    n4 = N - N % 4
     # Wolfe-Atwood iteration (Todd and Yildirim 2007): a step toward the point with the
     # largest Mahalanobis value, or an away step from the weighted point with the smallest
     # one. Stops when every point lies within (1 + eps) d1 and every weighted point above
@@ -1192,53 +1186,17 @@ def _mvee_khachiyan_numba(
         jm = -1
 
         # Bottleneck loop: O(N * d^2). The quadratic form q_k^T * invX * q_k is the dot
-        # product of the kept products of q_k with the weights of invX. Four points at a
-        # time, each with its own sum (the same additions per point, so the same value):
-        # the four sums run side by side.
+        # product of the kept products of q_k with the weights of invX.
         m = 0
         for r in range(d1):
             for c_idx in range(r, d1):
                 weights[m] = invX[r, r] if r == c_idx else invX[r, c_idx] + invX[c_idx, r]
                 m += 1
-        for k in range(0, n4, 4):
-            v0 = 0.0
-            v1 = 0.0
-            v2 = 0.0
-            v3 = 0.0
-            for m in range(n_prod):
-                wm = weights[m]
-                v0 += P[k, m] * wm
-                v1 += P[k + 1, m] * wm
-                v2 += P[k + 2, m] * wm
-                v3 += P[k + 3, m] * wm
-            if v0 > max_val:
-                max_val = v0
-                j = k
-            if v1 > max_val:
-                max_val = v1
-                j = k + 1
-            if v2 > max_val:
-                max_val = v2
-                j = k + 2
-            if v3 > max_val:
-                max_val = v3
-                j = k + 3
-            if u[k] > 0.0 and v0 < min_val:
-                min_val = v0
-                jm = k
-            if u[k + 1] > 0.0 and v1 < min_val:
-                min_val = v1
-                jm = k + 1
-            if u[k + 2] > 0.0 and v2 < min_val:
-                min_val = v2
-                jm = k + 2
-            if u[k + 3] > 0.0 and v3 < min_val:
-                min_val = v3
-                jm = k + 3
-        for k in range(n4, N):
+        for k in range(N):
             val = 0.0
             for m in range(n_prod):
                 val += P[k, m] * weights[m]
+
             if val > max_val:
                 max_val = val
                 j = k
@@ -1810,9 +1768,9 @@ def _hull_lattice_numba(
     2-D hulls of their planes, then the mesh vertices next to them, kept the same way."""
     cand = _voxel_hull_candidates_numba(fk, lk, fj, lj, fi, li)
     if cand.shape[0] > _VOXEL_FILTER_MIN:  # a small set goes to the mesh step as it is
-        _, cand = _plane_hull_candidates_numba(np.arange(cand.shape[0]), cand)
+        cand = _plane_hull_candidates_numba(cand)
     mesh_cand = _mesh_hull_candidates_numba(padded, cand)
-    _, kept2 = _plane_hull_candidates_numba(np.arange(mesh_cand.shape[0]), mesh_cand)
+    kept2 = _plane_hull_candidates_numba(mesh_cand)
     n = kept2.shape[0]
     lattice = np.empty((n, 3), dtype=np.int64)
     points = np.empty((n, 3), dtype=np.float64)

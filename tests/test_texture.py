@@ -885,8 +885,10 @@ def test_the_local_kernel_counts_equal_loops_over_the_voxels() -> None:
     # each, every row segment through the row passes, through the voxel path, or by its
     # length, and the families alone.
     rng = np.random.default_rng(21)
+    # 13 shapes (13 is coprime with 4 and 3, so each shape sees three (n_bins, alpha) pairs);
+    # the last has a third axis of 20 or more for the row of 16 equal levels of the last case
     shapes = [(1, 1, 1), (1, 7, 9), (6, 1, 8), (5, 7, 1), (2, 3, 4), (1, 1, 9), (7, 6, 5), (9, 8, 6),
-              (2, 3, 24), (1, 1, 40), (4, 5, 17), (3, 20, 20)]  # fmt: skip
+              (2, 3, 24), (1, 1, 40), (4, 5, 17), (3, 20, 20), (2, 4, 21)]  # fmt: skip
     for case in range(3 * len(shapes)):
         shape = shapes[case % len(shapes)]
         n_bins, alpha = (2, 5, 12, 70)[case % 4], case % 3
@@ -1074,6 +1076,15 @@ def test_direct_calls_read_other_level_types_as_int64_or_float64() -> None:
     for kind in (np.int32, np.int64, np.float64):
         levels = np.ones(3, dtype=kind)
         assert texture_module._level_form(levels) is levels
+        # A column-order array becomes a row-order copy (one kernel form); a strided crop
+        # stays as it is (its form is compiled too)
+        column = np.asfortranarray(np.arange(24, dtype=kind).reshape(2, 3, 4))
+        form = texture_module._level_form(column)
+        assert form.flags.c_contiguous and np.array_equal(form, column)
+        crop = np.arange(60, dtype=kind).reshape(3, 4, 5)[:, 1:3, 1:4]
+        assert texture_module._level_form(crop) is crop
+    column = np.asfortranarray(np.ones((2, 3, 4), dtype=np.uint8))
+    assert texture_module._level_form(column).flags.c_contiguous
     rng = np.random.default_rng(11)
     levels = rng.integers(1, 7, (9, 8, 7)).astype(np.int32)
     roi = (rng.random(levels.shape) > 0.2).astype(np.uint8)
@@ -1217,8 +1228,12 @@ def test_gldzm_needs_the_mask_inside_the_distance_mask() -> None:
     mask = np.ones((5, 5, 5), dtype=np.uint8)
     distance = np.ones((5, 5, 5), dtype=np.uint8)
     distance[0, 0, 0] = 0
-    with pytest.raises(ValueError, match="^1 mask voxels lie outside distance_mask"):
+    with pytest.raises(ValueError, match="^1 mask voxel lies outside distance_mask"):
         texture_module.calculate_gldzm_features(data, mask, 3, distance_mask=distance)
+    distance[0, 0, 1] = 0
+    with pytest.raises(ValueError, match="^2 mask voxels lie outside distance_mask"):
+        texture_module.calculate_gldzm_features(data, mask, 3, distance_mask=distance)
+    distance[0, 0, 1] = 1
     inner = np.zeros((5, 5, 5), dtype=np.uint8)
     inner[1:4, 1:4, 1:4] = 1
     data[1, 1, 1] = 3

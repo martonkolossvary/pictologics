@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-10-07T22:59:39.583566",
+  "timestamp": "2026-10-21T17:44:23.758734",
   "total": 9,
   "passed": 9,
   "failed": 0,
   "skipped": 0,
   "provenance": {
-    "pictologics_version": "0.7.0",
-    "reference_file": "dev/IBSI2/references/feature_values/reference_values.csv",
+    "pictologics_version": "0.8.0",
+    "reference_file": "IBSI2/references/feature_values/reference_values.csv",
     "reference_source": "https://github.com/theibsi/ibsi_2_reference_data",
     "reference_file_sha256": "6d1a4e7b297e"
   },
@@ -17,7 +17,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 1074.5,
+      "time_ms": 63.1,
       "notes": "Baseline (no filter)"
     },
     "2.B": {
@@ -26,7 +26,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 1105.4,
+      "time_ms": 121.4,
       "notes": "3D, support=5"
     },
     "3.B": {
@@ -35,7 +35,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 1113.7,
+      "time_ms": 141.4,
       "notes": "\u03c3=1.5mm, truncate=4\u03c3"
     },
     "4.B": {
@@ -44,7 +44,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 1113.0,
+      "time_ms": 132.9,
       "notes": "L5E5E5, rot-inv max, energy \u03b4=7"
     },
     "5.B": {
@@ -53,7 +53,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 1098.7,
+      "time_ms": 201.5,
       "notes": "\u03c3=5mm, \u03bb=2mm, \u03b3=1.5, rot-inv avg"
     },
     "6.B": {
@@ -62,7 +62,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 1071.5,
+      "time_ms": 137.8,
       "notes": "LLH level 1, rot-inv avg"
     },
     "7.B": {
@@ -71,7 +71,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 1080.3,
+      "time_ms": 129.3,
       "notes": "HHH level 2, rot-inv avg"
     },
     "8.B": {
@@ -80,7 +80,7 @@
       "passed": 17,
       "failed": 0,
       "total": 17,
-      "time_ms": 1078.6,
+      "time_ms": 168.0,
       "notes": "B map level 1"
     },
     "9.B": {
@@ -89,11 +89,11 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 1051.8,
+      "time_ms": 115.3,
       "notes": "B map level 2"
     }
   },
-  "total_time_seconds": 9.7875,
+  "total_time_seconds": 1.2107,
   "environment": {
     "system": "Darwin",
     "machine": "arm64",

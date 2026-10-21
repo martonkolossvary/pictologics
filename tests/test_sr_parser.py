@@ -1106,6 +1106,7 @@ class TestSRDocumentFromFolders:
             assert _sr_workers(8_000_000, None) == 5
             assert _sr_workers(30_000_000, None) == 8
             assert _sr_workers(1_000, 3) == 3
+            assert _sr_workers(1_000, 0) == _sr_workers(1_000, -1) == 1  # minimum 1
 
 
 class TestProcessSRFileWorker:
@@ -1230,3 +1231,30 @@ def test_the_csv_exports_have_the_bytes_of_pandas(tmp_path: Path) -> None:
     batch.get_combined_measurements_df().to_csv(tmp_path / "pandas_all.csv", index=False)
     written = batch.export_combined_csv(tmp_path / "csv_all.csv")
     assert written.read_bytes() == (tmp_path / "pandas_all.csv").read_bytes()
+
+
+def test_the_sr_pool_gives_the_results_of_one_process(tmp_path: Path) -> None:
+    """Three copies of the stored TID 1500 report give the same measurement tables and the
+    same processing log (but the times) in one process and in a pool of two workers
+    (SR_POOL_BYTES 0, so the pool runs)."""
+    with np.load(Path(__file__).parent / "data" / "highdicom_seg_sr.npz") as stored:
+        report = stored["tid1500_sr"].tobytes()
+    for i in range(3):
+        (tmp_path / f"sr_{i}.dcm").write_bytes(report)
+    batches = {}
+    with patch("pictologics.utilities.sr_parser.SR_POOL_BYTES", 0):
+        for workers in (1, 2):
+            batches[workers] = SRDocument.from_folders(
+                [tmp_path], show_progress=False, num_workers=workers
+            )
+    one, two = batches[1], batches[2]
+    assert len(one.documents) == len(two.documents) == 3
+    for first, second in zip(one.documents, two.documents, strict=True):
+        assert first.get_measurements_df().equals(second.get_measurements_df())
+    assert one.get_combined_measurements_df().equals(two.get_combined_measurements_df())
+
+    def summary(batch: Any) -> list[dict[str, Any]]:
+        return [{k: v for k, v in entry.items() if k != "processing_time_ms"} for entry in batch.processing_log]  # fmt: skip
+
+    assert summary(one) == summary(two)
+    assert [entry["status"] for entry in two.processing_log] == ["success"] * 3

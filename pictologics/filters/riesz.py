@@ -13,6 +13,7 @@ from .base import (
     _TRANSFER_CACHE_SHAPES,
     BoundaryCondition,
     _apply_with_boundary_padding,
+    _bool_mask,
     _float32_cut,
     _kept_rows,
     _padding_value_problem,
@@ -167,6 +168,7 @@ def riesz_transform(
         - Second-order Riesz components form the image Hessian
         - All-pass: doesn't amplify high frequencies like regular derivatives
     """
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     boundary = resolve_boundary(boundary)
     problem = _padding_value_problem(boundary, padding_value)
     if problem:
@@ -326,6 +328,7 @@ def riesz_log(
         )
         ```
     """
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     from .log import laplacian_of_gaussian
 
     boundary = resolve_boundary(boundary)
@@ -447,6 +450,7 @@ def riesz_simoncelli(
         )
         ```
     """
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     from .wavelets import _simoncelli_pad_width, _simoncelli_transfer, simoncelli_wavelet
 
     boundary = resolve_boundary(boundary)

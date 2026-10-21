@@ -840,8 +840,8 @@ def _split_series_instances(
 
 
 # DICOM files per worker process of a scan. Each worker imports the package first (about
-# 0.6 s), and a header read takes about 0.25 ms: a 200-file series took 3.06 s with the
-# default 13 workers and 0.06 s in this process. Measured break-even: 4 workers win from
+# 0.6 s), and a header read takes about 0.25 ms: a 200-file series took 3.06 s with 13
+# workers (the default of 0.7.1) and 0.06 s in this process. Measured break-even: 4 workers win from
 # about 4,000 files, 8 workers from about 6,000.
 FILES_PER_WORKER = 1_000
 # With num_workers None, a scan of fewer files runs in this process, and a larger one starts

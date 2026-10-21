@@ -15,7 +15,7 @@ instances = db.get_instances_df()  # one row for each file
 print(series.head())
 ```
 
-- **Workers**: each worker process imports Pictologics before it reads a file, so workers pay off only for large scans. With `num_workers=None`, `from_folders()` reads a scan of fewer than 6,000 DICOM files (`POOL_MIN_FILES`) in the calling process, which is faster, and starts at most 8 workers (`MAX_WORKERS`) for a larger scan. Every scan starts at most one worker per 1,000 DICOM files (`FILES_PER_WORKER`). `show_progress=False` turns the progress bar off.
+- **Workers**: each worker process imports Pictologics before it reads a file, so workers pay off only for large scans. With `num_workers=None`, `from_folders()` reads a scan of fewer than 6,000 DICOM files (`POOL_MIN_FILES`) in the calling process, which is faster. A larger scan starts at most 8 workers (`MAX_WORKERS`). Every scan starts at most one worker per 1,000 DICOM files (`FILES_PER_WORKER`). `show_progress=False` turns the progress bar off.
 - **Private tags**: `extract_private_tags=True` (default) keeps the vendor tags. A binary private value (for example a 60 KB CSA header) or a private sequence is stored as its size, such as `<OB, 60000 bytes>`.
 - **Skipped files**: DICOMDIR files are not patient data, so they are skipped.
 - **Completeness**: the series table tells whether a series is complete (`IsComplete`), whether its slices have gaps (`HasGaps`), and its slice spacing (`SpacingMM`).
@@ -163,7 +163,7 @@ batch.export_log("sr_exports/processing_log.csv")
 ```
 
 - `from_folders()` writes only the file of each report. `export_combined_csv()` and `export_log()` write the combined table and the log.
-- Each worker imports Pictologics before it reads a file (about 1 s), so workers pay off only for large batches. With `num_workers=None`, `from_folders()` reads SR files of less than 8 MB in total (`SR_POOL_BYTES`) in the calling process, and a larger batch starts one worker per 1.5 MB (`SR_BYTES_PER_WORKER`), at most 8. A `num_workers` that you give is used as it is. To find the SR files, it reads each file only up to its SOP Class UID.
+- Each worker imports Pictologics before it reads a file (about 1 s), so workers pay off only for large batches. With `num_workers=None`, `from_folders()` reads SR files of less than 8 MB in total (`SR_POOL_BYTES`) in the calling process. A larger batch starts one worker per 1.5 MB (`SR_BYTES_PER_WORKER`), at most 8. A `num_workers` that you give is used as it is. To find the SR files, it reads each file only up to its SOP Class UID.
 
 The processing log has one row for each file:
 

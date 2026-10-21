@@ -11,6 +11,7 @@ from numpy import typing as npt
 from .base import (
     _SLAB_MIN_SIZE,
     BoundaryCondition,
+    _bool_mask,
     _constant_padded,
     _convolve_axes,
     _float32_cut,
@@ -282,6 +283,7 @@ def laws_filter(
         - Uses separable 1D convolutions for ~8x speedup over full 3D
     """
 
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     # The passes run in float32. The normalized convolution of a source mask (without
     # rotation invariance) keeps the image type: it divides two filtered sums.
     masked_sums = source_mask is not None and not rotation_invariant

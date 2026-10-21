@@ -1037,21 +1037,23 @@ def test_the_padded_roi_is_one_copy_with_a_zero_border() -> None:
 
 def test_the_mvee_stops_on_the_mahalanobis_gap() -> None:
     # The away steps drop a point inside the ellipsoid: the 8 corners of a cube and its
-    # centre give the sphere through the corners (A = I / 3, c = 0), and every corner
-    # lies within 1 + eps. The volume of a random set is that of a converged fit within
-    # about eps. One iteration (max_iter 1) still gives an ellipsoid.
+    # centre give the sphere through the corners (A = I / 3, c = 0). The stop rule (the
+    # default eps of 3e-3) keeps every point within 1 + 4/3 eps and A within 4/3 eps of
+    # I / 3. The volume of a random set is that of a converged fit within 2 eps. One
+    # iteration (max_iter 1) still gives an ellipsoid.
+    eps = 3e-3
     corners = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)], float)
     points = np.vstack([corners, [[0.0, 0.0, 0.0]]])
     A, c = _mvee_khachiyan_numba(points)
     assert A is not None and c is not None
-    np.testing.assert_allclose(A, np.eye(3) / 3.0, rtol=0.0, atol=2e-3)
+    np.testing.assert_allclose(A, np.eye(3) / 3.0, rtol=0.0, atol=4.0 / 3.0 * eps)
     np.testing.assert_allclose(c, 0.0, atol=1e-5)
     d = corners - c
-    assert np.all(np.einsum("ki,ij,kj->k", d, A, d) <= 1.0 + 2e-3)
+    assert np.all(np.einsum("ki,ij,kj->k", d, A, d) <= 1.0 + 4.0 / 3.0 * eps)
     blob = np.random.default_rng(54).normal(size=(20, 3)) * np.array([1.0, 2.0, 0.5])
     A_fit, _ = _mvee_khachiyan_numba(blob)
     A_best, _ = _mvee_khachiyan_numba(blob, eps=1e-8)
     assert A_fit is not None and A_best is not None
     volume_fit, volume_best = (np.linalg.det(m) ** -0.5 for m in (A_fit, A_best))
-    assert abs(volume_fit / volume_best - 1.0) < 2e-3
+    assert abs(volume_fit / volume_best - 1.0) < 2.0 * eps
     assert _mvee_khachiyan_numba(blob, max_iter=1)[0] is not None

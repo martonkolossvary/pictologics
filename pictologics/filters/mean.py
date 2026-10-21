@@ -8,6 +8,7 @@ from numpy import typing as npt
 
 from .base import (
     BoundaryCondition,
+    _bool_mask,
     _constant_padded,
     _normalized_uniform_filter,
     _padding_value_problem,
@@ -93,6 +94,7 @@ def mean_filter(
     Note:
         Support M is defined in voxel units as per IBSI specification.
     """
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     # Validate support
     if support < 1 or support % 2 == 0:
         raise ValueError(f"Support must be an odd positive integer, got {support}")

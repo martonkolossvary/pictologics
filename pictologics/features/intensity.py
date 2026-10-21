@@ -32,6 +32,7 @@ import scipy.fft
 from numba import get_num_threads, jit, prange
 from numpy import typing as npt
 
+from .. import threads
 from ..threads import _memory_budget
 from ._utils import PRANGE_ONLY, compute_nonzero_bbox, serial_twin, sized
 
@@ -1198,6 +1199,40 @@ def _level_counts(
     return cast(tuple[npt.NDArray[np.int64], Any, Any, bool], _level_counts_numba(data, n_bins))
 
 
+# From this many values on, the whole-number check runs in threads (measured on 10 threads:
+# 1 M values 0.12 ms on one thread and 0.14 ms in threads; 2 M values 0.25 ms and 0.12 ms)
+_PARALLEL_WHOLE_MIN = 1_500_000
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _all_whole_numba(values: npt.NDArray[np.float64], wholes: npt.NDArray[np.bool_]) -> None:
+    """Whether every value of each of wholes.shape[0] parts of `values` is a finite whole
+    number, in threads: part c into wholes[c]. A NaN or an infinite value minus its floor
+    is NaN, so it is not whole. The loop reads a slice of the part (this form vectorizes;
+    a loop over the bounds of the part runs 3 times slower)."""
+    n = values.size
+    parts = wholes.shape[0]
+    for c in prange(parts):
+        part = values[c * n // parts : (c + 1) * n // parts]
+        whole = True
+        for i in range(part.shape[0]):
+            value = part[i]
+            whole &= value - np.floor(value) == 0.0
+        wholes[c] = whole
+
+
+_all_whole_numba_serial = serial_twin(_all_whole_numba)
+
+
+def _all_whole(values: npt.NDArray[np.float64]) -> bool:
+    """Whether every value of the C-order float64 `values` is a finite whole number, in one
+    pass (see _all_whole_numba): in threads from _PARALLEL_WHOLE_MIN values on."""
+    check = sized(_all_whole_numba, _all_whole_numba_serial, values.size, _PARALLEL_WHOLE_MIN)
+    wholes = np.empty(get_num_threads() if check is _all_whole_numba else 1, dtype=np.bool_)
+    check(values, wholes)
+    return bool(wholes.all())
+
+
 @jit(nopython=True, cache=True)  # type: ignore
 def _pairwise_sum_numba(terms: npt.NDArray[np.float64], start: int, stop: int) -> float:
     """The sum of terms[start:stop] in the order of np.sum (numpy's pairwise summation: a
@@ -1651,17 +1686,19 @@ def calculate_intensity_histogram_features(
         _counted_statistics_numba(counts, hist_origin, out)
         return dict(zip(_HISTOGRAM_FEATURES, out.tolist(), strict=True))
 
+    # One float64 copy of another type (float32, float16, uint64, bool): the mean, the
+    # variance, the moments, the percentiles and the deviations then sum in float64. The
+    # copy keeps every NaN, infinite and non-whole value.
+    if disc.dtype != np.float64:
+        disc = disc.astype(np.float64)
     # Discretised values are whole numbers (a float array holds them too); a value that is
-    # not whole, NaN or infinite is a caller error (a pipeline passes int32)
-    if not (np.all(np.isfinite(disc)) and np.array_equal(disc, np.rint(disc))):
+    # not whole, NaN or infinite is a caller error (a pipeline passes int32). The check
+    # reads the values once.
+    if not _all_whole(np.ascontiguousarray(disc)):
         raise ValueError(
             "discretised_values must be finite whole numbers (bin numbers); a value "
             "that is not whole, NaN or infinite was given."
         )
-    # One float64 copy of another type (float32, float16, uint64, bool): the mean, the
-    # variance, the moments, the percentiles and the deviations then sum in float64
-    if disc.dtype != np.float64:
-        disc = disc.astype(np.float64)
     features: dict[str, float] = {}
     min_val_i = int(np.min(disc))
     max_val_i = int(np.max(disc))
@@ -2168,7 +2205,9 @@ _SLAB_BYTES_PER_POINT = 64
 # threads, 19,000 on 4 (measured: 32,768 points 0.45 ms on 1 worker, 0.54 ms on 10;
 # 64,000 points 0.81 ms on 1, 0.65 ms on 10). The slab sums with s slabs make 2 s (s + 1)
 # FFTs of the slab grid, each 0.27 of the time per point of the FFT sums (measured on 10
-# threads: 0.78 to 0.83 ns per point and FFT, against 3.2 to 3.4 ns).
+# threads: 0.78 to 0.83 ns per point and FFT, against 3.2 to 3.4 ns). The choice of the
+# method uses the thread count of the import, so it does not change with set_num_threads,
+# with _make_room or with the share of a run_batch worker.
 _PAIR_SECONDS = 1.05e-9
 _PAIR_START_SECONDS = (45e-6, 2.5e-6)
 _FFT_SECONDS_PER_POINT = 12.5e-9
@@ -2186,18 +2225,18 @@ def _fft_seconds(points: int, units: float, workers: int) -> float:
     return start + units * points * _FFT_SECONDS_PER_POINT * share
 
 
-def _fft_workers(points: int) -> int:
-    """The FFT workers of the spatial sums on a grid of `points` points: numba's thread
-    count, or one when the model gives one worker less time (a small grid)."""
-    threads = int(get_num_threads())
+def _fft_workers(points: int, threads: int) -> int:
+    """The FFT workers of the spatial sums on a grid of `points` points with `threads`
+    threads: all of them, or one when the model gives one worker less time (a small grid)."""
     if _fft_seconds(points, 1.0, threads) < _fft_seconds(points, 1.0, 1):
         return threads
     return 1
 
 
-def _pair_seconds(n: int) -> float:
-    """Model time of the pair loop of `n` ROI voxels (see _PAIR_SECONDS)."""
-    threads = get_num_threads() if n >= _PAIRS_PARALLEL_MIN else 1
+def _pair_seconds(n: int, threads: int) -> float:
+    """Model time of the pair loop of `n` ROI voxels with `threads` threads (see
+    _PAIR_SECONDS)."""
+    threads = threads if n >= _PAIRS_PARALLEL_MIN else 1
     start = _PAIR_START_SECONDS[0] + _PAIR_START_SECONDS[1] * threads if threads > 1 else 0.0
     return start + n * (n - 1) / 2 * _PAIR_SECONDS / threads
 
@@ -2214,11 +2253,12 @@ def _spatial_plan(n: int, box: tuple[int, ...]) -> tuple[str, int, int, tuple[in
     loop runs with a warning that gives its expected time.
     """
     budget = _memory_budget()
-    pairs = _pair_seconds(n)
+    model_threads = threads._default  # the thread count of the import (see _PAIR_SECONDS)
+    pairs = _pair_seconds(n, model_threads)
     fshape = tuple(scipy.fft.next_fast_len(2 * k - 1, real=True) for k in box)
     grid = math.prod(fshape)
     if _FFT_BYTES_PER_POINT * grid <= budget:
-        fft = _fft_seconds(grid, 1.0, _fft_workers(grid))
+        fft = _fft_seconds(grid, 1.0, _fft_workers(grid, model_threads))
         return ("fft", 0, 0, fshape) if fft < pairs else ("pairs", 0, 0, ())
     # Cut the longest axis (it allows the thinnest slabs) into the fewest slabs that fit
     axis = max(range(len(box)), key=box.__getitem__)
@@ -2231,7 +2271,7 @@ def _spatial_plan(n: int, box: tuple[int, ...]) -> tuple[str, int, int, tuple[in
         if _SLAB_BYTES_PER_POINT * points <= budget:
             count = -(-box[axis] // rows)
             units = _SLAB_FFT_UNITS * 2 * count * (count + 1)
-            slabs = _fft_seconds(points, units, _fft_workers(points))
+            slabs = _fft_seconds(points, units, _fft_workers(points, model_threads))
             return ("slabs", axis, rows, sshape) if slabs < pairs else ("pairs", 0, 0, ())
         count += 1
     warnings.warn(
@@ -2386,7 +2426,7 @@ def _spatial_sums_fft(
     forward transforms.
     """
     grid = math.prod(fshape)
-    workers = _fft_workers(grid)
+    workers = _fft_workers(grid, get_num_threads())
     kernel, fold0, fold1 = _kernel_spectrum(fshape, spacing, workers)
     box = tuple(slice(0, n) for n in roi.shape)
     d = diff[roi]
@@ -2444,7 +2484,7 @@ def _spatial_sums_slabs(
     n0, n1, n2 = roi.shape
     count = -(-n0 // rows)
     points = math.prod(sizes)
-    workers = _fft_workers(points)
+    workers = _fft_workers(points, get_num_threads())
     build = sized(
         _inverse_distance_numba, _inverse_distance_numba_serial, points, _SPATIAL_FFT_PARALLEL_MIN
     )
@@ -2525,7 +2565,7 @@ def calculate_spatial_intensity_features(
     These features measure spatial autocorrelation of intensity values within the ROI.
     A time model picks the faster of two methods (see _spatial_plan): a loop over all
     voxel pairs, whose time grows with N² (N = number of ROI voxels), or FFT convolutions,
-    whose time grows with the ROI box. Both give the same values to about 1e-14
+    whose time grows with the ROI box. Both give the same values to about 1e-13
     (relative). The FFT needs about 32 bytes per point of a grid that is twice the ROI box
     along each axis, and it uses at most half of the memory (shared by the workers of
     run_batch). When the grid needs more, the FFT runs on slabs of the box: a few times
@@ -2639,7 +2679,8 @@ _LOCAL_PEAK_RADIUS_MM = 6.2035
 _LOCAL_CROP_MIN_SIZE = 1 << 15
 
 
-# From this many (ROI voxel, sphere offset) pairs on, the local peaks take two stages.
+# From this many (ROI voxel, sphere offset) pairs on, the local peaks take two stages
+# (measured: the two stages win from about 80 voxels and tie at 40).
 _TWO_STAGE_MIN_WORK = 1 << 16
 
 
@@ -2668,9 +2709,10 @@ def _without_unreached(
     """A copy of `data` with its non-finite voxels set to 0 when no sphere of an ROI voxel
     reaches one (the sphere is symmetric, so the test reads `roi` at each voxel plus the
     offsets), else None; None also above _NON_FINITE_MAX such voxels. No exact sphere mean
-    of an ROI voxel reads a changed voxel."""
+    of an ROI voxel reads a changed voxel. None also when every voxel is finite: then the
+    row totals overflow (values near the float64 limit), and the exact kernel gives inf."""
     bad = np.argwhere(~np.isfinite(data))
-    if bad.shape[0] > _NON_FINITE_MAX:
+    if not bad.shape[0] or bad.shape[0] > _NON_FINITE_MAX:
         return None
     shape = np.array(data.shape)
     for voxel in bad:

@@ -70,15 +70,15 @@ A value matches when its difference from the team's value is within 1, 5 or 10 %
 
 | Team | Total Features | Within 1% | Within 5% | Within 10% | Status |
 |:-----|:--------------:|----------:|----------:|-----------:|:------:|
-| CERR | 16524 | 14775 (89.4%) | 16108 (97.5%) | 16329 (98.8%) | ✅ 95%+ |
-| Cardiff University | 24786 | 23089 (93.2%) | 24303 (98.1%) | 24505 (98.9%) | ✅ 95%+ |
+| CERR | 16524 | 14775 (89.4%) | 16109 (97.5%) | 16329 (98.8%) | ✅ 95%+ |
+| Cardiff University | 24786 | 23091 (93.2%) | 24304 (98.1%) | 24505 (98.9%) | ✅ 95%+ |
 | King's College London | 23868 | 22321 (93.5%) | 23516 (98.5%) | 23702 (99.3%) | ✅ 95%+ |
 | NCT Dresden | 24786 | 24329 (98.2%) | 24575 (99.1%) | 24658 (99.5%) | ✅ 95%+ |
 | Qurit SERA | 24751 | 19179 (77.5%) | 20834 (84.2%) | 21590 (87.2%) | 🟢 80-95% |
 | UCSF | 24786 | 10096 (40.7%) | 10099 (40.7%) | 10103 (40.8%) | 🟠 40-60% |
-| USZ | 16524 | 16395 (99.2%) | 16490 (99.8%) | 16511 (99.9%) | ✅ 95%+ |
-| UdeS | 24786 | 20184 (81.4%) | 20324 (82.0%) | 20361 (82.1%) | 🟢 80-95% |
-| Veneto Institute of Oncology | 24786 | 19621 (79.2%) | 21277 (85.8%) | 22285 (89.9%) | 🟢 80-95% |
+| USZ | 16524 | 16395 (99.2%) | 16491 (99.8%) | 16512 (99.9%) | ✅ 95%+ |
+| UdeS | 24786 | 20183 (81.4%) | 20324 (82.0%) | 20361 (82.1%) | 🟢 80-95% |
+| Veneto Institute of Oncology | 24786 | 19622 (79.2%) | 21277 (85.8%) | 22285 (89.9%) | 🟢 80-95% |
 
 ## Agreement by Configuration
 
@@ -134,10 +134,10 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 | STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7690 | 332.3 |
 | STS_049_MRI | stat_qcod | LoG | 1749 | 13.98 | 1735 | 105.6 |
 | STS_021_MRI | stat_cov | LoG | -1097 | 79.72 | 1176 | 122.7 |
-| STS_045_MRI | stat_cov | LoG | -642.1 | -43.01 | 599.1 | 122.7 |
+| STS_045_MRI | stat_cov | LoG | -643.5 | -43.01 | 600.5 | 122.7 |
 | STS_050_CT | stat_qcod | Coif3 LHH L1 | -1.388e+05 | 1799 | 1.406e+05 | 2.958e+04 |
 | STS_045_PET | stat_qcod | LoG | -259.9 | -35.09 | 224.8 | 51.05 |
-| STS_020_PET | stat_cov | LoG | -1492 | -302.7 | 1190 | 308.1 |
+| STS_020_PET | stat_cov | LoG | -1320 | -302.7 | 1017 | 308.1 |
 | STS_050_MRI | stat_cov | LoG | -181.1 | 30.95 | 212.1 | 122.7 |
 | STS_003_CT | stat_median | Coif3 LHH L1 | -0.02632 | 0.001908 | 0.02823 | 0.01912 |
 | STS_012_CT | stat_cov | Coif3 LHH L1 | -3.282e+05 | 6075 | 3.343e+05 | 2.325e+05 |
@@ -151,7 +151,7 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 | STS_049_MRI | stat_qcod | LoG | 1749 | 13.98 | 1735 | 98.73 |
 | STS_048_CT | stat_cov | LoG | -7493 | 196.1 | 7690 | 544.8 |
 | STS_021_MRI | stat_cov | LoG | -1097 | 27.56 | 1124 | 109.7 |
-| STS_045_MRI | stat_cov | LoG | -642.1 | 82.86 | 724.9 | 109.7 |
+| STS_045_MRI | stat_cov | LoG | -643.5 | 82.86 | 726.3 | 109.7 |
 | STS_050_CT | stat_qcod | Coif3 LHH L1 | -1.388e+05 | -1.726e+04 | 1.216e+05 | 2.741e+04 |
 | STS_014_CT | stat_qcod | LoG | -1188 | 46.59 | 1234 | 293.1 |
 | STS_021_CT | stat_qcod | Simon. L1 | 1.344e+05 | -5.431e+04 | 1.887e+05 | 5.585e+04 |
@@ -170,7 +170,7 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 | STS_021_MRI | stat_cov | LoG | -1097 | 27.56 | 1124 | 102.5 |
 | STS_050_CT | stat_qcod | Coif3 LHH L1 | -1.388e+05 | -469.6 | 1.384e+05 | 1.482e+04 |
 | STS_021_CT | stat_qcod | Simon. L1 | 1.344e+05 | -1.688e+04 | 1.513e+05 | 1.982e+04 |
-| STS_045_MRI | stat_cov | LoG | -642.1 | 75.6 | 717.7 | 102.5 |
+| STS_045_MRI | stat_cov | LoG | -643.5 | 75.6 | 719.1 | 102.5 |
 | STS_038_CT | stat_qcod | Simon. L1 | 1.217e+05 | 2942 | 1.187e+05 | 1.982e+04 |
 | STS_014_CT | stat_qcod | LoG | -1188 | 46.72 | 1235 | 218.2 |
 | STS_050_MRI | stat_cov | LoG | -181.1 | 33.91 | 215 | 102.5 |
@@ -229,7 +229,7 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 
 ### USZ
 
-13 of 16524 values differ by more than 10 % of the range. The 10 largest, relative to the range:
+12 of 16524 values differ by more than 10 % of the range. The 10 largest, relative to the range:
 
 | Patient | Feature | Configuration | Pictologics Value | Team Value | Error | Range |
 |:--------|:--------|:-------------|----------:|-----------:|------:|------:|
@@ -241,8 +241,8 @@ The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For
 | STS_015_CT | stat_cov | Coif3 LHH L1 | 1.458e+04 | 1.602e+05 | 1.456e+05 | 4.884e+05 |
 | STS_044_MRI | stat_min | Mean | 216 | 150.2 | 65.8 | 258.2 |
 | STS_034_MRI | stat_min | Mean | 194.1 | 136 | 58.1 | 258.2 |
-| STS_020_PET | stat_cov | LoG | -1492 | -1290 | 202.7 | 1295 |
 | STS_026_MRI | stat_min | Mean | 163.9 | 129.1 | 34.75 | 258.2 |
+| STS_045_PET | stat_kurt | Gabor | 16.95 | 13.44 | 3.507 | 26.17 |
 
 ### UdeS
 

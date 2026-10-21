@@ -12,6 +12,7 @@ import pytest
 import scipy
 from numpy.testing import assert_allclose, assert_array_equal
 
+from pictologics import filters
 from pictologics.filters import (
     LAWS_KERNELS,
     BoundaryCondition,
@@ -3031,7 +3032,11 @@ def test_the_pad_planes_from_a_first_plane() -> None:
 
 def test_simoncelli_of_a_single_slice_is_its_2d_response() -> None:
     """A singleton axis has no frequency: the Simoncelli wavelet (and the Riesz-Simoncelli
-    filter) of a volume of one slice is the 2-D response of the slice, not zeros."""
+    filter) of a volume of one slice is the 2-D response of the slice, not zeros. An axis
+    of two voxels has the band edge only, so its response is zero."""
+    assert (
+        np.abs(simoncelli_wavelet(np.random.default_rng(55).normal(size=(2, 24, 24)), 1)).max() == 0
+    )
     image = np.random.default_rng(56).normal(0.0, 1.0, (24, 24))
     flat = simoncelli_wavelet(image, 1)
     assert np.abs(flat).max() > 0
@@ -3102,6 +3107,13 @@ def test_gabor_returns_a_row_order_array() -> None:
             out = gabor_filter(image, 2.0, 4.0, **kwargs)
         assert out.flags.c_contiguous
         assert out.tobytes() == np.ascontiguousarray(moves[-1]).tobytes()
+    # With average_over_planes, the slab sums read the plane responses as views: no plane is
+    # copied, and the averaged result is in row order. Only the axial result is copied.
+    with patch.object(gabor_module.np, "ascontiguousarray", wraps=np.ascontiguousarray) as copy:
+        averaged = gabor_filter(image, 2.0, 4.0, average_over_planes=True)
+        assert averaged.flags.c_contiguous and copy.call_count == 0
+        gabor_filter(image, 2.0, 4.0)
+        assert copy.call_count == 1
 
 
 def test_cache_by_bytes_keeps_the_newest_shapes() -> None:
@@ -3138,3 +3150,39 @@ def test_the_log_takes_the_fft_from_131072_voxels() -> None:
     with patch.object(base, "_fft_gaussian_laplace", return_value=sentinel) as fft:
         assert base._gaussian_laplace(at_gate, 2.0, "mirror") is sentinel
     fft.assert_called_once()
+
+
+# fmt: off
+_SOURCE_MASK_CALLS = {
+    "mean_filter": lambda image, valid: filters.mean_filter(image, 3, source_mask=valid),
+    "gaussian_filter": lambda image, valid: filters.gaussian_filter(image, 1.0, source_mask=valid),
+    "laws_filter": lambda image, valid: filters.laws_filter(image, "E5L5S5", source_mask=valid),
+    "laplacian_of_gaussian": lambda image, valid: filters.laplacian_of_gaussian(image, 1.0, source_mask=valid),
+    "gabor_filter": lambda image, valid: filters.gabor_filter(image, 2.0, 4.0, source_mask=valid),
+    "wavelet_transform": lambda image, valid: filters.wavelet_transform(image, "haar", 1, "LHL", source_mask=valid),
+    "simoncelli_wavelet": lambda image, valid: filters.simoncelli_wavelet(image, 1, source_mask=valid),
+    "riesz_transform": lambda image, valid: filters.riesz_transform(image, (1, 0, 0), source_mask=valid),
+    "riesz_log": lambda image, valid: filters.riesz_log(image, 1.0, source_mask=valid),
+    "riesz_simoncelli": lambda image, valid: filters.riesz_simoncelli(image, 1, source_mask=valid),
+}
+# fmt: on
+
+
+@pytest.mark.parametrize("name", sorted(_SOURCE_MASK_CALLS))
+def test_a_source_mask_of_any_type_gives_the_result_of_the_bool_mask(name: str) -> None:
+    """A uint8 or int32 source mask gives the result of the same bool mask, bit for bit, in
+    each of the ten filters that take a source mask (before, a uint8 mask raised in some of
+    them). A bool mask is not copied."""
+    from pictologics.filters.base import _bool_mask
+
+    rng = np.random.default_rng(61)
+    image = rng.normal(0.0, 1.0, (12, 13, 11))
+    valid = rng.random(image.shape) > 0.2
+
+    def bits(result: Any) -> list[bytes]:
+        return [np.asarray(part).tobytes() for part in (result if isinstance(result, tuple) else (result,))]  # fmt: skip
+
+    expected = bits(_SOURCE_MASK_CALLS[name](image, valid))
+    for kind in (np.uint8, np.int32):
+        assert bits(_SOURCE_MASK_CALLS[name](image, valid.astype(kind) * 3)) == expected
+    assert _bool_mask(valid) is valid and _bool_mask(None) is None

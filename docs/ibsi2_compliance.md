@@ -100,41 +100,41 @@ assert max_diff <= tolerance  # IBSI 2 Phase 1 pass criterion
 
 | Test | Filter | Phantom | Error % | Time | Memory | Status |
 |------|--------|---------|---------|------|--------|--------|
-| 1.a.1 | Mean | checkerboard | 0.00% | 3ms | 1.1MB | ✅ PASS |
-| 1.a.2 | Mean | checkerboard | 0.00% | 2ms | 1.0MB | ✅ PASS |
-| 1.a.3 | Mean | checkerboard | 0.00% | 2ms | 1.0MB | ✅ PASS |
-| 1.a.4 | Mean | checkerboard | 0.00% | 1ms | 1.0MB | ✅ PASS |
+| 1.a.1 | Mean | checkerboard | 0.00% | 2ms | 2.4MB | ✅ PASS |
+| 1.a.2 | Mean | checkerboard | 0.00% | 1ms | 2.5MB | ✅ PASS |
+| 1.a.3 | Mean | checkerboard | 0.00% | 2ms | 2.9MB | ✅ PASS |
+| 1.a.4 | Mean | checkerboard | 0.00% | 1ms | 2.6MB | ✅ PASS |
 | 1.b.1 | Mean (2D) | impulse_response | - | - | - | ⏭ SKIP |
-| 2.a | LoG | impulse_response | 0.00% | 6ms | 3.0MB | ✅ PASS |
-| 2.b | LoG | checkerboard | 0.03% | 6ms | 3.0MB | ✅ PASS |
+| 2.a | LoG | impulse_response | 0.00% | 5ms | 3.2MB | ✅ PASS |
+| 2.b | LoG | checkerboard | 0.03% | 5ms | 3.3MB | ✅ PASS |
 | 2.c | LoG (2D) | checkerboard | - | - | - | ⏭ SKIP |
-| 3.a.1 | Laws | impulse_response | 0.00% | 2ms | 1.0MB | ✅ PASS |
-| 3.a.2 | Laws | impulse_response | 0.00% | 5ms | 4.1MB | ✅ PASS |
-| 3.a.3 | Laws | impulse_response | 0.00% | 7ms | 4.1MB | ✅ PASS |
+| 3.a.1 | Laws | impulse_response | 0.00% | 1ms | 1.0MB | ✅ PASS |
+| 3.a.2 | Laws | impulse_response | 0.00% | 6ms | 3.1MB | ✅ PASS |
+| 3.a.3 | Laws | impulse_response | 0.00% | 7ms | 3.1MB | ✅ PASS |
 | 3.b.1 | Laws | checkerboard | 0.00% | 1ms | 1.0MB | ✅ PASS |
-| 3.b.2 | Laws | checkerboard | 0.00% | 5ms | 4.1MB | ✅ PASS |
-| 3.b.3 | Laws | checkerboard | 0.00% | 7ms | 4.1MB | ✅ PASS |
+| 3.b.2 | Laws | checkerboard | 0.00% | 6ms | 3.1MB | ✅ PASS |
+| 3.b.3 | Laws | checkerboard | 0.00% | 6ms | 3.1MB | ✅ PASS |
 | 3.c.1 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
 | 3.c.2 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
 | 3.c.3 | Laws (2D) | checkerboard | - | - | - | ⏭ SKIP |
-| 4.a.1 | Gabor | impulse_response | 0.00% | 7ms | 12.4MB | ✅ PASS |
-| 4.a.2 | Gabor | impulse_response | 0.00% | 27ms | 31.1MB | ✅ PASS |
-| 4.b.1 | Gabor | sphere | 0.01% | 6ms | 12.4MB | ✅ PASS |
-| 4.b.2 | Gabor | sphere | 0.09% | 46ms | 48.2MB | ✅ PASS |
+| 4.a.1 | Gabor | impulse_response | 0.00% | 6ms | 10.7MB | ✅ PASS |
+| 4.a.2 | Gabor | impulse_response | 0.00% | 23ms | 26.9MB | ✅ PASS |
+| 4.b.1 | Gabor | sphere | 0.01% | 5ms | 10.7MB | ✅ PASS |
+| 4.b.2 | Gabor | sphere | 0.09% | 41ms | 41.5MB | ✅ PASS |
 | 5.a.1 | Daubechies 2 | impulse_response | 0.00% | 2ms | 1.0MB | ✅ PASS |
-| 5.a.2 | Daubechies 2 | impulse_response | 0.00% | 11ms | 12.1MB | ✅ PASS |
-| 6.a.1 | Coiflet 1 | sphere | 0.00% | 2ms | 1.0MB | ✅ PASS |
-| 6.a.2 | Coiflet 1 | sphere | 0.00% | 11ms | 12.1MB | ✅ PASS |
-| 7.a.1 | Haar | checkerboard | 0.00% | 15ms | 15.0MB | ✅ PASS |
-| 7.a.2 | Haar | checkerboard | 0.00% | 14ms | 15.0MB | ✅ PASS |
+| 5.a.2 | Daubechies 2 | impulse_response | 0.00% | 6ms | 12.5MB | ✅ PASS |
+| 6.a.1 | Coiflet 1 | sphere | 0.00% | 1ms | 1.0MB | ✅ PASS |
+| 6.a.2 | Coiflet 1 | sphere | 0.00% | 7ms | 12.9MB | ✅ PASS |
+| 7.a.1 | Haar | checkerboard | 0.00% | 7ms | 15.0MB | ✅ PASS |
+| 7.a.2 | Haar | checkerboard | 0.00% | 7ms | 15.0MB | ✅ PASS |
 | 8.a.1 | Simoncelli | checkerboard | 0.38% | 3ms | 6.1MB | ✅ PASS |
 | 8.a.2 | Simoncelli | checkerboard | 0.00% | 2ms | 6.1MB | ✅ PASS |
 | 8.a.3 | Simoncelli | checkerboard | 0.00% | 2ms | 6.1MB | ✅ PASS |
-| 9.a | Riesz-LoG | impulse_response | 0.05% | 18ms | 44.0MB | ✅ PASS |
-| 9.b.1 | Riesz-LoG | sphere | 0.32% | 16ms | 44.0MB | ✅ PASS |
+| 9.a | Riesz-LoG | impulse_response | 0.05% | 15ms | 44.0MB | ✅ PASS |
+| 9.b.1 | Riesz-LoG | sphere | 0.32% | 14ms | 44.0MB | ✅ PASS |
 | 9.b.2 | Riesz-LoG (aligned) | sphere | - | - | - | ❗ REF. |
 | 10.a | Riesz-Simoncelli | impulse_response | - | - | - | ❗ REF. |
-| 10.b.1 | Riesz-Simoncelli | pattern_1 | 0.21% | 10ms | 43.7MB | ✅ PASS |
+| 10.b.1 | Riesz-Simoncelli | pattern_1 | 0.21% | 8ms | 43.7MB | ✅ PASS |
 | 10.b.2 | Riesz-Simoncelli (aligned) | pattern_1 | - | - | - | ❗ REF. |
 
 ### Tolerance Criteria
@@ -147,7 +147,7 @@ max_difference ≤ 0.01 × (reference_max - reference_min)
 ### Provenance
 
 !!! info "Reproducibility Provenance"
-    - **Pictologics version**: `0.7.1`
+    - **Pictologics version**: `0.8.0`
     - **IBSI 2 reference manual**: version 9 (the revision bundled under `dev/IBSI2/documentation/`)
     - **Reference dataset source**: `reference_response_maps` subfolder of the [IBSI 2 reference data repository](https://github.com/theibsi/ibsi_2_reference_data)
     - **Local reference directory**: `dev/IBSI2/references/response_maps`

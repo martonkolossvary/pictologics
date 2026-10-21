@@ -144,8 +144,8 @@ Pictologics considers all data as 3D volumes (even 2D slices are converted to 3D
 | Area density (OMBB) | IQYR | 0.5673 | — | — | ❗ REF. |
 | Volume density (AEE) | 6BDE | 1.17 | 1.17 | 0.01 | ✅ PASS |
 | Area density (AEE) | RDD2 | 1.36 | 1.36 | 0.01 | ✅ PASS |
-| Volume density (MVEE) | SWZ1 | 0.513 | — | — | ❗ REF. |
-| Area density (MVEE) | BRI8 | 0.7909 | — | — | ❗ REF. |
+| Volume density (MVEE) | SWZ1 | 0.5112 | — | — | ❗ REF. |
+| Area density (MVEE) | BRI8 | 0.7882 | — | — | ❗ REF. |
 | Volume density (convex hull) | R3ER | 0.961 | 0.961 | 0.006 | ✅ PASS |
 | Area density (convex hull) | 7T7F | 1.03 | 1.03 | 0.01 | ✅ PASS |
 
@@ -359,8 +359,8 @@ Pictologics considers all data as 3D volumes (even 2D slices are converted to 3D
 | Area density (OMBB) | IQYR | 0.5389 | — | — | ❗ REF. |
 | Volume density (AEE) | 6BDE | 1.29 | 1.29 | 0.01 | ✅ PASS |
 | Area density (AEE) | RDD2 | 1.62 | 1.62 | 0.01 | ✅ PASS |
-| Volume density (MVEE) | SWZ1 | 0.496 | — | — | ❗ REF. |
-| Area density (MVEE) | BRI8 | 0.8805 | — | — | ❗ REF. |
+| Volume density (MVEE) | SWZ1 | 0.4939 | — | — | ❗ REF. |
+| Area density (MVEE) | BRI8 | 0.8776 | — | — | ❗ REF. |
 | Volume density (convex hull) | R3ER | 0.834 | 0.834 | 0.002 | ✅ PASS |
 | Area density (convex hull) | 7T7F | 1.13 | 1.13 | 0.01 | ✅ PASS |
 
@@ -574,8 +574,8 @@ Pictologics considers all data as 3D volumes (even 2D slices are converted to 3D
 | Area density (OMBB) | IQYR | 0.5389 | — | — | ❗ REF. |
 | Volume density (AEE) | 6BDE | 1.29 | 1.29 | 0.01 | ✅ PASS |
 | Area density (AEE) | RDD2 | 1.62 | 1.62 | 0.01 | ✅ PASS |
-| Volume density (MVEE) | SWZ1 | 0.496 | — | — | ❗ REF. |
-| Area density (MVEE) | BRI8 | 0.8805 | — | — | ❗ REF. |
+| Volume density (MVEE) | SWZ1 | 0.4939 | — | — | ❗ REF. |
+| Area density (MVEE) | BRI8 | 0.8776 | — | — | ❗ REF. |
 | Volume density (convex hull) | R3ER | 0.834 | 0.834 | 0.002 | ✅ PASS |
 | Area density (convex hull) | 7T7F | 1.13 | 1.13 | 0.01 | ✅ PASS |
 
@@ -789,8 +789,8 @@ Pictologics considers all data as 3D volumes (even 2D slices are converted to 3D
 | Area density (OMBB) | IQYR | 0.5389 | — | — | ❗ REF. |
 | Volume density (AEE) | 6BDE | 1.29 | 1.29 | 0.01 | ✅ PASS |
 | Area density (AEE) | RDD2 | 1.62 | 1.62 | 0.01 | ✅ PASS |
-| Volume density (MVEE) | SWZ1 | 0.496 | — | — | ❗ REF. |
-| Area density (MVEE) | BRI8 | 0.8805 | — | — | ❗ REF. |
+| Volume density (MVEE) | SWZ1 | 0.4939 | — | — | ❗ REF. |
+| Area density (MVEE) | BRI8 | 0.8776 | — | — | ❗ REF. |
 | Volume density (convex hull) | R3ER | 0.834 | 0.834 | 0.002 | ✅ PASS |
 | Area density (convex hull) | 7T7F | 1.13 | 1.13 | 0.01 | ✅ PASS |
 

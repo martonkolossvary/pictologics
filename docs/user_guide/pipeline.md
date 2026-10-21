@@ -136,7 +136,7 @@ After a `discretise` step, the pipeline keeps two images: the image before the d
 
 ## Masks
 
-- **A mask path**: the pipeline loads the mask with the image as `reference_image`. So a DICOM SEG, an RTSTRUCT, a cropped mask or a mask in another voxel order goes onto the grid of the image (see [Data Loading](data_loading.md#masks)). The settings `mask_subvoxel_tolerance`, `mask_subvoxel_warning_threshold` and `mask_min_overlap_fraction` control the placement, as in `load_image`. The pipeline keeps the stored integer type of a NIfTI mask (`stored_type=True`), so a NIfTI mask and a SEG or RTSTRUCT mask take the same path.
+- **A mask path**: the pipeline loads the mask with the image as `reference_image`. So a DICOM SEG, an RTSTRUCT, a cropped mask or a mask in another voxel order goes onto the grid of the image. See [Data Loading](data_loading.md#masks). The settings `mask_subvoxel_tolerance`, `mask_subvoxel_warning_threshold` and `mask_min_overlap_fraction` control the placement, as in `load_image`. The pipeline keeps the stored integer type of a NIfTI mask (`stored_type=True`). So a NIfTI mask and a SEG or RTSTRUCT mask take the same path.
 - **An `Image` mask**: it must have the grid of the image: the same shape, spacing, origin and direction. Else `run()` raises a `ValueError`.
 - **No mask**: without `mask` (or with `mask=None`), the whole image is the ROI. The morphology features then describe the ROI after the mask steps, for example after `resegment`.
 - **Labels**: each voxel that is not 0 is in the ROI. So the labels 1, 2 and 3 make one ROI, and a label is not a weight. To use one label, add a `binarize_mask` step with `mask_values`, or use [`run_rois`](#many-rois-run_rois).

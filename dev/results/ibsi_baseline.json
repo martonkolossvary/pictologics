@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-07T22:59:34.297839",
+  "timestamp": "2026-10-21T17:44:21.367544",
   "features": {
     "Digital_Phantom:Morphology:RNU0": {
       "status": "PASS"
@@ -2090,8 +2090,8 @@
       "status": "PASS"
     }
   },
-  "total_time_seconds": 0.32727524993242696,
-  "memory_mb": 112.61041259765625,
+  "total_time_seconds": 0.11265570900002331,
+  "memory_mb": 58.16946983337402,
   "environment": {
     "system": "Darwin",
     "machine": "arm64",

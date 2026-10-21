@@ -1129,6 +1129,25 @@ def test_resegment_kernel_keeps_array_order() -> None:
             assert out.flags.f_contiguous == both_f
 
 
+def test_the_trilinear_kernel_keeps_a_tie_at_the_mask_threshold() -> None:
+    # Two neighbours of a float64 mask, 0.5 and 0.5 - 2^-53, with the weights 0.5/0.5 give
+    # 0.5 - 2^-54 exactly. The rounded threshold rule keeps that voxel (the rule of uint8
+    # masks); the old float64 rule, value >= 0.5, dropped it.
+    from pictologics import preprocessing
+
+    src = np.zeros((2, 2, 3))
+    src[0, 0, 0] = 0.5
+    src[0, 0, 1] = 0.5 - 2.0**-53
+    scale, shift, start = np.ones(3), np.array([0.0, 0.0, 0.5]), np.zeros(3, dtype=np.int64)
+    value = np.empty((1, 1, 1))
+    preprocessing._resample_trilinear_numba(src, scale, shift, start, False, float("nan"), value)
+    assert value[0, 0, 0] == 0.5 - 2.0**-54 and not value[0, 0, 0] >= 0.5
+    for unsigned in (False, True):
+        kept = np.empty((1, 1, 1), dtype=np.uint8)
+        preprocessing._resample_trilinear_numba(src, scale, shift, start, unsigned, 0.5, kept)
+        assert kept[0, 0, 0] == 1
+
+
 def test_resample_mask_threshold_every_type() -> None:
     # A mask threshold applies to the interpolated value, on the kernel paths and on
     # scipy's path (linear and cubic). Every mask type (float64, uint8, bool) rounds it at

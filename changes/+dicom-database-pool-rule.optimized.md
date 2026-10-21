@@ -1,1 +1,1 @@
-`DicomDatabase.from_folders` with the default `num_workers` reads scans of fewer than 6,000 DICOM files in the calling process, and starts at most 8 workers for a larger scan. A 2,000-file scan takes 1.2 s instead of 2.7 s.
+With the default `num_workers`, `DicomDatabase.from_folders` reads a scan of fewer than 6,000 DICOM files in the calling process. A larger scan starts at most 8 workers. A 2,000-file scan takes 1.2 s instead of 2.7 s.

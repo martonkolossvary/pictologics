@@ -580,8 +580,9 @@ def _numba_pass(
 ) -> npt.NDArray[Any]:
     """One 1-D pass of a numba twin of scipy (kind "correlate" with `weights`, or "uniform"
     with `size`) along `axis` of a 3-D row-order image into `output` (can be the image), on
-    slabs in the slab threads from _SLAB_MIN_SIZE voxels on. The values are those of the
-    scipy pass with the constant `cval`."""
+    slabs in the slab threads from _SLAB_MIN_SIZE voxels on. The correlate kind gives the
+    values of the scipy correlation with the constant `cval`. The uniform kind sums each
+    window on its own (see `_passes._direct`)."""
     code = _MODE_CODES[mode]
     kernel: Callable[[int, int], None]
     if kind == "correlate":
@@ -1226,6 +1227,15 @@ def _normalize(
     np.divide(response, weight, out=response, where=valid_output)
     response[~valid_output] = 0.0
     return response.astype(np.float32), valid_output
+
+
+def _bool_mask(source_mask: Optional[npt.NDArray[Any]]) -> Optional[npt.NDArray[np.bool_]]:
+    """A source mask of a filter as a bool array (True = valid voxel): None stays None, a
+    bool array comes back as it is, and another type gives `source_mask != 0`."""
+    if source_mask is None:
+        return None
+    mask = np.asarray(source_mask)
+    return mask if mask.dtype == np.bool_ else mask != 0
 
 
 def _prepare_masked_image(

@@ -255,8 +255,9 @@ def _direct(
 ) -> None:
     """out_rows[t, k] = the mean of the extended window around t of the lines buf[., k],
     each window summed on its own from its first value. So a value does not depend on where
-    the line starts: a crop of the image gives the same values. For float32 values the
-    window sum is exact in double, so the mean is the exact mean rounded once."""
+    the line starts: a crop of the image gives the same values. The double window sum is
+    exact for values within 2^29 of each other, and else within one double unit, so the
+    mean is the exact mean rounded once to float32."""
     r = size // 2
     fs = float(size)
     for t in range(n):

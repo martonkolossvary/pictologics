@@ -308,13 +308,13 @@ def test_step_resample_diverged_masks_resamples_independently(
     mock_image: Image,
     mock_mask: Image,
 ) -> None:
-    # A morph-only binarize step diverges morph_mask from intensity_mask so they no
+    # An intensity-only binarize step diverges morph_mask from intensity_mask so they no
     # longer share an array; the following resample must therefore resample each mask
     # independently (image + morph + intensity = 3 calls).
     pipeline.add_config(
         "res_div",
         [
-            {"step": "binarize_mask", "params": {"apply_to": "morph", "threshold": 0.5}},
+            {"step": "binarize_mask", "params": {"apply_to": "intensity", "threshold": 0.5}},
             {
                 "step": "resample",
                 "params": {"new_spacing": (2, 2, 2), "interpolation": "linear"},
@@ -344,7 +344,7 @@ def test_step_resample_roi_only_diverged_masks_intersect_independently(
     pipeline.add_config(
         "res_roi_div",
         [
-            {"step": "binarize_mask", "params": {"apply_to": "morph", "threshold": 0.5}},
+            {"step": "binarize_mask", "params": {"apply_to": "intensity", "threshold": 0.5}},
             {
                 "step": "resample",
                 "params": {"new_spacing": (2, 2, 2), "interpolation": "linear"},
@@ -371,11 +371,9 @@ def test_step_resample_roi_only_diverged_masks_intersect_independently(
     mock_resample.side_effect = [mock_image, morph_res, intensity_res] * 2
     mock_intersect.return_value = mock_mask
 
-    # An ROI of all ones gives a source mask with no invalid voxel, which changes no mask;
-    # the one call is the binarize step's (apply_to "morph": the intensity mask keeps the
-    # voxels of the new morphological mask).
+    # An ROI of all ones gives a source mask with no invalid voxel, which changes no mask.
     pipeline.run(mock_image, mock_mask, config_names=["res_roi_div"])
-    assert mock_intersect.call_count == 1
+    assert mock_intersect.call_count == 0
 
     # With voxels outside the ROI, morph_mask and intensity_mask were each intersected
     # with the source mask separately.
@@ -388,7 +386,7 @@ def test_step_resample_roi_only_diverged_masks_intersect_independently(
     )
     roi.array[0] = 0
     pipeline.run(mock_image, roi, config_names=["res_roi_div"])
-    assert mock_intersect.call_count == 1 + 3
+    assert mock_intersect.call_count == 2
 
 
 @patch("pictologics.pipeline.resegment_mask")
@@ -4709,7 +4707,7 @@ def test_binarize_mask_on_the_box_keeps_the_box_of_the_new_mask() -> None:
     # A selection that leaves out 0 compares the box of the mask only (the autouse fixture
     # sets the size gate to 0): the values of the old expressions, uint8 in row order, and
     # the run keeps the box of the new mask. A label that is not there leaves an empty mask
-    # (box None) and the ROI check raises.
+    # (box None) and the ROI check raises. NumPy arrays of values select as lists do.
     from pictologics.features._utils import compute_nonzero_bbox
 
     labels = np.zeros((12, 11, 10))
@@ -4720,7 +4718,15 @@ def test_binarize_mask_on_the_box_keeps_the_box_of_the_new_mask() -> None:
     img = Image(np.random.default_rng(87).normal(size=labels.shape), (1, 1, 1), (0, 0, 0))
     mask = Image(labels, (1, 1, 1), (0, 0, 0))
     pipeline = RadiomicsPipeline()
-    selections = [(0.5, None), (0.5, 3), (0.5, [3, 7]), (0.5, (3, 7)), (0.5, list(range(1, 11)))]
+    selections = [
+        (0.5, None),
+        (0.5, 3),
+        (0.5, [3, 7]),
+        (0.5, (3, 7)),
+        (0.5, list(range(1, 11))),
+        (0.5, np.array([3, 7])),
+        (0.5, np.array([7])),
+    ]
     for threshold, values in selections:
         state = _basic_state(img, mask)
         pipeline._execute_preprocessing_step(
@@ -4737,12 +4743,13 @@ def test_binarize_mask_on_the_box_keeps_the_box_of_the_new_mask() -> None:
 
 
 def test_binarize_mask_selecting_background_reads_the_whole_mask() -> None:
-    # A selection that keeps the value 0 reads the whole mask (no box is kept for it).
+    # A selection that keeps the value 0 reads the whole mask (no box is kept for it), also
+    # with the values in a NumPy array.
     labels = np.zeros((8, 7, 6))
     labels[2:5, 2:5, 1:4] = 3.0
     img = Image(np.random.default_rng(88).normal(size=labels.shape), (1, 1, 1), (0, 0, 0))
     pipeline = RadiomicsPipeline()
-    for threshold, values in ((0.0, None), (0.5, [0, 3]), (0.5, (0, 3))):
+    for threshold, values in ((0.0, None), (0.5, [0, 3]), (0.5, (0, 3)), (0.5, np.array([0, 3]))):
         state = _basic_state(img, Image(labels, (1, 1, 1), (0, 0, 0)))
         with patch.object(pipeline._mask_boxes, "keep", wraps=pipeline._mask_boxes.keep) as keep:
             pipeline._execute_preprocessing_step(
@@ -5590,6 +5597,74 @@ def test_in_memory_images_of_any_type_give_the_float64_features(
         assert all(result[k][n].equals(expected[k][n]) for k in result for n in names)
 
 
+def test_read_only_in_memory_arrays_are_copied_once() -> None:
+    # A read-only in-memory float64 image, source mask or mask is copied once at the start
+    # of a run (the kernels compile a second form for a read-only array): the features are
+    # those of the writeable arrays, and the arrays of the caller stay read-only. A float32
+    # image is not copied: the run casts it where it reads it.
+    from pictologics import pipeline as module
+
+    column = np.asfortranarray(np.arange(24.0).reshape(2, 3, 4))
+    column.setflags(write=False)
+    copy = module._writeable(column)
+    assert copy is not column and copy.flags.writeable and copy.flags.f_contiguous
+    assert np.array_equal(copy, column)
+    writeable = np.zeros(3)
+    assert module._writeable(writeable) is writeable
+    hu, mask = _in_memory_case((40, 40, 16))
+    pipeline = _in_memory_pipeline()
+    names = ["roi", "grid"]
+    expected = pipeline.run(Image(hu, mask.spacing, mask.origin), mask, config_names=names)
+    rois = pipeline.run_rois(Image(hu, mask.spacing, mask.origin), mask, config_names=["roi"])
+    values, labels = hu.copy(), mask.array.copy()
+    values.setflags(write=False)
+    labels.setflags(write=False)
+    image, roi = Image(values, mask.spacing, mask.origin), Image(labels, mask.spacing, mask.origin)
+    result = pipeline.run(image, roi, config_names=names)
+    assert all(result[name].equals(expected[name]) for name in names)
+    result_rois = pipeline.run_rois(image, roi, config_names=["roi"])
+    assert result_rois.keys() == rois.keys() == {"1"}
+    assert result_rois["1"]["roi"].equals(rois["1"]["roi"])
+    assert not values.flags.writeable and not labels.flags.writeable
+    valid = hu > -1000.0
+    valid.setflags(write=False)
+    single = np.float32(hu)
+    single.setflags(write=False)
+    with patch.object(module, "_writeable", wraps=module._writeable) as spy:
+        pipeline.run(Image(values, mask.spacing, mask.origin, source_mask=valid), mask, config_names=["roi"])  # fmt: skip
+        assert any(call.args[0] is valid for call in spy.call_args_list)
+        spy.reset_mock()
+        result = pipeline.run(Image(single, mask.spacing, mask.origin), mask, config_names=names)
+        assert all(call.args[0] is not single for call in spy.call_args_list)
+    assert all(result[name].equals(expected[name]) for name in names)
+
+
+def test_a_shared_prefix_with_another_reach_keeps_its_own_cut(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Three configurations share their first step but read a different distance outside
+    # the ROI, the narrow one first. A large float32 image is cut to the ROI region of each
+    # reach at the start, so each start reach has its own state: every result equals the
+    # float64 run. The start key holds the reach only for a cut image.
+    monkeypatch.setattr("pictologics.pipeline._CUT_MIN_SIZE", 1 << 16)  # the real gate
+    reseg = {"step": "resegment", "params": {"range_min": -500.0, "range_max": 600.0}}
+    intensity = {"step": "extract_features", "params": {"families": ["intensity"]}}
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("narrow", [reseg, intensity])
+    pipeline.add_config("local", [reseg, {"step": "extract_features", "params": {"families": ["intensity", "local_intensity"]}}])  # fmt: skip
+    pipeline.add_config("grown", [reseg, {"step": "grow_mask", "params": {"to_mm": 3.0}}, intensity])  # fmt: skip
+    names = list(pipeline._configs)
+    hu, mask = _in_memory_case((48, 48, 32))
+    expected = pipeline.run(Image(hu, mask.spacing, mask.origin), mask, config_names=names)
+    image = Image(hu.astype(np.float32), mask.spacing, mask.origin)
+    result = pipeline.run(image, mask, config_names=names)
+    assert all(result[name].equals(expected[name]) for name in names)
+    cut = pipeline._run_plan(names, None, True).prefix_keys
+    whole = pipeline._run_plan(names, None, False).prefix_keys
+    assert len({cut[name][0] for name in names}) == 3
+    assert len({whole[name][0] for name in names}) == 1
+
+
 @pytest.mark.filterwarnings("ignore:Auto-detected sentinel value")
 def test_an_in_memory_image_is_cast_where_it_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
     # Configurations that read the ROI region only cut the large image once each and cast
@@ -5730,18 +5805,24 @@ def test_the_pipeline_loads_a_nifti_mask_in_its_stored_type(tmp_path: Path) -> N
 
 def test_a_file_mask_takes_the_threshold_rule_of_every_mask(tmp_path: Path) -> None:
     # A linear mask resample rounds the interpolated value at the threshold for every mask
-    # type: a NIfTI file mask, a uint8 mask and a float64 mask give the same features.
+    # type: a NIfTI file mask, a uint8 mask and a float64 mask give the same features. The
+    # 0/1 mask and the grid of this test give one tie voxel: its interpolated value is
+    # 0.5 - 2^-54, from the rounding of the weight products. The rule keeps it; the old
+    # float64 rule (value >= 0.5) dropped it, so 0.7.1 gave other features here.
     import nibabel as nib
 
-    rng = np.random.default_rng(85)
-    image = Image(rng.normal(40.0, 20.0, (14, 13, 12)), (0.7, 0.8, 1.3), (0.0, 0.0, 0.0))
-    mask = np.zeros(image.array.shape, np.uint8)
-    mask[3:11, 4:10, 3:9] = 1
-    affine = np.diag([-0.7, -0.8, 1.3, 1.0])
+    from pictologics.preprocessing import resample_image
+
+    image = Image(np.random.default_rng(85).normal(40.0, 20.0, (8, 8, 8)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))  # fmt: skip
+    mask = (np.random.default_rng(9).random(image.array.shape) < 0.5).astype(np.uint8)
+    raw = resample_image(replace(image, array=mask.astype(np.float64)), (0.7, 0.7, 0.7), "linear")
+    kept = resample_image(replace(image, array=mask.astype(np.float64)), (0.7, 0.7, 0.7), "linear", mask_threshold=0.5)  # fmt: skip
+    assert raw.array[8, 1, 4] == 0.5 - 2.0**-54 and kept.array[8, 1, 4] == 1
+    affine = np.diag([-1.0, -1.0, 1.0, 1.0])
     nib.save(nib.Nifti1Image(mask, affine, dtype=np.uint8), tmp_path / "mask.nii.gz")
     pipeline = RadiomicsPipeline(load_standard=False)
     pipeline.add_config("c", [
-        {"step": "resample", "params": {"new_spacing": (1.0, 1.0, 1.0), "mask_interpolation": "linear", "mask_threshold": 0.5}},
+        {"step": "resample", "params": {"new_spacing": (0.7, 0.7, 0.7), "mask_interpolation": "linear", "mask_threshold": 0.5}},
         {"step": "extract_features", "params": {"families": ["intensity", "morphology"]}},
     ])  # fmt: skip
     results = [
@@ -5942,11 +6023,28 @@ def test_feature_values_are_floats() -> None:
     assert {entry["status"] for entry in pipeline.get_log()} == {"completed"}
 
 
-def test_a_morph_only_mask_step_keeps_the_intensity_mask_inside() -> None:
+def test_a_morph_only_mask_step_keeps_the_intensity_mask_inside(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # After keep_largest_component or binarize_mask with apply_to="morph", the intensity
     # mask keeps only the voxels of the new morphological mask (IBSI: the intensity mask is
     # a subset of it): the intensity features are those of the largest component alone,
-    # and the GLDZM keeps every zone (its zone percentage equals the GLSZM's).
+    # and the GLDZM keeps every zone (its zone percentage equals the GLSZM's). When the
+    # masks are one array, the intensity mask becomes the new morphological mask. With
+    # separate masks (a resegment on "intensity" first), the intersection reads the box of
+    # the new mask, and the run keeps the box of the result. No step reads the whole grid.
+    from pictologics import pipeline as module
+    from pictologics.features._utils import compute_nonzero_bbox
+
+    real = module._intersect_on_box
+    kept: list[bool] = []
+
+    def on_box(mask: Image, morph: np.ndarray, boxes: Any) -> Image:
+        new = real(mask, morph, boxes)
+        kept.append(boxes[id(new.array)] == compute_nonzero_bbox(new.array))
+        return new
+
+    monkeypatch.setattr(module, "_intersect_on_box", on_box)
     rng = np.random.default_rng(55)
     image = Image(rng.normal(40.0, 20.0, (20, 20, 20)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
     labels = np.zeros((20, 20, 20), dtype=np.uint8)
@@ -5954,23 +6052,72 @@ def test_a_morph_only_mask_step_keeps_the_intensity_mask_inside() -> None:
     labels[14:17, 14:17, 14:17] = 2
     largest = Image((labels == 1).astype(np.uint8), image.spacing, image.origin)
     families = ["intensity", "glszm", "gldzm"]
+    tail = [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": families}},
+    ]
+    reseg = {"step": "resegment", "params": {"range_min": 10.0, "range_max": 70.0, "apply_to": "intensity"}}  # fmt: skip
     pipeline = RadiomicsPipeline(load_standard=False)
     for name, step in (
         ("largest", {"step": "keep_largest_component", "params": {"apply_to": "morph"}}),
         ("label", {"step": "binarize_mask", "params": {"mask_values": 1, "apply_to": "morph"}}),
     ):
-        pipeline.add_config(name, [
-            step,
-            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
-            {"step": "extract_features", "params": {"families": families}},
-        ])  # fmt: skip
-    pipeline.add_config("alone", pipeline.get_config("largest")[1:])
-    results = pipeline.run(image, Image(labels, image.spacing, image.origin))
-    alone = pipeline.run(image, largest, config_names=["alone"])["alone"]
+        pipeline.add_config(name, [step, *tail])
+        pipeline.add_config("separate_" + name, [reseg, step, *tail])
+    pipeline.add_config("alone", tail)
+    pipeline.add_config("separate_alone", [reseg, *tail])
+    names = ["largest", "label", "separate_largest", "separate_label"]
+    with patch.object(module, "_intersect_mask", wraps=module._intersect_mask) as whole:
+        results = pipeline.run(image, Image(labels, image.spacing, image.origin), config_names=names)  # fmt: skip
+    assert not whole.called
+    assert kept == [True, True]  # the two configurations with separate masks
+    alone = pipeline.run(image, largest, config_names=["alone", "separate_alone"])
     for name in ("largest", "label"):
         features = results[name]
         assert features["zone_percentage_P30P"] == features["zone_percentage_VIWW"]
-        assert features.equals(alone), name
+        assert features.equals(alone["alone"]), name
+        assert results["separate_" + name].equals(alone["separate_alone"]), name
+
+
+def test_a_morph_only_mask_step_gives_the_intensity_mask_of_both() -> None:
+    # When the two masks are one array, a morph-only keep_largest_component or binarize_mask
+    # gives the intensity mask the new morphological mask, as apply_to="both" does: its
+    # values are 0 and 1. A later step that reads the mask values sees these values: a
+    # binarize_mask of value 3 on the intensity mask finds no ROI, a second threshold
+    # reads 0/1, and a linear mask resample interpolates 0/1.
+    rng = np.random.default_rng(5)
+    shape = (24, 22, 20)
+    image = Image(rng.normal(50.0, 10.0, shape), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    labels = np.zeros(shape)
+    labels[3:12, 3:12, 3:12] = 3.0
+    labels[15:19, 15:19, 15:19] = 3.0
+    prob = np.zeros(shape)
+    prob[3:12, 3:12, 3:12] = rng.uniform(0.31, 1.0, (9, 9, 9))
+    prob[15:19, 15:19, 15:19] = 0.9
+    intensity = {"step": "extract_features", "params": {"families": ["intensity"]}}
+
+    def largest(apply_to: str) -> dict[str, Any]:
+        return {"step": "keep_largest_component", "params": {"apply_to": apply_to}}
+
+    def binarize(apply_to: str, **params: Any) -> dict[str, Any]:
+        return {"step": "binarize_mask", "params": {**params, "apply_to": apply_to}}
+
+    resample = {"step": "resample", "params": {"new_spacing": (1.5, 1.5, 1.5), "mask_interpolation": "linear", "mask_threshold": 0.5}}  # fmt: skip
+    cases = (
+        (labels, lambda to: [largest(to), binarize("intensity", mask_values=[3])]),
+        (prob, lambda to: [binarize(to, threshold=0.3), binarize("intensity", threshold=0.6)]),
+        (labels, lambda to: [largest(to), resample]),
+    )
+    for index, (mask, steps) in enumerate(cases):
+        outcome = {}
+        for apply_to in ("morph", "both"):
+            pipeline = RadiomicsPipeline(load_standard=False)
+            pipeline.add_config("case", [*steps(apply_to), intensity])
+            result = pipeline.run(image, Image(mask, image.spacing, image.origin))["case"]
+            outcome[apply_to] = (result, pipeline.get_log()[-1]["status"])
+        assert outcome["morph"][1] == outcome["both"][1], index
+        assert outcome["morph"][0].equals(outcome["both"][0]), index
+    assert outcome["morph"][1] == "completed"
 
 
 def test_roi_check_and_background_selection_helpers() -> None:
@@ -6454,9 +6601,10 @@ def test_resample_stops_when_its_grid_cannot_fit_in_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Before a resample, the pipeline checks that the new grid, or the ROI region of it,
-    # fits in the memory of the computer at _GRID_BYTES_PER_VOXEL bytes per voxel. A grid
-    # that does not fit gives the config a MemoryError in its log entry and NaN features.
-    from pictologics import pipeline as pipeline_module
+    # fits in the memory of this process at _GRID_BYTES_PER_VOXEL bytes per voxel: the
+    # memory of the computer, shared by the run_batch workers. A grid that does not fit
+    # gives the config a MemoryError in its log entry and NaN features.
+    from pictologics import threads
 
     image = Image(np.ones((10, 10, 10)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
     roi = np.zeros((10, 10, 10), dtype=np.uint8)
@@ -6471,13 +6619,17 @@ def test_resample_stops_when_its_grid_cannot_fit_in_memory(
         ],
     )
     # the whole grid: 20 x 20 x 20 voxels x 24 bytes = 192,000 bytes
-    monkeypatch.setattr(pipeline_module, "_physical_memory", lambda: 100_000)
+    monkeypatch.setattr(threads, "_physical_memory", lambda: 400_000)
+    monkeypatch.setattr(threads, "_memory_shares", 1)
+    assert pipeline.run(image, None, config_names=["c"])["c"].notna().all()
+    monkeypatch.setattr(threads, "_memory_shares", 4)  # one of 4 workers: 100,000 bytes
     assert pipeline.run(image, None, config_names=["c"])["c"].isna().all()
     entry = pipeline._log[-1]
     assert entry["status"] == "error" and entry["failed_step"]["step"] == "resample"
     assert entry["error"].startswith(
         "Resampling to (0.5, 0.5, 0.5) mm makes a grid of 20 x 20 x 20 voxels."
     )
+    assert "0.00 GiB of memory of this process" in entry["error"]
     # with an ROI, only its region is resampled, and the region fits
     assert pipeline.run(image, mask, config_names=["c"])["c"].notna().all()
     assert pipeline._log[-1]["status"] == "completed"

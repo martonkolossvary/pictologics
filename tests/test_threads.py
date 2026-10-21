@@ -123,6 +123,7 @@ def physical_memory() -> Iterator[None]:
     threads._physical_memory.cache_clear()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no os.sysconf; the cases below test its reader")  # fmt: skip
 def test_physical_memory_of_this_computer(physical_memory: None) -> None:
     assert threads._physical_memory() == min(
         n
@@ -192,6 +193,7 @@ def test_physical_memory_on_posix(
     expected: int,
 ) -> None:
     paths = {
+        "/proc/self/cgroup": ["0::/", "4:memory:/"],  # the root groups of v2 and v1
         "/sys/fs/cgroup/memory.max": files.get("memory.max", []),
         "/sys/fs/cgroup/memory/memory.limit_in_bytes": files.get("v1", []),
     }
@@ -201,6 +203,53 @@ def test_physical_memory_on_posix(
     )
     monkeypatch.setattr(threads, "_words", paths.__getitem__)
     assert threads._physical_memory() == expected
+
+
+_JOB = "/sys/fs/cgroup/slurm/uid_5/job_7"
+
+
+@pytest.mark.parametrize(
+    ("groups", "files", "expected"),
+    [
+        # A Slurm job with no cgroup namespace: its limit is in its own group
+        (["0::/slurm/uid_5/job_7"], {f"{_JOB}/memory.max": ["17179869184"]}, 16 << 30),
+        # A step of the job without its own limit: the limit of the job above it
+        (
+            ["0::/slurm/uid_5/job_7/step_0"],
+            {f"{_JOB}/step_0/memory.max": ["max"], f"{_JOB}/memory.max": ["17179869184"]},
+            16 << 30,
+        ),
+        # The smallest limit on the path
+        (
+            ["0::/a/b"],
+            {
+                "/sys/fs/cgroup/a/memory.max": ["1073741824"],
+                "/sys/fs/cgroup/a/b/memory.max": ["4294967296"],
+            },
+            1 << 30,
+        ),
+        # cgroup v1: the memory hierarchy only, and the huge number of no limit at the root
+        (
+            ["5:cpu,cpuacct:/x", "4:memory:/slurm/job_3"],
+            {
+                "/sys/fs/cgroup/memory/slurm/job_3/memory.limit_in_bytes": ["2147483648"],
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes": ["9223372036854771712"],
+            },
+            2 << 30,
+        ),
+        (["broken", "1:name=systemd:/x"], {}, 0),  # no memory group
+        ([], {}, 0),  # no /proc/self/cgroup (macOS, Windows)
+    ],
+)
+def test_memory_limit_of_the_cgroup_of_the_process(
+    monkeypatch: pytest.MonkeyPatch, groups: list[str], files: dict[str, list[str]], expected: int
+) -> None:
+    monkeypatch.setattr(
+        threads,
+        "_words",
+        lambda path: groups if path == "/proc/self/cgroup" else files.get(path, []),
+    )
+    assert threads._memory_limit() == expected
 
 
 def _raises(error: type[Exception]) -> Any:
@@ -221,6 +270,7 @@ def test_memory_budget_is_half_of_the_memory_shared_by_the_workers(
     assert threads._memory_budget() == 128 << 30
     threads._share_memory(4)
     assert threads._memory_shares == 4 and threads._memory_budget() == 32 << 30
+    assert threads._memory_share() == 64 << 30  # the memory of one of the 4 workers
 
 
 def test_words_reads_a_small_file(tmp_path: Path) -> None:

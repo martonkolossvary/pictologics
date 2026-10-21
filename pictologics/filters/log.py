@@ -10,6 +10,7 @@ from numpy import typing as npt
 from .base import (
     _LOG_FFT_MIN,
     BoundaryCondition,
+    _bool_mask,
     _constant_padded,
     _float32_cut,
     _gaussian_laplace,
@@ -119,7 +120,9 @@ def laplacian_of_gaussian(
           response value.
         - A smaller float64 image runs the passes in float32, as a float32 image does:
           faster, with values within about 1e-7 of the largest response value.
+        - With a `padding_value`, the padded image counts.
     """
+    source_mask = _bool_mask(source_mask)  # a mask of another type: != 0
     # Handle scalar spacing
     if isinstance(spacing_mm, (int, float)):
         spacing_mm = (float(spacing_mm),) * 3

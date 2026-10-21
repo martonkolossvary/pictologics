@@ -1,0 +1,1 @@
+A run of two configurations with the same first steps and a different reach outside the ROI gave wrong values. When the image was not float64, the second configuration took the ROI region of the first. Only the start cut of 0.8.0 had this error. Now each start reach has its own state.
