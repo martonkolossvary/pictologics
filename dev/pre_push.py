@@ -142,7 +142,7 @@ def run_ruff() -> bool:
     print_step("Running ruff linting...")
 
     returncode, _, _ = run_command(
-        ["poetry", "run", "ruff", "check", "pictologics", "tests"], cwd=PROJECT_ROOT
+        ["poetry", "run", "ruff", "check", "pictologics", "tests", "scripts"], cwd=PROJECT_ROOT
     )
 
     if returncode == 0:
@@ -157,7 +157,9 @@ def run_mypy() -> bool:
     """Run mypy type checking."""
     print_step("Running mypy type checking...")
 
-    returncode, _, _ = run_command(["poetry", "run", "mypy", "pictologics"], cwd=PROJECT_ROOT)
+    returncode, _, _ = run_command(
+        ["poetry", "run", "mypy", "pictologics", "scripts"], cwd=PROJECT_ROOT
+    )
 
     if returncode == 0:
         print_success("Mypy: No errors found")

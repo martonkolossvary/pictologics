@@ -1,5 +1,10 @@
 name: Publish to PyPI
 
+# A stable release: test, check the version, build, record the wheel, upload it to PyPI.
+# Only after the upload, the notify job (notify-slicer-extension.yml) waits until PyPI
+# shows the recorded wheel and then notifies SlicerPictologics. A failed test, build or
+# upload skips the notification. Pre-releases go to TestPyPI and send no notification.
+
 on:
   release:
     types: [released]  # Triggered when published (or promoted from pre-release)
@@ -13,6 +18,10 @@ jobs:
     permissions:
       id-token: write  # Required for Trusted Publisher (OIDC)
       contents: read
+    outputs:
+      version: ${{ steps.wheel.outputs.version }}
+      filename: ${{ steps.wheel.outputs.filename }}
+      sha256: ${{ steps.wheel.outputs.sha256 }}
 
     steps:
       - name: Checkout
@@ -43,6 +52,7 @@ jobs:
           poetry run pytest -q -n auto --cov=pictologics --cov-report=xml
 
       - name: Check the version
+        id: version
         run: |
           # The release tag without "v" must equal the version in pyproject.toml and in
           # pictologics/__init__.py.
@@ -52,10 +62,21 @@ jobs:
           CODE="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' pictologics/__init__.py)"
           echo "tag $TAG, pyproject $PROJECT, __version__ $CODE"
           test "$BASE" = "$PROJECT" && test "$BASE" = "$CODE"
+          echo "version=$BASE" >> "$GITHUB_OUTPUT"
 
       - name: Build package
         run: |
           poetry build
+
+      - name: Record the wheel
+        id: wheel
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # A stable X.Y.Z version, the wheel metadata of that version, and the SHA-256 of
+          # the built wheel: the trusted record that the notify job checks on PyPI.
+          python scripts/verify_pypi_release.py record --version "$VERSION" \
+            --wheel "dist/pictologics-$VERSION-py3-none-any.whl" --github-output "$GITHUB_OUTPUT"
 
       - name: Publish to PyPI (Trusted Publisher)
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -67,3 +88,16 @@ jobs:
       # main. Pushing a built site to a `gh-pages` branch from here would write
       # to a branch that is never served, and is blocked by the repository
       # ruleset requiring code-scanning results on that branch.
+
+  notify:
+    name: Notify SlicerPictologics
+    needs: publish  # runs only after a successful upload
+    permissions:
+      contents: read
+    uses: ./.github/workflows/notify-slicer-extension.yml
+    with:
+      version: ${{ needs.publish.outputs.version }}
+      filename: ${{ needs.publish.outputs.filename }}
+      sha256: ${{ needs.publish.outputs.sha256 }}
+    secrets:
+      SLICER_EXTENSION_DISPATCH_TOKEN: ${{ secrets.SLICER_EXTENSION_DISPATCH_TOKEN }}

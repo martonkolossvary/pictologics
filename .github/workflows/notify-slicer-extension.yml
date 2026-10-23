@@ -1,34 +1,111 @@
 name: Notify SlicerPictologics of release
 
-# When a stable Pictologics release is published, ask the SlicerPictologics extension
-# to open a compatibility-qualified version-bump pull request. This fires a
-# repository_dispatch that the extension's adopt-pictologics-release.yml workflow
-# consumes (event type "pictologics-release", client_payload.version). That workflow
-# validates the release and opens a review-only PR; it never auto-merges.
+# Ask the SlicerPictologics extension to adopt a stable Pictologics release, after the release
+# is on production PyPI. The publish workflow (publish-pypi.yml) calls this workflow only after
+# a successful upload, with the trusted record of the built wheel: version, file name and
+# SHA-256. There is no other automatic path: this workflow does not listen to release events.
+#
+# 1. confirm: wait until https://pypi.org/pypi/pictologics/<version>/json shows that wheel with
+#    that SHA-256, not yanked (scripts/verify_pypi_release.py; at most about 3 minutes).
+# 2. dispatch: send a repository_dispatch (event type "pictologics-release",
+#    client_payload.version) to martonkolossvary/SlicerPictologics.
+#
+# The receiver, adopt-pictologics-release.yml of the extension, checks the release on PyPI and
+# runs its compatibility checks on each platform. Only when they pass does it commit the exact
+# pin and constraints to its default branch (a fast-forward push, never a force push; no pull
+# request). Its schedule (every six hours) finds a new release also without this notification.
+#
+# Recovery: the package is already on PyPI when this workflow runs, so a failure here needs no
+# new upload. Rerun the failed job, or run this workflow by hand (workflow_dispatch) with the
+# version and the SHA-256 of the "recorded:" line of the publish run.
 #
 # Requires an org/repo secret SLICER_EXTENSION_DISPATCH_TOKEN: a personal access token
 # (classic "repo" scope, or a fine-grained token with "contents: write") on
-# martonkolossvary/SlicerPictologics. The default GITHUB_TOKEN cannot dispatch to
-# another repository. Until that secret is configured, the job only prints a notice.
+# martonkolossvary/SlicerPictologics. The default GITHUB_TOKEN cannot dispatch to another
+# repository. Without the secret, the dispatch job prints a notice and sends nothing.
 
 on:
-  release:
-    types: [released]
+  workflow_call:
+    inputs:
+      version:
+        description: The stable version X.Y.Z that the publish job uploaded
+        required: true
+        type: string
+      filename:
+        description: The file name of the uploaded wheel
+        required: true
+        type: string
+      sha256:
+        description: The SHA-256 of the uploaded wheel, from the build
+        required: true
+        type: string
+    secrets:
+      SLICER_EXTENSION_DISPATCH_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The stable version X.Y.Z that is on PyPI
+        required: true
+        type: string
+      sha256:
+        description: The SHA-256 of its wheel, from the "recorded:" line of the publish run
+        required: true
+        type: string
+      filename:
+        description: The file name of the wheel (empty for pictologics-X.Y.Z-py3-none-any.whl)
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
-  dispatch:
-    name: Request extension version-bump adoption
+  confirm:
+    name: Confirm the wheel on PyPI
     runs-on: ubuntu-latest
-    if: ${{ !github.event.release.prerelease }}
+    outputs:
+      version: ${{ steps.pypi.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Wait until PyPI shows the uploaded wheel
+        id: pypi
+        env:
+          VERSION: ${{ inputs.version }}
+          FILENAME: ${{ inputs.filename }}
+          SHA256: ${{ inputs.sha256 }}
+        run: |
+          args=(confirm --version "$VERSION" --sha256 "$SHA256" --github-output "$GITHUB_OUTPUT")
+          if [ -n "$FILENAME" ]; then args+=(--filename "$FILENAME"); fi
+          python scripts/verify_pypi_release.py "${args[@]}"
+
+      - name: Report the failed PyPI check
+        if: failure()
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "::error::PyPI does not show the expected wheel of Pictologics $VERSION, so no notification was sent. Check the release on PyPI; then rerun this job or run this workflow by hand."
+
+  dispatch:
+    name: Request the extension adoption
+    needs: confirm
+    runs-on: ubuntu-latest
     env:
       DISPATCH_TOKEN: ${{ secrets.SLICER_EXTENSION_DISPATCH_TOKEN }}
+      VERSION: ${{ needs.confirm.outputs.version }}
     steps:
       - name: Skip without the dispatch token
         if: env.DISPATCH_TOKEN == ''
-        run: echo "::notice::SLICER_EXTENSION_DISPATCH_TOKEN is not set, so no dispatch was sent."
+        run: |
+          echo "::notice::Pictologics $VERSION is on PyPI, but SLICER_EXTENSION_DISPATCH_TOKEN is not set, so no notification was sent. The scheduled discovery of the extension (every six hours) still finds the release."
 
       - name: Send repository_dispatch to SlicerPictologics
         if: env.DISPATCH_TOKEN != ''
@@ -37,4 +114,10 @@ jobs:
           token: ${{ env.DISPATCH_TOKEN }}
           repository: martonkolossvary/SlicerPictologics
           event-type: pictologics-release
-          client-payload: '{"version": "${{ github.event.release.tag_name }}"}'
+          # The version is the checked X.Y.Z output of the confirm job
+          client-payload: '{"version": "${{ needs.confirm.outputs.version }}"}'
+
+      - name: Report the failed notification
+        if: failure()
+        run: |
+          echo "::error::Pictologics $VERSION is published on PyPI; only the notification failed. Rerun this job or run this workflow by hand (no new upload is needed). The scheduled discovery of the extension (every six hours) also finds the release."

@@ -31,11 +31,11 @@ jobs:
 
       - name: Ruff
         run: |
-          poetry run ruff check pictologics tests
+          poetry run ruff check pictologics tests scripts
 
       - name: Mypy
         run: |
-          poetry run mypy pictologics
+          poetry run mypy pictologics scripts
 
       - name: Towncrier Check
         if: github.event_name == 'pull_request'
