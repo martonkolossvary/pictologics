@@ -29,7 +29,7 @@ Pictologics computes in parallel and only where it must. These tips help it do s
 - The filters return float32 maps, half the memory of float64.
 - A column-order array (nibabel's `dataobj` or `get_fdata()`) is copied into row order once, by the tiled copy of the loaders.
 - Each `run_batch` worker holds one case at a time: the memory need grows with the number of workers.
-- The FFT of Moran's I and Geary's C uses at most half of the memory (in a Linux container, half of its memory limit). The `run_batch` workers share this limit. A larger ROI box runs in slabs. Each of the Riesz and Simoncelli table caches keeps at most 2 GiB, and at most a quarter of the limit.
+- The FFT of Moran's I and Geary's C uses at most half of the memory (in a Linux container, half of its memory limit). The `run_batch` workers share this limit. A larger ROI box runs in slabs. Each of the Riesz and Simoncelli table caches keeps at most 2 GiB, and at most a quarter of the limit. A table of a 3-D image is built in threads.
 
 ## Many Configurations and ROIs
 

@@ -112,7 +112,7 @@ def _warmup_texture() -> None:
         pairs += [(grey, roi_u8), (np.ascontiguousarray(grey), roi_u8)]
     for mm_data, mm_mask in pairs:
         _utils._roi_min_max_numba(mm_data, mm_mask)
-        _utils._roi_min_max_serial_numba(mm_data, mm_mask)
+        _utils._roi_min_max_numba_serial(mm_data, mm_mask)
 
     # The texture kernels. The grey-level volume build is specialized by the type and
     # layout of the grey levels: int32 in the pipeline (int64 and float64 too in a direct
@@ -132,8 +132,15 @@ def _warmup_texture() -> None:
         for data in (crop, np.ascontiguousarray(crop)):
             vol = np.zeros(tuple(s + 2 for s in data.shape), dtype=np.uint16)
             counts = np.empty((data.shape[0], 2), dtype=np.int64)
-            texture._texture_volume_numba(data, mask != 0, n_bins, vol, counts)
-            texture._texture_volume_serial_numba(data, mask != 0, n_bins, vol, counts)
+            span = np.empty((data.shape[0], 2), dtype=np.float64)
+            texture._texture_volume_numba(data, mask != 0, n_bins, vol, counts, span)
+            texture._texture_volume_serial_numba(data, mask != 0, n_bins, vol, counts, span)
+    # The pipeline gives the box crop of the int32 levels as it is: column order for a
+    # column-order image when the box is full or cuts axis 2 only
+    column = np.asfortranarray(box)
+    span = np.empty((column.shape[0], 2))
+    texture._texture_volume_numba(column, mask != 0, n_bins, vol, counts, span)
+    texture._texture_volume_serial_numba(column, mask != 0, n_bins, vol, counts, span)
     texture.calculate_all_texture_matrices(box, mask, n_bins)
     # The local kernel and its serial twin (a small volume takes the twin)
     vol, counts = texture._texture_volume(box, mask != 0, n_bins)
@@ -148,6 +155,12 @@ def _warmup_texture() -> None:
     texture._glcm_mu_sums_numba(glcm_p, glcm_levels, 1.5)
     # The NGTDM complexity: int64 levels, float64 probabilities and differences
     texture._ngtdm_complexity_numba(glcm_levels, np.full(2, 0.5), np.ones(2))
+    # The feature kernels: uint64 count tables, float64 sums, int64 zone cells
+    tables = np.ones((1, 2, 3), dtype=np.uint64)
+    texture._count_matrix_features_numba(tables, 1, 1024, np.empty(17))
+    texture._glcm_features_numba(np.ones((1, 2, 2), np.uint64), 2, 2.0, 1024, np.empty(25))
+    cells = np.array([0, 1], dtype=np.int64)
+    texture._glszm_features_numba(cells, cells, np.ones(2), np.empty(16))
     # The parallel zeroing and sum of large thread tables (from 182 grey levels on)
     texture._zero_fill_numba(np.ones(3, dtype=np.uint32))
     texture._thread_sum_numba(np.zeros((2, 4), dtype=np.uint32), np.zeros(4, dtype=np.uint64))
@@ -173,12 +186,25 @@ def _warmup_intensity() -> None:
     mean_val = 4.6
 
     intensity._sum_sq_centered(values, mean_val)
-    intensity._sum_of_squares(values)
+    for squares in (intensity._sum_of_squares_numba, intensity._sum_of_squares_numba_serial):
+        squares(values)
     intensity._central_moments_2_3_4(values, mean_val)
     intensity._mean_abs_dev(values, mean_val)
     intensity._robust_mean_abs_dev(values, lower=0.0, upper=10.0)
     intensity._percentile_ranks(values.size)
     intensity._small_order_statistics_numba(values)
+    # The one-pass sums of the first-order features (from 2^19 values on): the threaded
+    # kernels and their serial twins (one thread)
+    parts = intensity._FIRST_ORDER_PARTS
+    sums = np.empty((parts, 6))
+    counts = np.empty(parts, dtype=np.int64)
+    deviations = np.empty(parts)
+    for sums_kernel, robust_kernel in (
+        (intensity._first_order_sums_numba, intensity._robust_sums_numba),
+        (intensity._first_order_sums_numba_serial, intensity._robust_sums_numba_serial),
+    ):
+        sums_kernel(values, mean_val, 2.0, 0.0, 10.0, sums, counts)
+        robust_kernel(values, 0.0, 10.0, mean_val, deviations)
     # The value counts of the IVH: int32 binned values and int32 copies of whole floats and
     # small integers (other integers go to int64), in threads or on one core; the check of
     # whole float32 and float64 values
@@ -338,31 +364,33 @@ def _warmup_morphology() -> None:
     img = np.zeros(mask.shape, dtype=np.float64)
     img[mask > 0] = 2.0
 
-    # Production scans bbox-cropped views (strided) in the common case and
-    # C-contiguous arrays for full-volume ROIs; compile both layouts. Each parallel kernel
-    # of a small ROI has a serial twin with the same signatures.
+    # Production scans box crops in three layouts (row order, column order and strided;
+    # see layouts below); compile each. Each parallel kernel of a small ROI has a serial
+    # twin with the same signatures.
     for moments in (
         morphology._accumulate_moments_from_mask_numba,
         morphology._accumulate_moments_from_mask_numba_serial,
     ):
         moments(mask)
         moments(mask[1:, 1:, 1:])
-    img32 = img.astype(np.float32)  # float32 images: the responses of the filters
-    # A mask of another type becomes a row-order uint8 copy of the crop; the image crop
-    # stays a strided view
-    row_mask = np.ascontiguousarray(mask[1:, 1:, 1:])
+        moments(np.asfortranarray(mask))
+
+    # The box crops of the uint8 mask and of the image (float64, or float32: the responses
+    # of the filters and direct calls) have one of three layouts each, and the two can
+    # differ: row order (a full box or a box that cuts axis 0 only of a row-order array,
+    # and the row-order uint8 copy of a mask of another type), column order (a full box or
+    # a box that cuts axis 2 only of a column-order array) and strided (other boxes).
+    def layouts(array: npt.NDArray[Any]) -> tuple[npt.NDArray[Any], ...]:
+        return array, np.asfortranarray(array), np.pad(array, 1)[1:-1, 1:-1, 1:-1]
+
     for weighted in (
         morphology._accumulate_intensity_weighted_moments_numba,
         morphology._accumulate_intensity_weighted_moments_numba_serial,
     ):
-        weighted(mask, img)
-        weighted(mask[1:, 1:, 1:], img[1:, 1:, 1:])
-        weighted(mask, img32)
-        weighted(mask[1:, 1:, 1:], img32[1:, 1:, 1:])
-        weighted(row_mask, img[1:, 1:, 1:])
-        weighted(row_mask, img32[1:, 1:, 1:])
-        # An image of another type becomes a row-order float64 copy of the crop
-        weighted(mask[1:, 1:, 1:], np.ascontiguousarray(img[1:, 1:, 1:]))
+        for roi in layouts(mask):
+            for kind in (np.float64, np.float32):
+                for values in layouts(img.astype(kind)):
+                    weighted(roi, values)
 
     # Marching cubes (the mask with its zero border), also the parallel form of large volumes
     for parallel in (False, True):
@@ -432,7 +460,7 @@ def _warmup_filters() -> None:
     """Warmup filter, preprocessing and loader operations."""
     # Import here to avoid circular dependencies
     from . import loader, preprocessing
-    from .filters import _passes, _wavelet_pass, gabor
+    from .filters import _passes, _wavelet_pass, gabor, riesz, wavelets
     from .filters import base as filter_base
 
     # 0. Loader: the column-order to row-order copy for NIfTI, DICOM and SEG data, and
@@ -444,6 +472,11 @@ def _warmup_filters() -> None:
     for kind in loader._COLUMN_ORDER_DTYPES:
         row = np.ones((4, 4, 4), dtype=kind)
         loader._to_row_order_numba(row, np.empty((4, 4, 4), dtype=kind, order="F"))
+    # The copy of a mask or an image in another voxel order (_reoriented): the bits of
+    # every item size, on a view with no contiguous layout
+    for bits in loader._TURN_BITS.values():
+        turned = np.flip(np.ones((4, 4, 4), dtype=bits).transpose(1, 0, 2), 2)
+        loader._turn_numba(turned, np.empty((4, 4, 4), dtype=bits))
     ones, flags = np.ones(4), np.ones(4, dtype=np.bool_)
     # Every stored type of the fused NIfTI load (int8, int32 and uint32 too), and float32
     stored_types: list[Any] = list(
@@ -452,6 +485,12 @@ def _warmup_filters() -> None:
     for stored in stored_types:
         col = np.asfortranarray(np.ones((4, 4, 4), dtype=stored))
         loader._to_float_row_order_numba(col, ones, ones, flags, flags, np.empty((4, 4, 4)), 0)
+        # A slab of the stored-type DICOM load (apply_rescale=False): a strided output
+        loader._to_row_order_numba(col, np.empty((4, 4, 8), dtype=stored)[:, :, :4])
+    # The merge kernel of load_and_merge_images, for each type that takes it
+    for merge_type in loader._MERGE_DTYPES:
+        merged = np.zeros((4, 4, 4), dtype=merge_type)
+        loader._merge_numba(merged, np.ones((4, 4, 4), dtype=merge_type), merged.dtype.type(0), 0)
 
     # 1. Preprocessing kernels (discretise / resegment / resample). The
     # dispatch code always feeds C-contiguous arrays (via ravel /
@@ -465,17 +504,57 @@ def _warmup_filters() -> None:
     preprocessing._discretise_fbs_numba_serial(flat, 2.5, 0.0, binned)
     preprocessing._discretise_cutoffs_numba_serial(flat, np.array([2.0, 5.0]), True, binned)
     preprocessing._nonfinite_blocks_numba(flat, np.zeros(1, dtype=np.uint8))
+    preprocessing._rint_numba(flat, np.empty(flat.size, dtype=np.float64))
+    mapped = np.empty(flat.size)
+    preprocessing._normalise_map_numba(flat, 1.0, 2.0, mapped)
+    preprocessing._normalise_map_numba_serial(flat, 1.0, 2.0, mapped)
 
+    # The distance passes of grow_mask and of the nearest-ROI map (row order, int32 labels)
+    feature = np.zeros((2, 2, 2), dtype=np.bool_)
+    feature[0, 0, 0] = True
+    for axis0, axis1, axis2 in (
+        (
+            preprocessing._edt_axis0_numba,
+            preprocessing._edt_axis1_numba,
+            preprocessing._edt_axis2_numba,
+        ),
+        (
+            preprocessing._edt_axis0_numba_serial,
+            preprocessing._edt_axis1_numba_serial,
+            preprocessing._edt_axis2_numba_serial,
+        ),
+    ):
+        d2 = np.empty((2, 2, 2))
+        lab = feature.astype(np.int32)
+        axis0(feature, 1.0, d2, lab, True)
+        axis1(d2, 1.0, lab, True)
+        axis2(d2, 1.0, lab, True)
+
+    # resegment_mask reads a mask as the integer type of its size (see _utils._SAME_SIZE)
+    for view in (np.uint8, np.uint16, np.int32, np.int64):
+        v_flat = np.ones(flat.size, dtype=view)
+        v_out = np.empty(flat.size, dtype=view)
+        preprocessing._resegment_numba(flat, v_flat, 0.0, 5.0, v_out)
+        preprocessing._resegment_numba_serial(flat, v_flat, 0.0, 5.0, v_out)
+    # The default sentinel candidates
+    six = np.array([0.0, -1000.0, -2048.0, -3024.0, -1024.0, -32768.0])
     for m_dtype in (np.float64, np.uint8, np.bool_):
         m_flat = np.ones(flat.size, dtype=m_dtype)
         m_out = np.empty(flat.size, dtype=m_dtype)
-        preprocessing._resegment_numba(flat, m_flat, 0.0, 5.0, m_out)
         preprocessing._roi_values_numba(flat, m_flat)
+        for image3 in (flat.reshape(3, 3, 3), binned.reshape(3, 3, 3)):  # the ROI gather
+            preprocessing._box_values_numba(image3, m_flat.reshape(3, 3, 3), 0, 3, 1, 3, 0, 2)
         preprocessing._filter_outliers_numba(flat, m_flat, 0.0, 5.0, m_out)
+        preprocessing._filter_outliers_serial_numba(flat, m_flat, 0.0, 5.0, m_out)
         preprocessing._sentinel_counts_numba(flat, m_flat, np.array([0.0, -1000.0]))
+        preprocessing._sentinel_counts6_numba(flat, m_flat, six)
     preprocessing._sentinel_counts_numba(  # no ROI mask
         flat, np.empty(0, dtype=np.uint8), np.array([0.0, -1000.0])
     )
+    preprocessing._sentinel_counts6_numba(flat, np.empty(0, dtype=np.uint8), six)
+    valid_out = np.empty(flat.size, dtype=np.bool_)
+    preprocessing._not_equal_numba(flat, -1000.0, valid_out)
+    preprocessing._not_equal_numba_serial(flat, -1000.0, valid_out)
 
     src = np.ones((4, 4, 4), dtype=np.float64)
     scale = np.array([1.1, 1.1, 1.1])
@@ -497,9 +576,9 @@ def _warmup_filters() -> None:
             preprocessing._resample_trilinear_masked_numba_serial,
         ),
     ):
-        linear(src, scale, shift, start, False, math.nan, out3)
-        linear(src, scale, shift, start, False, 0.5, out_u8)
-        linear(src.astype(np.uint8), scale, shift, start, True, math.nan, out_u8)  # uint8 input
+        linear(src, scale, shift, start, False, math.nan, False, out3)
+        linear(src, scale, shift, start, False, 0.5, False, out_u8)
+        linear(src.astype(np.uint8), scale, shift, start, True, math.nan, False, out_u8)  # uint8
         for s_dtype in (np.float64, np.uint8, np.bool_):
             out_d = np.empty((3, 3, 3), dtype=s_dtype)
             nearest(src.astype(s_dtype), scale, shift, start, out_d)
@@ -573,6 +652,23 @@ def _warmup_filters() -> None:
                 image, np.empty((4, 4, 4), dtype=kind), 1, 1, 1, 2, 0.0, 0
             )
 
+    # The masked copy of the source-mask filters (_zero_filled, _prepare_masked_image, the
+    # float32 copy of the wavelet entry): float32 and float64 images and bool masks, each in
+    # row order or strided (the pipeline's crop views), into float32 or float64. Then the
+    # float32 response and the valid mask of the normalized convolution (row order).
+    mask_strided = np.ones((2, 2, 4), dtype=np.bool_)[:, :, :2]
+    for kind in (np.float32, np.float64):
+        strided = np.ones((2, 2, 4), dtype=kind)[:, :, :2]
+        for image in (strided, strided.copy()):
+            for mask in (mask_strided, mask_strided.copy()):
+                for out_kind in (np.float32, np.float64):
+                    out = np.empty((2, 2, 2), dtype=out_kind)
+                    filter_base._masked_planes_numba(image, mask, out, 0.0, 0, 2)
+    filter_base._normalize_planes_numba(
+        np.ones((2, 2, 2)), np.ones((2, 2, 2)), 0.01,
+        np.empty((2, 2, 2), dtype=np.float32), np.empty((2, 2, 2), dtype=np.bool_), 0, 2,
+    )  # fmt: skip
+
     # The wavelet passes: one float32 row-order kernel for each axis, in place (the same
     # signature as a new output), with the mode code 2 (scipy reflect) and a 2-tap kernel
     cube32 = np.ones((4, 5, 6), dtype=np.float32)
@@ -605,4 +701,17 @@ def _warmup_filters() -> None:
         1,
         np.empty((2, 4, 4)),
         np.empty((2, 4, 4), dtype=np.float32),
+    )
+
+    # The transfer table of a large 3-D Simoncelli filter: one parallel kernel (float64 grid
+    # vectors, int64 mirror indices); its row kernel compiles inside it
+    grid = np.zeros(2)
+    mirror = np.zeros(2, dtype=np.int64)
+    wavelets._simoncelli_table(
+        grid, grid, grid, mirror, mirror, mirror, 1.0, 1, np.empty((2, 2, 2))
+    )
+    # The transfer table of a large 3-D Riesz filter (int64 orders, float64 scale parts, a
+    # complex128 table); the power kernel compiles inside it
+    riesz._riesz_table(
+        grid, grid, grid, 1, 0, 0, 1, 0.0, -1.0, np.empty((2, 2, 2), dtype=np.complex128)
     )

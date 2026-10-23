@@ -1,6 +1,7 @@
 # pictologics/filters/base.py
 """Base classes and utilities for IBSI 2 filter implementations."""
 
+import math
 import os
 import threading
 from collections import OrderedDict, deque
@@ -101,6 +102,9 @@ _TRANSFER_CACHE_BYTES = 2 << 30
 # Shapes whose transfer tables stay cached: the newest image and the one before it (two
 # configurations of one run that resample to different grids alternate between them).
 _TRANSFER_CACHE_SHAPES = 2
+# From this many cells on, a 3-D transfer table (Simoncelli, Riesz) is built by a parallel
+# numba kernel; a smaller table is built by numpy, as the start of the kernel costs more.
+_TABLE_KERNEL_MIN = 1 << 15
 
 
 def _whole_number(value: Any) -> bool:
@@ -331,6 +335,19 @@ def _padding_value_problem(boundary: BoundaryCondition, padding_value: float) ->
     return None
 
 
+def _log_parameter_problem(
+    sigma_mm: float, spacing_mm: Tuple[float, ...], truncate: float
+) -> Optional[str]:
+    """Why the LoG scale `sigma_mm`, the voxel spacing `spacing_mm` (one value for each axis)
+    or `truncate` is not valid (each must be a finite positive number), or None."""
+    for name, value in (("sigma_mm", sigma_mm), ("truncate", truncate)):
+        if not (math.isfinite(value) and value > 0):
+            return f"{name} must be a positive number, not {value!r}"
+    if not all(math.isfinite(s) and s > 0 for s in spacing_mm):
+        return f"spacing_mm must hold positive numbers, not {spacing_mm!r}"
+    return None
+
+
 # A filter response, or (response, output valid mask) with a source mask
 _FilterOutput = Union[
     npt.NDArray[np.floating[Any]], Tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]
@@ -392,8 +409,9 @@ def _apply_with_boundary_padding(
             i.e. today's (pre-boundary-contract) behaviour.
         pad_width: Padding added on both sides of every axis: either a single int
             (same width for every axis) or a tuple with one width per axis of
-            `image`. Each axis's width is capped at that axis's own length, so
-            padding never blows up the array by more than 3x even for small inputs.
+            `image`. Each axis's width is capped at that axis's own length. Then
+            each width grows to the smallest width for which the padded axis has a
+            fast FFT size of the same parity (see `_fast_width`).
         padding_value: The constant of the ZERO (constant value) boundary.
         **kwargs: Additional keyword arguments forwarded to `func`.
 
@@ -406,6 +424,8 @@ def _apply_with_boundary_padding(
     pad_mode = _NUMPY_PAD_MODE_MAP[boundary]
     widths = (pad_width,) * image.ndim if isinstance(pad_width, int) else tuple(pad_width)
     widths = tuple(min(w, s) for w, s in zip(widths, image.shape, strict=True))
+    # Wider on both sides up to a fast FFT size of the same parity (the parity sets the Nyquist bin)
+    widths = tuple(_fast_width(s, w) for w, s in zip(widths, image.shape, strict=True))
 
     padded = _padded(image, [(w, w) for w in widths], pad_mode, padding_value)
     crop = tuple(slice(w, w + s) for w, s in zip(widths, image.shape, strict=True))
@@ -418,16 +438,40 @@ _PARALLEL_COPY_MIN = 1 << 21
 
 
 def _float32_cut(
-    response: npt.NDArray[Any], crop: Optional[Tuple[slice, ...]]
+    response: npt.NDArray[Any], crop: Optional[Tuple[slice, ...]], scale: Optional[float] = None
 ) -> npt.NDArray[np.float32]:
     """`response` cut to `crop` (None: the whole array) as a new C-ordered float32 array,
-    so a padded response is not kept. Large arrays copy on slabs in threads."""
+    so a padded response is not kept. Large arrays copy on slabs in threads. With `scale`,
+    each value is response * scale in float64, then cast to float32 (see _irfftn_unscaled)."""
     part = response if crop is None else response[crop]
+    if scale is not None:
+        return _slab_ufunc(np.multiply, (part, scale), np.empty(part.shape, dtype=np.float32))
     if part.size < _PARALLEL_COPY_MIN:
         return np.array(part, dtype=np.float32, order="C")
     output = np.empty(part.shape, dtype=np.float32)
     _slab_pass(_copy_pass, part, part.ndim - 1, output)
     return output
+
+
+def _irfftn_unscaled(
+    spectrum: npt.NDArray[np.complexfloating[Any, Any]], shape: Tuple[int, ...], workers: int
+) -> Tuple[npt.NDArray[np.float64], float]:
+    """irfftn(spectrum, s=shape) without its scale, and the scale 1 / N (N voxels). The
+    inverse complex FFT of the axes before the last runs in place in `spectrum` (it
+    overwrites it), then the inverse real FFT of the last axis makes the response. scipy's
+    irfftn of more than one axis makes a C temporary of the size of the spectrum first;
+    this form does not. The bits are those of irfftn: scipy applies the scale as one
+    multiplication after the last transform, as the caller does (see _float32_cut). An
+    inverse FFT over no axes (a 1-D spectrum) changes nothing."""
+    spectrum = scipy.fft.ifftn(
+        spectrum,
+        axes=tuple(range(spectrum.ndim - 1)),
+        workers=workers,
+        overwrite_x=True,
+        norm="forward",
+    )
+    response = scipy.fft.irfft(spectrum, n=shape[-1], axis=-1, workers=workers, norm="forward")
+    return response, 1.0 / float(np.prod(shape))
 
 
 def _copy_pass(image: npt.NDArray[Any], axis: int, output: npt.NDArray[Any]) -> None:
@@ -890,12 +934,24 @@ _LOG_SLAB_MIN = 2 << 20
 _FFT_CHUNK_BYTES = 1 << 20
 
 
+def _fast_width(n: int, w: int) -> int:
+    """The smallest pad width of at least `w` for which n + 2 * width is an 11-smooth size
+    (a fast FFT size). The size keeps the parity of n."""
+    size = n + 2 * w
+    while scipy.fft.next_fast_len(size) != size:
+        size += 2
+    return (size - n) // 2
+
+
 def _fft_gaussian_laplace(
     image: npt.NDArray[np.float64],
     sigmas: Tuple[Any, ...],
     mode: str,
     truncate: float,
     out_dtype: Any = np.float64,
+    widths: Optional[Tuple[Tuple[int, int], ...]] = None,
+    value: float = 0.0,
+    then: Optional[Callable[[Tuple[int, ...]], Callable[[Any], Any]]] = None,
 ) -> npt.NDArray[Any]:
     """The LoG of the passes of `_gaussian_laplace` as one FFT convolution with the same
     truncated kernels, as a new row-order array of `out_dtype`. The image is extended with
@@ -910,12 +966,25 @@ def _fft_gaussian_laplace(
     along the last axis goes into the spectrum (pocketfft transforms the last axis first,
     then axis 0, then axis 1, so the bits are those of rfftn). The complex passes run in
     place. The inverse transforms the cropped planes only, scaled and cut into the output
-    by a kernel."""
+    by a kernel.
+
+    `widths` gives the pad (before, after) of each axis; the FFT size is then the padded
+    size (the caller picks a fast one). `value` is the constant of the mode "constant".
+    `then(sizes)`, made before the spectrum (so its table is built first), gives a
+    function that multiplies the spectrum after the LoG transfer (see riesz_log)."""
     radii = [int(truncate * s + 0.5) for s in sigmas]
-    sizes = [
-        scipy.fft.next_fast_len(n + 2 * r, real=True)
-        for n, r in zip(image.shape, radii, strict=True)
-    ]
+    if widths is None:  # the kernel radius, on to a fast size
+        sizes = [
+            scipy.fft.next_fast_len(n + 2 * r, real=True)
+            for n, r in zip(image.shape, radii, strict=True)
+        ]
+        widths = tuple(
+            (r, size - n - r) for n, r, size in zip(image.shape, radii, sizes, strict=True)
+        )
+    else:
+        sizes = [n + a + b for n, (a, b) in zip(image.shape, widths, strict=True)]
+    pads = [a for a, _ in widths]
+    multiply = None if then is None else then(tuple(sizes))
     workers = get_num_threads()
     (g0, d0), (g1, d1), (g2, d2) = (
         _kernel_spectra(s, r, size, truncate, axis == 2)
@@ -925,16 +994,17 @@ def _fft_gaussian_laplace(
     both = np.multiply.outer(g0, g1)
     s0, s1, s2 = sizes
     if s0 * s1 * s2 < _LOG_SLAB_MIN or image.flags.fnc:  # column order: the rfftn path
-        widths = [(r, size - n - r) for n, r, size in zip(image.shape, radii, sizes, strict=True)]
-        padded = _padded(image, widths, _PAD_MODES[mode])
+        padded = _padded(image, widths, _PAD_MODES[mode], value)
         spectrum = scipy.fft.rfftn(padded, workers=workers)
         del padded
         _log_transfer(spectrum, first_two, both, g2, d2)
+        if multiply is not None:
+            spectrum = multiply(spectrum)
         response = scipy.fft.irfftn(spectrum, s=sizes, workers=workers, overwrite_x=True)
-        crop = tuple(slice(r, r + n) for r, n in zip(radii, image.shape, strict=True))
+        crop = tuple(slice(p, p + n) for p, n in zip(pads, image.shape, strict=True))
         return np.array(response[crop], dtype=out_dtype, order="C")
     n0, n1, n2 = image.shape
-    r0, r1, r2 = radii
+    r0, r1, r2 = pads
     code = _PAD_CODES[_PAD_MODES[mode]]
     spectrum = np.empty((s0, s1, s2 // 2 + 1), dtype=np.complex128)
     fct = 1.0 / float(s0 * s1 * s2)
@@ -946,7 +1016,7 @@ def _fft_gaussian_laplace(
         for first in range(a, b, chunk):
             last = min(first + chunk, b)
             buf = temp[: last - first]
-            _pad_planes_numba(image, buf, r0, r1, r2, code, 0.0, first)
+            _pad_planes_numba(image, buf, r0, r1, r2, code, float(value), first)
             spectrum[first:last] = scipy.fft.rfft(buf, axis=2, workers=1)
 
     def inverse(a: int, b: int) -> None:
@@ -971,6 +1041,8 @@ def _fft_gaussian_laplace(
     spectrum = scipy.fft.fft(spectrum, axis=0, workers=workers, overwrite_x=True)
     spectrum = scipy.fft.fft(spectrum, axis=1, workers=workers, overwrite_x=True)
     _log_transfer(spectrum, first_two, both, g2, d2)
+    if multiply is not None:
+        spectrum = multiply(spectrum)
     spectrum = scipy.fft.ifft(spectrum, axis=0, workers=workers, overwrite_x=True, norm="forward")
     spectrum = scipy.fft.ifft(spectrum, axis=1, workers=workers, overwrite_x=True, norm="forward")
     run(inverse, n0)
@@ -1074,7 +1146,7 @@ def _normalized_uniform_filter(
     # Sum of the valid values (invalid = 0) and of the valid weights, each in place
     weighted_sum = _zero_filled(image, source_mask)
     _uniform_filter(weighted_sum, size, mode, output=weighted_sum)
-    weight_sum = source_mask.astype(np.float64)
+    weight_sum = _weight(source_mask)
     _uniform_filter(weight_sum, size, mode, output=weight_sum)
     return _normalize(weighted_sum, weight_sum, weight_threshold)
 
@@ -1107,7 +1179,7 @@ def _normalized_gaussian_laplace(
     """
     # LoG of the zeroed image; the weight sum uses the Gaussian (the LoG sums to 0)
     log_response = _gaussian_laplace(_zero_filled(image, source_mask), sigma, mode, truncate)
-    weight_sum = source_mask.astype(np.float64)
+    weight_sum = _weight(source_mask)
     _gaussian_filter(weight_sum, sigma, mode, truncate, output=weight_sum)
     return _normalize(log_response, weight_sum, weight_threshold)
 
@@ -1123,7 +1195,7 @@ def _normalized_gaussian(
     """Gaussian smoothing by normalized convolution: G * (f m) / G * m, where the weight
     G * m reaches `weight_threshold` (the output valid mask), else 0."""
     smoothed = _gaussian_filter(_zero_filled(image, source_mask), sigma, mode, truncate)
-    weight_sum = source_mask.astype(np.float64)
+    weight_sum = _weight(source_mask)
     _gaussian_filter(weight_sum, sigma, mode, truncate, output=weight_sum)
     return _normalize(smoothed, weight_sum, weight_threshold)
 
@@ -1201,19 +1273,113 @@ def _normalized_separable_convolve_3d(
     # Weight of the valid voxels, as a fraction of the full kernel weight: 1 where every
     # voxel is valid, so the response there is the plain convolution
     abs_g1, abs_g2, abs_g3 = np.abs(g1), np.abs(g2), np.abs(g3)
-    weight = source_mask.astype(np.float64)
+    weight = _weight(source_mask)
     _convolve_axes(weight, (abs_g1, abs_g2, abs_g3), mode, output=weight)
     weight /= float(abs_g1.sum()) * float(abs_g2.sum()) * float(abs_g3.sum())
     return _normalize(result, weight, weight_threshold)
+
+
+def _on_planes(run: Callable[[int, int], None], planes: int, size: int) -> None:
+    """`run(first, last)` over the planes 0 to `planes` of an array of `size` values: one
+    call for a small array or one thread, else one call for each slab of planes in the
+    slab threads."""
+    threads = get_num_threads()
+    if size < _SLAB_MIN_SIZE or threads < 2:
+        run(0, planes)
+        return
+    edges = np.linspace(0, planes, min(threads, planes) + 1).astype(int)
+    list(_slab_pool().map(lambda k: run(int(edges[k]), int(edges[k + 1])), range(edges.size - 1)))
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _masked_planes_numba(
+    image: npt.NDArray[np.floating[Any]],
+    mask: npt.NDArray[np.bool_],
+    out: npt.NDArray[np.floating[Any]],
+    fill: float,
+    first: int,
+    last: int,
+) -> None:
+    """Planes first to last of `out` = `image` where `mask`, else `fill` (a cast when `out`
+    has another float type)."""
+    for i in range(first, last):
+        for j in range(out.shape[1]):
+            for k in range(out.shape[2]):
+                out[i, j, k] = image[i, j, k] if mask[i, j, k] else fill
+
+
+@jit(nopython=True, nogil=True, error_model="numpy", cache=True)  # type: ignore
+def _normalize_planes_numba(
+    response: npt.NDArray[np.float64],
+    weight: npt.NDArray[np.float64],
+    threshold: float,
+    out: npt.NDArray[np.float32],
+    valid: npt.NDArray[np.bool_],
+    first: int,
+    last: int,
+) -> None:
+    """Planes first to last of `out` = response / weight as float32 where the weight reaches
+    `threshold` (there `valid` is True), else 0."""
+    for i in range(first, last):
+        for j in range(out.shape[1]):
+            for k in range(out.shape[2]):
+                w = weight[i, j, k]
+                if w >= threshold:
+                    out[i, j, k] = response[i, j, k] / w
+                    valid[i, j, k] = True
+                else:
+                    out[i, j, k] = 0.0
+                    valid[i, j, k] = False
+
+
+def _masked_copy(
+    image: npt.NDArray[Any],
+    source_mask: npt.NDArray[np.bool_],
+    fill: float,
+    dtype: Any,
+) -> Optional[npt.NDArray[Any]]:
+    """A new row-order array of `dtype` (float32 or float64): `image` where `source_mask`,
+    else `fill`, from the plane kernel in the slab threads. None when the kernel does not
+    take the inputs (not a float32 or float64 image, not a bool mask, column order)."""
+    if not (
+        image.dtype in (np.float32, np.float64)
+        and image.ndim == 3
+        and source_mask.shape == image.shape
+        and not image.flags.fnc
+        and not source_mask.flags.fnc
+    ):
+        return None
+    out = np.empty(image.shape, dtype=dtype)
+    _on_planes(
+        lambda a, b: _masked_planes_numba(image, source_mask, out, float(fill), a, b),
+        image.shape[0],
+        out.size,
+    )
+    return out
 
 
 def _zero_filled(
     image: npt.NDArray[np.floating[Any]], source_mask: npt.NDArray[np.bool_]
 ) -> npt.NDArray[np.float64]:
     """The image as float64, with 0.0 at the invalid voxels."""
+    result = _masked_copy(image, source_mask, 0.0, np.float64)
+    if result is not None:
+        return result
     result = np.zeros(image.shape, dtype=np.float64)
     np.copyto(result, image, where=source_mask)
     return result
+
+
+def _weight(source_mask: npt.NDArray[np.bool_]) -> npt.NDArray[np.float64]:
+    """`source_mask.astype(np.float64)` (1.0 at the valid voxels, in the same memory order):
+    the weight of the normalized convolution. A row-order weight copies on slabs in
+    threads."""
+    out = np.empty_like(source_mask, dtype=np.float64)
+    if out.flags.c_contiguous:
+        _slab_pass(_copy_pass, source_mask, source_mask.ndim - 1, out)
+    else:
+        np.copyto(out, source_mask)
+    return out
 
 
 def _normalize(
@@ -1222,7 +1388,25 @@ def _normalize(
     weight_threshold: float,
 ) -> Tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.bool_]]:
     """(response / weight where the weight reaches `weight_threshold`, else 0) as float32,
-    and where it does (the output valid mask). The division writes into `response`."""
+    and where it does (the output valid mask). 3-D float64 arrays in row order take the plane
+    kernel in the slab threads; other arrays divide into `response`."""
+    if (
+        response.ndim == 3
+        and response.dtype == weight.dtype == np.float64
+        and response.shape == weight.shape
+        and response.flags.c_contiguous
+        and weight.flags.c_contiguous
+    ):
+        out = np.empty(response.shape, dtype=np.float32)
+        valid = np.empty(response.shape, dtype=np.bool_)
+        _on_planes(
+            lambda a, b: _normalize_planes_numba(
+                response, weight, float(weight_threshold), out, valid, a, b
+            ),
+            response.shape[0],
+            out.size,
+        )
+        return out, valid
     valid_output = weight >= weight_threshold
     np.divide(response, weight, out=response, where=valid_output)
     response[~valid_output] = 0.0
@@ -1242,6 +1426,7 @@ def _prepare_masked_image(
     image: npt.NDArray[np.floating[Any]],
     source_mask: npt.NDArray[np.bool_],
     fill_value: float = 0.0,
+    dtype: Any = None,
 ) -> npt.NDArray[np.floating[Any]]:
     """
     Prepare image for FFT-based filtering by zeroing out invalid voxels.
@@ -1254,10 +1439,17 @@ def _prepare_masked_image(
         image: 3D input image array
         source_mask: Boolean mask where True = valid voxel
         fill_value: Value to use for invalid voxels (default 0.0)
+        dtype: The type of the result (default: the image type). The cast is part of
+            the one copy.
 
     Returns:
-        Image with invalid voxels set to fill_value
+        Image with invalid voxels set to fill_value (a new row-order array)
     """
-    result = image.copy()
+    dtype = image.dtype if dtype is None else dtype
+    result = _masked_copy(image, source_mask, fill_value, dtype)
+    if result is not None:
+        return result
+    # the cast copy of as_float32 (in threads when large), or the copy of the old code
+    result = _float32_cut(image, None) if dtype == np.float32 else image.astype(dtype, order="C")
     result[~source_mask] = fill_value
     return result

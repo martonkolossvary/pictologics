@@ -1,7 +1,6 @@
 # pictologics/filters/log.py
 """Laplacian of Gaussian filter implementation (IBSI code: L6PA)."""
 
-import math
 from typing import Any, Optional, Tuple, Union, overload
 
 import numpy as np
@@ -14,6 +13,7 @@ from .base import (
     _constant_padded,
     _float32_cut,
     _gaussian_laplace,
+    _log_parameter_problem,
     _normalized_gaussian_laplace,
     _padding_value_problem,
     as_float32,
@@ -126,11 +126,9 @@ def laplacian_of_gaussian(
     # Handle scalar spacing
     if isinstance(spacing_mm, (int, float)):
         spacing_mm = (float(spacing_mm),) * 3
-    for name, value in (("sigma_mm", sigma_mm), ("truncate", truncate)):
-        if not (math.isfinite(value) and value > 0):
-            raise ValueError(f"{name} must be a positive number, not {value!r}")
-    if not all(math.isfinite(s) and s > 0 for s in spacing_mm):
-        raise ValueError(f"spacing_mm must hold positive numbers, not {spacing_mm!r}")
+    problem = _log_parameter_problem(sigma_mm, spacing_mm, truncate)
+    if problem:
+        raise ValueError(problem)
 
     # Convert to float32 as required by IBSI
     image = ensure_float32(image)

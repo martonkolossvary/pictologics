@@ -162,8 +162,11 @@ def _apply_window_level(
     min_val = center - width / 2
     max_val = center + width / 2
     np.nan_to_num(arr, copy=False, nan=min_val)  # NaN shows as the window minimum
-    arr = np.clip(arr, min_val, max_val)
-    arr = (arr - min_val) / (max_val - min_val) * 255
+    # In place: the same operations in the same order as (clip - min) / width * 255
+    np.clip(arr, min_val, max_val, out=arr)
+    arr -= min_val
+    arr /= max_val - min_val
+    arr *= 255
     return arr.astype(np.uint8)
 
 
@@ -207,10 +210,12 @@ def _normalize_image(
     else:
         arr_min = np.min(arr)
         arr_max = np.max(arr)
-    if arr_max > arr_min:
-        arr = (arr - arr_min) / (arr_max - arr_min) * 255
-    else:
-        arr = np.zeros_like(arr)
+    if not arr_max > arr_min:
+        return np.zeros(arr.shape, dtype=np.uint8)
+    # In place: the same operations in the same order as (arr - min) / (max - min) * 255
+    arr -= arr_min
+    arr /= arr_max - arr_min
+    arr *= 255
     return arr.astype(np.uint8)
 
 
@@ -222,7 +227,7 @@ def _get_colormap_colors(colormap: str) -> list[tuple[int, int, int]]:
     return COLORMAPS["tab20"]
 
 
-def _create_display_rgba(
+def _create_display_rgb(
     image_slice: Optional[npt.NDArray[np.floating[Any]]],
     mask_slice: Optional[npt.NDArray[np.floating[Any]]],
     alpha: float = 0.25,
@@ -231,9 +236,9 @@ def _create_display_rgba(
     window_width: Optional[float] = None,
     mask_as_colormap: bool = True,
     value_range: Optional[tuple[float, float]] = None,
-) -> npt.NDArray[np.floating[Any]]:
+) -> npt.NDArray[np.uint8]:
     """
-    Create an RGBA image for display.
+    Create an RGB image for display.
 
     Supports three modes:
     1. Image + Mask: Overlay mask on grayscale image
@@ -252,7 +257,8 @@ def _create_display_rgba(
             slice shown in gray (the image, or a grayscale mask), used without a window.
 
     Returns:
-        RGBA array (H, W, 4) as uint8, ready for matplotlib imshow.
+        RGB array (H, W, 3) as uint8 in row order, ready for matplotlib imshow and PIL.
+        The overlay is mixed into the colors, so the image has no alpha channel.
 
     Raises:
         ValueError: If both image_slice and mask_slice are None.
@@ -260,93 +266,51 @@ def _create_display_rgba(
     if image_slice is None and mask_slice is None:
         raise ValueError("At least one of image_slice or mask_slice must be provided.")
 
-    # Transpose from (X, Y) to (Y, X) for proper display with imshow
-    if image_slice is not None:
-        image_slice = np.transpose(image_slice)
+    # Transpose from (X, Y) to (Y, X) for display. The mask becomes a row-order copy:
+    # the label passes then read memory in order.
     if mask_slice is not None:
-        mask_slice = np.transpose(mask_slice)
-
-    # Determine shape from whichever slice is provided
-    if image_slice is not None:
-        shape = image_slice.shape
-    else:
-        assert mask_slice is not None  # For mypy: we know at least one is not None
-        shape = mask_slice.shape
-
-    # --- Mode 1: Image only ---
-    if mask_slice is None:
-        assert image_slice is not None  # For mypy
-        gray = _normalize_image(image_slice, window_center, window_width, value_range)
-        rgba = np.zeros((*shape, 4), dtype=np.uint8)
-        rgba[..., 0] = gray
-        rgba[..., 1] = gray
-        rgba[..., 2] = gray
-        rgba[..., 3] = 255
-        return rgba  # type: ignore[return-value]
-
-    # --- Mode 2: Mask only ---
-    if image_slice is None:
-        if mask_as_colormap:
-            # Create colormap visualization
-            colors = _get_colormap_colors(colormap)
-            num_colors = len(colors)
-            rgba = np.zeros((*shape, 4), dtype=np.uint8)
-            rgba[..., 3] = 255  # Fully opaque
-
-            # Background stays black; each label takes its color in one lookup
-            _, color_idx = _label_colors(mask_slice, num_colors)
-            rgba[..., :3] = _color_table(colors, np.uint8)[color_idx]
-            return rgba  # type: ignore[return-value]
-        else:
-            # Grayscale mask
-            gray = _normalize_image(mask_slice, window_center, window_width, value_range)
-            rgba = np.zeros((*shape, 4), dtype=np.uint8)
-            rgba[..., 0] = gray
-            rgba[..., 1] = gray
-            rgba[..., 2] = gray
-            rgba[..., 3] = 255
-            return rgba  # type: ignore[return-value]
-
-    # --- Mode 3: Overlay (image + mask) ---
-    gray = _normalize_image(image_slice, window_center, window_width, value_range)
-
-    # Create RGB base from grayscale
-    rgba = np.zeros((*shape, 4), dtype=np.uint8)
-    rgba[..., 0] = gray
-    rgba[..., 1] = gray
-    rgba[..., 2] = gray
-    rgba[..., 3] = 255
-
-    # Get colormap colors
+        mask_slice = np.ascontiguousarray(mask_slice.T)
     colors = _get_colormap_colors(colormap)
-    num_colors = len(colors)
 
-    # Apply mask colors with blending, for all labelled pixels at once
-    labelled, color_idx = _label_colors(mask_slice, num_colors)
-    pixels = np.flatnonzero(labelled)
-    rgb = rgba.reshape(-1, 4)  # a view: one row per pixel
-    rgb[pixels, :3] = np.clip(
-        (1 - alpha) * rgb[pixels, :3]
-        + alpha * _color_table(colors, np.float64)[color_idx.ravel()[pixels]],
+    # Mask only, in colors: background stays black (the last row of the table)
+    if image_slice is None and mask_as_colormap:
+        assert mask_slice is not None  # For mypy
+        pixels, color_index = _label_colors(mask_slice, len(colors))
+        index = np.full(mask_slice.size, len(colors), dtype=np.int64)
+        index[pixels] = color_index
+        return _color_table(colors, np.uint8)[index.reshape(mask_slice.shape)]
+
+    # The gray base: the image, or a mask shown in gray
+    gray_source = image_slice.T if image_slice is not None else mask_slice
+    assert gray_source is not None  # For mypy
+    gray = _normalize_image(gray_source, window_center, window_width, value_range)
+    rgb = np.empty((*gray.shape, 3), dtype=np.uint8)
+    rgb[...] = gray[..., None]
+    if image_slice is None or mask_slice is None:
+        return rgb
+
+    # Overlay: mix the label colors into the labelled pixels, all at once
+    pixels, color_index = _label_colors(mask_slice, len(colors))
+    flat = rgb.reshape(-1, 3)  # a view: one row per pixel
+    flat[pixels] = np.clip(
+        (1 - alpha) * flat[pixels] + alpha * _color_table(colors, np.float64)[color_index],
         0,
         255,
     ).astype(np.uint8)
-
-    return rgba  # type: ignore[return-value]
+    return rgb
 
 
 def _label_colors(
     mask_slice: npt.NDArray[Any], num_colors: int
-) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.int64]]:
-    """The labelled pixels, and per pixel the color index: (label - 1) mod the colors,
-    with the label truncated to an integer, or `num_colors` (black) for background 0. A
-    NaN in a float mask is background."""
-    labelled = mask_slice != 0
-    if mask_slice.dtype.kind == "f":
-        labelled &= ~np.isnan(mask_slice)
-        mask_slice = np.nan_to_num(mask_slice, nan=0.0)
-    index = np.where(labelled, (mask_slice.astype(np.int64) - 1) % num_colors, num_colors)
-    return labelled, index
+) -> tuple[npt.NDArray[np.intp], npt.NDArray[np.int64]]:
+    """The labelled pixels of a row-order mask (flat indices) and their color index:
+    (label - 1) mod the colors, with the label truncated to an integer. A NaN in a float
+    mask is background, as 0."""
+    flat = mask_slice.ravel()
+    if flat.dtype.kind == "f":
+        flat = np.nan_to_num(flat, nan=0.0)
+    pixels = np.flatnonzero(flat)
+    return pixels, (flat[pixels].astype(np.int64) - 1) % num_colors
 
 
 def _color_table(colors: list[tuple[int, int, int]], dtype: Any) -> npt.NDArray[Any]:
@@ -417,22 +381,41 @@ def _parse_slice_selection(
     return [0]
 
 
+# Voxels from which _gray_range reads the volume in threads (measured on 10 threads: 3.4 M
+# voxels x1.07, 52 M voxels x0.41)
+_RANGE_THREADS_MIN = 1 << 23
+
+
 def _gray_range(
     image: Optional[Image],
     mask: Optional[Image],
     window_center: Optional[float],
     window_width: Optional[float],
     mask_as_colormap: bool,
+    workers: int = 1,
 ) -> Optional[tuple[float, float]]:
     """(minimum, maximum) of the whole volume shown in gray (the image, or a mask shown
     in grayscale) when no window is set, so that all slices share one gray scale. NaN
-    values are left out."""
+    values are left out. With more than one worker, a large row- or column-order volume
+    is read in `workers` parts at the same time; np.nanmin is np.fmin.reduce, so the
+    parts give the same minimum and maximum."""
     if window_center is not None and window_width is not None:
         return None
     gray = image if image is not None else (None if mask_as_colormap else mask)
     if gray is None:
         return None
-    return float(np.nanmin(gray.array)), float(np.nanmax(gray.array))
+    array = gray.array
+    if (
+        workers > 1
+        and array.size >= _RANGE_THREADS_MIN
+        and (array.flags.c_contiguous or array.flags.f_contiguous)
+    ):
+        parts = np.array_split(array.ravel(order="K"), workers)  # views, no copy
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            lows = list(executor.map(np.fmin.reduce, parts))
+            highs = list(executor.map(np.fmax.reduce, parts))
+        return float(np.nanmin(np.array(lows))), float(np.nanmax(np.array(highs)))
+    return float(np.nanmin(array)), float(np.nanmax(array))
 
 
 def _get_reference_array(
@@ -554,7 +537,8 @@ def save_slices(
 
     # Parse slice selection
     slice_indices = _parse_slice_selection(slice_selection, num_slices)
-    value_range = _gray_range(image, mask, window_center, window_width, mask_as_colormap)
+    threads = get_num_threads()
+    value_range = _gray_range(image, mask, window_center, window_width, mask_as_colormap, threads)
 
     # Validate format
     format = format.lower()
@@ -589,8 +573,8 @@ def save_slices(
             else:
                 mask_slice = mask.array[:, :, idx]
 
-        # Create display RGBA
-        rgba = _create_display_rgba(
+        # The overlay is mixed into the colors, so the files are RGB
+        rgb = _create_display_rgb(
             img_slice,
             mask_slice,
             alpha,
@@ -600,10 +584,7 @@ def save_slices(
             mask_as_colormap,
             value_range,
         )
-
-        # The overlay is mixed into the colors and the alpha channel is always 255, so
-        # the files are RGB (the same pixels as RGBA, a quarter less data to encode).
-        pil_img = PILImage.fromarray(np.ascontiguousarray(rgba[..., :3]))
+        pil_img = PILImage.fromarray(rgb)
 
         # Save: one pixel per voxel, with dpi as the resolution tag of the file
         filename = f"{filename_prefix}_{idx:04d}{ext}"
@@ -613,7 +594,7 @@ def save_slices(
 
     # Slices in threads: PIL releases the GIL while it encodes. Numba's thread count, and
     # not more threads than slices.
-    workers = min(get_num_threads(), max(1, len(slice_indices)))
+    workers = min(threads, max(1, len(slice_indices)))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         return list(executor.map(save_slice, slice_indices))
 
@@ -756,7 +737,7 @@ def visualize_slices(
         return img_slice, mask_slice
 
     img_slice, mask_slice = get_slice(initial_slice)
-    rgba = _create_display_rgba(
+    rgb = _create_display_rgb(
         img_slice,
         mask_slice,
         alpha,
@@ -768,7 +749,7 @@ def visualize_slices(
     )
 
     # Display
-    im = ax.imshow(rgba, aspect="equal")
+    im = ax.imshow(rgb, aspect="equal")
     ax.set_title(f"Slice {initial_slice}/{num_slices - 1}")
     ax.axis("off")
 
@@ -786,7 +767,7 @@ def visualize_slices(
     def update(val: float) -> None:
         idx = int(val)
         img_slice, mask_slice = get_slice(idx)
-        rgba = _create_display_rgba(
+        rgb = _create_display_rgb(
             img_slice,
             mask_slice,
             alpha,
@@ -796,7 +777,7 @@ def visualize_slices(
             mask_as_colormap,
             value_range,
         )
-        im.set_data(rgba)
+        im.set_data(rgb)
         ax.set_title(f"Slice {idx}/{num_slices - 1}")
         fig.canvas.draw_idle()
 

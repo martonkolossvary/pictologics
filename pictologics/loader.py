@@ -94,6 +94,74 @@ def _direction_matrix(direction: Any) -> npt.NDArray[np.float64]:
 _DIRECTION_TOLERANCE = 0.01
 
 
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _turn_numba(view: npt.NDArray[Any], out: npt.NDArray[Any]) -> None:
+    """Copy `view` (the axes of an array swapped and flipped, any strides) into the
+    row-order array `out` of its shape: out[i, j, k] = view[i, j, k].
+
+    Tiles of 32 x 32 x 32 values keep the reads and the writes in cache for every order of
+    the axes. The threads share the (i, j) pairs of tiles, so an axis of few tiles does not
+    stop the other threads.
+    """
+    n0, n1, n2 = out.shape
+    tile = 32
+    tiles1 = (n1 + tile - 1) // tile
+    for t in prange(((n0 + tile - 1) // tile) * tiles1):
+        i0 = (t // tiles1) * tile
+        j0 = (t % tiles1) * tile
+        i1 = min(i0 + tile, n0)
+        j1 = min(j0 + tile, n1)
+        for k0 in range(0, n2, tile):
+            k1 = min(k0 + tile, n2)
+            for i in range(i0, i1):
+                for j in range(j0, j1):
+                    for k in range(k0, k1):
+                        out[i, j, k] = view[i, j, k]
+
+
+# The unsigned type of each item size: _turn_numba copies the bits of every type (warmed in
+# warmup._warmup_filters)
+_TURN_BITS = {1: np.uint8, 2: np.uint16, 4: np.uint32, 8: np.uint64}
+# Below this size numpy's copy costs less than the start of the threads
+_TURN_MIN_SIZE = 1 << 20
+# On one thread, the kernel is faster than numpy's copy from this size on (and only when
+# numpy reads one value per cache line through the whole array)
+_TURN_SERIAL_MIN_SIZE = 1 << 24
+
+
+def _turn_on_tiles(view: npt.NDArray[Any]) -> bool:
+    """Whether `_turn_numba` copies `view` faster than numpy (measured on an M4 Pro, 1 to 10
+    threads). numpy writes `out` in row order and reads `view` in that order, so its speed
+    depends on the axis of `view` along which the array is fast (the smallest stride)."""
+    strides = [abs(s) for s in view.strides]
+    fast = strides.index(min(strides))
+    if get_num_threads() == 1:  # numpy reads one value per cache line through the array
+        return fast == 0 and view.size >= _TURN_SERIAL_MIN_SIZE
+    if fast < 2:  # numpy reads one value per cache line
+        return True
+    # Whole rows of more than one byte for each value, out of their order in memory
+    return view.itemsize > 1 and strides[0] < strides[1]
+
+
+def _turned_copy(view: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """`view` (the axes of an array swapped and flipped) as a row-order array.
+
+    A large view takes a tiled parallel copy when numpy's copy reads across the cache:
+    `_row_order` for a column-order view, `_turn_numba` (on the bits of the values) for
+    other strides. A row-order view returns as it is, as from np.ascontiguousarray.
+    """
+    # A read-only view would need other signatures of the kernels
+    if view.size >= _TURN_MIN_SIZE and view.flags.writeable and not view.flags.c_contiguous:
+        if view.flags.f_contiguous:
+            return np.ascontiguousarray(_row_order(view))
+        bits = _TURN_BITS.get(view.itemsize)
+        if bits is not None and _turn_on_tiles(view):
+            out = np.empty(view.shape, dtype=view.dtype)
+            _turn_numba(view.view(bits), out.view(bits))
+            return out
+    return np.ascontiguousarray(view)
+
+
 def _reoriented(image: Image, reference: Image) -> Image:
     """`image` with its axes swapped and flipped to the axis directions of `reference`,
     when its direction matrix is that of `reference` up to the order and the signs of
@@ -117,7 +185,7 @@ def _reoriented(image: Image, reference: Image) -> Image:
     )
 
     def turned(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
-        return np.ascontiguousarray(np.flip(np.transpose(array, axes), flipped))
+        return _turned_copy(np.flip(np.transpose(array, axes), flipped))
 
     return Image(
         array=turned(image.array),
@@ -510,6 +578,15 @@ def create_full_mask(reference_image: Image, dtype: DTypeLike = np.uint8) -> Ima
     )
 
 
+def _filled(shape: tuple[int, ...], fill_value: float, dtype: Any) -> npt.NDArray[Any]:
+    """An array of `shape` and `dtype` that holds `fill_value`. A fill of +0 uses np.zeros:
+    the system gives the pages of zeros at their first use, so a page that no one writes
+    costs no time. A fill of -0.0 (its sign bit) and NaN use np.full."""
+    if fill_value == 0 and math.copysign(1.0, fill_value) > 0.0:
+        return np.zeros(shape, dtype=dtype)
+    return np.full(shape, fill_value, dtype=dtype)
+
+
 def _position_in_reference(
     image: Image,
     reference: Image,
@@ -565,7 +642,7 @@ def _position_in_reference(
         min_overlap_fraction,
     )
     # Output array with the reference shape, filled with fill_value, and the data in place
-    output = np.full(reference.array.shape, fill_value, dtype=data.dtype)
+    output = _filled(reference.array.shape, fill_value, data.dtype)
     if source is not None and target is not None:
         output[target] = data[source]
     return Image(
@@ -750,6 +827,49 @@ def _widened(merged: npt.NDArray[Any], current: npt.NDArray[Any]) -> npt.NDArray
     return merged if kind == merged.dtype else merged.astype(kind)
 
 
+# The conflict rules of `_merge_into` as the codes of `_merge_numba`
+_MERGE_RULES = {"max": 0, "min": 1, "last": 2, "first": 3}
+# Types that merge in `_merge_numba` (warmed in warmup._warmup_filters): NIfTI, NRRD,
+# MetaImage and rescaled DICOM (float64), SEG masks and labels (uint8), stored DICOM
+# pixels (int16, uint16)
+_MERGE_DTYPES = (np.float64, np.uint8, np.int16, np.uint16)
+# Arrays from this many voxels merge in `_merge_numba`: a 60x50x40 box merges x1.10
+# slower in it, a 64x64x64 box x0.60 faster
+_MERGE_MIN_SIZE = 1 << 18
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _merge_numba(merged: npt.NDArray[Any], current: npt.NDArray[Any], fill: Any, rule: int) -> None:
+    """The merge of `_merge_into` in one parallel pass over two row-order arrays of one
+    type, with no temporary arrays. `fill` is the fill value in that type and `rule` a
+    code of `_MERGE_RULES`. The results are those of np.copyto, np.maximum and
+    np.minimum: a NaN of `current` wins against a number, a NaN of `merged` stays, and of
+    two zeros, max gives +0 and min gives -0 (numpy gives these zeros on arm64; on x86-64
+    it gives the zero of `current`, the same value with the other sign)."""
+    m = merged.reshape(merged.size)
+    c = current.reshape(current.size)
+    for i in prange(c.size):
+        value = c[i]
+        if value != fill:
+            old = m[i]
+            if old == fill or rule == 2:
+                m[i] = value
+            elif rule == 0:
+                if (
+                    value > old
+                    or (value != value and old == old)
+                    or (value == 0 and old == 0 and math.copysign(1.0, value) > 0.0)
+                ):
+                    m[i] = value
+            elif rule == 1:
+                if (
+                    value < old
+                    or (value != value and old == old)
+                    or (value == 0 and old == 0 and math.copysign(1.0, value) < 0.0)
+                ):
+                    m[i] = value
+
+
 def _merge_into(
     merged: npt.NDArray[Any], current: npt.NDArray[Any], fill_value: float, rule: str
 ) -> None:
@@ -757,7 +877,17 @@ def _merge_into(
 
     Voxels where `merged` holds the fill value take the values of `current`; where both
     hold values, the conflict rule decides ("max", "min", "last"; "first" keeps them).
+    Large row-order arrays of one type of `_MERGE_DTYPES` merge in `_merge_numba`.
     """
+    if (
+        merged.dtype == current.dtype
+        and merged.dtype in _MERGE_DTYPES
+        and merged.size >= _MERGE_MIN_SIZE
+        and merged.flags.c_contiguous
+        and current.flags.c_contiguous
+    ):
+        _merge_numba(merged, current, merged.dtype.type(fill_value), _MERGE_RULES[rule])
+        return
     present = current != fill_value
     taken = merged != fill_value
     np.copyto(merged, current, where=present & ~taken)
@@ -813,21 +943,6 @@ def _dicom_sop_class(path: str) -> str:
         return str(getattr(pydicom.dcmread(path, stop_before_pixels=True), "SOPClassUID", ""))
     except Exception:
         return ""
-
-
-def _is_dicom_seg(path: str) -> bool:
-    """Check if a DICOM file is a Segmentation object.
-
-    Checks if the SOPClassUID is Segmentation Storage (1.2.840.10008.5.1.4.1.1.66.4)
-    or Label Map Segmentation Storage (1.2.840.10008.5.1.4.1.1.66.7).
-
-    Args:
-        path: Path to the potential DICOM file.
-
-    Returns:
-        True if the file is a DICOM SEG object, False otherwise.
-    """
-    return _dicom_sop_class(path) in _SEG_SOP_CLASSES
 
 
 def load_image(
@@ -1061,10 +1176,10 @@ def load_image(
         else:
             # Attempt to load as a single DICOM file if extension is not NIfTI
             # Check if it's a DICOM SEG or RTSTRUCT file first
-            is_seg = _is_dicom_seg(path)
-            if suv is not None and (is_seg or _dicom_sop_class(path) == _RTSTRUCT_SOP_CLASS):
+            sop_class = _dicom_sop_class(path)  # one header read for the two tests
+            if suv is not None and sop_class in (*_SEG_SOP_CLASSES, _RTSTRUCT_SOP_CLASS):
                 raise ValueError(f"suv needs a DICOM PET image, not the mask file '{path}'.")
-            if is_seg:
+            if sop_class in _SEG_SOP_CLASSES:
                 from pictologics.loaders.seg_loader import load_seg
 
                 if dataset_index != 0 or fill_value != 0.0:
@@ -1088,7 +1203,7 @@ def load_image(
                     return next(iter(seg_result.values()))
                 # Return early since reference alignment is handled by load_seg
                 return seg_result
-            if _dicom_sop_class(path) == _RTSTRUCT_SOP_CLASS:
+            if sop_class == _RTSTRUCT_SOP_CLASS:
                 from pictologics.loaders.rtstruct_loader import load_rtstruct
 
                 if reference_image is None:
@@ -1463,7 +1578,7 @@ def load_and_merge_images(
             )
             if merged_array is None:  # the merge, in reference geometry and the first type
                 kind = _merge_type(label_type if relabel_masks else data.dtype, fill_value)
-                merged_array = np.full(reference_image.array.shape, fill_value, dtype=kind)
+                merged_array = _filled(reference_image.array.shape, fill_value, kind)
             if source is None or target is None:
                 continue
             current_array = data[source]
@@ -1816,14 +1931,18 @@ _GZIP_FUSED_MIN_ITEMSIZE = 2
 _GZIP_INDEX_MIN_BYTES = 4 << 20
 
 
-def _gzip_pieces(path: str, offset: int, end: int) -> Generator[npt.NDArray[np.uint8], None, None]:
+def _gzip_pieces(
+    path: str, offset: int, end: int, start: int = 0, wbits: int = 31
+) -> Generator[npt.NDArray[np.uint8], None, None]:
     """The inflated bytes of the gzip file `path` from byte `offset` to byte `end`, as
-    uint8 arrays of at most 16 MB (zlib checks the CRC of the data). Raises ValueError
-    when the file is not one gzip member of exactly `end` bytes; zlib.error and OSError
-    pass through."""
-    inflate = zlib.decompressobj(wbits=31)  # the gzip format
+    uint8 arrays of at most 16 MB (zlib checks the CRC of the data). The compressed data
+    start at byte `start` of the file, in the format of `wbits` (31 gzip, 15 zlib). Raises
+    ValueError when the data are not one gzip member of exactly `end` bytes up to the end
+    of the file; zlib.error and OSError pass through."""
+    inflate = zlib.decompressobj(wbits=wbits)
     position = 0  # the inflated bytes so far
     with open(path, "rb") as file:
+        file.seek(start)
         while not inflate.eof and (chunk := file.read(1 << 24)):
             while chunk:
                 # At most 16 MB at a time, and one byte past the end shows a longer file
@@ -1928,14 +2047,20 @@ def _fill(data: npt.NDArray[np.uint8], pieces: Iterator[npt.NDArray[np.uint8]]) 
 
 
 def _gzip_values(
-    path: str, offset: int, shape: tuple[int, ...], dtype: np.dtype[Any], indexed: bool = True
+    path: str,
+    offset: int,
+    shape: tuple[int, ...],
+    dtype: np.dtype[Any],
+    indexed: bool = True,
+    start: int = 0,
+    wbits: int = 31,
 ) -> Optional[npt.NDArray[Any]]:
     """The column-order array of `shape` and `dtype` after `offset` bytes of the gzip file
     `path`. It is None when the file is not one gzip member of exactly that size, or when
     zlib cannot read it. With `indexed`, a file with a large block index (see
     _large_index) inflates on threads. When the index does not fit the file, or a block
     does not match it, the stream is still one standard member. It then inflates in one
-    pass."""
+    pass. `start` and `wbits` go to _gzip_pieces (data after a text header, zlib data)."""
     data = np.empty(math.prod(shape) * dtype.itemsize, dtype=np.uint8)
     try:
         index = _large_index(path) if indexed else None
@@ -1948,7 +2073,7 @@ def _gzip_values(
                 return data.view(dtype).reshape(shape, order="F")
             except ValueError:
                 pass
-        with closing(_gzip_pieces(path, offset, offset + data.size)) as pieces:
+        with closing(_gzip_pieces(path, offset, offset + data.size, start, wbits)) as pieces:
             _fill(data, pieces)
     except (OSError, zlib.error, ValueError):
         return None
@@ -2409,10 +2534,12 @@ def _stack_slices(slices: list[Any], apply_rescale: bool) -> npt.NDArray[Any]:
     With `apply_rescale`, every slice becomes float64, times its RescaleSlope and plus its
     RescaleIntercept when they differ from 1 and 0. So a DICOM image without rescale tags
     resamples and filters as the same image from NIfTI does. Without `apply_rescale`, the
-    stored values and type stay. A large float64 series of 2D slices with one shape and
-    pixel type takes one tiled kernel from the stored-type stack into the row-order
-    output, and each slice (its file bytes and decoded pixels) is freed once copied.
-    Other series stack the slices, then turn a large volume to row order, like NIfTI data.
+    stored values and type stay. A large series of 2D slices with one shape and pixel type
+    goes a slab at a time through one tiled kernel into the row-order output (float64, or
+    the stored type without `apply_rescale`): a worker thread reads the slices of the next
+    slab while the kernel copies the current one, and each slice (its file bytes and
+    decoded pixels) is freed once copied. Other series stack the slices, then turn a large
+    volume to row order, like NIfTI data.
     """
     # pydicom pixel_array is (Rows, Columns) -> (Y, X); the stack is (Z, Y, X) and its
     # (X, Y, Z) view is in column order
@@ -2428,8 +2555,7 @@ def _stack_slices(slices: list[Any], apply_rescale: bool) -> npt.NDArray[Any]:
     rescaled = (slopes != 1.0) | (intercepts != 0.0)
     rows, columns, _, _, samples, frames = layout[0]
     fused = (
-        apply_rescale
-        and all(item == layout[0] for item in layout)
+        all(item == layout[0] for item in layout)
         and samples in (None, 1)
         and frames in (None, 1)
         and isinstance(rows, int)
@@ -2444,25 +2570,37 @@ def _stack_slices(slices: list[Any], apply_rescale: bool) -> npt.NDArray[Any]:
         photometric = getattr(slices[0], "PhotometricInterpretation", None)
         native = _native_pixels(slices[0], first, photometric)
         like = first if native is not None and np.array_equal(native, first) else None
-        # The slices go to the output a slab at a time: the stored values of one slab, not
-        # of the whole series, are in memory next to the output
-        out = np.empty(first.shape[::-1] + (len(slices),), dtype=np.float64)
-        slab = np.empty((min(_SLAB, len(slices)),) + first.shape, dtype=first.dtype)
-        for z0 in range(0, len(slices), _SLAB):
-            z1 = min(z0 + _SLAB, len(slices))
-            for k in range(z0, z1):
+        # The slices go to the output a slab at a time: the stored values of one or two
+        # slabs, not of the whole series, are in memory next to the output
+        n = len(slices)
+        out = np.empty(first.shape[::-1] + (n,), dtype=np.float64 if apply_rescale else first.dtype)
+        slabs = [
+            np.empty((min(_SLAB, n),) + first.shape, dtype=first.dtype)
+            for _ in range(1 + (n > _SLAB))
+        ]
+
+        def fill(slab: npt.NDArray[Any], z0: int) -> None:
+            for k in range(z0, min(z0 + _SLAB, n)):
                 slab[k - z0] = first if k == 0 else _decoded_pixels(slices[k], like, photometric)
                 slices[k] = None
-            part = slice(z0, z1)
-            _to_float_row_order_numba(
-                slab[: z1 - z0].transpose(2, 1, 0),
-                slopes[part],
-                intercepts[part],
-                rescaled[part],
-                rescaled[part],
-                out,
-                z0,
-            )
+
+        fill(slabs[0], 0)
+        # A worker thread reads the slices of the next slab while the kernel copies the
+        # current one (the parallel kernel runs without the GIL). The thread starts at the
+        # first submit, so a series of one slab starts none.
+        with ThreadPoolExecutor(1) as pool:
+            for i, z0 in enumerate(range(0, n, _SLAB)):
+                z1 = min(z0 + _SLAB, n)
+                ahead = pool.submit(fill, slabs[(i + 1) % 2], z1) if z1 < n else None
+                src, part = slabs[i % 2][: z1 - z0].transpose(2, 1, 0), slice(z0, z1)
+                if apply_rescale:
+                    _to_float_row_order_numba(
+                        src, slopes[part], intercepts[part], rescaled[part], rescaled[part], out, z0
+                    )
+                else:
+                    _to_row_order_numba(src, out[:, :, part])
+                if ahead is not None:
+                    ahead.result()
         return out
     pixel_data = []
     for k in range(len(slices)):

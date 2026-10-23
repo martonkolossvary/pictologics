@@ -6,12 +6,13 @@ from typing import Any, List, Optional, Tuple, Union, cast
 import numpy as np
 import pywt
 import scipy.fft
-from numba import get_num_threads
+from numba import get_num_threads, jit, prange
 from numpy import typing as npt
 
 from ._wavelet_pass import wavelet_pass
 from .base import (
     _SLAB_MIN_SIZE,
+    _TABLE_KERNEL_MIN,
     _TRANSFER_CACHE_SHAPES,
     BoundaryCondition,
     _add_times,
@@ -19,6 +20,7 @@ from .base import (
     _bool_mask,
     _constant_padded,
     _float32_cut,
+    _irfftn_unscaled,
     _ordered_map,
     _padding_value_problem,
     _prepare_masked_image,
@@ -153,11 +155,11 @@ def wavelet_transform(
     # The passes run in float32 (the numba passes sum each line in double, the bits of
     # scipy's convolve1d; a NaN or inf voxel spreads over the non-zero taps of an a trous
     # kernel only)
-    image = as_float32(image)
-
-    # Apply source_mask preprocessing (zero out invalid voxels)
+    # With a source mask, the invalid voxels become 0 in the same copy
     if source_mask is not None:
-        image = _prepare_masked_image(image, source_mask)
+        image = _prepare_masked_image(image, source_mask, dtype=np.float32)
+    else:
+        image = as_float32(image)
 
     mode = get_scipy_mode(boundary)
 
@@ -518,8 +520,15 @@ def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.f
     # k - 1 on an even axis (at 0 for 0) and at k on an odd one: on axis 0 a slab reads
     # only rows that are not changed yet, and on the other axes g(-k) is g shifted by
     # one. The values are those of a second evaluation of g at -k, bit for bit.
-    slabs = _slabs(table_shape)
     table = np.empty(table_shape, dtype=np.float64)
+    if len(shape) == 3 and table.size >= _TABLE_KERNEL_MIN:
+        # A large 3-D table: one parallel kernel, the same bits (see _simoncelli_table)
+        mirrors = [_mirror_index(s, len(g)) for s, g in zip(shape, grids, strict=True)]
+        blocks = min(table_shape[0], get_num_threads())
+        _simoncelli_table(*grids, *mirrors, max_freq, blocks, table)
+        table.flags.writeable = False  # cached array must not be mutated by callers
+        return table
+    slabs = _slabs(table_shape)
     for start, stop in slabs:
         table[start:stop] = _simoncelli_values(vectors, start, stop, max_freq)
     even = [s % 2 == 0 for s in shape]
@@ -540,6 +549,75 @@ def _simoncelli_transfer(shape: Tuple[int, ...], level: int) -> npt.NDArray[np.f
         part *= 0.5
     table.flags.writeable = False  # cached array must not be mutated by callers
     return table
+
+
+def _mirror_index(s: int, length: int) -> npt.NDArray[np.int64]:
+    """The index of g(-k) for k = 0 .. length - 1 on an axis of s points of the centered
+    grid in the fftn layout: k - 1 on an even axis (0 for k = 0), k on an odd axis."""
+    k = np.arange(length, dtype=np.int64)
+    return np.maximum(k - 1, 0) if s % 2 == 0 else k
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _simoncelli_row(
+    a: float,
+    c1: npt.NDArray[np.float64],
+    c2: npt.NDArray[np.float64],
+    max_freq: float,
+    out: npt.NDArray[np.float64],
+) -> None:
+    """out[j, k] = g at (a, c1[j], c2[k]): the Simoncelli band of _simoncelli_values, with
+    the operations of numpy in the same order, so the same bits."""
+    low = max_freq / 4.0
+    for j in range(c1.shape[0]):
+        ab = a * a + c1[j] * c1[j]
+        for k in range(c2.shape[0]):
+            dist = np.sqrt(ab + c2[k] * c2[k])
+            g = 0.0
+            if dist >= low and dist <= max_freq:
+                g = np.cos(np.pi / 2.0 * np.log2(2.0 * dist / max_freq))
+            out[j, k] = g
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _simoncelli_table(
+    c0: npt.NDArray[np.float64],
+    c1: npt.NDArray[np.float64],
+    c2: npt.NDArray[np.float64],
+    m0: npt.NDArray[np.int64],
+    m1: npt.NDArray[np.int64],
+    m2: npt.NDArray[np.int64],
+    max_freq: float,
+    blocks: int,
+    out: npt.NDArray[np.float64],
+) -> None:
+    """out = (g(k) + g(-k)) / 2 of the Simoncelli band g on the grid vectors c0, c1, c2,
+    with the mirror indices m0, m1, m2 (see _mirror_index), in `blocks` blocks of rows on
+    axis 0, one block for each thread. A block writes g into its rows, then adds the
+    mirrored g from its last row down, so the row m0[i] is not changed yet when row i reads
+    it. The row before the block is evaluated once more in a buffer, so no block reads
+    the rows of another block. g is evaluated once for each cell (see _simoncelli_row)."""
+    n0, n1, n2 = out.shape
+    for block in prange(blocks):
+        first = block * n0 // blocks
+        stop = (block + 1) * n0 // blocks
+        before = np.empty((n1, n2))
+        row = np.empty((n1, n2))
+        for i in range(first, stop):
+            _simoncelli_row(c0[i], c1, c2, max_freq, out[i])
+        if stop > first and m0[first] < first:
+            _simoncelli_row(c0[m0[first]], c1, c2, max_freq, before)
+        for i in range(stop - 1, first - 1, -1):
+            source = before
+            if m0[i] >= first:
+                for j in range(n1):
+                    for k in range(n2):
+                        row[j, k] = out[m0[i], j, k]
+                source = row
+            for j in range(n1):
+                jn = m1[j]
+                for k in range(n2):
+                    out[i, j, k] = (out[i, j, k] + source[jn, m2[k]]) * 0.5
 
 
 def _simoncelli_values(
@@ -572,11 +650,12 @@ def _simoncelli_pad_width(level: int) -> int:
     on the image shape. An 8-voxel radius holds 99.94 % of the L2 energy of the
     level-1 kernel, but the L2 energy is the wrong measure of the error: the small tail
     of the kernel (up to 1.1e-3 of its peak) adds up over a large uniform object.
-    Measured against a 64-voxel pad (level 1, mirror boundary), the 8-voxel pad differs
-    by up to 6.9e-2 of the response range at the border of a CT scan and by up to
-    1.2e-1 at the centre of a 64^3 sphere phantom. Each extra level halves the
-    bandwidth (doubling the spatial extent), so the pad doubles too. The periodic
-    boundary (the IBSI default) takes no pad.
+    Measured against a 64-voxel pad (level 1, mirror boundary; each pad widened to a
+    fast FFT size, see `_fast_width`), the 8-voxel pad differs by up to 4.9e-2 of the
+    response range at the border of a CT scan and by up to 1.2e-1 at the centre of a
+    64^3 sphere phantom. Each extra level halves the bandwidth (doubling the spatial
+    extent), so the pad doubles too. The periodic boundary (the IBSI default) takes no
+    pad.
     """
     return 8 * (1 << (level - 1))
 
@@ -653,7 +732,6 @@ def simoncelli_wavelet(
         arr: npt.NDArray[np.floating[Any]], crop: Optional[Tuple[slice, ...]]
     ) -> npt.NDArray[np.floating[Any]]:
         shape = tuple(arr.shape)
-        ndim = arr.ndim
 
         # Transfer function depends only on (shape, level) — never on image values or
         # the source mask — so it is built once and cached (see _simoncelli_transfer).
@@ -662,12 +740,11 @@ def simoncelli_wavelet(
         # Apply filter in frequency domain using Real FFT (the table is the even part of
         # the band, see _simoncelli_transfer). scipy.fft with numba's thread count is
         # multithreaded and matches np.fft to float32 precision.
-        axes = tuple(range(ndim))
         workers = get_num_threads()
         spectrum = _times_mirrored(scipy.fft.rfftn(arr, workers=workers), g_sim, shape[0], 1)
-        response = scipy.fft.irfftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
-
-        return _float32_cut(response, crop)
+        response, scale = _irfftn_unscaled(spectrum, shape, workers)
+        del spectrum  # freed before the cut: the peak holds the response and the cut
+        return _float32_cut(response, crop, scale)
 
     return _apply_with_boundary_padding(
         _core, image, boundary, _simoncelli_pad_width(level), padding_value

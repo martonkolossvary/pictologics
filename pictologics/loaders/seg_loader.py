@@ -12,6 +12,7 @@ for the requested segments.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -244,13 +245,17 @@ def _read_seg(path: str | Path, stop_before_pixels: bool = False) -> pydicom.Dat
     return seg
 
 
-def _inside_level(seg: pydicom.Dataset, fractional_threshold: float) -> float:
+def _inside_level(seg: pydicom.Dataset, fractional_threshold: float) -> int:
     """The smallest stored value inside a segment: 1 (values above 0), or for a
-    FRACTIONAL SEG the threshold fraction of its MaximumFractionalValue."""
+    FRACTIONAL SEG the threshold fraction of its MaximumFractionalValue, rounded up.
+
+    The stored values are integers, so x >= 127.5 is x >= 128. An integer level keeps
+    the compare of a frame in its own dtype (a float level casts each frame to float64).
+    """
     if str(getattr(seg, "SegmentationType", "")) != "FRACTIONAL":
-        return 1.0
+        return 1
     maximum = float(getattr(seg, "MaximumFractionalValue", 255) or 255)
-    return max(fractional_threshold * maximum, 1.0)
+    return math.ceil(max(fractional_threshold * maximum, 1.0))
 
 
 def _extract_seg_geometry(
@@ -434,7 +439,7 @@ def _extract_combined_segments(
     frames: Iterable[tuple[int, npt.NDArray[Any]]],
     target_segments: list[int],
     layout: _FrameLayout,
-    level: float = 1.0,
+    level: int = 1,
 ) -> npt.NDArray[Any]:
     """Extract and combine multiple segments into a single label array.
 
@@ -464,7 +469,7 @@ def _extract_combined_segments(
             combined[layout.slices[frame_idx]][keep] = frame_data[keep]
         elif seg_num in wanted:
             # Add to combined array (higher segment numbers overwrite lower)
-            combined[layout.slices[frame_idx]][frame_data >= level] = seg_num
+            np.copyto(combined[layout.slices[frame_idx]], seg_num, where=frame_data >= level)
     return combined
 
 
@@ -473,7 +478,7 @@ def _extract_segment_masks(
     frames: Iterable[tuple[int, npt.NDArray[Any]]],
     target_segments: list[int],
     layout: _FrameLayout,
-    level: float = 1.0,
+    level: int = 1,
 ) -> dict[int, npt.NDArray[np.uint8]]:
     """Extract each segment as a binary mask, in one pass over the frames.
 

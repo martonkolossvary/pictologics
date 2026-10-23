@@ -473,3 +473,45 @@ def test_long_format_columns_match_rows_of_the_old_build() -> None:
     assert str(rows) == str(expected)  # NaN compares unequal, its text does not
     frame = format_results(results, fmt="long", meta=meta, output_type="pandas")
     pd.testing.assert_frame_equal(frame, pd.DataFrame(expected))
+
+
+def test_json_finds_nan_before_the_encode(tmp_path: Path) -> None:
+    # A scan of the rows finds a NaN or infinite float before the encode, so the JSON text
+    # is encoded once, with the bytes of the old encode after a failed first try; a NaN in
+    # a list in a row (the scan does not see it) makes a second encode, as before.
+    import math
+    from unittest.mock import patch
+
+    from pictologics import results as results_module
+
+    rows = [{"id": "x", "a": 1.0}, {"id": "y", "a": 2.0}, {"id": "z", "a": math.inf}]
+    nested = [{"id": "x", "a": [1.0, math.nan]}]
+    series = {"c": pd.Series({"a": 1.0, "b": math.nan})}
+    for name, data, calls in (("rows", rows, 1), ("nested", nested, 2)):
+        path = tmp_path / f"{name}.json"
+        with patch.object(results_module.json, "dumps", wraps=json.dumps) as dumps:
+            save_results(data, path)
+        assert dumps.call_count == calls
+        assert path.read_text() == json.dumps(
+            results_module._json_safe(data), indent=2, allow_nan=False
+        )
+    for fmt in ("wide", "long"):
+        with patch.object(results_module.json, "dumps", wraps=json.dumps) as dumps:
+            text = format_results(series, fmt=fmt, output_type="json")
+        assert dumps.call_count == 1
+        assert "NaN" not in text and "null" in text
+
+
+def test_wide_and_long_values_of_nullable_series_are_python_numbers() -> None:
+    # A Series of a nullable type (Int64, Float64, boolean) gives Python numbers in the
+    # wide format, as in the long format, so the JSON output encodes them.
+    results = {
+        "c": pd.Series([1, 2], index=["a", "b"], dtype="Int64"),
+        "d": pd.Series([True, False], index=["a", "b"], dtype="boolean"),
+    }
+    row = format_results(results)
+    assert row == {"c__a": 1, "c__b": 2, "d__a": True, "d__b": False}
+    assert [type(value) for value in row.values()] == [int, int, bool, bool]
+    assert json.loads(format_results(results, output_type="json")) == row
+    keys = pd.Series([1.5], index=pd.Index([7], dtype="Int64"))
+    assert [type(r["feature_key"]) for r in format_results({"k": keys}, fmt="long")] == [int]

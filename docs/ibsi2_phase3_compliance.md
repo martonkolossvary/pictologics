@@ -113,17 +113,17 @@ Mismatches shown below are cases where the error exceeds **10%** of the team's r
 
 ### Simoncelli Boundary
 
-The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For the Simoncelli filters (IDs 8 and 9), Pictologics uses the periodic boundary of its FFT filters, as in IBSI 2 phases 1 and 2, because it gives the better match: over all teams, 58.1 % of the Simoncelli values are within 1 % of the team's range with the periodic boundary and 56.3 % with the mirror boundary; the periodic boundary matches 4 of the 7 teams at least as well. Share of values within 1 % of the range:
+The IBSI 2 manual's phase 3 table lists the mirror boundary for all filters. For the Simoncelli filters (IDs 8 and 9), Pictologics uses the periodic boundary of its FFT filters, as in IBSI 2 phases 1 and 2, because it gives the better match: over all teams, 58.1 % of the Simoncelli values are within 1 % of the team's range with the periodic boundary and 56.0 % with the mirror boundary; the periodic boundary matches 4 of the 7 teams at least as well. Share of values within 1 % of the range:
 
 | Team | Periodic (used) | Mirror |
 |:-----|----------------:|-------:|
-| Cardiff University | 79.9% | 82.6% |
-| King's College London | 93.0% | 84.0% |
-| NCT Dresden | 94.2% | 90.5% |
-| Qurit SERA | 86.1% | 82.6% |
+| Cardiff University | 79.9% | 82.4% |
+| King's College London | 93.0% | 83.5% |
+| NCT Dresden | 94.2% | 89.9% |
+| Qurit SERA | 86.1% | 81.9% |
 | UCSF | 20.7% | 21.2% |
 | UdeS | 20.7% | 21.2% |
-| Veneto Institute of Oncology | 12.2% | 11.9% |
+| Veneto Institute of Oncology | 12.2% | 12.0% |
 
 ### CERR
 

@@ -64,7 +64,7 @@ poetry install
 
 Numba compiles the fast parts of Pictologics for your computer. So `import pictologics` compiles them on the first import (a warm-up), and keeps the compiled code in a disk cache:
 
-- The first import can take about half a minute (27 s on an Apple M4 Pro).
+- The first import can take about one and a half minutes (96 s on an Apple M4 Pro).
 - Later imports read the cache: about 2 s.
 - A new version of Pictologics or of Numba compiles again on its first import.
 

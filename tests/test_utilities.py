@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -1751,9 +1752,6 @@ class TestExceptionHandling:
             mock_dcm.ImagePositionPatient = None
             mock_dcm.ImageOrientationPatient = None
 
-            # Mock __iter__ to return an empty iterator for private tags
-            mock_dcm.__iter__ = MagicMock(return_value=iter([]))
-
             mock_dcmread.return_value = mock_dcm
 
             result = _extract_single_file_metadata(Path("/fake.dcm"), extract_private_tags=False)
@@ -1774,18 +1772,15 @@ class TestExceptionHandling:
             mock_dcm.ImagePositionPatient = None
             mock_dcm.ImageOrientationPatient = None
 
-            # Create a private tag that raises exception when accessed
+            # A private element whose value raises when it is read
+            from pydicom.tag import BaseTag
+
             mock_private_elem = MagicMock()
-            mock_private_elem.tag = MagicMock()
-            mock_private_elem.tag.is_private = True
-            mock_private_elem.tag.group = 0x0019
-            mock_private_elem.tag.element = 0x1001
-            # Make value access raise exception
             type(mock_private_elem).value = property(
                 lambda self: (_ for _ in ()).throw(Exception("Cannot read value"))
             )
-
-            mock_dcm.__iter__ = MagicMock(return_value=iter([mock_private_elem]))
+            mock_dcm.keys.return_value = [BaseTag(0x00191001)]
+            mock_dcm.__getitem__.return_value = mock_private_elem
 
             mock_dcmread.return_value = mock_dcm
 
@@ -1804,24 +1799,44 @@ class TestExceptionHandling:
             mock_dcm.SeriesInstanceUID = "series1"
             mock_dcm.SOPInstanceUID = "inst1"
 
-            # Set valid IPP and IOP that would normally work
+            # An orientation of 5 values: no projection score
             mock_dcm.ImagePositionPatient = [0.0, 0.0, 0.0]
-            mock_dcm.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-
-            mock_dcm.__iter__ = MagicMock(return_value=iter([]))
+            mock_dcm.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0]
 
             mock_dcmread.return_value = mock_dcm
 
-            # Mock numpy to raise exception during projection calculation
-            with patch("pictologics.utilities.dicom_database.np.cross") as mock_cross:
-                mock_cross.side_effect = Exception("Math error")
+            result = _extract_single_file_metadata(Path("/fake.dcm"), extract_private_tags=False)
+            assert result is not None
+            assert result["ProjectionScore"] is None
 
-                result = _extract_single_file_metadata(
-                    Path("/fake.dcm"), extract_private_tags=False
-                )
-                assert result is not None
-                # Projection score should be None due to exception
-                assert result["ProjectionScore"] is None
+    @pytest.mark.parametrize("case", ["oblique", "scanner text", "zeros 1", "zeros 2"])
+    def test_the_projection_score_has_the_bits_of_numpy(self, case: str) -> None:
+        # The score in Python has the bits of np.dot(position, np.cross(row, column)), also
+        # for text values of a scanner and for zero products of both signs
+        import struct
+
+        if case == "oblique":
+            rng = np.random.default_rng(29)
+            q, _ = np.linalg.qr(rng.normal(size=(3, 3)))
+            iop: list[Any] = [*q[:, 0], *q[:, 1]]
+            ipp: list[Any] = list(rng.uniform(-500.0, 500.0, 3))
+        elif case == "scanner text":
+            iop = ["0.996195", "-0.087156", "0", "0.087156", "0.996195", "0"]
+            ipp = ["-125.3", "-98.6", "42.25"]
+        elif case == "zeros 1":
+            iop, ipp = [1.0, -1e-17, 1e-17, -0.0, -0.0, 0.0], [-170.0, 12.5, 0.0]
+        else:
+            iop, ipp = [1.0, -0.0, -1e-17, 1.0, 0.0, 1.0], [-1e-310, 0.0, -0.0]
+        with patch("pictologics.utilities.dicom_database.pydicom.dcmread") as mock_dcmread:
+            mock_dcm = MagicMock()
+            mock_dcm.ImagePositionPatient = ipp
+            mock_dcm.ImageOrientationPatient = iop
+            mock_dcmread.return_value = mock_dcm
+            result = _extract_single_file_metadata(Path("/fake.dcm"), extract_private_tags=False)
+        assert result is not None
+        row, column = np.array([float(v) for v in iop[:3]]), np.array([float(v) for v in iop[3:]])
+        expected = float(np.dot(np.array([float(v) for v in ipp]), np.cross(row, column)))
+        assert struct.pack("<d", result["ProjectionScore"]) == struct.pack("<d", expected)
 
 
 # ============================================================================
@@ -2285,3 +2300,195 @@ def test_overlapping_folders_read_each_file_once(tmp_path: Path) -> None:
     assert reads.call_count == 4
     alone = DicomDatabase.from_folders([str(tmp_path)], show_progress=False, num_workers=1)
     assert both.get_instances_df().equals(alone.get_instances_df())
+
+
+# ============================================================================
+# The header read and the scan of the files
+# ============================================================================
+
+
+def _raw_element(group: int, element: int, vr: bytes, value: bytes) -> bytes:
+    """An explicit-VR little-endian data element (a short VR) as bytes."""
+    import struct
+
+    return struct.pack("<HH2sH", group, element, vr, len(value)) + value
+
+
+def _pixel_free_dicom(path: Path) -> Path:
+    """A synthetic DICOM file without pixel data, so that elements can follow at its end."""
+    import pydicom
+
+    create_synthetic_dicom(path)
+    ds = pydicom.dcmread(path)
+    del ds.PixelData
+    ds.save_as(path)
+    return path
+
+
+def test_private_tags_keep_the_tag_order(tmp_path: Path) -> None:
+    # The private tags come in tag order, also for elements out of order in the file
+    path = _pixel_free_dicom(tmp_path / "order.dcm")
+    with open(path, "ab") as file:
+        file.write(
+            _raw_element(0x7FE3, 0x0010, b"LO", b"ZZZZ")
+            + _raw_element(0x7FE3, 0x1010, b"LO", b"late")
+            + _raw_element(0x7FE1, 0x0010, b"LO", b"ACME")
+            + _raw_element(0x7FE1, 0x1010, b"LO", b"earl")
+        )
+    metadata = _extract_single_file_metadata(path, extract_private_tags=True)
+    assert metadata is not None
+    assert [key for key in metadata if key.startswith("Private_")] == [
+        "Private_7FE1_0010",
+        "Private_7FE1_1010",
+        "Private_7FE3_0010",
+        "Private_7FE3_1010",
+    ]
+
+
+def test_an_element_that_cannot_be_read_keeps_the_file(tmp_path: Path) -> None:
+    # A public element that pydicom cannot read (a US value of 3 bytes) no longer drops the
+    # file; a private one of that kind is left out of the private tags
+    folder = tmp_path / "bad"
+    folder.mkdir()
+    path = _pixel_free_dicom(folder / "bad.dcm")
+    with open(path, "ab") as file:
+        file.write(
+            _raw_element(0x7FE0, 0x0001, b"US", b"\x01\x02\x03")
+            + _raw_element(0x7FE1, 0x0010, b"LO", b"ACME")
+            + _raw_element(0x7FE1, 0x1011, b"US", b"\x01\x02\x03")
+        )
+    metadata = _extract_single_file_metadata(path, extract_private_tags=True)
+    assert metadata is not None and metadata["Private_7FE1_0010"] == "ACME"
+    assert "Private_7FE1_1011" not in metadata
+    db = DicomDatabase.from_folders([folder], num_workers=1, show_progress=False)
+    assert len(db.get_instances_df()) == 1
+
+
+def _three_folder_tree(root: Path) -> Path:
+    """tree/f.dcm, tree/A/A1/f.dcm and tree/B/f.dcm (synthetic DICOM files)."""
+    tree = root / "tree"
+    for k, folder in enumerate((tree, tree / "A" / "A1", tree / "B")):
+        folder.mkdir(parents=True)
+        create_synthetic_dicom(folder / "f.dcm", sop_uid=f"1.2.3.{k}")
+    return tree
+
+
+def test_the_scan_order_is_that_of_rglob_in_python_3_12(tmp_path: Path) -> None:
+    # The files of the start folder, then those of all its subfolders, then deeper: the
+    # order of Path.rglob in Python 3.12, whatever the order of the listing
+    tree = _three_folder_tree(tmp_path)
+    assert _scan_dicom_files([tree], True, False) == [
+        tree / "f.dcm",
+        tree / "B" / "f.dcm",
+        tree / "A" / "A1" / "f.dcm",
+    ]
+
+
+def test_links_in_a_scanned_folder(tmp_path: Path) -> None:
+    # A link to a file of the tree counts once (the first path of the walk); a link to an
+    # outside folder is not walked; a link cycle gives no error and no extra file
+    tree = _three_folder_tree(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    create_synthetic_dicom(outside / "o.dcm", sop_uid="1.2.3.9")
+    try:
+        os.symlink(tree / "B" / "f.dcm", tree / "link.dcm")
+        os.symlink(outside, tree / "B" / "out", target_is_directory=True)
+        os.symlink(tree, tree / "A" / "cycle", target_is_directory=True)
+    except OSError:  # pragma: no cover  (a file system or a Windows account without links)
+        pytest.skip("no symbolic links on this file system")
+    found = _scan_dicom_files([tree], True, False)
+    # The files of tree come first (in the order of the listing): the link, not its target
+    assert sorted(found) == sorted([tree / "f.dcm", tree / "link.dcm", tree / "A" / "A1" / "f.dcm"])
+
+
+def test_a_hard_link_counts_twice(tmp_path: Path) -> None:
+    # Two paths of one file (a hard link) count as two files, as in 0.8.0
+    tree = _three_folder_tree(tmp_path)
+    try:
+        os.link(tree / "f.dcm", tree / "hard.dcm")
+    except OSError:  # pragma: no cover  (a file system without hard links)
+        pytest.skip("no hard links on this file system")
+    found = _scan_dicom_files([tree], False, False)
+    assert sorted(found) == [tree / "f.dcm", tree / "hard.dcm"]
+
+
+def test_a_folder_that_cannot_be_read(tmp_path: Path) -> None:
+    # The walk skips a subfolder that it cannot read; the scan of one folder raises
+    from pictologics.utilities import dicom_database
+
+    tree = _three_folder_tree(tmp_path)
+    scandir = os.scandir
+
+    def denied(path: Any) -> Any:
+        if str(path) in (str(tree / "A"), str(tree / "B")) or str(path) == "denied":
+            raise PermissionError(path)
+        return scandir(path)
+
+    with patch.object(dicom_database.os, "scandir", side_effect=denied):
+        assert _scan_dicom_files([tree], True, False) == [tree / "f.dcm"]
+    with (
+        patch.object(dicom_database.os, "scandir", side_effect=lambda p: denied("denied")),
+        pytest.raises(PermissionError),
+    ):
+        _scan_dicom_files([tree], False, False)
+
+
+def test_a_junction_counts_with_its_target(tmp_path: Path) -> None:
+    # A junction (Windows) is a link: the files below it get the real path of its target,
+    # so tree/J/f and tree/A/f count once
+    from pictologics.utilities import dicom_database
+
+    tree = str(tmp_path / "tree")
+
+    class Entry:
+        def __init__(self, folder: str, name: str, kind: str) -> None:
+            self.path, self.name, self.kind = os.path.join(folder, name), name, kind
+
+        def is_dir(self, follow_symlinks: bool = True) -> bool:
+            return self.kind in ("dir", "junction")
+
+        def is_file(self) -> bool:
+            return self.kind == "file"
+
+        def is_symlink(self) -> bool:
+            return False
+
+        def is_junction(self) -> bool:
+            return self.kind == "junction"
+
+    listings = {
+        tree: [Entry(tree, "A", "dir"), Entry(tree, "J", "junction")],
+        os.path.join(tree, "A"): [Entry(os.path.join(tree, "A"), "f.dcm", "file")],
+        os.path.join(tree, "J"): [Entry(os.path.join(tree, "J"), "f.dcm", "file")],
+    }
+
+    class Listing:
+        def __init__(self, folder: str) -> None:
+            self.entries = listings[folder]
+
+        def __enter__(self) -> list[Entry]:
+            return self.entries
+
+        def __exit__(self, *exc: Any) -> None:
+            return None
+
+    def realpath(path: Any) -> str:
+        path = str(path)
+        return os.path.join(tree, "A") if path == os.path.join(tree, "J") else path
+
+    with (
+        patch.object(dicom_database.os, "scandir", side_effect=Listing),
+        patch.object(dicom_database.os.path, "realpath", side_effect=realpath),
+    ):
+        walked = dicom_database._walk_files(tree, True)
+        assert [(entry.path, real) for entry, real in walked] == [
+            (os.path.join(tree, "A", "f.dcm"), os.path.join(tree, "A")),
+            (os.path.join(tree, "J", "f.dcm"), os.path.join(tree, "A")),
+        ]
+        with (
+            patch.object(Path, "is_file", return_value=False),
+            patch.object(Path, "is_dir", return_value=True),
+            patch("pydicom.misc.is_dicom", return_value=True),
+        ):
+            assert _scan_dicom_files([Path(tree)], True, False) == [Path(tree, "A", "f.dcm")]

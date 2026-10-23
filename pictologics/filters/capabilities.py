@@ -272,8 +272,8 @@ FILTER_CAPABILITIES: dict[str, FilterCapability] = {
     # laplacian_of_gaussian, which converts it per-axis (see "log" above), so
     # anisotropic spacing is genuinely supported here despite the Riesz stage itself
     # having no spacing concept. `boundary` (default PERIODIC) applies to the whole
-    # LoG-then-Riesz chain: a non-periodic boundary pads the image once with the
-    # pad-filter-crop helper, as for "riesz".
+    # LoG-then-Riesz chain: a non-periodic boundary pads the image once and runs the
+    # LoG and the Riesz transform in one FFT round trip.
     "riesz_log": FilterCapability(
         input_dimensionality=(3,),
         kernel_dimensionality=3,

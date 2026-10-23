@@ -15,6 +15,7 @@ from __future__ import annotations
 import bz2
 import gzip
 import math
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ from typing import Any
 import numpy as np
 from numpy import typing as npt
 
-from pictologics.loader import Image, _float64_volume
+from pictologics.loader import Image, _float64_volume, _gzip_values
 
 # The type names of the NRRD format and their numpy types
 _TYPES = {
@@ -112,13 +113,31 @@ def _read_values(path: Path, fields: dict[str, str], offset: int, count: int) ->
         if name.startswith("LIST") or len(name.split()) > 1:
             raise ValueError(f"'{path}': data in more than one file are not supported.")
         source, start = path.parent / name, 0
-    with open(source, "rb") as file:
-        file.seek(start)
-        for _ in range(int(fields.get("lineskip", 0))):
-            file.readline()
-        data = file.read()
+    lines = int(fields.get("lineskip", 0))
+    if lines:
+        with open(source, "rb") as file:
+            file.seek(start)
+            for _ in range(lines):
+                file.readline()
+            start = file.tell()
     encoding = fields["encoding"].lower()
     skip = int(fields.get("byteskip", 0))
+    # Read raw values directly from the file. Inflate gzip values into the array in one pass.
+    # Both give a writeable array (the kernels compile for writeable arrays). Other data and
+    # the errors go to the full read below.
+    size = count * dtype.itemsize
+    if encoding == "raw":
+        end = os.path.getsize(source)
+        first = end - size if skip == -1 else start + skip
+        if start <= first <= end - size:
+            return np.fromfile(source, dtype=dtype, count=count, offset=first)
+    elif encoding in ("gzip", "gz") and skip >= 0:
+        values = _gzip_values(str(source), skip, (count,), dtype, indexed=False, start=start)
+        if values is not None:
+            return values
+    with open(source, "rb") as file:
+        file.seek(start)
+        data = file.read()
     if encoding in ("txt", "text", "ascii"):
         words = data.split()
         if len(words) < count:

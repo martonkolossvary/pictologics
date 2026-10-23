@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-21T17:44:44.351682",
+  "timestamp": "2026-10-23T16:02:34.999897",
   "agreement_rule": "team's range for each modality, filter and feature (max - min over the patients)",
   "scans_processed": 153,
   "scans_failed": 0,
@@ -7,10 +7,10 @@
   "pipeline_errors": 0,
   "patients": 51,
   "teams_compared": 9,
-  "total_time_seconds": 133.51565196600114,
-  "wall_time_seconds": 18.84282829199998,
+  "total_time_seconds": 132.07021483796416,
+  "wall_time_seconds": 18.91884816699894,
   "memory_metric": "largest worker peak resident memory",
-  "memory_mb": 1750.296875,
+  "memory_mb": 1532.46875,
   "team_results": {
     "CERR": {
       "total": 16524,

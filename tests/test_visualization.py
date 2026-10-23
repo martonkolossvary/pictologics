@@ -2,7 +2,7 @@
 Test suite for Visualization Utilities.
 
 Tests cover all functionality including:
-- RGBA display creation (image-only, mask-only, overlay)
+- RGB display creation (image-only, mask-only, overlay)
 - Window/level normalization
 - Slice selection parsing
 - Batch export of images
@@ -27,7 +27,7 @@ from pictologics.loader import Image
 from pictologics.utilities.visualization import (
     COLORMAPS,
     _apply_window_level,
-    _create_display_rgba,
+    _create_display_rgb,
     _get_colormap_colors,
     _get_reference_array,
     _gray_range,
@@ -140,8 +140,8 @@ class TestGetColormapColors:
         assert colors == COLORMAPS["tab20"]
 
 
-class TestCreateDisplayRgba:
-    """Tests for _create_display_rgba."""
+class TestCreateDisplayRgb:
+    """Tests for _create_display_rgb."""
 
     def test_overlay_mode(self) -> None:
         """Test overlay mode (image + mask)."""
@@ -149,17 +149,17 @@ class TestCreateDisplayRgba:
         mask = np.zeros((64, 64), dtype=np.int32)
         mask[10:20, 10:20] = 1
 
-        result = _create_display_rgba(img, mask, alpha=0.5)
-        assert result.shape == (64, 64, 4)
+        result = _create_display_rgb(img, mask, alpha=0.5)
+        assert result.shape == (64, 64, 3)
         assert result.dtype == np.uint8
-        assert np.min(result[..., 3]) == 255  # Fully opaque
+        assert result.flags.c_contiguous  # PIL takes it with no copy
 
     def test_image_only_mode(self) -> None:
         """Test image-only mode (no mask)."""
         img = np.random.rand(64, 64) * 1000
 
-        result = _create_display_rgba(img, None)
-        assert result.shape == (64, 64, 4)
+        result = _create_display_rgb(img, None)
+        assert result.shape == (64, 64, 3)
         assert result.dtype == np.uint8
         # Should be grayscale (R=G=B)
         assert np.allclose(result[..., 0], result[..., 1])
@@ -171,8 +171,8 @@ class TestCreateDisplayRgba:
         mask[10:20, 10:20] = 1
         mask[30:40, 30:40] = 2
 
-        result = _create_display_rgba(None, mask, mask_as_colormap=True)
-        assert result.shape == (64, 64, 4)
+        result = _create_display_rgb(None, mask, mask_as_colormap=True)
+        assert result.shape == (64, 64, 3)
         # Background should be black
         assert np.all(result[0, 0, :3] == 0)
         # Labels should have color
@@ -184,20 +184,20 @@ class TestCreateDisplayRgba:
         mask[10:20, 10:20] = 128
         mask[30:40, 30:40] = 255
 
-        result = _create_display_rgba(None, mask, mask_as_colormap=False)
-        assert result.shape == (64, 64, 4)
+        result = _create_display_rgb(None, mask, mask_as_colormap=False)
+        assert result.shape == (64, 64, 3)
         # Should be grayscale
         assert np.allclose(result[..., 0], result[..., 1])
 
     def test_neither_provided_raises(self) -> None:
         """Test that providing neither raises ValueError."""
         with pytest.raises(ValueError, match="At least one"):
-            _create_display_rgba(None, None)
+            _create_display_rgb(None, None)
 
     def test_overlay_mixes_mask_colors_by_alpha(self) -> None:
         """Each label's color is mixed into the gray image by alpha (0: image only, 1: color
-        only); background pixels keep the gray value; labels past the colormap wrap; the
-        alpha channel stays 255 (the transparency is in the colors)."""
+        only); background pixels keep the gray value; labels past the colormap wrap. The
+        image has no alpha channel (the transparency is in the colors)."""
         rng = np.random.default_rng(1)
         img = rng.normal(40, 100, (64, 48))
         mask = np.zeros((64, 48))
@@ -206,15 +206,14 @@ class TestCreateDisplayRgba:
         mask[45:55, 30:40] = 21  # tab20 has 20 colors: label 21 gets color 1
         gray = _normalize_image(img.T).astype(np.float64)
         for alpha in (0.0, 0.25, 0.6, 1.0):
-            rgba = _create_display_rgba(img, mask, alpha=alpha)
+            rgb = _create_display_rgb(img, mask, alpha=alpha)
             expected = np.repeat(gray[..., None], 3, axis=2)
             for label in (1, 2, 21):
                 inside = mask.T == label
                 color = np.array(COLORMAPS["tab20"][(label - 1) % 20], dtype=np.float64)
                 expected[inside] = (1 - alpha) * expected[inside] + alpha * color
-            np.testing.assert_array_equal(rgba[..., :3], expected.astype(np.uint8))
-            assert np.all(rgba[..., 3] == 255)
-        assert tuple(_create_display_rgba(img, mask, alpha=1.0)[12, 12, :3]) == (31, 119, 180)
+            np.testing.assert_array_equal(rgb, expected.astype(np.uint8))
+        assert tuple(_create_display_rgb(img, mask, alpha=1.0)[12, 12]) == (31, 119, 180)
 
     def test_multi_label_mask(self) -> None:
         """Test multi-label mask overlay."""
@@ -224,8 +223,8 @@ class TestCreateDisplayRgba:
         mask[30:40, 30:40] = 2
         mask[50:60, 50:60] = 3
 
-        result = _create_display_rgba(img, mask, alpha=0.5)
-        assert result.shape == (64, 64, 4)
+        result = _create_display_rgb(img, mask, alpha=0.5)
+        assert result.shape == (64, 64, 3)
 
 
 class TestParseSliceSelection:
@@ -448,19 +447,22 @@ class TestSaveSlices:
             for f, idx in zip(files, (9, 3, 6), strict=True):
                 index = tuple(idx if k == axis else slice(None) for k in range(3))
                 image_slice = synthetic_image.array[index]
-                rgb = _create_display_rgba(
+                rgb = _create_display_rgb(
                     image_slice, synthetic_mask.array[index], value_range=value_range
-                )[..., :3]
-                saved = PILImage.open(f)
-                assert saved.size == image_slice.shape  # (width, height): the slice, turned
-                assert [round(float(v)) for v in saved.info["dpi"]] == [dpi, dpi]  # PNG: per metre
-                if fmt == "jpeg":  # lossy: the JPEG of the same RGB pixels
-                    expected = tmp_path / "expected.jpg"
-                    PILImage.fromarray(np.ascontiguousarray(rgb)).save(expected, dpi=(dpi, dpi))
-                    assert Path(f).read_bytes() == expected.read_bytes()
-                else:
-                    assert saved.mode == "RGB"
-                    np.testing.assert_array_equal(np.asarray(saved), rgb)
+                )
+                with PILImage.open(f) as saved:  # closed after the checks
+                    assert saved.size == image_slice.shape  # (width, height): the slice, turned
+                    assert [round(float(v)) for v in saved.info["dpi"]] == [
+                        dpi,
+                        dpi,
+                    ]  # PNG: per metre
+                    if fmt == "jpeg":  # lossy: the JPEG of the same RGB pixels
+                        expected = tmp_path / "expected.jpg"
+                        PILImage.fromarray(np.ascontiguousarray(rgb)).save(expected, dpi=(dpi, dpi))
+                        assert Path(f).read_bytes() == expected.read_bytes()
+                    else:
+                        assert saved.mode == "RGB"
+                        np.testing.assert_array_equal(np.asarray(saved), rgb)
 
     def test_save_uses_threads_and_png_level_3(
         self, synthetic_image: Image, tmp_path: Path
@@ -801,7 +803,47 @@ def test_a_nan_in_a_float_mask_is_background() -> None:
     mask = np.array([[0.0, 1.0], [2.0, np.nan]])
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        labelled, index = _label_colors(mask, 3)
+        pixels, index = _label_colors(mask, 3)
     assert caught == []
-    assert labelled.tolist() == [[False, True], [True, False]]
-    assert index.tolist() == [[3, 0], [1, 3]]
+    assert pixels.tolist() == [1, 2]  # flat row-order indices of the labels 1 and 2
+    assert index.tolist() == [0, 1]
+
+
+def test_the_normalisation_does_not_change_its_input() -> None:
+    # The scaling runs in place on a float64 copy, never on the slice of the caller
+    arr = np.array([[0.0, 100.0], [np.nan, 400.0]])
+    before = arr.copy()
+    _normalize_image(arr, value_range=(0.0, 400.0))
+    _normalize_image(arr, 200.0, 400.0)
+    np.testing.assert_array_equal(arr, before)
+
+
+def test_a_mask_shown_in_colors_on_its_own() -> None:
+    # Background black, label (l - 1) mod colors, a float label truncated, NaN background,
+    # from a slice in (X, Y) order
+    mask = np.array([[0.0, 1.0, 2.9], [21.0, np.nan, -1.0]])
+    rgb = _create_display_rgb(None, mask, colormap="tab20")
+    table = np.array(COLORMAPS["tab20"] + [(0, 0, 0)], dtype=np.uint8)
+    np.testing.assert_array_equal(rgb, table[[[20, 0], [0, 20], [1, 18]]])
+
+
+def test_the_gray_range_in_threads_is_the_serial_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    # From _RANGE_THREADS_MIN voxels, a row- or column-order volume is read in parts in
+    # threads: the same minimum and maximum (NaN left out), the same all-NaN warning; a
+    # strided volume and one worker take the serial path
+    from pictologics.utilities import visualization
+
+    monkeypatch.setattr(visualization, "_RANGE_THREADS_MIN", 8)
+    rng = np.random.default_rng(3)
+    arr = rng.normal(40.0, 100.0, (9, 8, 7))
+    arr[1, 2, 3] = np.nan
+    for volume in (arr, np.asfortranarray(arr), arr[:, :, ::2]):
+        image = Image(volume, (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+        serial = (float(np.nanmin(volume)), float(np.nanmax(volume)))
+        assert _gray_range(image, None, None, None, True, 3) == serial
+    nan_image = Image(np.full((4, 4, 4), np.nan), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    with pytest.warns(RuntimeWarning, match="All-NaN slice encountered"):
+        found = _gray_range(nan_image, None, None, None, True, 3)
+    assert np.isnan(found).all()
+    mask = Image((arr > 40).astype(np.uint8), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    assert _gray_range(None, mask, None, None, False, 3) == (0.0, 1.0)

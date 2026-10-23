@@ -843,7 +843,7 @@ class TestLoader(unittest.TestCase):
         img = _load_dicom_file("seg2d.dcm")
         self.assertEqual(img.origin, (3.0, 4.0, 5.0))
 
-    @patch("pictologics.loader._is_dicom_seg")
+    @patch("pictologics.loader._dicom_sop_class")
     @patch("pictologics.loader.Path")
     def test_load_image_seg_ignores_dataset_index(
         self, mock_Path_cls: MagicMock, mock_is_seg: MagicMock
@@ -852,7 +852,7 @@ class TestLoader(unittest.TestCase):
         mock_path_obj = mock_Path_cls.return_value
         mock_path_obj.exists.return_value = True
         mock_path_obj.is_dir.return_value = False
-        mock_is_seg.return_value = True
+        mock_is_seg.return_value = "1.2.840.10008.5.1.4.1.1.66.4"
 
         with patch.object(
             __import__("pictologics.loaders.seg_loader", fromlist=["load_seg"]),
@@ -1049,7 +1049,7 @@ class TestLoader(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dataset_index 5 is out of range"):
             _load_dicom_series("dicom_dir", dataset_index=5)
 
-    @patch("pictologics.loader._is_dicom_seg")
+    @patch("pictologics.loader._dicom_sop_class")
     @patch("pictologics.loader.Path")
     def test_load_image_seg_dict_return(
         self,
@@ -1061,7 +1061,7 @@ class TestLoader(unittest.TestCase):
         mock_path_obj.exists.return_value = True
         mock_path_obj.is_dir.return_value = False
 
-        mock_is_seg.return_value = True
+        mock_is_seg.return_value = "1.2.840.10008.5.1.4.1.1.66.4"
 
         # Create mock images for dict return
         mock_img1 = MagicMock()
@@ -1800,6 +1800,18 @@ class TestRepositioning(unittest.TestCase):
         # Data region should have original values
         self.assertEqual(result.array[5, 5, 5], 1.0)
 
+    def test_position_in_reference_zero_fills_keep_their_sign(self) -> None:
+        # A fill of +0 starts the output as np.zeros; a fill of -0.0 keeps its sign bit
+        from pictologics.loader import _position_in_reference
+
+        reference = Image(np.zeros((6, 5, 4)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+        cropped = Image(np.ones((2, 2, 2)), (1.0, 1.0, 1.0), (1.0, 1.0, 1.0))
+        for fill, negative in ((0.0, False), (0, False), (-0.0, True)):
+            result = _position_in_reference(cropped, reference, fill_value=fill)
+            self.assertEqual(bool(np.signbit(result.array[0, 0, 0])), negative)
+            self.assertEqual(result.array[1, 1, 1], 1.0)
+            self.assertTrue(result.array.flags.c_contiguous)
+
     @patch("pictologics.loader._load_dicom_file")
     @patch("pictologics.loader.Path")
     def test_load_image_with_reference_repositioning(
@@ -1867,7 +1879,7 @@ class TestRepositioning(unittest.TestCase):
                     load_image("mask.dcm", reference_image=reference)
 
     @patch("pictologics.loaders.seg_loader.load_seg")
-    @patch("pictologics.loader._is_dicom_seg")
+    @patch("pictologics.loader._dicom_sop_class")
     @patch("pictologics.loader.Path")
     def test_load_image_passes_alignment_controls_to_seg_loader(
         self,
@@ -1878,7 +1890,7 @@ class TestRepositioning(unittest.TestCase):
         """DICOM SEG path loading must honour reference-alignment controls."""
         mock_Path.return_value.exists.return_value = True
         mock_Path.return_value.is_dir.return_value = False
-        mock_is_seg.return_value = True
+        mock_is_seg.return_value = "1.2.840.10008.5.1.4.1.1.66.4"
         reference = Image(
             array=np.zeros((10, 10, 10)),
             spacing=(1.0, 1.0, 1.0),
@@ -2434,6 +2446,45 @@ def test_dicom_series_converts_a_slab_at_a_time(tmp_path: "os.PathLike[str]") ->
             image = _load_dicom_series(tmp_path)
         assert image.array.flags.c_contiguous and image.array.dtype == np.float64
         np.testing.assert_array_equal(image.array.view(np.uint64), expected.view(np.uint64))
+    # Without apply_rescale, the slabs go to the row-order output in the stored type
+    plain = os.path.join(tmp_path, "plain")
+    os.mkdir(plain)
+    stored = _write_series(plain, [(1.0, 0.0)] * 5)
+    for slab in (2, 5, 32):
+        with (
+            patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8),
+            patch("pictologics.loader._SLAB", slab),
+        ):
+            raw = _load_dicom_series(plain, apply_rescale=False)
+        assert raw.array.dtype == np.int16 and raw.array.flags.c_contiguous
+        np.testing.assert_array_equal(raw.array, stored)
+
+
+def test_dicom_series_reports_a_broken_slice_of_a_later_slab(
+    tmp_path: "os.PathLike[str]",
+) -> None:
+    # The worker thread reads the slices of the next slab: a slice there that cannot
+    # decode gives the error of the file, with its name, to the caller
+    from pathlib import Path
+
+    import pydicom
+
+    from pictologics.loader import _DicomContentError
+
+    _write_series(tmp_path, [(1.0, 0.0)] * 5)
+    files = sorted(Path(tmp_path).glob("*.dcm"))
+    broken = next(
+        f for f in files if pydicom.dcmread(f, stop_before_pixels=True).InstanceNumber == 4
+    )
+    ds = pydicom.dcmread(broken)
+    ds.PixelData = ds.PixelData[:10]
+    ds.save_as(broken, enforce_file_format=True)
+    with (
+        patch("pictologics.loader._ROW_ORDER_MIN_SIZE", 8),
+        patch("pictologics.loader._SLAB", 2),
+        pytest.raises(_DicomContentError, match=f"cannot decode .*{broken.name}"),
+    ):
+        _load_dicom_series(tmp_path)
 
 
 def test_nifti_loads_the_values_of_get_fdata_in_one_pass(tmp_path: "os.PathLike[str]") -> None:
@@ -2945,6 +2996,111 @@ def test_reoriented_turns_the_axes_to_the_reference() -> None:
         values, (1.0, 2.0, 3.0), (5.0, 6.0, 7.0), np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
     )
     assert _reoriented(oblique, reference) is oblique
+
+
+def test_turned_copy_gives_the_bits_of_numpy_in_every_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Each turned view (swapped and flipped axes) copies to the bytes of np.ascontiguousarray:
+    # on the tiled kernel (the bits of the values), on _row_order for a column-order view, or
+    # on numpy (a 16-byte type, a read-only view, a small view)
+    from pictologics import loader
+
+    monkeypatch.setattr(loader, "_TURN_MIN_SIZE", 0)
+    monkeypatch.setattr(loader, "_TURN_SERIAL_MIN_SIZE", 0)
+    calls = {"turn": 0, "row": 0}
+    turn, row = loader._turn_numba, loader._row_order
+
+    def turn_spy(view: np.ndarray, out: np.ndarray) -> None:
+        calls["turn"] += 1
+        turn(view, out)
+
+    def row_spy(array: np.ndarray) -> np.ndarray:
+        calls["row"] += 1
+        return row(array)
+
+    monkeypatch.setattr(loader, "_turn_numba", turn_spy)
+    monkeypatch.setattr(loader, "_row_order", row_spy)
+    rng = np.random.default_rng(38)
+    base = rng.normal(0.0, 100.0, (6, 5, 4))
+    base[0, 0, 0], base[1, 2, 3], base[2, 1, 0], base[3, 4, 1] = np.nan, -0.0, np.inf, -np.inf
+    single, double = base.astype(np.float32), base + 1j
+    base.view(np.uint64)[4, 3, 2] = 0x7FF0000000000ABC  # a NaN payload (after the casts)
+    whole = rng.integers(0, 200, (6, 5, 4))
+    sources = [base, single, whole.astype(np.int16), whole.astype(np.uint8), whole > 100, double]
+    orders = [
+        ((1, 0, 2), ()),
+        ((2, 1, 0), (2,)),
+        ((0, 2, 1), (1, 2)),
+        ((0, 1, 2), (0,)),
+        ((0, 1, 2), (2,)),
+        ((2, 1, 0), ()),  # a column-order view
+        ((1, 0, 2), (2,)),
+    ]
+
+    def turned(source: np.ndarray, axes: tuple[int, ...], flips: tuple[int, ...]) -> np.ndarray:
+        view = np.transpose(source, axes)
+        return np.flip(view, flips) if flips else view
+
+    for threads in (1, 2):
+        monkeypatch.setattr(loader, "get_num_threads", lambda threads=threads: threads)
+        for source in sources:
+            for axes, flips in orders:
+                view = turned(source, axes, flips)
+                before = dict(calls)
+                out = loader._turned_copy(view)
+                assert out.flags.c_contiguous and out.dtype == source.dtype
+                assert out.tobytes() == np.ascontiguousarray(view).tobytes()
+                kernel = calls["turn"] - before["turn"]
+                if (axes, flips) == ((2, 1, 0), ()):
+                    assert calls["row"] - before["row"] == 1
+                if source.dtype == np.complex128:
+                    assert kernel == 0
+                elif (axes, flips) == ((2, 1, 0), (2,)):
+                    assert kernel == 1
+                elif axes == (0, 2, 1):
+                    assert kernel == (threads == 2)
+    read_only = base.copy()
+    read_only.setflags(write=False)
+    view = turned(read_only, (2, 1, 0), (2,))
+    before = dict(calls)
+    assert loader._turned_copy(view).tobytes() == np.ascontiguousarray(view).tobytes()
+    assert calls == before
+    assert np.shares_memory(loader._turned_copy(base), base)  # the row order as it is
+    monkeypatch.setattr(loader, "_TURN_MIN_SIZE", 1 << 20)
+    loader._turned_copy(turned(base, (2, 1, 0), (2,)))
+    assert calls == before
+
+
+def test_turn_on_tiles_takes_the_kernel_where_numpy_reads_across_the_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On one thread, only views that are fast along their first axis and large; on more
+    # threads, every view that numpy reads one value per cache line, and whole rows of more
+    # than one byte out of their order in memory
+    from pictologics import loader
+
+    zeros = np.zeros((40, 30, 20))  # 24,000 values
+
+    def turned(
+        source: np.ndarray, axes: tuple[int, ...], flips: tuple[int, ...] = ()
+    ) -> np.ndarray:
+        view = np.transpose(source, axes)
+        return np.flip(view, flips) if flips else view
+
+    monkeypatch.setattr(loader, "get_num_threads", lambda: 1)
+    monkeypatch.setattr(loader, "_TURN_SERIAL_MIN_SIZE", 24000)
+    assert loader._turn_on_tiles(turned(zeros, (2, 1, 0), (2,)))
+    monkeypatch.setattr(loader, "_TURN_SERIAL_MIN_SIZE", 24001)
+    assert not loader._turn_on_tiles(turned(zeros, (2, 1, 0), (2,)))
+    assert not loader._turn_on_tiles(turned(zeros, (0, 2, 1)))
+    assert not loader._turn_on_tiles(turned(zeros, (1, 0, 2)))
+    monkeypatch.setattr(loader, "get_num_threads", lambda: 2)
+    assert loader._turn_on_tiles(turned(zeros, (2, 1, 0)))
+    assert loader._turn_on_tiles(turned(zeros, (0, 2, 1)))
+    assert loader._turn_on_tiles(turned(zeros, (1, 0, 2)))
+    assert not loader._turn_on_tiles(turned(zeros.astype(np.uint8), (1, 0, 2)))
+    assert not loader._turn_on_tiles(turned(zeros, (0, 1, 2), (2,)))
+    assert not loader._turn_on_tiles(turned(zeros, (0, 1, 2), (0,)))
+    assert loader._turn_on_tiles(turned(zeros, (1, 0, 2), (2,)))
 
 
 def test_dicom_image_with_nifti_masks_in_other_voxel_orders(tmp_path: "os.PathLike[str]") -> None:
@@ -3709,6 +3865,57 @@ def test_a_merge_frees_each_image_before_the_next_load() -> None:
         with patch("pictologics.loader.load_image", load):
             merged = load_and_merge_images(["a", "b", "c", "d"], **kwargs)
         assert len(loaded) == 4 and np.all(merged.array == 4.0)
+
+
+@pytest.mark.parametrize("kind", [np.float64, np.uint8, np.int16, np.uint16])
+def test_the_merge_kernel_gives_the_bits_of_the_numpy_merge(kind: type) -> None:
+    # Row-order arrays of one type of _MERGE_DTYPES merge in _merge_numba (here from one
+    # voxel on): the bits of the numpy merge for each rule and fill, also for NaN, +-inf
+    # and zeros of two signs (max gives +0, min -0, a NaN of the merge stays). For a tie of
+    # +0 and -0, numpy gives these zeros on arm64 and the zero of `current` on x86-64: the
+    # reference takes the rule of the kernel there (the same values)
+    from pictologics import loader
+
+    rng = np.random.default_rng(3)
+    shape = (5, 6, 7)
+    floats = np.dtype(kind).kind == "f"
+    pool = [0.0, -0.0, 1.0, 2.0, -3.0, np.nan, np.inf, -np.inf] if floats else [0, 1, 2, 3, 9]
+    for fill in (0.0, -1000.0, np.nan) if floats else (0,):
+        merged = rng.choice(np.array([*pool, fill]), shape).astype(kind)
+        current = rng.choice(np.array([*pool, fill]), shape).astype(kind)
+        if floats:  # zeros of two signs and NaN against NaN, in both orders
+            merged.flat[:4] = (-0.0, 0.0, np.nan, 1.0)
+            current.flat[:4] = (0.0, -0.0, np.nan, np.nan)
+        for rule in ("max", "min", "last", "first"):
+            expected = np.asfortranarray(merged)  # column order: the numpy path
+            loader._merge_into(expected, current, fill, rule)
+            if floats and rule in ("max", "min"):
+                ties = (merged == 0) & (current == 0) & (merged != fill) & (current != fill)
+                ties &= np.signbit(merged) != np.signbit(current)  # zeros of two signs
+                expected[ties] = 0.0 if rule == "max" else -0.0
+            got = merged.copy()
+            with (
+                patch("pictologics.loader._MERGE_MIN_SIZE", 1),
+                patch("pictologics.loader._merge_numba", wraps=loader._merge_numba) as kernel,
+            ):
+                loader._merge_into(got, current, fill, rule)
+            assert kernel.call_count == 1
+            assert np.ascontiguousarray(expected).tobytes() == got.tobytes()
+
+
+def test_a_reposition_merge_starts_as_zeros_for_a_zero_fill(tmp_path: "os.PathLike[str]") -> None:
+    # A fill of +0 starts the merge as np.zeros, a fill of -0.0 keeps its sign bit
+    from pictologics import save_image
+
+    reference = Image(np.zeros((6, 5, 4)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    path = os.path.join(tmp_path, "box.nii.gz")
+    save_image(Image(np.ones((2, 2, 2)), (1.0, 1.0, 1.0), (1.0, 1.0, 1.0)), path)
+    for fill, sign in ((0.0, False), (0, False), (-0.0, True)):
+        merged = load_and_merge_images(
+            [path], reference_image=reference, reposition_to_reference=True, fill_value=fill
+        )
+        assert merged.array[0, 0, 0] == 0.0 and bool(np.signbit(merged.array[0, 0, 0])) is sign
+        assert merged.array[1:3, 1:3, 1:3].sum() == 8.0
 
 
 def test_equal_geometry_passes_with_no_tolerance_check() -> None:

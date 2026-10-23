@@ -115,14 +115,29 @@ class TestIntensityFeatures(unittest.TestCase):
             )
 
     def test_calculate_intensity_features_constant(self) -> None:
-        # IBSI: skewness and kurtosis are 0 when the variance is 0. Equal values whose
-        # mean is not exact (0.1) count too, although their variance is about 1e-34.
-        for value in (5.0, 0.1):
-            features = calculate_intensity_features(np.full(3, value))
-            self.assertAlmostEqual(features["mean_intensity_Q4LE"], value)
-            self.assertAlmostEqual(features["intensity_variance_ECT3"], 0.0)
-            self.assertEqual(features["intensity_skewness_KE2A"], 0.0)
-            self.assertEqual(features["intensity_kurtosis_IPH6"], 0.0)
+        # IBSI: equal values have no spread. The variance, the three absolute deviations,
+        # the skewness, the kurtosis and the coefficient of variation are exactly 0, also
+        # for values whose mean is not exact (0.1 and 1/3 give rounding noise in the sums).
+        # Equal infinite values keep the NaN variance and deviations of their sums.
+        spread = (
+            "intensity_variance_ECT3",
+            "intensity_skewness_KE2A",
+            "intensity_kurtosis_IPH6",
+            "intensity_mean_absolute_deviation_4FUA",
+            "intensity_robust_mean_absolute_deviation_1128",
+            "intensity_median_absolute_deviation_N72L",
+            "intensity_coefficient_of_variation_7TET",
+        )
+        for n in (3, 100, 1000):
+            for value in (5.0, 0.1, 1.0 / 3.0):
+                features = calculate_intensity_features(np.full(n, value))
+                self.assertAlmostEqual(features["mean_intensity_Q4LE"], value)
+                self.assertEqual([features[k] for k in spread], [0.0] * len(spread))
+        with np.errstate(invalid="ignore"):  # inf - inf in the sums
+            features = calculate_intensity_features(np.full(10, np.inf))
+        self.assertTrue(np.isnan(features["intensity_variance_ECT3"]))
+        self.assertTrue(np.isnan(features["intensity_mean_absolute_deviation_4FUA"]))
+        self.assertEqual(features["intensity_skewness_KE2A"], 0.0)
 
     def test_calculate_intensity_features_zero_mean(self) -> None:
         # CV and Quartile coeff denom = 0
@@ -811,7 +826,7 @@ class TestIntensityFeatures(unittest.TestCase):
         box = (10, 10, 10)
         grid = math.prod(scipy.fft.next_fast_len(2 * k - 1, real=True) for k in box)
         fft_time = module._fft_seconds(grid, 1.0, 1)
-        with patch.object(module.threads, "_default", 1):
+        with patch.object(module, "_PLAN_THREADS", 1):
             for n, method in ((100, "pairs"), (1000, "fft")):
                 self.assertEqual(fft_time < module._pair_seconds(n, 1), method == "fft")
                 self.assertEqual(module._spatial_plan(n, box)[0], method)
@@ -1607,11 +1622,38 @@ def test_the_energy_sums_in_a_fixed_order() -> None:
     from pictologics.features import intensity as intensity_module
 
     rng = np.random.default_rng(51)
+    kernels = (
+        intensity_module._sum_of_squares_numba,
+        intensity_module._sum_of_squares_numba_serial,
+    )
     for n in (0, 1, 7, 8, 9, 4096, 4097):
         values = rng.normal(40.0, 20.0, n)
         exact = math.fsum(values * values)
-        got = intensity_module._sum_of_squares(values)
-        assert abs(got - exact) <= 8 * np.spacing(max(exact, 1.0))
+        for kernel in kernels:
+            got = kernel(values)
+            assert abs(got - exact) <= 8 * np.spacing(max(exact, 1.0))
+
+    def documented(values: np.ndarray) -> float:
+        # Blocks of 4096 values, eight accumulators in each, the tail, the block sums in order
+        total = 0.0
+        for start in range(0, values.size, 4096):
+            block_values = values[start : start + 4096]
+            acc = [0.0] * 8
+            full = block_values.size // 8
+            for j in range(full):
+                for a in range(8):
+                    acc[a] += block_values[8 * j + a] * block_values[8 * j + a]
+            block = ((acc[0] + acc[1]) + (acc[2] + acc[3])) + (
+                (acc[4] + acc[5]) + (acc[6] + acc[7])
+            )
+            for k in range(8 * full, block_values.size):
+                block += block_values[k] * block_values[k]
+            total += block
+        return total
+
+    values = rng.normal(40.0, 20.0, 3 * 4096 + 13)
+    for kernel in kernels:
+        assert np.float64(kernel(values)).tobytes() == np.float64(documented(values)).tobytes()
 
     def at_offset(values: np.ndarray, k: int) -> np.ndarray:
         buffer = np.empty(values.size + 16)
@@ -1626,6 +1668,30 @@ def test_the_energy_sums_in_a_fixed_order() -> None:
         for f in (calculate_intensity_features(at_offset(values, 8 * k)) for k in range(8))
     }
     assert len(results) == 1
+
+
+def test_the_energy_takes_its_threaded_kernel_from_its_gate() -> None:
+    # From the gate on, with more than one thread, the threaded energy kernel runs; below it,
+    # its serial twin: the same bits
+    from pictologics.features import _utils
+    from pictologics.features import intensity as module
+
+    values = np.random.default_rng(52).normal(40.0, 20.0, 20_000)
+    energies = []
+    for gate, calls in ((1, (1, 0)), (1 << 40, (0, 1))):
+        with (
+            patch.object(
+                module, "_sum_of_squares_numba", wraps=module._sum_of_squares_numba
+            ) as kernel,
+            patch.object(
+                module, "_sum_of_squares_numba_serial", wraps=module._sum_of_squares_numba_serial
+            ) as twin,
+            patch.object(module, "_SQUARES_PARALLEL_MIN", gate),
+            patch.object(_utils, "get_num_threads", return_value=2),
+        ):
+            energies.append(calculate_intensity_features(values)["intensity_energy_N8CA"])
+        assert (kernel.call_count, twin.call_count) == calls
+    assert np.float64(energies[0]).tobytes() == np.float64(energies[1]).tobytes()
 
 
 def test_histogram_values_must_be_finite_whole_numbers() -> None:
@@ -1745,7 +1811,7 @@ def test_local_peaks_keep_two_stages_with_an_unreached_nan() -> None:
 
 
 def test_the_spatial_method_does_not_depend_on_the_thread_count() -> None:
-    # The choice of pairs, FFT or slabs uses the thread count of the import. So a call at
+    # The choice of pairs, FFT or slabs uses a fixed count of threads. So a call at
     # one thread and a call at the default take the same method, and Moran's I and Geary's C
     # keep their bits. A run() with the morphology family, whose worker can leave the calling
     # thread one thread less, gives the values of the direct call.
@@ -1784,3 +1850,89 @@ def test_the_spatial_method_does_not_depend_on_the_thread_count() -> None:
     result = pipeline.run(image, mask)["spatial"]
     direct = calculate_spatial_intensity_features(image, mask)
     assert all(result[key] == value for key, value in direct.items())
+
+
+_FIRST_ORDER_KEYS = [
+    "mean_intensity_Q4LE",
+    "intensity_variance_ECT3",
+    "intensity_skewness_KE2A",
+    "intensity_kurtosis_IPH6",
+    "median_intensity_Y12H",
+    "minimum_intensity_1GSF",
+    "10th_intensity_percentile_QG58",
+    "90th_intensity_percentile_8DWT",
+    "maximum_intensity_84IY",
+    "intensity_interquartile_range_SALO",
+    "intensity_range_2OJQ",
+    "intensity_mean_absolute_deviation_4FUA",
+    "intensity_robust_mean_absolute_deviation_1128",
+    "intensity_median_absolute_deviation_N72L",
+    "intensity_coefficient_of_variation_7TET",
+    "intensity_quartile_coefficient_of_dispersion_9S40",
+    "intensity_energy_N8CA",
+    "root_mean_square_intensity_5ZWQ",
+]
+
+
+def test_first_order_sums_in_parts_match_the_serial_kernels() -> None:
+    # From the gate on, the moments and the deviations come from the sums of 64 fixed parts:
+    # the values of the serial kernels within 1e-12, and the features in the same key order
+    from pictologics.features import intensity
+
+    rng = np.random.default_rng(40)
+    for n in (1, 63, 1000):
+        values = rng.normal(40.0, 20.0, n)
+        args = (float(values.mean()), float(np.median(values)), 20.0, 60.0)
+        serial = intensity._moments_and_deviations(values, *args)
+        features = calculate_intensity_features(values)
+        with patch.object(intensity, "_PARALLEL_FIRST_ORDER_MIN", 1):
+            parts = intensity._moments_and_deviations(values, *args)
+            in_parts = calculate_intensity_features(values)
+        np.testing.assert_allclose(parts, serial, rtol=1e-12)
+        assert list(in_parts) == list(features) == _FIRST_ORDER_KEYS
+        np.testing.assert_allclose(list(in_parts.values()), list(features.values()), rtol=1e-12)
+
+
+def test_first_order_sums_on_one_thread_take_the_twins() -> None:
+    # On one thread the serial twins of the part kernels give the threaded result exactly
+    from pictologics.features import intensity
+
+    values = np.random.default_rng(41).normal(40.0, 20.0, 1000)
+    args = (float(values.mean()), float(np.median(values)), 20.0, 60.0)
+    with patch.object(intensity, "_PARALLEL_FIRST_ORDER_MIN", 1):
+        threaded = intensity._moments_and_deviations(values, *args)
+        with patch.object(intensity, "get_num_threads", return_value=1):
+            assert intensity._moments_and_deviations(values, *args) == threaded
+
+
+def test_first_order_sums_with_no_value_in_the_robust_range() -> None:
+    # No value in [lower, upper]: the robust mean absolute deviation is 0, as in the serial
+    # kernel
+    from pictologics.features import intensity
+
+    values = np.random.default_rng(42).normal(40.0, 20.0, 100)
+    with patch.object(intensity, "_PARALLEL_FIRST_ORDER_MIN", 1):
+        result = intensity._moments_and_deviations(values, 40.0, 40.0, 10.0, 0.0)
+    assert result[4] == 0.0 == intensity._robust_mean_abs_dev(values, 10.0, 0.0)
+
+
+def test_first_order_features_of_a_strided_array_are_those_of_its_copy() -> None:
+    # A strided view gives the features of its row-order copy
+    two = np.empty((500, 2))
+    two[:, 0] = np.random.default_rng(43).gamma(1.5, 4.0, 500)
+    assert calculate_intensity_features(two[:, 0]) == calculate_intensity_features(two[:, 0].copy())
+
+
+def test_the_spatial_method_does_not_depend_on_the_import_thread_count() -> None:
+    # The time model of the spatial method takes a fixed count of 4 threads: the same plan
+    # for every thread count of the import
+    from pictologics import threads
+    from pictologics.features import intensity as module
+
+    assert module._PLAN_THREADS == 4
+    cases = ((1000, (13, 13, 13)), (2000, (15, 15, 15)), (3400, (19, 19, 19)), (5000, (40, 40, 40)))
+    plans = set()
+    for count in (1, 4, 10, 64):
+        with patch.object(threads, "_default", count):
+            plans.add(tuple(module._spatial_plan(n, box) for n, box in cases))
+    assert len(plans) == 1

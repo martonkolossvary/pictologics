@@ -237,6 +237,20 @@ def test_load_image_as_suv(tmp_path: Path) -> None:
     rtstruct.save_as(tmp_path / "rtstruct.dcm")
     with pytest.raises(ValueError, match="not the mask file"):
         load_image(tmp_path / "rtstruct.dcm", suv="bw")
+    # One file reads its SOP class once (also a mask file with suv)
+    from unittest.mock import patch
+
+    from pictologics import loader
+
+    with patch.object(loader, "_dicom_sop_class", wraps=loader._dicom_sop_class) as sop:
+        load_image(tmp_path / "2.dcm", suv="bw")
+    assert sop.call_count == 1
+    with (
+        patch.object(loader, "_dicom_sop_class", wraps=loader._dicom_sop_class) as sop,
+        pytest.raises(ValueError, match="not the mask file"),
+    ):
+        load_image(tmp_path / "rtstruct.dcm", suv="bw")
+    assert sop.call_count == 1
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # no warning for a plain series
         load_image(tmp_path / "0.dcm", suv="bsa")

@@ -149,7 +149,10 @@ def _roi_min_max_numba(
     npt.NDArray[np.float64],
 ]:
     """Per-slice min/max of the finite `data` values of the `mask != 0` voxels, in a
-    single fused pass."""
+    single fused pass. The voxel loop reads only the rows with ROI voxels: a row after a
+    row without ROI voxels gets a vectorised test of its mask first (as in
+    _bbox_scan_numba). After a row with ROI voxels, the voxel loop runs at once, so a
+    dense ROI does not read its mask two times."""
     depth, height, width = data.shape
     found = np.zeros(depth, dtype=np.uint8)
     mins = np.full(depth, np.inf, dtype=np.float64)
@@ -159,9 +162,17 @@ def _roi_min_max_numba(
         lo = np.inf
         hi = -np.inf
         hit = False
+        roi_row = False  # whether the last row held ROI voxels
         for y in range(height):
+            if not roi_row:
+                for x in range(width):
+                    roi_row |= mask[z, y, x] != 0
+                if not roi_row:
+                    continue
+            roi_row = False
             for x in range(width):
                 if mask[z, y, x] != 0:
+                    roi_row = True
                     v = data[z, y, x]
                     if not math.isfinite(v):  # NaN or infinite: no ROI intensity
                         continue
@@ -178,43 +189,8 @@ def _roi_min_max_numba(
     return found, mins, maxs
 
 
-@jit(nopython=True, cache=True)  # type: ignore
-def _roi_min_max_serial_numba(
-    data: npt.NDArray[np.floating[Any]],
-    mask: npt.NDArray[Any],
-) -> tuple[
-    npt.NDArray[np.uint8],
-    npt.NDArray[np.float64],
-    npt.NDArray[np.float64],
-]:
-    """Serial variant of `_roi_min_max_numba` for small volumes, where the
-    parallel threading-dispatch cost exceeds the scan itself."""
-    depth, height, width = data.shape
-    found = np.zeros(depth, dtype=np.uint8)
-    mins = np.full(depth, np.inf, dtype=np.float64)
-    maxs = np.full(depth, -np.inf, dtype=np.float64)
-
-    for z in range(depth):
-        lo = np.inf
-        hi = -np.inf
-        hit = False
-        for y in range(height):
-            for x in range(width):
-                if mask[z, y, x] != 0:
-                    v = data[z, y, x]
-                    if not math.isfinite(v):  # NaN or infinite: no ROI intensity
-                        continue
-                    hit = True
-                    if v < lo:
-                        lo = v
-                    if v > hi:
-                        hi = v
-        if hit:
-            found[z] = 1
-            mins[z] = lo
-            maxs[z] = hi
-
-    return found, mins, maxs
+# The serial twin serves volumes below 2^19 voxels (see roi_min_max)
+_roi_min_max_numba_serial = serial_twin(_roi_min_max_numba)
 
 
 def _column_order(array: npt.NDArray[Any]) -> bool:
@@ -263,7 +239,7 @@ def roi_min_max(
     data, mask = _row_order_pair(data, _nonzero_form(mask))
     # Measured crossover: below ~2^19 voxels the parallel launch overhead dominates.
     if data.size < 1 << 19:
-        found, mins, maxs = _roi_min_max_serial_numba(data, mask)
+        found, mins, maxs = _roi_min_max_numba_serial(data, mask)
     else:
         found, mins, maxs = _roi_min_max_numba(data, mask)
     idx = np.flatnonzero(found)

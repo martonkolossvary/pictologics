@@ -19,7 +19,6 @@ import numpy as np
 import pydicom
 from numpy import typing as npt
 
-from pictologics.features._utils import compute_nonzero_bbox
 from pictologics.loader import _RTSTRUCT_SOP_CLASS, Image, _direction_matrix, _warn_if_other_frame
 
 # The contour types that bound an area (CLOSEDPLANAR_XOR names the even-odd rule)
@@ -115,23 +114,31 @@ def load_rtstruct(
     for uid in sorted({frames[n] for n in chosen if n in frames}):
         names = ", ".join(repr(rois[n][0]) for n in chosen if frames.get(n) == uid)
         _warn_if_other_frame(uid, reference_image, f"The RTSTRUCT ROI {names}")
-    # Each mask and its nonzero box; the label map needs only the part in the box, so a
-    # mask leaves memory once its box is cut out
-    masks: dict[int, npt.NDArray[np.bool_]] = {}
-    boxes = {}
+    # The mask of each ROI comes in the box of its spans (no full-size mask for an ROI):
+    # the label map takes the box at once, a dict mask copies it into zeros
+    shape = reference_image.array.shape
+    labels: npt.NDArray[Any] | None = None
+    if combine_rois:
+        labels = np.zeros(shape, np.uint8 if max(chosen, default=0) <= 255 else np.uint16)
+    masks: dict[int, npt.NDArray[np.uint8]] = {}
+    empty = []
     for number in chosen:
-        mask = _filled(
+        box, part = _filled(
             rois[number], reference_image, subvoxel_tolerance, subvoxel_warning_threshold
         )
-        boxes[number] = box = compute_nonzero_bbox(mask)
-        masks[number] = mask[box].copy() if combine_rois and box is not None else mask
-    for number in chosen:
-        if boxes[number] is None:
-            warnings.warn(
-                f"ROI {rois[number][0]!r} covers no voxel center of the reference image.",
-                UserWarning,
-                stacklevel=2,
-            )
+        if not part.any():
+            empty.append(number)
+        if labels is not None:
+            labels[box][part] = number  # a later ROI wins where ROIs overlap
+        else:
+            masks[number] = mask = np.zeros(shape, np.uint8)
+            mask[box] = part
+    for number in empty:
+        warnings.warn(
+            f"ROI {rois[number][0]!r} covers no voxel center of the reference image.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     def image(array: npt.NDArray[Any]) -> Image:
         return Image(
@@ -143,13 +150,8 @@ def load_rtstruct(
             frame_of_reference_uid=reference_image.frame_of_reference_uid,
         )
 
-    if not combine_rois:
-        return {rois[number][0]: image(mask.view(np.uint8)) for number, mask in masks.items()}
-    labels = np.zeros(reference_image.array.shape, np.uint8 if max(masks, default=0) <= 255 else np.uint16)  # fmt: skip
-    for number, mask in masks.items():
-        box = boxes[number]
-        if box is not None:
-            labels[box][mask] = number
+    if labels is None:
+        return {rois[number][0]: image(mask) for number, mask in masks.items()}
     return image(labels)
 
 
@@ -211,8 +213,10 @@ def _filled(
     reference: Image,
     tolerance: float,
     warning_threshold: float,
-) -> npt.NDArray[np.bool_]:
-    """The mask of the closed contours of `roi` on the grid of `reference`."""
+) -> tuple[tuple[slice, ...], npt.NDArray[np.bool_]]:
+    """The mask of the closed contours of `roi` on the grid of `reference`, in the box of
+    the pixels that the fills of its slices write: (the box, the mask in the box). The
+    box is empty when no contour edge crosses a pixel row of the grid."""
     name, contours = roi
     shape = reference.array.shape
     to_index = np.linalg.inv(_direction_matrix(reference.direction) * np.asarray(reference.spacing))
@@ -240,22 +244,37 @@ def _filled(
             UserWarning,
             stacklevel=3,
         )
-    mask = np.zeros(shape, dtype=bool)
+    # The spans of each slice first: their rows and columns give the box
+    found = []
     for (axis, k), polygons in planes.items():
-        plane = mask[tuple(k if a == axis else slice(None) for a in range(3))]
-        _fill_even_odd(plane, polygons)
-    return mask
+        spans = _spans(polygons, tuple(n for a, n in enumerate(shape) if a != axis))
+        if spans is not None:
+            found.append((axis, k, spans))
+    if not found:
+        return (slice(0, 0),) * 3, np.zeros((0, 0, 0), dtype=bool)
+    start = np.min([np.insert([rows[0], begin.min()], axis, k) for axis, k, (rows, begin, _) in found], axis=0)  # fmt: skip
+    stop = np.max([np.insert([rows[-1] + 1, end.max()], axis, k + 1) for axis, k, (rows, _, end) in found], axis=0)  # fmt: skip
+    part = np.zeros(stop - start, dtype=bool)
+    for axis, k, (rows, begin, end) in found:
+        row0, col0 = (int(start[a]) for a in range(3) if a != axis)
+        plane = part[tuple(k - int(start[a]) if a == axis else slice(None) for a in range(3))]
+        _fill_spans(plane, rows - row0, begin - col0, end - col0)
+    return tuple(slice(int(a), int(b)) for a, b in zip(start, stop, strict=True)), part
 
 
-def _fill_even_odd(plane: npt.NDArray[np.bool_], polygons: list[npt.NDArray[np.float64]]) -> None:
-    """Set the pixels of `plane` whose centers lie inside an odd number of the closed
-    `polygons` ((row, column) pixel coordinates, centers at integers).
+def _spans(
+    polygons: list[npt.NDArray[np.float64]], shape: tuple[int, ...]
+) -> tuple[npt.NDArray[np.intp], npt.NDArray[np.intp], npt.NDArray[np.intp]] | None:
+    """The spans of the pixels of a slice of `shape` whose centers lie inside an odd
+    number of the closed `polygons` ((row, column) pixel coordinates, centers at
+    integers): the row, the first column and the end column of each span, sorted by row.
+    None when no edge crosses a pixel row of the slice.
 
     Each edge crosses the pixel rows r with min(r0, r1) <= r < max(r0, r1) (a vertex
     counts once); a pixel is inside when an odd number of crossings of its row lie at or
     before its column.
     """
-    rows_n, cols_n = plane.shape
+    rows_n, cols_n = shape
     starts = np.concatenate(polygons)
     ends = np.concatenate([np.roll(p, -1, axis=0) for p in polygons])
     r0, c0, r1, c1 = starts[:, 0], starts[:, 1], ends[:, 0], ends[:, 1]
@@ -263,21 +282,31 @@ def _fill_even_odd(plane: npt.NDArray[np.bool_], polygons: list[npt.NDArray[np.f
     stop = np.clip(np.ceil(np.maximum(r0, r1)), 0, rows_n).astype(np.intp)
     counts = stop - first
     if not counts.any():
-        return
+        return None
     edge = np.repeat(np.arange(len(starts)), counts)
     rows = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts - first, counts)
     cols = c0[edge] + (rows - r0[edge]) * (c1[edge] - c0[edge]) / (r1[edge] - r0[edge])
     order = np.lexsort((cols, rows))
     rows, cols = rows[order], cols[order]
     # The crossings of a row pair up: in at crossing 2i, out at crossing 2i + 1
-    low = rows[0]
     begin = np.clip(np.ceil(cols[0::2]), 0, cols_n).astype(np.intp)
     end = np.clip(np.ceil(cols[1::2]), 0, cols_n).astype(np.intp)
+    return rows[0::2], begin, end
+
+
+def _fill_spans(
+    plane: npt.NDArray[np.bool_],
+    rows: npt.NDArray[np.intp],
+    begin: npt.NDArray[np.intp],
+    end: npt.NDArray[np.intp],
+) -> None:
+    """Set the pixels of the spans (sorted by row) in `plane`: a span sets the pixels of
+    its row from its first column up to its end column (the end column stays out)."""
+    low, left = rows[0], int(begin.min())
     # Only the columns from the first crossing to the last can be inside
-    left = int(begin.min())
     steps = np.zeros((rows[-1] - low + 1, int(end.max()) - left + 1), dtype=np.int32)
-    np.add.at(steps, (rows[0::2] - low, begin - left), 1)
-    np.add.at(steps, (rows[0::2] - low, end - left), -1)
+    np.add.at(steps, (rows - low, begin - left), 1)
+    np.add.at(steps, (rows - low, end - left), -1)
     plane[low : rows[-1] + 1, left : left + steps.shape[1] - 1] |= (
         np.cumsum(steps[:, :-1], axis=1) > 0
     )

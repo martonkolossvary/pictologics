@@ -87,7 +87,7 @@ class TestWarmup(unittest.TestCase):
 # Run with the compiler on (see test_a_pipeline_run_after_the_import_compiles_no_kernel):
 # the new signatures of each kernel of the package after a pipeline workload, as JSON.
 _NEW_SIGNATURES = """
-import importlib, json, os, pkgutil, threading, warnings
+import gzip, importlib, json, os, pkgutil, threading, warnings, zlib
 
 import numpy as np
 import scipy
@@ -98,8 +98,12 @@ with warnings.catch_warnings():
 import numba
 from numba.core.registry import CPUDispatcher
 from pictologics import Image, RadiomicsPipeline
-from pictologics.features import intensity, morphology, texture
-from pictologics.preprocessing import discretise_image
+from pictologics.features import _utils, intensity, morphology, texture
+from pictologics.preprocessing import (
+    create_source_mask_from_sentinel,
+    detect_sentinel_value,
+    discretise_image,
+)
 
 
 def signatures():
@@ -138,6 +142,10 @@ pipeline.add_config("fbs", [
     {"step": "discretise", "params": {"method": "FBS", "bin_width": 5.0, "min_val": -100.0}},
     {"step": "extract_features", "params": {"families": ["intensity"]}},
 ])
+pipeline.add_config("reseg", [
+    {"step": "resegment", "params": {"range_min": -50.0, "range_max": 150.0}},
+    {"step": "extract_features", "params": {"families": ["intensity"]}},
+])
 pipeline.add_config("spatial", [{"step": "extract_features", "params": {
     "families": ["intensity"], "include_spatial_intensity": True, "include_local_intensity": True,
 }}])
@@ -170,11 +178,17 @@ same = all(
     for run, (first, again) in enumerate(zip(runs[None], runs[1]))
     for name in first
 )
+energy_values = np.random.default_rng(3).normal(40.0, 20.0, 1_500_000)  # the threaded energy sum
+energies = []
+for count in (None, 1):
+    pictologics.set_num_threads(count)
+    energies.append(intensity.calculate_intensity_features(energy_values)["intensity_energy_N8CA"])
+same = same and energies[0] == energies[1]
 pictologics.set_num_threads()
 for kind in (np.bool_, np.int8, np.uint8, np.int16, np.uint16, np.int32, np.uint32, np.int64,
              np.uint64, np.float32, np.float64):  # masks of each type and order
     for array in (roi.astype(kind), np.asfortranarray(roi.astype(kind))):
-        pipeline.run(image, Image(array, image.spacing, image.origin), config_names=["fbs"])
+        pipeline.run(image, Image(array, image.spacing, image.origin), config_names=["fbs", "reseg"])
 labels = np.where(roi, 3, 0)
 labels[5:15, 5:15, 5:15] = 1
 for dtype in (np.uint8, np.uint16, np.int32, np.int64, np.float64):
@@ -189,6 +203,23 @@ pipeline.run_rois(image, Image(float_map, image.spacing, image.origin), labels=[
 float_map = labels.astype(np.float64)
 float_map.setflags(write=False)
 pipeline.run_rois(image, Image(float_map, image.spacing, image.origin), labels=[1], config_names=["fbs"])
+from pictologics.preprocessing import grow_mask
+
+tiny = np.zeros((6, 6, 6))
+tiny[2:4, 2:4, 2:4] = 1
+for kind in (np.uint8, np.bool_, np.float32):  # the distance passes: parallel, then the twins
+    for conv in (np.ascontiguousarray, np.asfortranarray):
+        grow_mask(Image(conv(roi.astype(kind)), image.spacing, image.origin), 3.0, 0.0)
+        grow_mask(Image(conv(tiny.astype(kind)), image.spacing, image.origin), -1.0)
+pipeline.add_config("nearest_ring", [
+    {"step": "grow_mask", "params": {"to_mm": 2.0, "from_mm": 0.0, "nearest_roi": True}},
+    {"step": "extract_features", "params": {"families": ["intensity"]}},
+])
+for label_array in (labels.astype(np.uint8), np.asfortranarray(labels.astype(np.int64))):
+    pipeline.run_rois(image, Image(label_array, image.spacing, image.origin), config_names=["nearest_ring"])
+pictologics.preprocessing.normalise_image(image, "zscore")  # the parallel map
+column = Image(np.asfortranarray(values[:40, :40, :40]), image.spacing, image.origin)
+pictologics.preprocessing.normalise_image(column, "percentile")  # the serial twin, column order
 for kind in (np.float64, np.float32, np.uint8, np.bool_, np.int64):  # column-order copies
     pictologics.save_image(Image(values.astype(kind), image.spacing, image.origin), "x.nii")
 import nibabel
@@ -199,16 +230,53 @@ for kind in (np.float64, np.float32, np.uint8, np.int32):  # the gzip writer; in
     pictologics.save_image(Image(values.astype(kind), image.spacing, image.origin), "x.nii.gz")
     pictologics.load_image("x.nii.gz")
     pictologics.load_image("x.nii.gz", stored_type=True)
+from pictologics import loader
+for kind in loader._MERGE_DTYPES:  # each type of the merge kernel (2^18 voxels on)
+    loader._merge_into(np.zeros((64, 64, 64), kind), np.ones((64, 64, 64), kind), 0, "max")
+pictologics.load_and_merge_images(["x.nii.gz", "x.nii.gz"])  # float64
+pictologics.load_and_merge_images(["x.nii.gz", "x.nii.gz"], relabel_masks=True)  # uint8 labels
+pictologics.load_and_merge_images(["x.nii.gz"], reference_image=image, reposition_to_reference=True, fill_value=-1.0)  # a full-size view
 nibabel.save(nibabel.Nifti1Image(values.astype(np.int16), np.eye(4)), "s.nii.gz")  # nibabel's file: one pass
 pictologics.load_image("s.nii.gz")
 levels = np.asarray(discretise_image(values, "FBN", roi_mask=mask.array, n_bins=16))
+from pictologics.preprocessing import apply_mask
+for kind in (np.uint8, np.bool_, np.float64):  # the threaded gather of a float64 and an int32 image
+    apply_mask(values, roi.astype(kind))
+    apply_mask(levels, roi.astype(kind))
+matrices = texture.calculate_all_texture_matrices(levels, mask.array, 16)
+for kind in (np.uint64, np.uint32, np.float64):  # given matrices: the feature kernels, numpy
+    for family in ("glcm", "glrlm", "glszm", "gldzm", "ngldm"):
+        function = getattr(texture, f"calculate_{family}_features")
+        function(levels, mask.array, 16, **{f"{family}_matrix": matrices[family].astype(kind)})
+texture.calculate_glcm_features(levels, mask.array, 16, glcm_matrix=matrices["glcm"].sum(axis=0))
 for kind in (np.uint8, np.int64, np.float32):  # direct calls with other types
     texture.calculate_all_texture_features(levels.astype(kind), mask.array, 16)
     intensity.calculate_intensity_histogram_features(levels[roi].astype(kind))
+many = np.random.default_rng(5).integers(1, 257, (64, 64, 64)).astype(np.float64)
+texture.calculate_all_texture_features(many, np.ones(many.shape, np.uint8), 256, families=["glszm", "gldzm"])  # about 236,000 zones: the zone tables in threads
 for kind in (np.uint8, np.int64):  # column-order levels: a row-order copy (see _level_form)
     texture.calculate_all_texture_features(np.asfortranarray(levels.astype(kind)), np.asfortranarray(mask.array), 16)
     texture.calculate_zone_features(np.asfortranarray(levels.astype(kind)), mask.array, np.zeros(shape, np.int32), 16)
+pipeline.add_config("levels", [{"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
+                               {"step": "extract_features", "params": {"families": ["texture"]}}])
+for part in (values, values[:40, :36, :30]):  # the parallel kernels, then the serial twins
+    boxes = [np.ones(part.shape, np.uint8)]  # boxes that keep the layout of a crop:
+    for cut in (np.s_[:, :, 2:-2], np.s_[2:-2]):  # a full box, a cut of axis 2, a cut of axis 0
+        boxes.append(np.zeros(part.shape, np.uint8))
+        boxes[-1][cut] = 1
+    for box in boxes:
+        for order in ("C", "F"):  # mask and image each in row and column order
+            mask_box = Image(np.asarray(box, order=order), image.spacing, image.origin)
+            for kind in (np.float64, np.float32):
+                for image_order in ("C", "F"):
+                    part_image = Image(np.asarray(part, dtype=kind, order=image_order), image.spacing, image.origin)
+                    morphology.calculate_morphology_features(mask_box, part_image)
+    column = Image(np.asfortranarray(part), image.spacing, image.origin)
+    pipeline.run(column, Image(boxes[0], image.spacing, image.origin), config_names=["levels"])  # column-order levels
 intensity.calculate_intensity_features(np.random.default_rng(3).normal(40.0, 20.0, 1_500_000))  # the threaded select: a column-order table
+pictologics.set_num_threads(1)  # from 2^19 values on: the serial twins of the first-order sums
+intensity.calculate_intensity_features(np.random.default_rng(3).normal(40.0, 20.0, 600_000))
+pictologics.set_num_threads()
 big = np.tile(levels[roi], 5)  # from 2^19 values on, the level count runs in threads
 for kind in (np.int32, np.int64, np.float64):
     intensity.calculate_intensity_histogram_features(big.astype(kind), n_bins=16)
@@ -228,6 +296,17 @@ with open("c.mha", "wb") as mha_file:
     mha_file.write(b"ObjectType = Image\\nNDims = 3\\nBinaryData = True\\nDimSize = 128 128 64\\n"
                    b"ElementType = MET_SHORT\\nElementDataFile = LOCAL\\n" + stored)
 pictologics.load_image("c.mha")
+with open("g.nrrd", "wb") as nrrd_file:  # gzip and zlib data inflate into the array
+    nrrd_file.write(b"NRRD0004\\ntype: short\\ndimension: 3\\nspace: left-posterior-superior\\n"
+                    b"sizes: 128 128 64\\nspace directions: (1,0,0) (0,1,0) (0,0,1)\\n"
+                    b"kinds: domain domain domain\\nendian: little\\nencoding: gzip\\n"
+                    b"space origin: (0,0,0)\\n\\n" + gzip.compress(stored, 1))
+pictologics.load_image("g.nrrd")
+with open("g.mha", "wb") as mha_file:
+    mha_file.write(b"ObjectType = Image\\nNDims = 3\\nBinaryData = True\\nDimSize = 128 128 64\\n"
+                   b"ElementType = MET_SHORT\\nCompressedData = True\\nElementDataFile = LOCAL\\n"
+                   + zlib.compress(stored, 1))
+pictologics.load_image("g.mha")
 from pictologics.filters import gabor_filter
 for kind in (np.float32, np.float64):  # the Gabor slices in each order, each part and a region
     cube = values[:20, :18, :16].astype(kind)
@@ -252,11 +331,35 @@ from pictologics.filters import wavelet_transform
 wavelet_transform(values, "db2", 2, "LHL", rotation_invariant=True)  # the 24 rotations, slabs, in place
 wavelet_transform(values.astype(np.float32), "coif1", 1, "HHH", "mirror", rotation_invariant=True, pooling="max")
 wavelet_transform(values[:20, :18, :16], "haar", 1, "LHL")  # the serial path
+from pictologics.filters import riesz_transform
+for kind in (np.float64, np.float32):  # the masked copy: row-order and strided images and masks
+    cube = values.astype(kind)
+    part, part_roi = cube[2:-2, 2:-2, 2:-2], roi[2:-2, 2:-2, 2:-2]
+    for img, valid in ((cube, roi), (part, part_roi), (part, np.ascontiguousarray(part_roi)),
+                       (np.ascontiguousarray(part), part_roi)):
+        mean_filter(img, 3, source_mask=valid)  # the image type into float64, the normalize kernel
+        riesz_transform(img, (1, 0, 0), source_mask=valid)  # into the image type
+        wavelet_transform(img, "haar", 1, "LHL", source_mask=valid)  # into float32
+from pictologics.filters import simoncelli_wavelet
+simoncelli_wavelet(values, level=1)  # the table kernels (a 3-D table above the gate)
+from pictologics.filters import riesz_simoncelli
+riesz_transform(values.astype(np.float32), (1, 0, 1), boundary="mirror")  # a half Riesz table
+riesz_simoncelli(values, level=2, order=(0, 2, 0))
+from pictologics.filters import riesz_log
+riesz_log(values, 2.0, 1.0, (1, 0, 0), boundary="mirror")  # one FFT round trip on slabs
+riesz_log(values[:20, :18, :16].astype(np.float32), 2.0, 1.0, (0, 1, 0), boundary="zero",
+          padding_value=-5.0)  # the rfftn path of a float32 image, a padding value
 column = Image(np.asfortranarray(values.astype(np.float32)), image.spacing, image.origin)  # one pass
 resample_run = RadiomicsPipeline(load_standard=False)
 resample_run.add_config("im1", [{"step": "resample", "params": {"new_spacing": (1.5, 1.5, 1.5)}},
                                 {"step": "extract_features", "params": {"families": ["intensity"]}}])
 resample_run.run(column, mask, config_names=["im1"])
+whole = RadiomicsPipeline(load_standard=False)  # no mask: the view of the box; resegment: the box gather
+whole.add_config("rseg", [{"step": "resegment", "params": {"range_min": 0.0, "range_max": 80.0}},
+                          {"step": "discretise", "params": {"method": "FBN", "n_bins": 16}},
+                          {"step": "extract_features", "params": {"families": ["intensity", "histogram"]}}])
+whole.add_config("plain", [{"step": "extract_features", "params": {"families": ["intensity"]}}])
+whole.run(image, None, config_names=["rseg", "plain"])
 read_only = values.copy()  # read-only in-memory arrays: one copy at the start of a run
 read_only.setflags(write=False)
 fixed = roi.astype(np.uint8)
@@ -290,6 +393,7 @@ for k in range(64):
     ds.save_as(f"big_endian/{k}.dcm", enforce_file_format=True, implicit_vr=False,
                little_endian=False)
 pictologics.load_image("big_endian")
+pictologics.load_image("big_endian", apply_rescale=False)  # the stored-type slabs
 texture.calculate_zone_features(levels.astype(np.uint8), np.asfortranarray(mask.array), np.zeros(shape, np.int32), 16)
 texture._gldzm_distance_map(roi)
 pipeline.run(image, Image(roi.astype(np.float16), image.spacing, image.origin), config_names=["fbs"])
@@ -301,11 +405,22 @@ for conv in (np.ascontiguousarray, np.asfortranarray):
     for kind in (np.float64, np.uint8, np.bool_, np.int32, np.uint16, np.float32):
         small_image = Image(conv(small_values), image.spacing, image.origin)
         small_mask = Image(conv(small_roi.astype(kind)), image.spacing, image.origin)
-        pipeline.run(small_image, small_mask, config_names=["fbs", "standard_fbn_8", "spatial"])
+        pipeline.run(small_image, small_mask, config_names=["fbs", "standard_fbn_8", "spatial", "reseg"])
         pipeline.run(Image(np.ascontiguousarray(small_values), image.spacing, image.origin), small_mask, config_names=["fbs"])
+for kind in (np.uint8, np.bool_, np.float64):  # the 6-candidate count for each ROI type
+    detect_sentinel_value(image, roi_mask=Image(roi.astype(kind), image.spacing, image.origin))
+detect_sentinel_value(image)
+create_source_mask_from_sentinel(image, -1000.0)  # the parallel kernel
+create_source_mask_from_sentinel(Image(np.asfortranarray(values), image.spacing, image.origin), -1000.0)
+create_source_mask_from_sentinel(Image(small_values, image.spacing, image.origin), -1000.0)  # the twin
 # Each serial twin gives the bits of its parallel kernel (10 sizes, the warmed signatures)
 from pictologics import preprocessing
+preprocessing.resample_image(Image(np.asfortranarray(values), image.spacing, image.origin), (1.5, 1.5, 1.5), "cubic", source_mask=np.asfortranarray(roi))  # the cubic resample of a column-order image and mask
 from pictologics.features._mc_tables import EDGE_TABLE, TRIANGLE_COUNT
+
+for conv in (np.ascontiguousarray, np.asfortranarray):  # the serial outlier kernel, both orders
+    for kind in (np.float64, np.uint8, np.bool_):
+        preprocessing.filter_outliers(Image(conv(small_values), image.spacing, image.origin), Image(conv(small_roi.astype(kind)), image.spacing, image.origin))
 
 
 def outputs(kernel, args, outs):
@@ -345,6 +460,10 @@ for n in (3, 5, 8, 11, 16, 23, 31, 40, 52, 64):
     dist_axes = [np.minimum(np.arange(k), k - np.arange(k)) * 0.7 for k in box.shape]
     intensity._prefix_pad_numba(vals, 0, p0, np.empty(n), np.empty(n))
     intensity._prefix_pad_numba(vals, 2, p2, np.empty(n), np.empty(n))
+    edt_feature = box != 0
+    edt_d2 = np.empty(box.shape)
+    edt_lab = edt_feature.astype(np.int32) * 3
+    preprocessing._edt_axis0_numba_serial(edt_feature, 0.7, edt_d2, edt_lab, True)
     cases = [
         (morphology._accumulate_moments_from_mask_numba, lambda: (box,), ()),
         (morphology._accumulate_moments_from_mask_numba, lambda: (box[1:, 1:, 1:],), ()),
@@ -355,7 +474,8 @@ for n in (3, 5, 8, 11, 16, 23, 31, 40, 52, 64):
         (morphology._mesh_area_volume_numba, lambda: (verts, faces), ()),
         (morphology._ombb_extents_numba, lambda: (verts, verts.mean(axis=0), evecs), ()),
         (preprocessing._resample_nearest_numba, lambda: (box, scale, shift, start, np.zeros(out, np.uint8)), (4,)),
-        (preprocessing._resample_trilinear_numba, lambda: (vals, scale, shift, start, False, float("nan"), np.zeros(out)), (6,)),
+        (preprocessing._resample_trilinear_numba, lambda: (vals, scale, shift, start, False, float("nan"), False, np.zeros(out)), (7,)),
+        (preprocessing._resample_trilinear_numba, lambda: (vals, scale, shift, start, False, float("nan"), True, np.zeros(out)), (7,)),
         (preprocessing._resample_trilinear_masked_numba, lambda: (vals, valid, scale, shift, start, 0.5, np.zeros(out), np.zeros(out, np.bool_)), (6, 7)),
         (preprocessing._pad_edge_numba, lambda: (vals, 12, np.zeros(vpad.shape)), (2,)),
         (preprocessing._prefilter_axis0_numba, lambda: (vpad.copy(), pole, gain, pole ** vpad.shape[0], 4), (0,)),
@@ -376,9 +496,21 @@ for n in (3, 5, 8, 11, 16, 23, 31, 40, 52, 64):
         (intensity._weighted_power_numba, lambda: (spectrum, grid, *folds, box.shape[2], np.empty(fold_shape[0])), (5,)),
         (intensity._cross_power_numba, lambda: (spectrum, spectrum * (0.5 - 0.25j), spectrum.conj(), box.shape[2], np.empty(fold_shape[0])), (4,)),
         (intensity._all_whole_numba, lambda: (np.round(vals).ravel(), np.zeros(3, np.bool_)), (1,)),
+        (preprocessing._edt_axis0_numba, lambda: (edt_feature, 0.7, np.empty(box.shape), edt_feature.astype(np.int32) * 3, True), (2, 3)),
+        (preprocessing._edt_axis1_numba, lambda: (edt_d2.copy(), 0.8, edt_lab.copy(), True), (0, 2)),
+        (preprocessing._edt_axis2_numba, lambda: (edt_d2.copy(), 1.25, edt_lab.copy(), True), (0, 2)),
+        (preprocessing._normalise_map_numba, lambda: (vals.ravel(), 40.0, 10.0, np.zeros(vals.size)), (3,)),
+        (preprocessing._not_equal_numba, lambda: (vals.ravel(), float(vals.flat[0]), np.zeros(vals.size, np.bool_)), (2,)),
+        (preprocessing._resegment_numba, lambda: (vals.ravel(), box.ravel(), 30.0, 50.0, np.zeros(box.size, np.uint8)), (4,)),
+        (preprocessing._resegment_numba, lambda: (vals.ravel(), vals.ravel().view(np.int64), 30.0, 50.0, np.zeros(box.size, np.int64)), (4,)),
+        (_utils._roi_min_max_numba, lambda: (vals, box), ()),
+        (intensity._sum_of_squares_numba, lambda: (vals.ravel(),), ()),
+        (intensity._first_order_sums_numba, lambda: (vals.ravel(), 40.0, 39.0, 30.0, 50.0, np.zeros((64, 6)), np.zeros(64, np.int64)), (5, 6)),
+        (intensity._robust_sums_numba, lambda: (vals.ravel(), 30.0, 50.0, 40.0, np.zeros(64)), (4,)),
+        (_utils._roi_min_max_numba, lambda: (vals, np.where((np.arange(n + 1) % 3 == 0)[None, :, None], box, 0).astype(np.uint8)), ()),
     ]
     for kernel, args, outs in cases:
-        module = next(m for m in (morphology, preprocessing, intensity) if hasattr(m, kernel.__name__))
+        module = next(m for m in (morphology, preprocessing, intensity, _utils) if hasattr(m, kernel.__name__))
         twin = getattr(module, kernel.__name__ + "_serial")
         if kernel is intensity._calculate_spatial_features_numba:
             # The pair loop runs with fast math: the vectorized sums of the kernel and of
@@ -386,6 +518,16 @@ for n in (3, 5, 8, 11, 16, 23, 31, 40, 52, 64):
             twins_same = twins_same and bool(np.allclose(kernel(*args()), twin(*args()), rtol=1e-12, atol=0.0))
         else:
             twins_same = twins_same and outputs(kernel, args(), outs) == outputs(twin, args(), outs)
+# The serial outlier kernel gives the bits of the parallel one (NaN and outliers in the
+# intensities; a -0.0 background in the float64 mask)
+outlier_vals = vals.copy()
+outlier_vals[1, 1, 1], outlier_vals[2, 2, 2] = np.nan, 1e6
+for kind in (np.float64, np.uint8, np.bool_):
+    outlier_mask = box.astype(kind)
+    if kind is np.float64:
+        outlier_mask[box == 0] = -0.0
+    args = (outlier_vals.ravel(), outlier_mask.ravel(), 25.0, 55.0, np.empty(box.size, kind))
+    twins_same = twins_same and outputs(preprocessing._filter_outliers_numba, args, (4,)) == outputs(preprocessing._filter_outliers_serial_numba, args, (4,))
 # The compiled cubic kernels give scipy's bits where the scipy build fuses the multiply-add
 # as the kernels do (the arm64 wheels); elsewhere (the x86-64 wheels) the values lie within
 # 1e-13 of scipy's largest value
@@ -398,6 +540,16 @@ cubic_shape, cubic_scale, cubic_shift, _ = preprocessing._output_grid(vals.shape
 cubic_ref = affine_transform(vals, np.array(cubic_scale), np.array(cubic_shift), output_shape=cubic_shape, order=3, mode="nearest")
 cubic_new = preprocessing.resample_image(Image(vals, (1.0,) * 3, (0.0,) * 3), (1.25,) * 3, "cubic").array
 cubic_same = cubic_new.tobytes() == cubic_ref.tobytes() if fuses else bool(np.abs(cubic_new - cubic_ref).max() <= 1e-13 * np.abs(cubic_ref).max())
+round_values = values + 0.5  # halves: a half goes to the even integer
+round_same = all(  # round_intensities in threads gives the bits of np.round, in each order
+    np.array_equal(preprocessing.round_intensities(Image(conv(round_values), image.spacing, image.origin)).array.view(np.uint64), np.round(conv(round_values)).view(np.uint64))
+    for conv in (np.ascontiguousarray, np.asfortranarray)
+)
+# Masks and images in another voxel order (_reoriented): the tiled copy of each item size
+grid = Image(np.zeros((2, 2, 2)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+turned_axes = np.eye(3)[:, [2, 1, 0]] * [1.0, 1.0, -1.0]
+for kind in (np.float64, np.float32, np.int16, np.uint8, np.bool_):
+    loader._reoriented(Image(np.zeros((72, 128, 128), dtype=kind), (1.0,) * 3, (0.0,) * 3, turned_axes), grid)
 statuses = {entry["status"] for entry in pipeline.get_log()}
 after = signatures()
 new = {name: [s for s in after[name] if s not in before.get(name, [])] for name in after}
@@ -408,6 +560,7 @@ print(json.dumps({
     "new thread": seen == [pictologics.get_num_threads()],
     "twins same": twins_same,
     "cubic matches scipy": cubic_same,
+    "round matches numpy": round_same,
 }))
 """
 
@@ -416,16 +569,20 @@ def test_a_pipeline_run_after_the_import_compiles_no_kernel(tmp_path: Path) -> N
     # With the compiler on, the import warms every kernel signature that the package
     # reaches: the standard templates on a CT-like image (large enough for the parallel
     # paths), a filter with many FBS levels, 256 grey levels, masks of each type in row and
-    # column order, label maps of five types in run_rois, save_image of five types, direct
-    # calls with other input types, and a big-endian DICOM series. One thread gives the
-    # same features as the default (also Moran's I and Geary's C; with SciPy 1.18 or later,
-    # whose FFT splits its work by thread, these two agree to 1e-12 on the FFT path, and the
-    # features of the FFT LoG to 1e-6), and a new thread starts with the default. The check
-    # runs in its own numba cache, so it never writes into a cache that another process
-    # builds at the same time. Each serial twin of a parallel kernel gives the bits of its
-    # kernel on 10 sizes (the fast-math pair loop of Moran's I within 1e-12), and the
-    # compiled cubic resample gives scipy's bits where the scipy build fuses the
-    # multiply-add as the kernels do, else values within 1e-13 of scipy's largest one.
+    # column order, box crops of row-order, column-order and strided layout in direct
+    # morphology calls, label maps of five types in run_rois, save_image of five types,
+    # direct calls with other input types, a big-endian DICOM series, the distance passes of
+    # grow_mask and of the nearest-ROI map, the merge kernel of load_and_merge_images, and
+    # masks and images in another voxel order.
+    # One thread gives the same features as the default (also Moran's I and Geary's C; with
+    # SciPy 1.18 or later, whose FFT splits its work by thread, these two agree to 1e-12 on
+    # the FFT path, and the features of the FFT LoG to 1e-6), and a new thread starts with
+    # the default. The check runs in its own numba cache, so it never writes into a cache
+    # that another process builds at the same time. Each serial twin of a parallel kernel
+    # gives the bits of its kernel on 10 sizes (the fast-math pair loop of Moran's I within
+    # 1e-12), and the compiled cubic resample gives scipy's bits where the scipy build fuses
+    # the multiply-add as the kernels do, else values within 1e-13 of scipy's largest one,
+    # and round_intensities in threads gives the bits of np.round.
     cache = os.environ.get("NUMBA_CACHE_DIR")
     env = {
         **os.environ,
@@ -451,4 +608,5 @@ def test_a_pipeline_run_after_the_import_compiles_no_kernel(tmp_path: Path) -> N
         "new thread": True,
         "twins same": True,
         "cubic matches scipy": True,
+        "round matches numpy": True,
     }

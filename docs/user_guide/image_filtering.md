@@ -63,13 +63,13 @@ A filter reads voxels past the image edge. The boundary sets their values:
 The Simoncelli and Riesz filters work in the Fourier domain, which is periodic:
 
 - **`"periodic"` (default)**: the FFT works on the image as it is. This is the fastest path, and the one that IBSI specifies for the Simoncelli tests.
-- **`"zero"`, `"nearest"`, `"mirror"`**: the filter pads the image with the requested mode, filters, and cuts the result back. A composite filter (`riesz_log`, `riesz_simoncelli`) pads once around the whole chain.
+- **`"zero"`, `"nearest"`, `"mirror"`**: the filter pads the image with the requested mode, filters, and cuts the result back. A composite filter (`riesz_log`, `riesz_simoncelli`) pads once around the whole chain. `riesz_log` then does the LoG and the Riesz transform in one FFT round trip on the padded image.
 
 !!! note "Requested and effective boundary"
     The transform stays periodic on the padded image, so a non-periodic boundary is honoured only approximately: the Riesz kernel has long tails, and no finite pad removes all of its error. The capability metadata calls this `as_specified_via_padding` (see [`FILTER_CAPABILITIES`](../api/filters.md#capability-metadata)), and the log entry of each filter step records the requested and the effective boundary. The boundary that a test specifies gives better agreement with its IBSI reference map: for IBSI 2 Phase 1 test 10.b.1, `"nearest"` makes the largest error about four times smaller.
 
 !!! warning "Cost of a non-periodic boundary"
-    The pad makes the array larger. On a 64³ image, Simoncelli at level 1 then works on 2.0 times the voxels and takes 1.5 times as long; Riesz 3.4 and 3.0 times; Riesz-Simoncelli at level 1 5.4 and 3.1 times; Riesz-LoG at σ 2 mm 5.4 and 2.2 times. The pad grows with the scale of the filter. Use a non-periodic boundary only when you need it.
+    The pad makes the array larger. On a 64³ image, Simoncelli at level 1 then works on 2.0 times the voxels and takes 1.5 times as long; Riesz 3.4 and 3.0 times; Riesz-Simoncelli at level 1 5.4 and 3.1 times; Riesz-LoG at σ 2 mm 5.4 and 1.0 times. The pad grows with the scale of the filter. Use a non-periodic boundary only when you need it.
 
 ## Filters in a Pipeline
 

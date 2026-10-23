@@ -5,12 +5,13 @@ from __future__ import annotations
 import bz2
 import gzip
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from pictologics import load_image
-from pictologics.loaders import get_segment_info
+from pictologics.loaders import get_segment_info, nrrd_loader
 
 VALUES = np.arange(24, dtype=np.int16).reshape(4, 3, 2) - 5  # (x, y, z)
 HEADER = [
@@ -263,3 +264,24 @@ def test_nrrd_values_are_writeable(tmp_path: Path) -> None:
         with patch.object(nrrd_loader, "_read_values", side_effect=capture):
             load_image(_write(tmp_path / f"{name}.nrrd", lines + extra, data))
         assert returned[-1].flags.writeable, name
+
+
+def test_nrrd_odd_gzip_data_use_the_full_read(tmp_path: Path) -> None:
+    # A standard gzip file inflates into the array (no gzip module call); two members and
+    # longer data go to the full read with the same values; short data and a bad CRC give
+    # the errors of the full read.
+    lines = [*_without("encoding"), "encoding: gzip"]
+    raw = _raw(VALUES)
+    with patch.object(nrrd_loader, "gzip", None):
+        np.testing.assert_array_equal(load_image(_write(tmp_path / "a.nrrd", lines, gzip.compress(raw))).array, VALUES)  # fmt: skip
+    for name, data in (
+        ("two", gzip.compress(raw[:20]) + gzip.compress(raw[20:])),
+        ("long", gzip.compress(raw + bytes(4))),
+    ):
+        np.testing.assert_array_equal(load_image(_write(tmp_path / f"{name}.nrrd", lines, data)).array, VALUES)  # fmt: skip
+    with pytest.raises(ValueError, match="data hold 24 of 48 bytes"):
+        load_image(_write(tmp_path / "short.nrrd", lines, gzip.compress(raw[:24])))
+    bad = bytearray(gzip.compress(raw))
+    bad[-8] ^= 0xFF
+    with pytest.raises(ValueError, match="CRC check failed"):
+        load_image(_write(tmp_path / "crc.nrrd", lines, bytes(bad)))

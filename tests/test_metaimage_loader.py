@@ -5,11 +5,13 @@ from __future__ import annotations
 import zlib
 from pathlib import Path
 from typing import Optional
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from pictologics import load_image
+from pictologics.loaders import metaimage_loader
 
 VALUES = np.arange(24, dtype=np.int16).reshape(4, 3, 2) - 5  # (x, y, z)
 HEADER = {
@@ -165,3 +167,24 @@ def test_metaimage_values_are_writeable(tmp_path: Path) -> None:
         with patch.object(metaimage_loader, "_read_values", side_effect=capture):
             load_image(_write(tmp_path / f"{name}.mha", header, data))
         assert returned[-1].flags.writeable, name
+
+
+def test_metaimage_odd_zlib_data_use_the_full_read(tmp_path: Path) -> None:
+    # A standard zlib file inflates into the array (no zlib module call); a trailing byte
+    # and longer data go to the full read with the same values; two streams, a cut stream
+    # and short data at the end of the file give the errors of the full read.
+    header = _header(CompressedData="True")
+    raw = _raw(VALUES)
+    with patch.object(metaimage_loader, "zlib", None):
+        np.testing.assert_array_equal(load_image(_write(tmp_path / "a.mha", header, zlib.compress(raw))).array, VALUES)  # fmt: skip
+    for name, data in (
+        ("trail", zlib.compress(raw) + b"\n"),
+        ("long", zlib.compress(raw + bytes(4))),
+    ):
+        np.testing.assert_array_equal(load_image(_write(tmp_path / f"{name}.mha", header, data)).array, VALUES)  # fmt: skip
+    with pytest.raises(ValueError, match="data hold 20 of 48 bytes"):
+        load_image(_write(tmp_path / "two.mha", header, zlib.compress(raw[:20]) + zlib.compress(raw[20:])))  # fmt: skip
+    with pytest.raises(ValueError, match="data hold"):
+        load_image(_write(tmp_path / "cut.mha", header, zlib.compress(raw)[:-6]))
+    with pytest.raises(ValueError, match="data hold 31 of 48 bytes"):
+        load_image(_write(tmp_path / "last_short.mha", _header(HeaderSize="-1"), raw[:31]))

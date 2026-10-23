@@ -141,8 +141,8 @@ class TestRoiMinMax:
         mask = np.zeros((3, 3, 3))
         mask[0, 0, 0] = mask[1, 1, 1] = 1
         kinds = (np.bool_, np.int8, np.int16, np.uint32, np.uint64, np.float32)
-        serial = _utils._roi_min_max_serial_numba
-        with patch.object(_utils, "_roi_min_max_serial_numba", wraps=serial) as scan:
+        serial = _utils._roi_min_max_numba_serial
+        with patch.object(_utils, "_roi_min_max_numba_serial", wraps=serial) as scan:
             for kind in kinds:
                 assert roi_min_max(data, mask.astype(kind)) == (0.0, 13.0)
         forms = [np.uint8, np.uint8, np.uint16, np.int32, np.int64, np.float32]
@@ -157,6 +157,28 @@ class TestRoiMinMax:
         roi = data[mask > 0]
         assert lo == pytest.approx(roi.min())
         assert hi == pytest.approx(roi.max())
+
+    def test_the_scan_skips_the_rows_without_roi_voxels(self):
+        # A row after a row without ROI voxels gets a test of its mask first; after a row
+        # with ROI voxels (also a NaN voxel) the voxel loop runs at once. Both kernels give
+        # one range per slice, and the first of two equal values stays (-0.0 before 0.0
+        # gives -0.0).
+        data = np.arange(60, dtype=np.float64).reshape(2, 6, 5)
+        mask = np.zeros((2, 6, 5), dtype=np.uint8)
+        mask[0, 1, 4] = mask[0, 2, 0] = 1  # two rows in a row
+        mask[0, 4, 2] = 1  # after an empty row
+        data[0, 4, 2] = np.nan
+        mask[0, 5, 3] = 1  # after a row whose only ROI voxel is NaN
+        data[1, 3, 1], data[1, 3, 2] = -0.0, 0.0
+        mask[1, 3, 1:3] = 1
+        for kernel in (_utils._roi_min_max_numba, _utils._roi_min_max_numba_serial):
+            found, mins, maxs = kernel(data, mask)
+            assert found.tolist() == [1, 1]
+            assert (mins[0], maxs[0]) == (9.0, 28.0)
+            assert mins[1] == maxs[1] == 0.0 and np.signbit(mins[1]) and np.signbit(maxs[1])
+        values = data[mask != 0]
+        values = values[np.isfinite(values)]
+        assert roi_min_max(data, mask) == (float(values.min()), float(values.max()))
 
 
 class TestMergeBboxes:
@@ -196,7 +218,7 @@ def test_the_range_scan_reads_the_layouts_of_the_import() -> None:
     from pictologics.features import _utils
 
     seen: list[tuple[bool, bool, str]] = []
-    real = _utils._roi_min_max_serial_numba
+    real = _utils._roi_min_max_numba_serial
 
     def spy(data: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         seen.append((bool(data.flags.c_contiguous), bool(mask.flags.c_contiguous), mask.dtype.name))
@@ -214,7 +236,7 @@ def test_the_range_scan_reads_the_layouts_of_the_import() -> None:
         (np.pad(data, 1)[1:-1, 1:-1, 1:-1], mask),  # strided data with a float64 mask
         (np.pad(data, 1)[1:-1, 1:-1, 1:-1], mask.astype(np.uint8)),  # the texture crop
     ]
-    with patch.object(_utils, "_roi_min_max_serial_numba", spy):
+    with patch.object(_utils, "_roi_min_max_numba_serial", spy):
         for d, m in cases:
             assert _utils.roi_min_max(d, m) == expected
     assert [s[1] for s in seen] == [True] * 6  # the mask is in row order

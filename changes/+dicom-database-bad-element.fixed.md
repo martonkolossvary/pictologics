@@ -1,0 +1,1 @@
+With `extract_private_tags=True` (default), `DicomDatabase.from_folders()` left out a file when pydicom could not read one element of its header (for example a US value of 3 bytes). Now the file stays in the database. A private element that pydicom cannot read is not in the private tags of the file.

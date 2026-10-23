@@ -6,16 +6,21 @@ from typing import Any, Optional, Tuple, Union, cast
 
 import numpy as np
 import scipy.fft
-from numba import get_num_threads
+from numba import get_num_threads, jit, prange
 from numpy import typing as npt
 
 from .base import (
+    _TABLE_KERNEL_MIN,
     _TRANSFER_CACHE_SHAPES,
     BoundaryCondition,
     _apply_with_boundary_padding,
     _bool_mask,
+    _fast_width,
+    _fft_gaussian_laplace,
     _float32_cut,
+    _irfftn_unscaled,
     _kept_rows,
+    _log_parameter_problem,
     _padding_value_problem,
     _prepare_masked_image,
     _slabs,
@@ -24,6 +29,7 @@ from .base import (
     _whole_number,
     cache_by_bytes,
     ensure_float32,
+    get_scipy_mode,
     resolve_boundary,
 )
 
@@ -34,12 +40,13 @@ from .base import (
 # as a power law, similar to a generalised Hilbert transform. 16 voxels hold 92-100 %
 # of the L2 energy of a first- or second-order kernel (97.8 % for the order (1, 0, 0)),
 # but the L2 energy is the wrong measure of the error: the tail adds up over a large
-# uniform object. Measured against a 64-voxel pad, the 16-voxel pad of the order
-# (1, 0, 0) differs by up to 1.2e-1 of the response range with the mirror boundary and
-# by up to 5.2e-2 with the zero boundary, at the border of a CT scan; farther than 16
-# voxels from the border, by at most 1.0e-2 (5.8e-4 on average). No finite pad removes
-# the truncation error, so 16 is a balance between accuracy and the cost of a larger FFT
-# array. The periodic boundary (the IBSI default) takes no pad.
+# uniform object. Measured against a 64-voxel pad (each pad widened to a fast FFT size,
+# see `_fast_width`), the 16-voxel pad of the order (1, 0, 0) differs by up to 8.5e-2 of
+# the response range with the mirror boundary and by up to 3.0e-2 with the zero boundary,
+# at the border of a CT scan; farther than 16 voxels from the border, by at most 5.1e-2
+# with the mirror boundary (1.1e-2 on average). No finite pad removes the truncation
+# error, so 16 is a balance between accuracy and the cost of a larger FFT array. The
+# periodic boundary (the IBSI default) takes no pad.
 _RIESZ_BASE_PAD = 16
 
 
@@ -81,9 +88,14 @@ def _riesz_transfer(
     # volumes.
     out_shape = np.broadcast_shapes(*(n.shape for n in nu_vectors))
     table = np.empty(out_shape, dtype=np.complex128)
-    for start, stop in _slabs(out_shape):
-        nu = [n[start:stop] if i == 0 else n for i, n in enumerate(nu_vectors)]
-        _riesz_values(nu, order, L, out=table[start:stop])
+    if ndim == 3 and table.size >= _TABLE_KERNEL_MIN:
+        # A large 3-D table: one parallel kernel, the same bits (see _riesz_table)
+        scale = _riesz_scale(order, L)
+        _riesz_table(*freqs, *order, L, scale.real, scale.imag, table)
+    else:
+        for start, stop in _slabs(out_shape):
+            nu = [n[start:stop] if i == 0 else n for i, n in enumerate(nu_vectors)]
+            _riesz_values(nu, order, L, out=table[start:stop])
     table[(0,) * table.ndim] = 0  # the DC value is +0
     table.flags.writeable = False  # cached array must not be mutated by callers
     return cast(npt.NDArray[np.complexfloating[Any, Any]], table)
@@ -98,8 +110,6 @@ def _riesz_values(
     """The Riesz transfer values (IBSI 2 Eq. 34) at the broadcast frequency vectors `nu`
     of each axis (radians), for the total order L, written into `out` when given. At DC
     the numerator is 0 (L >= 1), so the value is a zero there (of either sign)."""
-    norm_factor = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
-    phase = np.exp(-1j * np.pi * L / 2)
     nu_sq_norm = np.asarray(sum(n**2 for n in nu), dtype=np.float64)
     nu_norm = np.sqrt(nu_sq_norm)
     nu_norm_safe = np.where(nu_norm > 0, nu_norm, 1.0)  # avoid /0 at DC
@@ -108,8 +118,69 @@ def _riesz_values(
         if ord_val > 0:
             numerator *= nu[i] ** ord_val
     # (phase * norm) * numerator / |nu|^L, in `out` (or one new array): no complex temporary
-    values = np.multiply(phase * norm_factor, numerator, out=out)
+    values = np.multiply(_riesz_scale(order, L), numerator, out=out)
     return cast(npt.NDArray[np.complex128], np.divide(values, nu_norm_safe**L, out=values))
+
+
+def _riesz_scale(order: Tuple[int, ...], L: int) -> complex:
+    """The constant factor of the Riesz values (IBSI 2 Eq. 34): the phase (-i)**L times the
+    norm sqrt(L! / (l1! l2! l3!))."""
+    norm_factor = sqrt(factorial(L) / np.prod([factorial(o) for o in order]))
+    return complex(np.exp(-1j * np.pi * L / 2) * norm_factor)
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _riesz_power(x: float, n: int) -> float:
+    """x ** n as numpy computes it for an array: x for n = 1, x * x for n = 2, else pow."""
+    if n == 1:
+        return x
+    if n == 2:
+        return x * x
+    return float(np.power(x, float(n)))
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _riesz_table(
+    f0: npt.NDArray[np.float64],
+    f1: npt.NDArray[np.float64],
+    f2: npt.NDArray[np.float64],
+    o0: int,
+    o1: int,
+    o2: int,
+    L: int,
+    scale_re: float,
+    scale_im: float,
+    out: npt.NDArray[np.complex128],
+) -> None:
+    """The Riesz values (see _riesz_values) on the frequency vectors f0, f1, f2 of a 3-D
+    table. Each value has the operations of the numpy build in the same order, so the same
+    bits: the complex product scale * (numerator + 0j), then numpy's complex division by
+    (|nu|**L + 0j), that is a ratio 0 / d and the products with the reciprocal 1 / d."""
+    n0, n1, n2 = out.shape
+    for i in prange(n0):
+        a = f0[i]
+        for j in range(n1):
+            b = f1[j]
+            ab = a * a + b * b
+            for k in range(n2):
+                c = f2[k]
+                norm = np.sqrt(ab + c * c)
+                safe = norm if norm > 0 else 1.0
+                numerator = 1.0
+                if o0 > 0:
+                    numerator *= _riesz_power(a, o0)
+                if o1 > 0:
+                    numerator *= _riesz_power(b, o1)
+                if o2 > 0:
+                    numerator *= _riesz_power(c, o2)
+                d = _riesz_power(safe, L)
+                re = scale_re * numerator - scale_im * 0.0
+                im = scale_re * 0.0 + scale_im * numerator
+                ratio = 0.0 / d
+                reciprocal = 1.0 / (d + 0.0 * ratio)
+                out[i, j, k] = complex(
+                    (re + im * ratio) * reciprocal, (im - re * ratio) * reciprocal
+                )
 
 
 def riesz_transform(
@@ -227,7 +298,6 @@ def _riesz_response(
     # Apply in frequency domain using Real FFT. scipy.fft (multithreaded, with
     # numba's thread count) is several times faster than the single-threaded np.fft
     # and matches it to float32 precision.
-    axes = tuple(range(arr.ndim))
     workers = get_num_threads()
     # The spectrum has shape (N1, N2, N3//2 + 1), the shape of the transfer.
     spectrum = scipy.fft.rfftn(arr, workers=workers)
@@ -235,8 +305,58 @@ def _riesz_response(
         spectrum = _times_mirrored(spectrum, band, shape[0], 1)
     sign = (-1) ** order[0]
     spectrum = _times_mirrored(spectrum, transfer, shape[0], sign)
-    response = scipy.fft.irfftn(spectrum, s=shape, axes=axes, workers=workers, overwrite_x=True)
-    return _float32_cut(response, crop)
+    response, scale = _irfftn_unscaled(spectrum, shape, workers)
+    del spectrum  # freed before the cut: the peak holds the response and the cut
+    return _float32_cut(response, crop, scale)
+
+
+def _spacing_tuple(spacing_mm: Union[float, Tuple[float, ...]]) -> Tuple[float, ...]:
+    """The spacing as one float for each axis (a single number: the same for the 3 axes)."""
+    if isinstance(spacing_mm, (int, float)):
+        return (float(spacing_mm),) * 3
+    return tuple(float(s) for s in spacing_mm)
+
+
+def _riesz_log_fft(
+    image: npt.NDArray[np.floating[Any]],
+    sigma_mm: float,
+    spacing_mm: Union[float, Tuple[float, ...]],
+    truncate: float,
+    order: Tuple[int, ...],
+    boundary: BoundaryCondition,
+    pad_width: Tuple[int, ...],
+    padding_value: float,
+) -> npt.NDArray[np.float32]:
+    """The LoG then the Riesz transform of a 3-D `image` in one FFT round trip, for a
+    boundary other than PERIODIC. The image is padded once with the boundary (the constant
+    `padding_value` for ZERO) by at least `pad_width` (at most the axis length, as
+    `_apply_with_boundary_padding` does) and at least the LoG radius on both sides of each
+    axis, widened to a fast FFT size of the same parity (an even axis has a Nyquist plane,
+    where an odd-order Riesz transfer is lost). Its spectrum is multiplied by the LoG
+    transfer and the Riesz table, transformed back and cut to the image, as float32.
+    A float32 or integer image is filtered as float64."""
+    as_float64 = cast(npt.NDArray[np.float64], ensure_float32(image).astype(np.float64, copy=False))
+    sigmas = tuple(sigma_mm / s for s in _spacing_tuple(spacing_mm))
+    widths = tuple(
+        (w, w)
+        for w in (
+            _fast_width(n, max(min(p, n), int(truncate * s + 0.5)))
+            for n, p, s in zip(as_float64.shape, pad_width, sigmas, strict=True)
+        )
+    )
+    sign = (-1) ** order[0]
+
+    def riesz(sizes: Tuple[int, ...]) -> Any:
+        table = _riesz_transfer(sizes, order)
+        return lambda spectrum: _times_mirrored(spectrum, table, sizes[0], sign)
+
+    return cast(
+        npt.NDArray[np.float32],
+        _fft_gaussian_laplace(
+            as_float64, sigmas, get_scipy_mode(boundary), truncate, np.float32, widths,
+            padding_value, riesz,
+        ),
+    )  # fmt: skip
 
 
 def _riesz_log_pad_width(
@@ -253,12 +373,9 @@ def _riesz_log_pad_width(
     since the padded array must accommodate both the LoG convolution's edge
     effects and the subsequent global Riesz FFT's boundary sensitivity.
     """
-    spacing: Tuple[float, ...]
-    if isinstance(spacing_mm, (int, float)):
-        spacing = (float(spacing_mm),) * 3
-    else:
-        spacing = tuple(float(s) for s in spacing_mm)
-    return tuple(int(np.ceil(truncate * sigma_mm / s)) + _RIESZ_BASE_PAD for s in spacing)
+    return tuple(
+        int(np.ceil(truncate * sigma_mm / s)) + _RIESZ_BASE_PAD for s in _spacing_tuple(spacing_mm)
+    )
 
 
 def riesz_log(
@@ -283,21 +400,16 @@ def riesz_log(
         spacing_mm: Voxel spacing in mm
         order: Riesz order tuple (l1, l2, l3)
         truncate: LoG truncation parameter
-        boundary: Boundary condition for the whole LoG-then-Riesz chain. The
-            default `BoundaryCondition.PERIODIC` reproduces today's exact
-            behaviour: the internal LoG call keeps its own default (ZERO padding)
-            and the Riesz stage stays periodic, with no outer padding at all. Any
-            other condition pads `image` once (see `_apply_with_boundary_padding`
-            and `_riesz_log_pad_width`), runs the LoG-then-Riesz chain on the
-            padded array, and crops back — and is *also* forwarded to the
-            internal LoG call so its own edge handling matches the requested
-            condition instead of silently staying at ZERO.
-        source_mask: Optional boolean mask where True = valid voxel. Because
-            `source_mask` shares `image`'s (unpadded) shape, the mid-chain
-            re-zeroing this function otherwise performs before the Riesz stage is
-            only applied when no padding occurs (the default `PERIODIC` case);
-            for any other boundary, the mask is instead applied once to the final,
-            already-cropped response.
+        boundary: Boundary condition for the whole LoG-then-Riesz chain. PERIODIC (the
+            default) runs the LoG with its own ZERO boundary, then the Riesz transform on
+            the image as it is. Another boundary pads the image once with that boundary
+            (see `_riesz_log_pad_width`, widened to a fast FFT size of the same parity).
+            It runs the LoG and the Riesz transform in one FFT round trip on the padded
+            image, and cuts the result back. A 2-D image keeps the two stages.
+        source_mask: Optional boolean mask where True = valid voxel. With PERIODIC, the
+            LoG uses normalized convolution, and the mask zeroes the invalid voxels again
+            before the Riesz stage. With another boundary, the mask zeroes the invalid
+            voxels of the final response.
         padding_value: The constant of constant value padding (Z3VE), with the ZERO
             (constant) boundary. Default 0.
 
@@ -307,7 +419,9 @@ def riesz_log(
     Raises:
         ValueError: If `order` is not valid (see `riesz_transform`), if `boundary` is a
             string that is not a valid `BoundaryCondition` member name, or if
-            `padding_value` is not 0 with a boundary other than the constant one.
+            `padding_value` is not 0 with a boundary other than the constant one. Also
+            if `sigma_mm`, an entry of `spacing_mm` or `truncate` is not a finite
+            positive number.
 
     Example:
         Compute first-order Riesz transform of LoG-filtered image at 5mm scale:
@@ -332,10 +446,18 @@ def riesz_log(
     from .log import laplacian_of_gaussian
 
     boundary = resolve_boundary(boundary)
-    problem = _padding_value_problem(boundary, padding_value)
+    problem = _padding_value_problem(boundary, padding_value) or _log_parameter_problem(
+        sigma_mm, _spacing_tuple(spacing_mm), truncate
+    )
     if problem:
         raise ValueError(problem)
     order = _riesz_order(order, image.ndim)
+    pad_width = _riesz_log_pad_width(sigma_mm, spacing_mm, truncate)
+    if boundary is not BoundaryCondition.PERIODIC and image.ndim == 3:
+        result = _riesz_log_fft(
+            image, sigma_mm, spacing_mm, truncate, order, boundary, pad_width, padding_value
+        )
+        return result if source_mask is None else _prepare_masked_image(result, source_mask)
 
     def _core(
         arr: npt.NDArray[np.floating[Any]], crop: Optional[Tuple[slice, ...]]
@@ -380,11 +502,10 @@ def riesz_log(
             log_response = _prepare_masked_image(log_response, mask)
         return _riesz_response(log_response, crop, order)
 
-    pad_width = _riesz_log_pad_width(sigma_mm, spacing_mm, truncate)
     result = _apply_with_boundary_padding(_core, image, boundary, pad_width, padding_value)
 
     if source_mask is not None and boundary is not BoundaryCondition.PERIODIC:
-        result = _prepare_masked_image(result, source_mask)
+        result = _prepare_masked_image(result, source_mask)  # a 2-D image
 
     return result
 

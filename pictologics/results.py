@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from itertools import chain
 from pathlib import Path
 from typing import Any
 
@@ -95,7 +96,14 @@ def format_results(
                 if len(_WIDE_COLUMNS) >= _WIDE_CACHE_CONFIGS:
                     _WIDE_COLUMNS.clear()
                 columns = _WIDE_COLUMNS[config_name] = {}
-            for feature_name, value in series.items():
+            # A Series gives its names and values as Python objects in two calls (tolist),
+            # not one by one
+            pairs = (
+                zip(series.index.tolist(), series.tolist(), strict=True)
+                if isinstance(series, pd.Series)
+                else series.items()
+            )
+            for feature_name, value in pairs:
                 col_name = columns.get(feature_name)
                 if col_name is None:
                     col_name = f"{config_name}__{feature_name}"
@@ -126,8 +134,12 @@ def format_results(
         values: list[Any] = []
         for config_name, series in results.items():
             names.extend([config_name] * len(series))
-            keys.extend(series.keys())
-            values.extend(series.tolist() if isinstance(series, pd.Series) else series.values())
+            if isinstance(series, pd.Series):
+                keys.extend(series.index.tolist())
+                values.extend(series.tolist())
+            else:
+                keys.extend(series.keys())
+                values.extend(series.values())
         standard = {config_col: names, "feature_key": keys, "value": values}
         table = {
             col: standard[col] if col in standard else [meta[col]] * len(values)
@@ -149,7 +161,7 @@ def format_results(
         rows = [
             dict(zip(cols_order, row, strict=True)) for row in zip(*table.values(), strict=True)
         ]
-        return rows if output_type == "dict" else _json_text(rows)
+        return rows if output_type == "dict" else _json_text(rows, values=values)
 
     else:
         raise ValueError(f"Unknown format: {fmt}. Use 'wide' or 'long'.")
@@ -239,7 +251,7 @@ def save_results(
         if not np.isfinite(floats).all():
             records = _json_safe(records)
         with open(path, "w") as f:
-            f.write(_json_text(records, indent=2))
+            f.write(_json_text(records, indent=2, values=()))  # numpy scanned the floats
     else:
         raise ValueError(f"Unsupported export format: {file_format}")
 
@@ -255,12 +267,21 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-def _json_text(data: Any, indent: int | None = None) -> str:
+def _json_text(data: Any, indent: int | None = None, values: Iterable[Any] | None = None) -> str:
     """Strict JSON (no NaN token, which most JSON readers reject): non-finite values
-    become null. Data without them takes one pass (the common case)."""
+    become null. A scan of `values` (default: the values of the dict `data`, or of the
+    dicts in the list `data`) finds a NaN or infinite float before the encode, so the
+    encode runs once. A value that the scan does not see makes a second encode."""
+    if values is None:
+        values = chain.from_iterable(map(dict.values, [data] if isinstance(data, dict) else data))
+    isfinite = math.isfinite
+    for value in values:
+        if type(value) is float and not isfinite(value):
+            data = _json_safe(data)
+            break
     try:
         return json.dumps(data, indent=indent, allow_nan=False)
-    except ValueError:  # a NaN or infinite value
+    except ValueError:  # a NaN or infinite value that the scan did not see
         return json.dumps(_json_safe(data), indent=indent, allow_nan=False)
 
 

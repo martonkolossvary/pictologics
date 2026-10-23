@@ -12,6 +12,7 @@ MetaImage geometry is in the LPS+ world frame, as in ITK and in the package.
 from __future__ import annotations
 
 import math
+import os
 import zlib
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ from typing import Any
 import numpy as np
 from numpy import typing as npt
 
-from pictologics.loader import Image, _float64_volume
+from pictologics.loader import Image, _float64_volume, _gzip_values
 
 # The element types of the MetaImage format and their numpy types (MET_LONG has 4 bytes)
 _TYPES = {
@@ -109,6 +110,20 @@ def _read_values(
         if name.startswith("LIST") or len(name.split()) > 1:
             raise ValueError(f"'{path}': data in more than one file are not supported.")
         source, start = path.parent / name, max(int(header.get("HeaderSize", "0")), 0)
+    # Read raw values directly from the file. Inflate zlib values into the array in one pass.
+    # Both give a writeable array (the kernels compile for writeable arrays). Other data and
+    # the errors go to the full read below.
+    if _true(header, "BinaryData", "True"):
+        size = count * dtype.itemsize
+        if _true(header, "CompressedData"):
+            values = _gzip_values(str(source), 0, (count,), dtype, False, start, wbits=15)
+            if values is not None:
+                return values
+        else:
+            end = os.path.getsize(source)
+            first = end - size if header.get("HeaderSize") == "-1" else start
+            if start <= first <= end - size:
+                return np.fromfile(source, dtype=dtype, count=count, offset=first)
     with open(source, "rb") as file:
         file.seek(start)
         data = file.read()

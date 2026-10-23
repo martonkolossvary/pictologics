@@ -1,0 +1,1 @@
+A run without a mask, or with a mask that holds every voxel of its box, no longer copies the image for the intensity, histogram and IVH features: the ROI values are a view of the image. On a 512x512x200 CT at 10 threads, `run()` without a mask with discretisation, intensity and histogram features takes 104 ms instead of 169 ms and 260 MB instead of 900 MB.

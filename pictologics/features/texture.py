@@ -189,14 +189,14 @@ def _chamfer_distance_taxicab_numba(
     background, matching the effect of the one-voxel zero-padding used by the
     `distance_transform_cdt` call this replaces.
 
-    Returns a `(depth+2, height+2, width+2)` int32 array; the caller slices
+    Returns a `(depth+2, height+2, width+2)` uint16 array; the caller slices
     `[1:-1, 1:-1, 1:-1]` to recover the unpadded distance map, matching the layout the
     scipy-based padded-then-sliced code previously produced.
     """
     depth, height, width = mask_bool.shape
     p_depth, p_height, p_width = depth + 2, height + 2, width + 2
-    dist = np.zeros((p_depth, p_height, p_width), dtype=np.int32)
-    inf = np.int32(depth + height + width + 1)
+    dist = np.zeros((p_depth, p_height, p_width), dtype=np.uint16)
+    inf = np.uint16(min(depth + height + width + 1, 65535))
 
     for z in range(depth):
         for y in range(height):
@@ -248,14 +248,14 @@ def _chamfer_distance_taxicab_numba(
 @jit(nopython=True, nogil=True, parallel=True, cache=True)  # type: ignore
 def _distance_map_parallel_numba(
     mask_bool: npt.NDArray[np.bool_], planar0: bool, planar1: bool, planar2: bool
-) -> npt.NDArray[np.int32]:
-    """`_chamfer_distance_taxicab_numba` in threads, with the same int32 map. The taxicab
+) -> npt.NDArray[np.uint16]:
+    """`_chamfer_distance_taxicab_numba` in threads, with the same uint16 map. The taxicab
     distance is separable: one pass forward and one pass backward along each axis give
     the same integers as the two raster passes. The passes along x and y run in each
     slice (the slices in parallel), then the passes along z (the rows in parallel)."""
     depth, height, width = mask_bool.shape
-    dist = np.zeros((depth + 2, height + 2, width + 2), dtype=np.int32)
-    inf = np.int32(depth + height + width + 1)
+    dist = np.zeros((depth + 2, height + 2, width + 2), dtype=np.uint16)
+    inf = np.uint16(min(depth + height + width + 1, 65535))
     for z in prange(1, depth + 1):
         for y in range(1, height + 1):
             for x in range(1, width + 1):
@@ -304,12 +304,12 @@ _DISTANCE_PARALLEL_MIN = 1 << 18
 
 def _distance_map(
     mask_bool: npt.NDArray[np.bool_], planar: tuple[bool, bool, bool]
-) -> npt.NDArray[np.int32]:
+) -> npt.NDArray[np.uint16]:
     """The padded GLDZM distance map of a row-order bool mask (see
     `_chamfer_distance_taxicab_numba`), in threads for a large mask."""
     if mask_bool.size >= _DISTANCE_PARALLEL_MIN and mask_bool.shape[0] > 1:
-        return cast(npt.NDArray[np.int32], _distance_map_parallel_numba(mask_bool, *planar))
-    return cast(npt.NDArray[np.int32], _chamfer_distance_taxicab_numba(mask_bool, *planar))
+        return cast(npt.NDArray[np.uint16], _distance_map_parallel_numba(mask_bool, *planar))
+    return cast(npt.NDArray[np.uint16], _chamfer_distance_taxicab_numba(mask_bool, *planar))
 
 
 def _gldzm_distance_map(
@@ -334,7 +334,7 @@ def _gldzm_distance_map(
         return cast(npt.NDArray[Any], padded[1:-1, 1:-1, 1:-1])
 
     mask_padded = np.pad(mask_bool, 1, mode="constant", constant_values=0)
-    dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.int32)
+    dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.uint16)
     unpad = tuple(slice(1, -1) for _ in range(mask_bool.ndim))
     return cast(npt.NDArray[Any], dist_map_padded[unpad])
 
@@ -382,14 +382,18 @@ def _texture_volume_numba(
     n_bins: int,
     vol: npt.NDArray[np.uint16],
     counts: npt.NDArray[np.int64],
+    span: npt.NDArray[np.float64],
 ) -> None:
     """Write the level of each ROI voxel with a level in [1, n_bins] into the interior of
     the zero array `vol`. counts[z, 0] gets the number of these voxels in slice z, and
-    counts[z, 1] the number of ROI voxels."""
+    counts[z, 1] the number of ROI voxels. span[z] gets the smallest and the largest of
+    these levels (inf and -inf for none), for the grey-level span of the GLCM."""
     depth, height, width = data.shape
     for z in prange(depth):
         valid = 0
         inside = 0
+        lo = np.inf
+        hi = -np.inf
         for y in range(height):
             for x in range(width):
                 if roi[z, y, x]:
@@ -398,8 +402,12 @@ def _texture_volume_numba(
                     if g >= 1 and g <= n_bins:
                         vol[z + 1, y + 1, x + 1] = g
                         valid += 1
+                        lo = min(lo, np.float64(g))
+                        hi = max(hi, np.float64(g))
         counts[z, 0] = valid
         counts[z, 1] = inside
+        span[z, 0] = lo
+        span[z, 1] = hi
 
 
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
@@ -409,6 +417,7 @@ def _texture_volume_serial_numba(
     n_bins: int,
     vol: npt.NDArray[np.uint16],
     counts: npt.NDArray[np.int64],
+    span: npt.NDArray[np.float64],
 ) -> None:
     """Serial variant of `_texture_volume_numba` for small volumes, where starting the
     threads costs more than the pass (about 85 us)."""
@@ -416,6 +425,8 @@ def _texture_volume_serial_numba(
     for z in range(depth):
         valid = 0
         inside = 0
+        lo = np.inf
+        hi = -np.inf
         for y in range(height):
             for x in range(width):
                 if roi[z, y, x]:
@@ -424,8 +435,12 @@ def _texture_volume_serial_numba(
                     if g >= 1 and g <= n_bins:
                         vol[z + 1, y + 1, x + 1] = g
                         valid += 1
+                        lo = min(lo, np.float64(g))
+                        hi = max(hi, np.float64(g))
         counts[z, 0] = valid
         counts[z, 1] = inside
+        span[z, 0] = lo
+        span[z, 1] = hi
 
 
 # From this many voxels on, the grey-level volume is built in threads
@@ -433,20 +448,26 @@ _PARALLEL_VOLUME_MIN = 1 << 16
 
 
 def _texture_volume(
-    data: npt.NDArray[Any], roi: npt.NDArray[np.bool_], n_bins: int
+    data: npt.NDArray[Any],
+    roi: npt.NDArray[np.bool_],
+    n_bins: int,
+    span: Optional[npt.NDArray[np.float64]] = None,
 ) -> tuple[npt.NDArray[np.uint16], npt.NDArray[np.int64]]:
     """The padded grey-level volume of the texture kernels, and the counts of
-    `_texture_volume_numba` (texture voxels and ROI voxels of each slice)."""
+    `_texture_volume_numba` (texture voxels and ROI voxels of each slice). `span`, a
+    (depth, 2) float64 array, gets the smallest and the largest level of each slice."""
     if n_bins > _MAX_TEXTURE_LEVELS:
         raise ValueError(
             f"Texture features take at most {_MAX_TEXTURE_LEVELS:,} grey levels, not {n_bins:,}"
         )
     vol = np.zeros(tuple(s + 2 for s in data.shape), dtype=np.uint16)
     counts = np.empty((data.shape[0], 2), dtype=np.int64)
+    if span is None:
+        span = np.empty((data.shape[0], 2), dtype=np.float64)
     if data.size < _PARALLEL_VOLUME_MIN:
-        _texture_volume_serial_numba(data, roi, n_bins, vol, counts)
+        _texture_volume_serial_numba(data, roi, n_bins, vol, counts, span)
     else:
-        _texture_volume_numba(data, roi, n_bins, vol, counts)
+        _texture_volume_numba(data, roi, n_bins, vol, counts, span)
     return vol, counts
 
 
@@ -459,11 +480,13 @@ def _z_blocks(per_slice: npt.NDArray[np.int64], n_blocks: int) -> npt.NDArray[np
     return np.unique(bounds).astype(np.int64)
 
 
+@lru_cache(maxsize=None)
 def _directions(planar: tuple[bool, bool, bool]) -> npt.NDArray[np.int64]:
     """The indices of the 13 directions that stay in the image. A direction that steps
     along an axis of size 1 (a one-slice image) leaves the image at once: in it, every
     voxel would be a run of length 1, so the GLCM and the GLRLM use the in-plane
-    directions only, as for a 2D image."""
+    directions only, as for a 2D image. Cached and shared: do not write it (it stays
+    writable, so the local kernel takes it with its compiled signature)."""
     steps_out = (DIRECTIONS_13 != 0) & np.array(planar)
     return np.flatnonzero(~steps_out.any(axis=1)).astype(np.int64)
 
@@ -1000,8 +1023,10 @@ def _local_matrices(
     levels = _table_levels(vol, n_bins, 4 * n_threads * n_tables * n_bins * cells)
     rows = n_bins if levels is None else levels.size
     # Up to 64 levels, the pairs of the even and the odd x alternate between two tables
-    # (shorter store chains); larger tables cost more to zero and to sum than they save
-    n_alt = _GLCM_ALT if rows <= _GLCM_ALT_MAX_LEVELS else 1
+    # (shorter store chains); larger tables cost more to zero and to sum than they save.
+    # The serial twin of a small volume keeps one table: it has no long rows, and its one
+    # table needs no sum
+    n_alt = _GLCM_ALT if rows <= _GLCM_ALT_MAX_LEVELS and parallel else 1
     glcm_t = (
         _thread_tables((n_threads, n_alt, n_tables, rows + 1, rows + 1))
         if calc_glcm
@@ -1025,7 +1050,12 @@ def _local_matrices(
         ngtdm_n,
         ngldm_t,
     )
-    blocks = _z_blocks(counts[:, 0], 4 * n_threads)
+    # One thread: one block of all slices
+    blocks = (
+        _z_blocks(counts[:, 0], 4 * n_threads)
+        if n_threads > 1
+        else np.array([0, counts.shape[0]], dtype=np.int64)
+    )
     pairs = steps if glcm_distance == 1 else steps * glcm_distance
 
     def run(volume: npt.NDArray[np.uint16], families: tuple[bool, ...], distance: int) -> None:
@@ -1060,12 +1090,18 @@ def _local_matrices(
     for ngtdm, ngldm, distance in passes:
         if ngtdm or ngldm:
             run(vol, (False, False, ngtdm, ngldm), distance)
-    glcm = (
-        np.ascontiguousarray(_thread_sum(glcm_t.reshape((-1,) + glcm_t.shape[2:]))[:, 1:, 1:])
-        if calc_glcm
-        else np.zeros((13, n_bins, n_bins), dtype=np.uint64)
-    )
-    glrlm = _thread_sum(glrlm_t) if calc_glrlm else np.zeros((13, n_bins, 1), dtype=np.uint64)
+    if not calc_glcm:
+        glcm = np.zeros((13, n_bins, n_bins), dtype=np.uint64)
+    elif n_threads == 1 and n_alt == 1:  # the one table of the serial twin
+        glcm = glcm_t[0, 0, :, 1:, 1:].astype(np.uint64)
+    else:
+        glcm = np.ascontiguousarray(
+            _thread_sum(glcm_t.reshape((-1,) + glcm_t.shape[2:]))[:, 1:, 1:]
+        )
+    if not calc_glrlm:
+        glrlm = np.zeros((13, n_bins, 1), dtype=np.uint64)
+    else:
+        glrlm = _thread_sum(glrlm_t) if n_threads > 1 else glrlm_t[0].astype(np.uint64)
     if levels is not None:  # back to a row and a column for each of the n_bins levels
         if calc_glcm:
             glcm_all = np.zeros((n_tables, n_bins, n_bins), dtype=np.uint64)
@@ -1075,15 +1111,15 @@ def _local_matrices(
             glrlm_all = np.zeros((n_tables, n_bins, longest + 1), dtype=np.uint64)
             glrlm_all[:, levels, :] = glrlm
             glrlm = glrlm_all
+    if n_threads > 1:  # the sums over the threads
+        ngtdm_d_sum, ngtdm_n_sum = ngtdm_d.sum(axis=0), ngtdm_n.sum(axis=0)
+        ngldm_sum = ngldm_t.sum(axis=0, dtype=np.uint64)
+    else:  # one thread: its tables
+        ngtdm_d_sum, ngtdm_n_sum = ngtdm_d[0], ngtdm_n[0]
+        ngldm_sum = ngldm_t[0].astype(np.uint64)
     # s_i is the sum over the neighbour counts n of (sum of |g n - S|) / n, in a fixed order
-    ngtdm_s = (ngtdm_d.sum(axis=0)[:, 1:] / np.arange(1, ngtdm_size)).sum(axis=1)
-    return (
-        glcm,
-        glrlm,
-        ngtdm_s,
-        ngtdm_n.sum(axis=0).astype(np.float64),
-        ngldm_t.sum(axis=0, dtype=np.uint64),
-    )
+    ngtdm_s = (ngtdm_d_sum[:, 1:] / np.arange(1, ngtdm_size)).sum(axis=1)
+    return glcm, glrlm, ngtdm_s, ngtdm_n_sum.astype(np.float64), ngldm_sum
 
 
 def calculate_all_texture_matrices(
@@ -1235,7 +1271,9 @@ def _texture_matrices(
     # One pass over the mask gives the ROI. Label values are membership markers, not
     # weights. Row order also for a column-order mask, so the kernels compile once.
     roi = np.not_equal(mask_c, 0, order="C")
-    extra = {"roi": roi} if compact else {}
+    extra: dict[str, Any] = {"roi": roi, "n_voxels": 0} if compact else {}
+    if compact and calc_glcm:
+        extra["ng_eff"] = 1
 
     # Fast exit for empty ROI. Checked on the cropped mask; mask_c can still be empty
     # when only distance_mask has nonzero voxels.
@@ -1252,11 +1290,17 @@ def _texture_matrices(
             **extra,
         }
 
-    vol, counts = _texture_volume(data_c, roi, n_bins)
+    span = np.empty((data_c.shape[0], 2), dtype=np.float64)
+    vol, counts = _texture_volume(data_c, roi, n_bins, span)
     if compact:
         texture_voxels, roi_voxels = counts.sum(axis=0)
         if texture_voxels != roi_voxels:
             extra["roi"] = vol[1:-1, 1:-1, 1:-1] != 0  # the ROI without invalid levels
+        # The count of the texture voxels and the GLCM Ng_eff (the span of their levels,
+        # as roi_min_max gives it): the feature functions need no pass over the ROI
+        extra["n_voxels"] = int(texture_voxels)
+        if calc_glcm and texture_voxels:
+            extra["ng_eff"] = int(span[:, 1].max() - span[:, 0].min() + 1)
 
     # 1. Local Features (GLCM, GLRLM, NGTDM, NGLDM). The compact mode leaves out the
     # matrices that are not asked for; the full mode gives zero placeholders.
@@ -1478,6 +1522,569 @@ def _glcm_mu_sums_numba(
     return variance, correlation, tendency, shade, prominence
 
 
+# --- Feature sums in the order of numpy ---
+# The feature kernels add their terms in the order of np.sum on a contiguous float64 array
+# (numpy's pairwise sum: eight accumulators up to 128 terms, else two halves), with the
+# same elementwise expressions and exact integer marginals. So they give the bits of the
+# numpy expressions of the features, in one call for each family.
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _pairwise_block_numba(a: npt.NDArray[np.float64], lo: int, n: int) -> float:
+    """The sum of a[lo : lo + n] (n <= 128) in the order of numpy's pairwise sum: one
+    accumulator below 8 terms, else eight accumulators and the rest one by one."""
+    if n < 8:
+        res = 0.0
+        for i in range(lo, lo + n):
+            res += a[i]
+        return float(res)
+    r0 = a[lo]
+    r1 = a[lo + 1]
+    r2 = a[lo + 2]
+    r3 = a[lo + 3]
+    r4 = a[lo + 4]
+    r5 = a[lo + 5]
+    r6 = a[lo + 6]
+    r7 = a[lo + 7]
+    i = lo + 8
+    stop = lo + n - n % 8
+    while i < stop:
+        r0 += a[i]
+        r1 += a[i + 1]
+        r2 += a[i + 2]
+        r3 += a[i + 3]
+        r4 += a[i + 4]
+        r5 += a[i + 5]
+        r6 += a[i + 6]
+        r7 += a[i + 7]
+        i += 8
+    res = ((r0 + r1) + (r2 + r3)) + ((r4 + r5) + (r6 + r7))
+    while i < lo + n:
+        res += a[i]
+        i += 1
+    return float(res)
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _np_sum_numba(a: npt.NDArray[np.float64], n: int) -> float:
+    """np.sum of the float64 a[:n], with its bits: numpy adds blocks of up to 128 terms
+    (_pairwise_block_numba) and splits a longer range into two halves (the first a
+    multiple of 8 terms), whose sums it adds. A loop with a stack does the halves (numba
+    cannot load a cached caller of a recursive function). The reduction starts at 0.0."""
+    if n <= 128:
+        return float(0.0 + _pairwise_block_numba(a, 0, n))
+    starts = np.empty(64, dtype=np.int64)
+    sizes = np.empty(64, dtype=np.int64)
+    stage = np.empty(64, dtype=np.int64)  # 0: first half next, 1: second half next, 2: add
+    sums = np.empty(64)
+    starts[0] = 0
+    sizes[0] = n
+    stage[0] = 0
+    depth = 1
+    k = 0
+    while depth > 0:
+        f = depth - 1
+        size = sizes[f]
+        if size <= 128:
+            sums[k] = _pairwise_block_numba(a, starts[f], size)
+            k += 1
+            depth -= 1
+            continue
+        half = size // 2
+        half -= half % 8
+        if stage[f] == 0:
+            stage[f] = 1
+            starts[depth] = starts[f]
+            sizes[depth] = half
+            stage[depth] = 0
+            depth += 1
+        elif stage[f] == 1:
+            stage[f] = 2
+            starts[depth] = starts[f] + half
+            sizes[depth] = size - half
+            stage[depth] = 0
+            depth += 1
+        else:
+            k -= 1
+            sums[k - 1] = sums[k - 1] + sums[k]
+            depth -= 1
+    return float(0.0 + sums[0])
+
+
+@jit(nopython=True, nogil=True, error_model="numpy", cache=True)  # type: ignore
+def _count_matrix_features_numba(
+    tables: npt.NDArray[np.uint64], skip: int, min_cells: int, out: npt.NDArray[np.float64]
+) -> int:
+    """The features of a count matrix (GLRLM, GLDZM, NGLDM) into `out`, as the numpy
+    expressions of calculate_glrlm_features give them: the matrix is the sum of `tables`
+    (n_tables, rows, columns) over the tables, without its first `skip` columns. From
+    `min_cells` cells on, it keeps only the rows and the columns that hold counts (see
+    _occupied). out: the 16 GLRLM features in their order (out[6], the percentage, stays
+    for the caller) and the energy. Returns the total count (0: `out` is not written)."""
+    n_t, r, c_all = tables.shape
+    c = c_all - skip
+    m = np.zeros((r, c), dtype=np.uint64)
+    for table in range(n_t):
+        for a in range(r):
+            for b in range(c):
+                m[a, b] += tables[table, a, b + skip]
+    total = np.uint64(0)
+    for a in range(r):
+        for b in range(c):
+            total += m[a, b]
+    if total == 0:
+        return 0
+    rows = np.arange(1, r + 1)
+    cols = np.arange(1, c + 1)
+    if r * c >= min_cells:
+        row_any = np.zeros(r, dtype=np.bool_)
+        col_any = np.zeros(c, dtype=np.bool_)
+        for a in range(r):
+            for b in range(c):
+                if m[a, b] != 0:
+                    row_any[a] = True
+                    col_any[b] = True
+        rows = np.flatnonzero(row_any) + 1
+        cols = np.flatnonzero(col_any) + 1
+        if rows.size < r or cols.size < c:
+            kept = np.empty((rows.size, cols.size), dtype=np.uint64)
+            for a in range(rows.size):
+                for b in range(cols.size):
+                    kept[a, b] = m[rows[a] - 1, cols[b] - 1]
+            m = kept
+    r = rows.size
+    c = cols.size
+    n = r * c
+    nf = np.float64(total)
+    p = np.empty(n)
+    t = np.empty(n)
+    for a in range(r):
+        for b in range(c):
+            p[a * c + b] = np.float64(m[a, b]) / nf
+    # The marginals of the counts: exact (uint64, as numpy sums them)
+    si2 = np.uint64(0)
+    for a in range(r):
+        s = np.uint64(0)
+        for b in range(c):
+            s += m[a, b]
+        si2 += s * s
+    sj2 = np.uint64(0)
+    for b in range(c):
+        s = np.uint64(0)
+        for a in range(r):
+            s += m[a, b]
+        sj2 += s * s
+    for a in range(r):
+        for b in range(c):
+            t[a * c + b] = p[a * c + b] / np.float64(cols[b] * cols[b])
+    out[0] = _np_sum_numba(t, n)
+    for a in range(r):
+        for b in range(c):
+            t[a * c + b] = p[a * c + b] * np.float64(cols[b] * cols[b])
+    out[1] = _np_sum_numba(t, n)
+    out[2] = np.float64(si2) / nf
+    out[3] = np.float64(si2) / np.float64(total * total)
+    out[4] = np.float64(sj2) / nf
+    out[5] = np.float64(sj2) / np.float64(total * total)
+    out[6] = 0.0
+    for a in range(r):
+        for b in range(c):
+            t[a * c + b] = np.float64(rows[a]) * p[a * c + b]
+    mu_i = _np_sum_numba(t, n)
+    for a in range(r):
+        d = np.float64(rows[a]) - mu_i
+        for b in range(c):
+            t[a * c + b] = (d * d) * p[a * c + b]
+    out[7] = _np_sum_numba(t, n)
+    for a in range(r):
+        for b in range(c):
+            t[a * c + b] = np.float64(cols[b]) * p[a * c + b]
+    mu_j = _np_sum_numba(t, n)
+    for a in range(r):
+        for b in range(c):
+            d = np.float64(cols[b]) - mu_j
+            t[a * c + b] = (d * d) * p[a * c + b]
+    out[8] = _np_sum_numba(t, n)
+    k = 0
+    for i in range(n):
+        if p[i] > 0:
+            t[k] = p[i] * math.log2(p[i])
+            k += 1
+    out[9] = -_np_sum_numba(t, k)
+    for a in range(r):
+        i2 = rows[a] * rows[a]
+        for b in range(c):
+            t[a * c + b] = p[a * c + b] / np.float64(i2)
+    out[10] = _np_sum_numba(t, n)
+    for a in range(r):
+        i2 = rows[a] * rows[a]
+        for b in range(c):
+            t[a * c + b] = p[a * c + b] * np.float64(i2)
+    out[11] = _np_sum_numba(t, n)
+    for a in range(r):
+        i2 = rows[a] * rows[a]
+        for b in range(c):
+            t[a * c + b] = p[a * c + b] / np.float64(i2 * (cols[b] * cols[b]))
+    out[12] = _np_sum_numba(t, n)
+    for a in range(r):
+        i2 = rows[a] * rows[a]
+        for b in range(c):
+            t[a * c + b] = p[a * c + b] * np.float64(i2) / np.float64(cols[b] * cols[b])
+    out[13] = _np_sum_numba(t, n)
+    for a in range(r):
+        i2 = rows[a] * rows[a]
+        for b in range(c):
+            t[a * c + b] = p[a * c + b] * np.float64(cols[b] * cols[b]) / np.float64(i2)
+    out[14] = _np_sum_numba(t, n)
+    for a in range(r):
+        i2 = rows[a] * rows[a]
+        for b in range(c):
+            t[a * c + b] = p[a * c + b] * np.float64(i2) * np.float64(cols[b] * cols[b])
+    out[15] = _np_sum_numba(t, n)
+    for i in range(n):
+        t[i] = p[i] * p[i]
+    out[16] = _np_sum_numba(t, n)
+    return int(total)
+
+
+@jit(nopython=True, nogil=True, error_model="numpy", cache=True)  # type: ignore
+def _glszm_features_numba(
+    gl_idx: npt.NDArray[np.int64],
+    sz_idx: npt.NDArray[np.int64],
+    c: npt.NDArray[np.float64],
+    out: npt.NDArray[np.float64],
+) -> float:
+    """The 16 GLSZM features of the non-zero cells (0-based grey level and size, count, in
+    row order) into `out`, with the bits of the numpy expressions of before (pairwise
+    sums; np.bincount adds the cells in their order). out[6], the zone percentage, stays
+    for the caller. Returns the zone count."""
+    n = c.shape[0]
+    p = np.empty(n)
+    t = np.empty(n)
+    total = _np_sum_numba(c, n)
+    for k in range(n):
+        p[k] = c[k] / total
+    for k in range(n):
+        j = np.float64(sz_idx[k] + 1)
+        t[k] = p[k] / (j * j)
+    out[0] = _np_sum_numba(t, n)
+    for k in range(n):
+        j = np.float64(sz_idx[k] + 1)
+        t[k] = p[k] * (j * j)
+    out[1] = _np_sum_numba(t, n)
+    # np.bincount with weights: the cells add in their order
+    s_i = np.zeros(gl_idx.max() + 1)
+    for k in range(n):
+        s_i[gl_idx[k]] += c[k]
+    for a in range(s_i.size):
+        s_i[a] = s_i[a] * s_i[a]
+    sum_si2 = _np_sum_numba(s_i, s_i.size)
+    out[2] = sum_si2 / total
+    out[3] = sum_si2 / (total * total)
+    s_j = np.zeros(sz_idx.max() + 1)
+    for k in range(n):
+        s_j[sz_idx[k]] += c[k]
+    for b in range(s_j.size):
+        s_j[b] = s_j[b] * s_j[b]
+    sum_sj2 = _np_sum_numba(s_j, s_j.size)
+    out[4] = sum_sj2 / total
+    out[5] = sum_sj2 / (total * total)
+    out[6] = 0.0
+    for k in range(n):
+        t[k] = np.float64(gl_idx[k] + 1) * p[k]
+    mu_i = _np_sum_numba(t, n)
+    for k in range(n):
+        d = np.float64(gl_idx[k] + 1) - mu_i
+        t[k] = (d * d) * p[k]
+    out[7] = _np_sum_numba(t, n)
+    for k in range(n):
+        t[k] = np.float64(sz_idx[k] + 1) * p[k]
+    mu_j = _np_sum_numba(t, n)
+    for k in range(n):
+        d = np.float64(sz_idx[k] + 1) - mu_j
+        t[k] = (d * d) * p[k]
+    out[8] = _np_sum_numba(t, n)
+    for k in range(n):
+        t[k] = p[k] * np.log2(p[k])
+    out[9] = -_np_sum_numba(t, n)
+    for k in range(n):
+        i = np.float64(gl_idx[k] + 1)
+        t[k] = p[k] / (i * i)
+    out[10] = _np_sum_numba(t, n)
+    for k in range(n):
+        i = np.float64(gl_idx[k] + 1)
+        t[k] = p[k] * (i * i)
+    out[11] = _np_sum_numba(t, n)
+    for k in range(n):
+        i = np.float64(gl_idx[k] + 1)
+        j = np.float64(sz_idx[k] + 1)
+        t[k] = p[k] / ((i * i) * (j * j))
+    out[12] = _np_sum_numba(t, n)
+    for k in range(n):
+        i = np.float64(gl_idx[k] + 1)
+        j = np.float64(sz_idx[k] + 1)
+        t[k] = p[k] * (i * i) / (j * j)
+    out[13] = _np_sum_numba(t, n)
+    for k in range(n):
+        i = np.float64(gl_idx[k] + 1)
+        j = np.float64(sz_idx[k] + 1)
+        t[k] = p[k] * (j * j) / (i * i)
+    out[14] = _np_sum_numba(t, n)
+    for k in range(n):
+        i = np.float64(gl_idx[k] + 1)
+        j = np.float64(sz_idx[k] + 1)
+        t[k] = p[k] * (i * i) * (j * j)
+    out[15] = _np_sum_numba(t, n)
+    return float(total)
+
+
+@jit(nopython=True, nogil=True, error_model="numpy", cache=True)  # type: ignore
+def _glcm_features_numba(
+    glcm: npt.NDArray[np.uint64],
+    n_bins: int,
+    ng_eff: float,
+    min_cells: int,
+    out: npt.NDArray[np.float64],
+) -> int:
+    """The 25 GLCM features of the count tables `glcm` (n_tables, n, n) into `out`, in the
+    order and with the bits of calculate_glcm_features (its numpy path): the symmetric sum
+    over the tables, the levels that hold counts (from `min_cells` cells on, see
+    _occupied), P, the sums of _glcm_sums_numba and _glcm_mu_sums_numba, the difference
+    and the sum bins and the marginal entropy. Returns the total count (0: `out` is not
+    written)."""
+    n_t, n, _ = glcm.shape
+    tab = np.zeros((n, n), dtype=np.uint64)
+    for d in range(n_t):
+        for a in range(n):
+            for b in range(n):
+                tab[a, b] += glcm[d, a, b]
+    sym = np.empty((n, n), dtype=np.uint64)
+    total = np.uint64(0)
+    for a in range(n):
+        for b in range(n):
+            v = tab[a, b] + tab[b, a]
+            sym[a, b] = v
+            total += v
+    if total == 0:
+        return 0
+    if n * n < min_cells:
+        levels = np.arange(1, n + 1)
+    else:
+        occupied = np.zeros(n, dtype=np.bool_)
+        for a in range(n):
+            for b in range(n):
+                if sym[a, b] != 0:
+                    occupied[a] = True
+                    break
+        levels = np.flatnonzero(occupied) + 1
+    m = levels.size
+    totalf = np.float64(total)
+    p = np.empty((m, m))
+    row_counts = np.empty(m, dtype=np.uint64)
+    for a in range(m):
+        ia = levels[a] - 1
+        rc = np.uint64(0)
+        for b in range(m):
+            v = sym[ia, levels[b] - 1]
+            rc += v
+            p[a, b] = np.float64(v) / totalf
+        row_counts[a] = rc
+    nb = max(n_bins, levels[m - 1])
+    p_diff = np.zeros(nb)
+    p_sum = np.zeros(2 * nb + 1)
+    sums = _glcm_sums_numba(p, levels, ng_eff, p_diff, p_sum)
+    # The joint average from the integer counts (exact: both stay below 2^53)
+    num = np.int64(0)
+    for a in range(m):
+        num += levels[a] * np.int64(row_counts[a])
+    joint_average = np.float64(num) / np.float64(total)
+    variance, correlation, tendency, shade, prominence = _glcm_mu_sums_numba(
+        p, levels, joint_average
+    )
+    t = np.empty(2 * nb + 1)
+    for k in range(nb):
+        dk = np.float64(k) - sums[2]
+        t[k] = (dk * dk) * p_diff[k]
+    difference_variance = _np_sum_numba(t, nb)
+    j = 0
+    for k in range(nb):
+        if p_diff[k] > 0:
+            t[j] = p_diff[k] * math.log2(p_diff[k])
+            j += 1
+    difference_entropy = -_np_sum_numba(t, j)
+    ns = 2 * nb - 1
+    for k in range(ns):
+        t[k] = np.float64(k + 2) * p_sum[k + 2]
+    sum_average = _np_sum_numba(t, ns)
+    for k in range(ns):
+        dk = np.float64(k + 2) - sum_average
+        t[k] = (dk * dk) * p_sum[k + 2]
+    sum_variance = _np_sum_numba(t, ns)
+    j = 0
+    for k in range(ns):
+        if p_sum[k + 2] > 0:
+            t[j] = p_sum[k + 2] * math.log2(p_sum[k + 2])
+            j += 1
+    sum_entropy = -_np_sum_numba(t, j)
+    # The marginal entropy from the exact row counts
+    j = 0
+    for a in range(m):
+        px = np.float64(row_counts[a]) / totalf
+        if px > 0:
+            t[j] = px * math.log2(px)
+            j += 1
+    hx = -_np_sum_numba(t, j)
+    hxy = sums[1]
+    out[0] = sums[0]
+    out[1] = joint_average
+    out[2] = variance
+    out[3] = hxy
+    out[4] = sums[2]
+    out[5] = difference_variance
+    out[6] = difference_entropy
+    out[7] = sum_average
+    out[8] = sum_variance
+    out[9] = sum_entropy
+    out[10] = sums[4]
+    out[11] = sums[3]
+    out[12] = sums[2]
+    out[13] = sums[5]
+    out[14] = sums[6]
+    out[15] = sums[7]
+    out[16] = sums[8]
+    out[17] = sums[9]
+    out[18] = correlation / variance if variance != 0 else 1.0
+    out[19] = sums[10]
+    out[20] = tendency
+    out[21] = shade
+    out[22] = prominence
+    out[23] = (hxy - 2 * hx) / hx if hx != 0 else np.nan
+    out[24] = np.sqrt(1 - np.exp(-2 * (2 * hx - hxy)))
+    return int(total)
+
+
+_GLCM_KEYS = (
+    "joint_maximum_GYBY", "joint_average_60VM", "joint_variance_UR99", "joint_entropy_TU9B",
+    "difference_average_TF7R", "difference_variance_D3YU", "difference_entropy_NTRS",
+    "sum_average_ZGXS", "sum_variance_OEEB", "sum_entropy_P6QZ", "angular_second_moment_8ZQL",
+    "contrast_ACUI", "dissimilarity_8S9J", "inverse_difference_IB1Z",
+    "normalised_inverse_difference_NDRX", "inverse_difference_moment_WF0Z",
+    "normalised_inverse_difference_moment_1QCO", "inverse_variance_E8JP", "correlation_NI2N",
+    "autocorrelation_QWB0", "cluster_tendency_DG8W", "cluster_shade_7NFM",
+    "cluster_prominence_AE86", "information_correlation_1_R8DG", "information_correlation_2_JN9H",
+)  # fmt: skip
+_GLRLM_KEYS = (
+    "short_runs_emphasis_22OV", "long_runs_emphasis_W4KF", "grey_level_non_uniformity_R5YN",
+    "normalised_grey_level_non_uniformity_OVBL", "run_length_non_uniformity_W92Y",
+    "normalised_run_length_non_uniformity_IC23", "run_percentage_9ZK5",
+    "grey_level_variance_8CE5", "run_length_variance_SXLW", "run_entropy_HJ9O",
+    "low_grey_level_run_emphasis_V3SW", "high_grey_level_run_emphasis_G3QZ",
+    "short_run_low_grey_level_emphasis_HTZT", "short_run_high_grey_level_emphasis_GD3A",
+    "long_run_low_grey_level_emphasis_IVPO", "long_run_high_grey_level_emphasis_3KUM",
+)  # fmt: skip
+_GLDZM_KEYS = (
+    "small_distance_emphasis_0GBI", "large_distance_emphasis_MB4I", "grey_level_non_uniformity_VFT7",
+    "normalised_grey_level_non_uniformity_7HP3", "zone_distance_non_uniformity_V294",
+    "normalised_zone_distance_non_uniformity_IATH", "zone_percentage_VIWW",
+    "grey_level_variance_QK93", "zone_distance_variance_7WT1", "zone_distance_entropy_GBDU",
+    "low_grey_level_zone_emphasis_S1RA", "high_grey_level_zone_emphasis_K26C",
+    "small_distance_low_grey_level_emphasis_RUVG", "small_distance_high_grey_level_emphasis_DKNJ",
+    "large_distance_low_grey_level_emphasis_A7WM", "large_distance_high_grey_level_emphasis_KLTH",
+)  # fmt: skip
+# The NGLDM features in their order, with the index of each in `out` of
+# _count_matrix_features_numba
+_NGLDM_KEYS = (
+    ("low_dependence_emphasis_SODN", 0), ("high_dependence_emphasis_IMOQ", 1),
+    ("low_grey_level_count_emphasis_TL9H", 10), ("high_grey_level_count_emphasis_OAE7", 11),
+    ("low_dependence_low_grey_level_emphasis_EQ3F", 12),
+    ("low_dependence_high_grey_level_emphasis_JA6D", 13),
+    ("high_dependence_low_grey_level_emphasis_NBZI", 14),
+    ("high_dependence_high_grey_level_emphasis_9QMG", 15),
+    ("grey_level_non_uniformity_FP8K", 2), ("normalised_grey_level_non_uniformity_5SPA", 3),
+    ("dependence_count_non_uniformity_Z87G", 4),
+    ("normalised_dependence_count_non_uniformity_OKJI", 5),
+    ("dependence_count_percentage_6XV8", 6), ("grey_level_variance_1PFV", 7),
+    ("dependence_count_variance_DNX2", 8), ("dependence_count_entropy_FCBV", 9),
+    ("dependence_count_energy_CAS9", 16),
+)  # fmt: skip
+_GLSZM_KEYS = (
+    "small_zone_emphasis_P001", "large_zone_emphasis_48P8", "grey_level_non_uniformity_JNSA",
+    "normalised_grey_level_non_uniformity_Y1RO", "zone_size_non_uniformity_4JP3",
+    "normalised_zone_size_non_uniformity_VB3A", "zone_percentage_P30P",
+    "grey_level_variance_BYLV", "zone_size_variance_3NSA", "zone_size_entropy_GU8N",
+    "low_grey_level_zone_emphasis_XMSY", "high_grey_level_zone_emphasis_5GN9",
+    "small_zone_low_grey_level_emphasis_5RAI", "small_zone_high_grey_level_emphasis_HW1V",
+    "large_zone_low_grey_level_emphasis_YH51", "large_zone_high_grey_level_emphasis_J17V",
+)  # fmt: skip
+
+
+def _ng_eff(data: npt.NDArray[Any], mask: npt.NDArray[Any]) -> int:
+    """Ng_eff of the GLCM: the span of the grey levels of the ROI (1 for no level)."""
+    roi_span = roi_min_max(data, mask)
+    return int(roi_span[1] - roi_span[0] + 1) if roi_span is not None else 1
+
+
+def _glcm_features(glcm: npt.NDArray[Any], n_bins: int, ng_eff: int) -> dict[str, float]:
+    """The GLCM features of the unsigned count tables `glcm` (n_tables, n, n), or of one
+    (n, n) table."""
+    out = np.empty(len(_GLCM_KEYS))
+    tables = np.ascontiguousarray(glcm, dtype=np.uint64).reshape((-1,) + glcm.shape[-2:])
+    if _glcm_features_numba(tables, n_bins, float(ng_eff), _OCCUPIED_MIN_CELLS, out) == 0:
+        return {}
+    return dict(zip(_GLCM_KEYS, out, strict=True))
+
+
+def _count_features(tables: npt.NDArray[Any], skip: int) -> tuple[int, npt.NDArray[np.float64]]:
+    """The total count and the `out` of _count_matrix_features_numba for the unsigned
+    count matrix (rows, columns) or tables (n_tables, rows, columns)."""
+    counts = np.ascontiguousarray(tables, dtype=np.uint64).reshape((-1,) + tables.shape[-2:])
+    out = np.empty(17)
+    return _count_matrix_features_numba(counts, skip, _OCCUPIED_MIN_CELLS, out), out
+
+
+def _glrlm_features(
+    glrlm: npt.NDArray[Any],
+    mask: Optional[npt.NDArray[Any]],
+    n_directions: Optional[int],
+    n_voxels: Optional[int] = None,
+) -> dict[str, float]:
+    """The GLRLM features of the unsigned run tables; n_voxels: the ROI voxel count (None:
+    count `mask`)."""
+    n_runs, out = _count_features(glrlm, 1)
+    if n_runs == 0:
+        return {}
+    if n_voxels is None:
+        n_voxels = _roi_voxel_count(cast(npt.NDArray[Any], mask))
+    out[6] = np.uint64(n_runs) / (n_voxels * (n_directions or 13))
+    return dict(zip(_GLRLM_KEYS, out[:16], strict=True))
+
+
+def _gldzm_features(
+    gldzm: npt.NDArray[Any], mask: Optional[npt.NDArray[Any]], n_voxels: Optional[int] = None
+) -> dict[str, float]:
+    """The GLDZM features of the unsigned matrix (see _glrlm_features)."""
+    n_zones, out = _count_features(gldzm, 0)
+    if n_zones == 0:
+        return {}
+    if n_voxels is None:
+        n_voxels = _roi_voxel_count(cast(npt.NDArray[Any], mask))
+    out[6] = np.uint64(n_zones) / n_voxels
+    return dict(zip(_GLDZM_KEYS, out[:16], strict=True))
+
+
+def _ngldm_features(
+    ngldm: npt.NDArray[Any], mask: Optional[npt.NDArray[Any]], n_voxels: Optional[int] = None
+) -> dict[str, float]:
+    """The NGLDM features of the unsigned matrix (see _glrlm_features)."""
+    n_s, out = _count_features(ngldm, 0)
+    if n_s == 0:
+        return {}
+    if n_voxels is None:
+        n_voxels = _roi_voxel_count(cast(npt.NDArray[Any], mask))
+    out[6] = np.uint64(n_s) / n_voxels
+    return {key: out[i] for key, i in _NGLDM_KEYS}
+
+
 def calculate_glcm_features(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[np.floating[Any]],
@@ -1558,9 +2165,12 @@ def calculate_glcm_features(
         planar = _planar_axes(data.shape)
         data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
         matrices = _one_matrix(data, mask, n_bins, "glcm", planar=planar, distance=glcm_distance)
-        glcm, mask = matrices["glcm"], matrices["roi"].view(np.uint8)
-    else:
-        glcm = glcm_matrix
+        return _glcm_features(matrices["glcm"], n_bins, matrices["ng_eff"])
+    glcm = glcm_matrix
+    if glcm.dtype.kind == "u":  # counts: the kernel
+        if not glcm.any():
+            return {}
+        return _glcm_features(glcm, n_bins, _ng_eff(data, mask))
 
     # Merge (Sum) -> IAZD
     glcm_sum = np.sum(glcm, axis=0)
@@ -1574,13 +2184,8 @@ def calculate_glcm_features(
 
     P = glcm_sym / total_sum
 
-    # Ng_eff is the ROI grey-level span; only ROI min/max are needed. Fused single-pass
-    # kernel: no bbox rescan and no boolean-gather temporaries.
-    roi_span = roi_min_max(data, mask)
-    if roi_span is not None:
-        Ng_eff = int(roi_span[1] - roi_span[0] + 1)
-    else:
-        Ng_eff = 1  # Fallback
+    # Ng_eff is the ROI grey-level span
+    Ng_eff = _ng_eff(data, mask)
 
     # The sums over the cells that hold counts, in two serial passes (_glcm_sums_numba,
     # _glcm_mu_sums_numba); levels: the 1-based grey levels of the rows and columns of P
@@ -1701,13 +2306,15 @@ def calculate_glrlm_features(
         planar = _planar_axes(data.shape)
         data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
         matrices = _one_matrix(data, mask, n_bins, "glrlm", planar=planar)
-        glrlm, mask = matrices["glrlm"], matrices["roi"]
-        n_directions = _directions(planar).size
-    else:
-        glrlm = glrlm_matrix
-        if n_directions is None and glrlm.shape[0] == 13:
-            # The directions of a one-slice image that leave it have no runs at all
-            n_directions = int(np.count_nonzero(glrlm.reshape(13, -1).any(axis=1)))
+        return _glrlm_features(
+            matrices["glrlm"], None, _directions(planar).size, n_voxels=matrices["n_voxels"]
+        )
+    glrlm = glrlm_matrix
+    if n_directions is None and glrlm.shape[0] == 13:
+        # The directions of a one-slice image that leave it have no runs at all
+        n_directions = int(np.count_nonzero(glrlm.reshape(13, -1).any(axis=1)))
+    if glrlm.dtype.kind == "u":  # counts: the kernel
+        return _glrlm_features(glrlm, mask, n_directions)
 
     # Merge (Sum) -> IAZD
     glrlm_sum = np.sum(glrlm, axis=0)
@@ -1832,6 +2439,19 @@ def _glszm_cells(
             large[k] = (np.int64(zone_gl[t]) - 1) * stride + (zone_size[t] - 1)
             k += 1
     large.sort()
+    cells: npt.NDArray[np.uint32] = _glszm_cells_of(dense, large, stride)
+    return cells
+
+
+@jit(nopython=True, nogil=True, cache=True)  # type: ignore
+def _glszm_cells_of(
+    dense: npt.NDArray[np.int64], large: npt.NDArray[np.int64], stride: int
+) -> npt.NDArray[np.uint32]:
+    """The (3, n_cells) cells of `_glszm_cells` from the dense (n_bins, width) table of the
+    small zones and the sorted keys (grey level index * stride + size index) of the large
+    zones."""
+    n_bins, width = dense.shape
+    n_large = large.shape[0]
     n_cells = 0
     for g in range(n_bins):
         for s in range(width):
@@ -1899,17 +2519,17 @@ def _zone_offsets_numba(shape: tuple[int, int, int]) -> npt.NDArray[np.int64]:
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _fill_zones_numba(
     flat: npt.NDArray[np.uint16],
-    flat_dist: npt.NDArray[np.int32],
+    flat_dist: npt.NDArray[np.uint16],
     offsets: npt.NDArray[np.int64],
     lo: int,
     hi: int,
     stride_z: int,
     base: int,
+    end: int,
     calc_gldzm: bool,
-    res_gl: npt.NDArray[np.int32],
+    res_gl: npt.NDArray[np.uint16],
     res_size: npt.NDArray[np.int32],
-    res_dist: npt.NDArray[np.int32],
-    stack: npt.NDArray[np.int32],
+    res_dist: npt.NDArray[np.uint16],
     parent: npt.NDArray[np.int32],
     lab_lo: npt.NDArray[np.int32],
     lab_hi: npt.NDArray[np.int32],
@@ -1917,7 +2537,15 @@ def _fill_zones_numba(
     """Flood-fill the zones of the flat padded volume between the indices lo and hi (whole
     slices) and return their number. Zone t gets the id base + t, with its level, size and
     smallest distance, and its voxels on the first and the last slice get the label id + 1
-    in lab_lo and lab_hi (when these have a slice of room). Visited voxels become 0."""
+    in lab_lo and lab_hi (when these have a slice of room). Visited voxels become 0.
+
+    The stack of the fill lives in `parent`, growing down from `end` (base + the texture
+    voxels of the chunk): the zones so far and the pending voxels are distinct voxels of
+    the chunk, so the two never meet; a zone's parent slot is written when it is done.
+    The neighbour steps come in the order dz = -1, 0, +1 (9 each), so a voxel on the first
+    slice of the chunk skips the first 9 and one on the last slice the last 9: the other
+    steps stay in the chunk (the padding ring is never pushed)."""
+    first_end = lo + stride_z
     last = hi - stride_z  # first index of the last slice
     faces = lab_lo.size > 1
     n_zones = 0
@@ -1926,28 +2554,32 @@ def _fill_zones_numba(
         if gl == 0:
             continue
         zid = base + n_zones
-        parent[zid] = zid
         flat[i] = 0
-        stack[base] = i
-        top = base + 1
+        top = end - 1
+        parent[top] = i
         size = 0
         min_dist = flat_dist[i] if calc_gldzm else 0
-        while top > base:
-            top -= 1
-            cur = stack[top]
+        while top < end:
+            cur = parent[top]
+            top += 1
             size += 1
-            if faces and cur < lo + stride_z:
+            on_first = cur < first_end
+            on_last = cur >= last
+            if faces and on_first:
                 lab_lo[cur - lo] = zid + 1
-            if faces and cur >= last:
+            if faces and on_last:
                 lab_hi[cur - last] = zid + 1
             if calc_gldzm and flat_dist[cur] < min_dist:
                 min_dist = flat_dist[cur]
-            for k in range(26):
+            k0 = 9 if on_first else 0
+            k1 = 17 if on_last else 26
+            for k in range(k0, k1):
                 nb = cur + offsets[k]
-                if lo <= nb < hi and flat[nb] == gl:
+                if flat[nb] == gl:
                     flat[nb] = 0
-                    stack[top] = nb
-                    top += 1
+                    top -= 1
+                    parent[top] = nb
+        parent[zid] = zid
         res_gl[zid] = gl
         res_size[zid] = size
         res_dist[zid] = min_dist
@@ -1996,14 +2628,13 @@ def _face_pairs_numba(
 @jit(nopython=True, nogil=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
 def _label_zones_numba(
     vol: npt.NDArray[np.uint16],
-    dist: npt.NDArray[np.int32],
+    dist: npt.NDArray[np.uint16],
     bounds: npt.NDArray[np.int64],
     roi_base: npt.NDArray[np.int64],
     calc_gldzm: bool,
-    res_gl: npt.NDArray[np.int32],
+    res_gl: npt.NDArray[np.uint16],
     res_size: npt.NDArray[np.int32],
-    res_dist: npt.NDArray[np.int32],
-    stack: npt.NDArray[np.int32],
+    res_dist: npt.NDArray[np.uint16],
     parent: npt.NDArray[np.int32],
     lab_lo: npt.NDArray[np.int32],
     lab_hi: npt.NDArray[np.int32],
@@ -2015,8 +2646,9 @@ def _label_zones_numba(
     bounds[c + 1].
 
     The chunks run in parallel. Zone t of chunk c gets the id roi_base[c] + t (roi_base
-    counts the texture voxels of the earlier chunks, so the ids and the stacks of the
-    chunks never overlap). Zones that touch across a chunk face are then joined
+    counts the texture voxels of the earlier chunks, so the ids of the chunks never
+    overlap; the stack of chunk c grows down from roi_base[c + 1] in `parent`). Zones that
+    touch across a chunk face are then joined
     (union-find): the size of the root is the sum and its distance the minimum, so the
     result is the same for every chunk split. The faces find their pairs of zones in
     parallel: face c writes them into the rows slots[c] to slots[c + 1] (9 rows for each
@@ -2027,6 +2659,7 @@ def _label_zones_numba(
     flat_dist = dist.ravel()
     offsets = _zone_offsets_numba(vol.shape)
     n_chunks = bounds.shape[0] - 1
+    n_ids = parent.shape[0]
     for c in prange(n_chunks):
         zone_counts[c] = _fill_zones_numba(
             flat,
@@ -2036,11 +2669,11 @@ def _label_zones_numba(
             bounds[c + 1] * stride_z,
             stride_z,
             roi_base[c],
+            roi_base[c + 1] if c + 1 < n_chunks else n_ids,
             calc_gldzm,
             res_gl,
             res_size,
             res_dist,
-            stack,
             parent,
             lab_lo[c],
             lab_hi[c],
@@ -2055,29 +2688,35 @@ def _label_zones_numba(
         found[c] = _face_pairs_numba(
             lab_hi[c], lab_lo[c + 1], res_gl, vol.shape[1], vol.shape[2], pairs, slots[c]
         )
+    # Each union makes one root a zone of another root. Only these joined zones add their
+    # size and distance to a root, after all unions.
+    joined = np.empty(found.sum(), dtype=np.int32)
+    n_joined = 0
     for c in range(n_chunks - 1):
         for k in range(slots[c], slots[c] + found[c]):
             ra = _uf_find(parent, pairs[k, 0])
             rb = _uf_find(parent, pairs[k, 1])
             if ra < rb:
                 parent[rb] = ra
+                joined[n_joined] = rb
+                n_joined += 1
             elif rb < ra:
                 parent[ra] = rb
-    for c in range(n_chunks):
-        for t in range(zone_counts[c]):
-            zid = roi_base[c] + t
-            r = _uf_find(parent, zid)
-            if r != zid:
-                res_size[r] += res_size[zid]
-                if res_dist[zid] < res_dist[r]:
-                    res_dist[r] = res_dist[zid]
+                joined[n_joined] = ra
+                n_joined += 1
+    for k in range(n_joined):
+        zid = joined[k]
+        r = _uf_find(parent, zid)
+        res_size[r] += res_size[zid]
+        if res_dist[zid] < res_dist[r]:
+            res_dist[r] = res_dist[zid]
 
 
 @jit(nopython=True, nogil=True, cache=True)  # type: ignore
 def _zone_tables_numba(
-    res_gl: npt.NDArray[np.int32],
+    res_gl: npt.NDArray[np.uint16],
     res_size: npt.NDArray[np.int32],
-    res_dist: npt.NDArray[np.int32],
+    res_dist: npt.NDArray[np.uint16],
     parent: npt.NDArray[np.int32],
     zone_counts: npt.NDArray[np.int64],
     roi_base: npt.NDArray[np.int64],
@@ -2130,7 +2769,101 @@ def _zone_tables_numba(
     return glszm, gldzm
 
 
-_NO_DISTANCE = np.zeros((1, 1, 1), dtype=np.int32)
+@jit(nopython=True, nogil=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _zone_cells_parallel_numba(
+    res_gl: npt.NDArray[Any],
+    res_size: npt.NDArray[np.int32],
+    res_dist: npt.NDArray[Any],
+    parent: npt.NDArray[np.int32],
+    zone_counts: npt.NDArray[np.int64],
+    roi_base: npt.NDArray[np.int64],
+    n_bins: int,
+    calc_glszm: bool,
+    calc_gldzm: bool,
+) -> tuple[npt.NDArray[np.uint32], npt.NDArray[np.uint32]]:
+    """The GLSZM cells (as `_glszm_cells`) and the GLDZM of `_zone_tables_numba` with
+    `dense_glszm=False`, with each chunk of zones in a thread. Each chunk moves its root
+    zones to the start of its id range, then counts them in its own tables; the tables add
+    up. The large zones (wider than the dense GLSZM table) go into the chunk's range of
+    `parent` (as zone ids), and their keys are sorted after the chunks. Afterwards the
+    buffers hold only the root zones."""
+    n_chunks = zone_counts.shape[0]
+    # roots, largest size, largest distance and large zones of each chunk
+    stats = np.zeros((n_chunks, 4), dtype=np.int64)
+    for c in prange(n_chunks):
+        base = roi_base[c]
+        k = 0
+        largest = 0
+        farthest = 0
+        for t in range(zone_counts[c]):
+            zid = base + t
+            if parent[zid] == zid:
+                s = res_size[zid]
+                d = res_dist[zid]
+                res_gl[base + k] = res_gl[zid]
+                res_size[base + k] = s
+                res_dist[base + k] = d
+                if s > largest:
+                    largest = s
+                if d > farthest:
+                    farthest = d
+                k += 1
+        stats[c, 0] = k
+        stats[c, 1] = largest
+        stats[c, 2] = farthest
+    max_sz = int(stats[:, 1].max())
+    width = min(max_sz, max(1, _GLSZM_DENSE_CELLS // n_bins)) if calc_glszm else 0
+    n_dist = max(1, int(stats[:, 2].max())) if calc_gldzm else 1
+    small = np.zeros((n_chunks, n_bins, width), dtype=np.uint32)
+    near = np.zeros((n_chunks, n_bins, n_dist if calc_gldzm else 0), dtype=np.uint32)
+    for c in prange(n_chunks):
+        base = roi_base[c]
+        n_large = 0
+        for k in range(stats[c, 0]):
+            g = res_gl[base + k] - 1
+            if calc_glszm:
+                s = res_size[base + k]
+                if s <= width:
+                    small[c, g, s - 1] += 1
+                else:
+                    parent[base + n_large] = base + k
+                    n_large += 1
+            if calc_gldzm and res_dist[base + k] > 0:
+                near[c, g, res_dist[base + k] - 1] += 1
+        stats[c, 3] = n_large
+
+    gldzm = np.zeros((n_bins, n_dist), dtype=np.uint32)
+    dense = np.zeros((n_bins, width), dtype=np.int64)
+    # The tables add up in this thread (a parallel region costs about 0.1 ms)
+    for g in range(n_bins):
+        for c in range(n_chunks):
+            for s in range(width):
+                dense[g, s] += small[c, g, s]
+            if calc_gldzm:
+                for d in range(n_dist):
+                    gldzm[g, d] += near[c, g, d]
+    glszm = np.zeros((3, 0), dtype=np.uint32)
+    if calc_glszm:
+        stride = np.int64(max_sz) + 1
+        large = np.empty(stats[:, 3].sum(), dtype=np.int64)
+        j = 0
+        for c in range(n_chunks):
+            for q in range(stats[c, 3]):
+                zid = parent[roi_base[c] + q]
+                large[j] = (np.int64(res_gl[zid]) - 1) * stride + (res_size[zid] - 1)
+                j += 1
+        large.sort()
+        glszm = _glszm_cells_of(dense, large, stride)
+    return glszm, gldzm
+
+
+# From this many zones on (sum of zone_counts), the compact zone tables run in threads.
+# Measured on 10 threads: x0.85 at 180,000 zones, x0.94 at 113,000, x1.0-1.16 below
+# 70,000 (two parallel regions cost about 0.2 ms).
+_ZONE_TABLES_PARALLEL_MIN = 1 << 17
+
+
+_NO_DISTANCE = np.zeros((1, 1, 1), dtype=np.uint16)
 _NO_FACE = np.zeros(1, dtype=np.int32)
 # Below this many voxels of the padded volume, one serial zone fill is faster than the
 # parallel chunks (measured).
@@ -2140,7 +2873,7 @@ _ZONE_PARALLEL_MIN_SIZE = 1 << 17
 def _zone_matrices(
     vol: npt.NDArray[np.uint16],
     counts: npt.NDArray[np.int64],
-    dist: npt.NDArray[np.int32],
+    dist: npt.NDArray[np.uint16],
     n_bins: int,
     calc_glszm: bool,
     calc_gldzm: bool,
@@ -2149,14 +2882,19 @@ def _zone_matrices(
 ) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
     """GLSZM and GLDZM of the padded volume, with the padded distance map `dist` (any
     array when `calc_gldzm` is False). `vol` is all 0 afterwards. The buffers are made
-    for each call: the zones need 20 bytes per texture voxel, and a face label pair per
+    for each call: the zones need 12 bytes per texture voxel, and a face label pair per
     chunk. `parallel` picks the parallel zone kernel (default: from
-    _ZONE_PARALLEL_MIN_SIZE voxels on; the warm-up asks for it on a small volume)."""
+    _ZONE_PARALLEL_MIN_SIZE voxels on). True: the parallel zone kernel and, for the
+    compact matrices, the parallel tables (the warm-up asks for them on a small volume)."""
     per_slice = counts[:, 0]
     n_voxels = max(1, int(per_slice.sum()))
-    # One buffer for the zone level, size and distance, the parents and the stack (flat
-    # indices of the padded volume)
-    res_gl, res_size, res_dist, parent, stack = np.empty((5, n_voxels), dtype=np.int32)
+    # The zone level, size and distance, and the parents (the fill keeps its stack of flat
+    # indices of the padded volume in `parent`)
+    res_gl = np.empty(n_voxels, dtype=np.uint16)
+    res_size = np.empty(n_voxels, dtype=np.int32)
+    res_dist = np.empty(n_voxels, dtype=np.uint16)
+    parent = np.empty(n_voxels, dtype=np.int32)
+    tables_in_threads = parallel is True  # the warm-up asks for them on a small volume
     if parallel is None:
         parallel = vol.size >= _ZONE_PARALLEL_MIN_SIZE
     if not parallel or (n_chunks := numba.get_num_threads()) == 1:
@@ -2170,11 +2908,11 @@ def _zone_matrices(
             vol.size - stride_z,
             stride_z,
             0,
+            n_voxels,
             calc_gldzm,
             res_gl,
             res_size,
             res_dist,
-            stack,
             parent,
             _NO_FACE,
             _NO_FACE,
@@ -2212,13 +2950,31 @@ def _zone_matrices(
         res_gl,
         res_size,
         res_dist,
-        stack,
         parent,
         lab_lo,
         lab_hi,
         zone_counts,
         slots,
     )
+    if (
+        not dense_glszm
+        and n_bins <= _GLSZM_MANY_LEVELS
+        and (tables_in_threads or zone_counts.sum() >= _ZONE_TABLES_PARALLEL_MIN)
+    ):
+        return cast(
+            tuple[npt.NDArray[Any], npt.NDArray[Any]],
+            _zone_cells_parallel_numba(
+                res_gl,
+                res_size,
+                res_dist,
+                parent,
+                zone_counts,
+                roi_base,
+                n_bins,
+                calc_glszm,
+                calc_gldzm,
+            ),
+        )
     return cast(
         tuple[npt.NDArray[Any], npt.NDArray[Any]],
         _zone_tables_numba(
@@ -2250,13 +3006,16 @@ def calculate_zone_features(
     Args:
         data: 3D discretized image data.
         mask: 3D mask array (not modified - copied internally by JIT function).
-        dist_map: 3D distance map for GLDZM.
+        dist_map: 3D distance map for GLDZM, with whole numbers in [0, 65535].
         n_bins: Number of grey level bins.
         calc_glszm: Whether to calculate GLSZM.
         calc_gldzm: Whether to calculate GLDZM.
 
     Returns:
         Tuple of (glszm, gldzm) matrices.
+
+    Raises:
+        ValueError: a `dist_map` value is not in [0, 65535] (with `calc_gldzm`).
 
     Example:
         ```python
@@ -2274,7 +3033,13 @@ def calculate_zone_features(
         ```
     """
     vol, counts = _texture_volume(_level_form(data), np.not_equal(mask, 0, order="C"), n_bins)
-    dist = np.pad(np.asarray(dist_map, dtype=np.int32), 1) if calc_gldzm else _NO_DISTANCE
+    dist = _NO_DISTANCE
+    if calc_gldzm:
+        dist_map = np.asarray(dist_map)
+        # The kernels read a uint16 map: a value outside [0, 65535] (or NaN) would wrap
+        if not np.all((dist_map >= 0) & (dist_map <= np.iinfo(np.uint16).max)):
+            raise ValueError("dist_map values must lie in [0, 65535].")
+        dist = np.pad(dist_map.astype(np.uint16), 1)
     return _zone_matrices(vol, counts, dist, n_bins, calc_glszm, calc_gldzm, dense_glszm=True)
 
 
@@ -2307,18 +3072,25 @@ def calculate_glszm_features(
         data, mask, _ = _maybe_crop_to_bbox(data, mask, None)
         # The kernel returns only the non-zero cells: no dense (n_bins, largest zone) matrix.
         matrices = _one_matrix(data, mask, n_bins, "glszm")
-        return _glszm_features_from_cells(matrices["glszm_cells"], matrices["roi"])
+        return _glszm_features_from_cells(
+            matrices["glszm_cells"], None, n_voxels=matrices["n_voxels"]
+        )
 
-    gl_idx, sz_idx = np.nonzero(glszm_matrix)
+    # np.nonzero gives strided index arrays: row-order copies, for the compiled kernel
+    gl_idx, sz_idx = (np.ascontiguousarray(i) for i in np.nonzero(glszm_matrix))
     return _glszm_features(gl_idx, sz_idx, glszm_matrix[gl_idx, sz_idx].astype(np.float64), mask)
 
 
 def _glszm_features_from_cells(
-    cells: npt.NDArray[Any], mask: npt.NDArray[np.floating[Any]]
+    cells: npt.NDArray[Any], mask: Optional[npt.NDArray[Any]], n_voxels: Optional[int] = None
 ) -> dict[str, float]:
     """GLSZM features from the (3, n_cells) cell array of `_glszm_cells`."""
     return _glszm_features(
-        cells[0].astype(np.int64), cells[1].astype(np.int64), cells[2].astype(np.float64), mask
+        cells[0].astype(np.int64),
+        cells[1].astype(np.int64),
+        cells[2].astype(np.float64),
+        mask,
+        n_voxels,
     )
 
 
@@ -2326,85 +3098,21 @@ def _glszm_features(
     gl_idx: npt.NDArray[np.int64],
     sz_idx: npt.NDArray[np.int64],
     c: npt.NDArray[np.float64],
-    mask: npt.NDArray[np.floating[Any]],
+    mask: Optional[npt.NDArray[Any]],
+    n_voxels: Optional[int] = None,
 ) -> dict[str, float]:
-    """GLSZM features from the non-zero cells: 0-based grey level and size, and count.
-
-    The GLSZM is extremely sparse in the zone-size dimension (a single large zone can push
-    the size axis into the tens of thousands while only a few hundred cells are non-zero).
-    Working on the non-zero cells is arithmetically identical (every term carries a factor
-    of P, so zero cells contribute exactly zero). The cells must come in row-major order,
-    as np.nonzero gives them.
-    """
+    """GLSZM features from the non-zero cells: 0-based grey level and size, and count, in
+    row order (as np.nonzero gives them). The GLSZM is very sparse along the zone sizes,
+    and every term carries a factor of P, so the non-zero cells give the features of the
+    whole matrix. n_voxels: the ROI voxel count (None: count `mask`)."""
     if gl_idx.size == 0:
         return {}
-
-    N_zones = c.sum()
-
-    I = (gl_idx + 1).astype(np.float64)  # noqa: E741
-    J = (sz_idx + 1).astype(np.float64)  # Zone size
-    I2 = I * I
-    J2 = J * J
-    P = c / N_zones
-
-    features: dict[str, float] = {}
-
-    # Small Zone Emphasis (SZE) - P001
-    features["small_zone_emphasis_P001"] = np.sum(P / J2)
-
-    # Large Zone Emphasis (LZE) - 48P8
-    features["large_zone_emphasis_48P8"] = np.sum(P * J2)
-
-    # Grey Level Non-Uniformity (GLNU) - JNSA
-    s_i = np.bincount(gl_idx, weights=c)
-    sum_si2 = np.sum(s_i**2)
-    features["grey_level_non_uniformity_JNSA"] = sum_si2 / N_zones
-
-    # Normalised Grey Level Non-Uniformity (GLNN) - Y1RO
-    features["normalised_grey_level_non_uniformity_Y1RO"] = sum_si2 / (N_zones**2)
-
-    # Zone Size Non-Uniformity (ZSNU) - 4JP3
-    s_j = np.bincount(sz_idx, weights=c)
-    sum_sj2 = np.sum(s_j**2)
-    features["zone_size_non_uniformity_4JP3"] = sum_sj2 / N_zones
-
-    # Normalised Zone Size Non-Uniformity (ZSNN) - VB3A
-    features["normalised_zone_size_non_uniformity_VB3A"] = sum_sj2 / (N_zones**2)
-
-    # Zone Percentage (ZP) - P30P
-    n_voxels = _roi_voxel_count(mask)
-    features["zone_percentage_P30P"] = N_zones / n_voxels
-
-    # Grey Level Variance (GLV) - BYLV
-    mu_i = np.sum(I * P)
-    features["grey_level_variance_BYLV"] = np.sum(((I - mu_i) ** 2) * P)
-
-    # Zone Size Variance (ZSV) - 3NSA
-    mu_j = np.sum(J * P)
-    features["zone_size_variance_3NSA"] = np.sum(((J - mu_j) ** 2) * P)
-
-    # Zone Size Entropy (ZSE) - GU8N
-    features["zone_size_entropy_GU8N"] = -np.sum(P * np.log2(P))
-
-    # Low Grey Level Zone Emphasis (LGLZE) - XMSY
-    features["low_grey_level_zone_emphasis_XMSY"] = np.sum(P / I2)
-
-    # High Grey Level Zone Emphasis (HGLZE) - 5GN9
-    features["high_grey_level_zone_emphasis_5GN9"] = np.sum(P * I2)
-
-    # Small Zone Low Grey Level Emphasis (SZLGLE) - 5RAI
-    features["small_zone_low_grey_level_emphasis_5RAI"] = np.sum(P / (I2 * J2))
-
-    # Small Zone High Grey Level Emphasis (SZHGLE) - HW1V
-    features["small_zone_high_grey_level_emphasis_HW1V"] = np.sum(P * I2 / J2)
-
-    # Large Zone Low Grey Level Emphasis (LZLGLE) - YH51
-    features["large_zone_low_grey_level_emphasis_YH51"] = np.sum(P * J2 / I2)
-
-    # Large Zone High Grey Level Emphasis (LZHGLE) - J17V
-    features["large_zone_high_grey_level_emphasis_J17V"] = np.sum(P * I2 * J2)
-
-    return features
+    out = np.empty(len(_GLSZM_KEYS))
+    n_zones = _glszm_features_numba(gl_idx, sz_idx, c, out)
+    if n_voxels is None:
+        n_voxels = _roi_voxel_count(cast(npt.NDArray[Any], mask))
+    out[6] = np.float64(n_zones) / n_voxels
+    return dict(zip(_GLSZM_KEYS, out, strict=True))
 
 
 # --- GLDZM ---
@@ -2449,9 +3157,10 @@ def calculate_gldzm_features(
         matrices = _one_matrix(
             data, mask, n_bins, "gldzm", distance_mask=distance_mask, planar=planar
         )
-        gldzm, mask = matrices["gldzm"], matrices["roi"]
-    else:
-        gldzm = gldzm_matrix
+        return _gldzm_features(matrices["gldzm"], None, n_voxels=matrices["n_voxels"])
+    gldzm = gldzm_matrix
+    if gldzm.dtype.kind == "u":  # counts: the kernel
+        return _gldzm_features(gldzm, mask)
 
     N_zones = np.sum(gldzm)
     if N_zones == 0:
@@ -2692,9 +3401,10 @@ def calculate_ngldm_features(
         matrices = _one_matrix(
             data, mask, n_bins, "ngldm", ngldm_alpha=ngldm_alpha, distance=ngldm_distance
         )
-        ngldm, mask = matrices["ngldm"], matrices["roi"]
-    else:
-        ngldm = ngldm_matrix
+        return _ngldm_features(matrices["ngldm"], None, n_voxels=matrices["n_voxels"])
+    ngldm = ngldm_matrix
+    if ngldm.dtype.kind == "u":  # counts: the kernel
+        return _ngldm_features(ngldm, mask)
 
     N_s = np.sum(ngldm)
     if N_s == 0:
@@ -2869,37 +3579,25 @@ def calculate_all_texture_features(
         ngldm_distance=ngldm_distance,
     )
     # The bool ROI gives the same ROI voxel counts as mask_c, from a fast count.
+    # The texture voxel count and the GLCM Ng_eff come with the matrices: the feature
+    # functions make no pass over the ROI
     roi = texture_matrices["roi"]
+    n_voxels = texture_matrices["n_voxels"]
 
-    # GLCM (the texture ROI, in one mask type and layout)
     if "glcm" in chosen:
-        results.update(
-            calculate_glcm_features(
-                disc_c, roi.view(np.uint8), n_bins, glcm_matrix=texture_matrices["glcm"]
-            )
-        )
+        results.update(_glcm_features(texture_matrices["glcm"], n_bins, texture_matrices["ng_eff"]))
     if "glrlm" in chosen:
         results.update(
-            calculate_glrlm_features(
-                disc_c,
-                roi,
-                n_bins,
-                glrlm_matrix=texture_matrices["glrlm"],
-                n_directions=_directions(planar).size,
+            _glrlm_features(
+                texture_matrices["glrlm"], roi, _directions(planar).size, n_voxels=n_voxels
             )
         )
     if "glszm" in chosen:
-        results.update(_glszm_features_from_cells(texture_matrices["glszm_cells"], roi))
-    if "gldzm" in chosen:
         results.update(
-            calculate_gldzm_features(
-                disc_c,
-                roi,
-                n_bins,
-                gldzm_matrix=texture_matrices["gldzm"],
-                distance_mask=(distmask_c if distmask_c is not None else mask_c),
-            )
+            _glszm_features_from_cells(texture_matrices["glszm_cells"], roi, n_voxels=n_voxels)
         )
+    if "gldzm" in chosen:
+        results.update(_gldzm_features(texture_matrices["gldzm"], roi, n_voxels=n_voxels))
     if "ngtdm" in chosen:
         results.update(
             calculate_ngtdm_features(
@@ -2910,7 +3608,5 @@ def calculate_all_texture_features(
             )
         )
     if "ngldm" in chosen:
-        results.update(
-            calculate_ngldm_features(disc_c, roi, n_bins, ngldm_matrix=texture_matrices["ngldm"])
-        )
+        results.update(_ngldm_features(texture_matrices["ngldm"], roi, n_voxels=n_voxels))
     return results

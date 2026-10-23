@@ -32,7 +32,6 @@ import scipy.fft
 from numba import get_num_threads, jit, prange
 from numpy import typing as npt
 
-from .. import threads
 from ..threads import _memory_budget
 from ._utils import PRANGE_ONLY, compute_nonzero_bbox, serial_twin, sized
 
@@ -50,17 +49,23 @@ def _sum_sq_centered(values: npt.NDArray[np.floating[Any]], mean_val: float) -> 
     return total
 
 
-@jit(nopython=True, cache=True)  # type: ignore
-def _sum_of_squares(values: npt.NDArray[np.floating[Any]]) -> float:
-    """The sum of the squares of `values` in a fixed order: blocks of 4096 values, each
-    summed in eight accumulators (no fastmath, so the order is the source order). The
-    same values give the same bits in every buffer; np.dot (BLAS) blocks by the address
-    of the buffer and gives values one ulp apart."""
+# The block of the energy sum (see _sum_of_squares_numba): the bits of the sum depend on it.
+_SQUARES_BLOCK = 4096
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _sum_of_squares_numba(values: npt.NDArray[np.floating[Any]]) -> float:
+    """The sum of the squares of `values` in a fixed order: blocks of _SQUARES_BLOCK values,
+    each summed in eight accumulators (no fastmath, so the order is the source order), then
+    the block sums in block order. The threads share the blocks, so the bits do not depend
+    on the number of threads or on the buffer; np.dot (BLAS) blocks by the address of the
+    buffer and gives values one ulp apart."""
     n = values.shape[0]
-    total = 0.0
-    start = 0
-    while start < n:
-        stop = min(start + 4096, n)
+    sums = np.empty((n + _SQUARES_BLOCK - 1) // _SQUARES_BLOCK)
+    for b in prange(sums.shape[0]):
+        start = b * _SQUARES_BLOCK
+        count = min(_SQUARES_BLOCK, n - start)
+        block_values = values[start : start + count]
         a0 = 0.0
         a1 = 0.0
         a2 = 0.0
@@ -69,24 +74,31 @@ def _sum_of_squares(values: npt.NDArray[np.floating[Any]]) -> float:
         a5 = 0.0
         a6 = 0.0
         a7 = 0.0
-        i = start
-        while i + 8 <= stop:
-            a0 += values[i] * values[i]
-            a1 += values[i + 1] * values[i + 1]
-            a2 += values[i + 2] * values[i + 2]
-            a3 += values[i + 3] * values[i + 3]
-            a4 += values[i + 4] * values[i + 4]
-            a5 += values[i + 5] * values[i + 5]
-            a6 += values[i + 6] * values[i + 6]
-            a7 += values[i + 7] * values[i + 7]
-            i += 8
+        full = count // 8
+        for j in range(full):
+            k = 8 * j
+            a0 += block_values[k] * block_values[k]
+            a1 += block_values[k + 1] * block_values[k + 1]
+            a2 += block_values[k + 2] * block_values[k + 2]
+            a3 += block_values[k + 3] * block_values[k + 3]
+            a4 += block_values[k + 4] * block_values[k + 4]
+            a5 += block_values[k + 5] * block_values[k + 5]
+            a6 += block_values[k + 6] * block_values[k + 6]
+            a7 += block_values[k + 7] * block_values[k + 7]
         block = ((a0 + a1) + (a2 + a3)) + ((a4 + a5) + (a6 + a7))
-        while i < stop:
-            block += values[i] * values[i]
-            i += 1
-        total += block
-        start = stop
+        for k in range(8 * full, count):
+            block += block_values[k] * block_values[k]
+        sums[b] = block
+    total = 0.0
+    for b in range(sums.shape[0]):
+        total += sums[b]
     return total
+
+
+# The serial twin of the energy sum (see serial_twin). Measured on 10 threads: below this
+# many values, starting the threads (55 to 75 us) costs more than the sum.
+_sum_of_squares_numba_serial = serial_twin(_sum_of_squares_numba)
+_SQUARES_PARALLEL_MIN = 1 << 20
 
 
 @jit(nopython=True, fastmath=True, cache=True)  # type: ignore
@@ -152,6 +164,132 @@ def _robust_mean_abs_dev(
             dev_total += abs(v - mean_val)
 
     return dev_total / count
+
+
+# From this many values on, the moments and the deviations of the first-order features sum
+# in _FIRST_ORDER_PARTS fixed parts of the values, in threads (measured on 10 threads: 643k
+# values x0.86 of the serial kernels, 2.3 M values x0.68 of the first-order features). The
+# parts do not depend on the number of threads, so the values do not depend on it. Below
+# the gate, the serial kernels give the values of 0.8.0.
+_PARALLEL_FIRST_ORDER_MIN = 1 << 19
+_FIRST_ORDER_PARTS = 64
+# Fast math without the contraction of a multiply and an add: the threaded kernels and their
+# serial twins then compile the same sums (with contraction, a twin can give other bits)
+_FAST_NO_CONTRACT = {"nnan", "ninf", "nsz", "arcp", "reassoc", "afn"}
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, fastmath=_FAST_NO_CONTRACT, cache=True)  # type: ignore
+def _first_order_sums_numba(
+    values: npt.NDArray[np.float64],
+    mean: float,
+    median: float,
+    lower: float,
+    upper: float,
+    sums: npt.NDArray[np.float64],
+    counts: npt.NDArray[np.int64],
+) -> None:
+    """The sums of one pass over each of sums.shape[0] parts of `values`, in threads: for
+    part c, sums[c] = the sums of d^2, d^3, d^4 and |d| (d = v - mean), the sum of
+    |v - median|, the sum of the values in [lower, upper]; counts[c] = the count of these
+    values. The loop reads a slice of the part (this form vectorizes)."""
+    n = values.size
+    parts = sums.shape[0]
+    for c in prange(parts):
+        part = values[c * n // parts : (c + 1) * n // parts]
+        m2 = 0.0
+        m3 = 0.0
+        m4 = 0.0
+        mad = 0.0
+        med = 0.0
+        total = 0.0
+        count = 0
+        for i in range(part.shape[0]):
+            v = part[i]
+            d = v - mean
+            d2 = d * d
+            m2 += d2
+            m3 += d2 * d
+            m4 += d2 * d2
+            mad += abs(d)
+            med += abs(v - median)
+            if v >= lower and v <= upper:
+                total += v
+                count += 1
+        sums[c, 0] = m2
+        sums[c, 1] = m3
+        sums[c, 2] = m4
+        sums[c, 3] = mad
+        sums[c, 4] = med
+        sums[c, 5] = total
+        counts[c] = count
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, fastmath=_FAST_NO_CONTRACT, cache=True)  # type: ignore
+def _robust_sums_numba(
+    values: npt.NDArray[np.float64],
+    lower: float,
+    upper: float,
+    center: float,
+    sums: npt.NDArray[np.float64],
+) -> None:
+    """sums[c] = the sum of |v - center| of the values in [lower, upper] of part c of
+    `values` (the parts of _first_order_sums_numba), in threads."""
+    n = values.size
+    parts = sums.shape[0]
+    for c in prange(parts):
+        part = values[c * n // parts : (c + 1) * n // parts]
+        dev = 0.0
+        for i in range(part.shape[0]):
+            v = part[i]
+            if v >= lower and v <= upper:
+                dev += abs(v - center)
+        sums[c] = dev
+
+
+_first_order_sums_numba_serial = serial_twin(_first_order_sums_numba)
+_robust_sums_numba_serial = serial_twin(_robust_sums_numba)
+
+
+def _moments_and_deviations(
+    values: npt.NDArray[np.floating[Any]], mean: float, median: float, lower: float, upper: float
+) -> tuple[float, float, float, float, float, float]:
+    """The 2nd, 3rd and 4th central moments, the mean absolute deviation, the robust mean
+    absolute deviation (the values in [lower, upper]) and the median absolute deviation of
+    the C-order float64 `values`. From _PARALLEL_FIRST_ORDER_MIN values on, two passes in
+    threads (see _first_order_sums_numba); the parts add in their order."""
+    n = values.size
+    if n < _PARALLEL_FIRST_ORDER_MIN:
+        m2, m3, m4 = _central_moments_2_3_4(values, mean)
+        return (
+            m2,
+            m3,
+            m4,
+            _mean_abs_dev(values, mean),
+            _robust_mean_abs_dev(values, lower, upper),
+            _mean_abs_dev(values, median),
+        )
+    sums = np.empty((_FIRST_ORDER_PARTS, 6))
+    counts = np.empty(_FIRST_ORDER_PARTS, dtype=np.int64)
+    threaded = get_num_threads() > 1
+    sums_kernel = _first_order_sums_numba if threaded else _first_order_sums_numba_serial
+    sums_kernel(values, mean, median, lower, upper, sums, counts)
+    total = np.cumsum(sums, axis=0)[-1]  # cumsum adds in order: a fixed order
+    count = int(counts.sum())
+    robust = 0.0
+    if count > 0:
+        dev = np.empty(_FIRST_ORDER_PARTS)
+        robust_kernel = _robust_sums_numba if threaded else _robust_sums_numba_serial
+        robust_kernel(values, lower, upper, float(total[5] / count), dev)
+        robust = float(np.cumsum(dev)[-1] / count)
+    inv_n = 1.0 / n
+    return (
+        float(total[0] * inv_n),
+        float(total[1] * inv_n),
+        float(total[2] * inv_n),
+        float(total[3] / n),
+        robust,
+        float(total[4] / n),
+    )
 
 
 @jit(nopython=True, parallel=PRANGE_ONLY, fastmath=True, cache=True)  # type: ignore
@@ -1521,8 +1659,9 @@ def calculate_intensity_features(
     if len(values) == 0:
         return {}
     # float32 values (for example filter responses) would sum in float32: with its rounding
-    # errors, and in an order that depends on the numpy version.
-    values = np.asarray(values, dtype=np.float64)
+    # errors, and in an order that depends on the numpy version. A C-order copy of a strided
+    # array: the sums then do not depend on the memory layout.
+    values = np.ascontiguousarray(values, dtype=np.float64)
 
     features: dict[str, float] = {}
 
@@ -1530,17 +1669,32 @@ def calculate_intensity_features(
     mean_val = np.mean(values)
     features["mean_intensity_Q4LE"] = float(mean_val)
 
+    # IBSI percentiles use the nearest-rank convention (the smallest value with at
+    # least p% of the data at or below it), i.e. numpy's 'inverted_cdf'. This
+    # reproduces the IBSI benchmark (e.g. P90 = 4), whereas linear interpolation
+    # would give an interpolated 4.2. The median (Y12H) is the conventional
+    # sample median. One partition gives both.
+    min_val = np.min(values)
+    max_val = np.max(values)
+    p10, p25, p75, p90, median_val = _order_statistics(values, (min_val, max_val))
+
     # 4.1.2 Intensity variance (ECT3): the second central moment. The pass that gives it
-    # also gives the third and the fourth, so np.var does not read the values again.
-    m2, m3, m4 = _central_moments_2_3_4(values, float(mean_val))
+    # also gives the third and the fourth moments and the sums of the three deviations
+    # (4.1.12 to 4.1.14), so np.var does not read the values again. Equal finite values
+    # have no spread: IBSI gives 0 for all six, where the sums give rounding noise (a
+    # variance of about 1e-34 for 0.1 values, whose mean is not exact).
+    if min_val == max_val and math.isfinite(min_val):
+        m2 = m3 = m4 = mad = robust_mad = median_ad = 0.0
+    else:
+        m2, m3, m4, mad, robust_mad, median_ad = _moments_and_deviations(
+            values, float(mean_val), float(median_val), float(p10), float(p90)
+        )
     var_val = m2
     features["intensity_variance_ECT3"] = float(var_val)
 
     # 4.1.3 Intensity skewness (KE2A) and 4.1.4 kurtosis (IPH6). IBSI defines both as 0
-    # when the variance is 0. Equal values can give a variance of about 1e-34 (a mean of
-    # 0.1 values is not exact), so equal values count as 0 variance here.
-    min_val = np.min(values)
-    max_val = np.max(values)
+    # when the variance is 0. Equal values count as 0 variance here, also infinite ones
+    # (their variance is NaN).
     if var_val == 0.0 or min_val == max_val:
         features["intensity_skewness_KE2A"] = 0.0
         features["intensity_kurtosis_IPH6"] = 0.0
@@ -1552,13 +1706,6 @@ def calculate_intensity_features(
         else:  # pragma: no cover  # unreachable: denom==0 iff var_val==0, caught above
             features["intensity_skewness_KE2A"] = np.nan
             features["intensity_kurtosis_IPH6"] = np.nan
-
-    # IBSI percentiles use the nearest-rank convention (the smallest value with at
-    # least p% of the data at or below it), i.e. numpy's 'inverted_cdf'. This
-    # reproduces the IBSI benchmark (e.g. P90 = 4), whereas linear interpolation
-    # would give an interpolated 4.2. The median (Y12H) is the conventional
-    # sample median. One partition gives both.
-    p10, p25, p75, p90, median_val = _order_statistics(values, (min_val, max_val))
 
     # 4.1.5 Median intensity (Y12H)
     features["median_intensity_Y12H"] = float(median_val)
@@ -1579,19 +1726,13 @@ def calculate_intensity_features(
     features["intensity_range_2OJQ"] = float(max_val - min_val)
 
     # 4.1.12 Mean absolute deviation (4FUA)
-    features["intensity_mean_absolute_deviation_4FUA"] = float(
-        _mean_abs_dev(values, float(mean_val))
-    )
+    features["intensity_mean_absolute_deviation_4FUA"] = float(mad)
 
     # 4.1.13 Robust mean absolute deviation (1128)
-    features["intensity_robust_mean_absolute_deviation_1128"] = float(
-        _robust_mean_abs_dev(values, float(p10), float(p90))
-    )
+    features["intensity_robust_mean_absolute_deviation_1128"] = float(robust_mad)
 
     # 4.1.14 Median absolute deviation (N72L)
-    features["intensity_median_absolute_deviation_N72L"] = float(
-        _mean_abs_dev(values, float(median_val))
-    )
+    features["intensity_median_absolute_deviation_N72L"] = float(median_ad)
 
     # 4.1.15 Coefficient of variation (7TET)
     if mean_val != 0:
@@ -1608,7 +1749,10 @@ def calculate_intensity_features(
         features["intensity_quartile_coefficient_of_dispersion_9S40"] = np.nan
 
     # 4.1.17 Energy (N8CA)
-    energy = float(_sum_of_squares(values))  # a fixed order: the same bits in every buffer
+    squares = sized(
+        _sum_of_squares_numba, _sum_of_squares_numba_serial, values.shape[0], _SQUARES_PARALLEL_MIN
+    )
+    energy = float(squares(values))  # a fixed order: the same bits in every buffer
     features["intensity_energy_N8CA"] = energy
 
     # 4.1.18 Root mean square (5ZWQ)
@@ -2208,14 +2352,19 @@ _SLAB_BYTES_PER_POINT = 64
 # 64,000 points 0.81 ms on 1, 0.65 ms on 10). The slab sums with s slabs make 2 s (s + 1)
 # FFTs of the slab grid, each 0.27 of the time per point of the FFT sums (measured on 10
 # threads: 0.78 to 0.83 ns per point and FFT, against 3.2 to 3.4 ns). The choice of the
-# method uses the thread count of the import, so it does not change with set_num_threads,
-# with _make_room or with the share of a run_batch worker.
+# method uses the fixed count _PLAN_THREADS, so it does not change with the computer, with
+# set_num_threads, with _make_room or with the share of a run_batch worker.
 _PAIR_SECONDS = 1.05e-9
 _PAIR_START_SECONDS = (45e-6, 2.5e-6)
 _FFT_SECONDS_PER_POINT = 12.5e-9
 _FFT_SERIAL_PART = (0.3, 0.15)
 _FFT_START_SECONDS = (47e-6, 38e-6)
 _SLAB_FFT_UNITS = 0.27
+# The thread count of the time model (see _spatial_plan): fixed, so the method and thus the
+# values do not depend on the computer or on its threads. Measured worst cases against the
+# faster method: 1 thread x2.43 (a compact ROI of 1,500 voxels, +0.7 ms), 4 threads x1.00,
+# 10 threads x1.57 (5,000 scattered voxels, +1.0 ms).
+_PLAN_THREADS = 4
 
 
 def _fft_seconds(points: int, units: float, workers: int) -> float:
@@ -2255,7 +2404,7 @@ def _spatial_plan(n: int, box: tuple[int, ...]) -> tuple[str, int, int, tuple[in
     loop runs with a warning that gives its expected time.
     """
     budget = _memory_budget()
-    model_threads = threads._default  # the thread count of the import (see _PAIR_SECONDS)
+    model_threads = _PLAN_THREADS  # a fixed count (see _PLAN_THREADS)
     pairs = _pair_seconds(n, model_threads)
     fshape = tuple(scipy.fft.next_fast_len(2 * k - 1, real=True) for k in box)
     grid = math.prod(fshape)

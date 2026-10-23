@@ -889,26 +889,22 @@ def _scan_dicom_files(
     Returns:
         List of paths to DICOM files.
     """
-    all_candidates: list[Path] = []
-
-    # Collect all candidate files
+    # The files, each once: a file of overlapping folders (a folder and its subfolder), or
+    # a link to a file and that file, counts once, with the first path that found it. The
+    # key of a file is its real path: the real path of its folder and its name, or the
+    # os.path.realpath of a link.
+    unique: dict[str, Path] = {}
     for path in paths:
-        if not path.exists():
-            continue
         if path.is_file():
-            all_candidates.append(path)
+            unique.setdefault(os.path.realpath(path), path)
         elif path.is_dir():
-            if recursive:
-                all_candidates.extend(path.rglob("*"))
-            else:
-                all_candidates.extend(path.iterdir())
-
-    # Filter to files only. A file of overlapping folders (a folder and its subfolder)
-    # counts once, with the first path that found it.
-    unique: dict[Path, Path] = {}
-    for candidate in all_candidates:
-        if candidate.is_file():
-            unique.setdefault(candidate.resolve(), candidate)
+            for entry, real_folder in _walk_files(str(path), recursive):
+                if entry.is_symlink():
+                    key = os.path.realpath(entry.path)
+                else:
+                    key = os.path.join(real_folder, entry.name)
+                if key not in unique:
+                    unique[key] = Path(entry.path)
     file_candidates = list(unique.values())
 
     if not file_candidates:
@@ -930,6 +926,57 @@ def _scan_dicom_files(
             continue
 
     return dicom_files
+
+
+def _walk_files(root: str, recursive: bool) -> list[tuple[os.DirEntry[str], str]]:
+    """The file entries of a folder and its subfolders, each with the real path of its folder.
+
+    os.scandir gives the type of an entry without a stat call. As Path.rglob("*") of Python
+    3.12, the walk does not follow links to folders and skips a folder that it cannot read.
+    The order is that of rglob in Python 3.12: the files of `root`, then, for each folder that
+    the walk reaches (depth first), the files of all its subfolders.
+
+    Args:
+        root: The folder.
+        recursive: Whether to walk the subfolders.
+
+    Returns:
+        (entry, real path of its folder) of each file.
+    """
+    real = {root: os.path.realpath(root)}
+    folders = [root]
+    files: dict[str, list[os.DirEntry[str]]] = {}
+    stack = [root]
+    while stack:
+        folder = stack.pop()
+        try:
+            with os.scandir(folder) as listing:
+                entries = list(listing)
+        except OSError:
+            # As Path.rglob, the walk skips a folder that it cannot read; as Path.iterdir,
+            # the scan of one folder raises the error
+            if not recursive:
+                raise
+            entries = []
+        found: list[os.DirEntry[str]] = []
+        subfolders: list[os.DirEntry[str]] = []
+        for entry in entries:
+            if entry.is_dir(follow_symlinks=False):
+                subfolders.append(entry)
+            elif entry.is_file():
+                found.append(entry)
+        files[folder] = found
+        if recursive:
+            for sub in subfolders:
+                # A junction (Windows) is a link: its real path is not below its folder
+                real[sub.path] = (
+                    os.path.realpath(sub.path)
+                    if sub.is_junction()
+                    else os.path.join(real[folder], sub.name)
+                )
+            folders.extend(sub.path for sub in subfolders)
+            stack.extend(sub.path for sub in reversed(subfolders))
+    return [(entry, real[folder]) for folder in folders for entry in files[folder]]
 
 
 def _extract_metadata_wrapper(
@@ -1113,13 +1160,15 @@ def _extract_single_file_metadata(
     # Calculate projection score for spatial sorting
     if metadata["ImagePositionPatient"] and metadata["ImageOrientationPatient"]:
         try:
-            iop = metadata["ImageOrientationPatient"]
-            row_cosines = np.array(iop[:3])
-            col_cosines = np.array(iop[3:])
-            slice_normal = np.cross(row_cosines, col_cosines)
-            position = np.array(metadata["ImagePositionPatient"])
-            metadata["ProjectionScore"] = float(np.dot(position, slice_normal))
-        except Exception as e:
+            # The dot product of the position and the slice normal (row x column), in
+            # Python: the roundings of np.cross and np.dot, without their call cost. The
+            # sum of np.dot starts at 0.0, so a zero score is +0.0: "+ 0.0" does the same.
+            r0, r1, r2, c0, c1, c2 = metadata["ImageOrientationPatient"]
+            p0, p1, p2 = metadata["ImagePositionPatient"]
+            metadata["ProjectionScore"] = (
+                p0 * (r1 * c2 - r2 * c1) + p1 * (r2 * c0 - r0 * c2) + p2 * (r0 * c1 - r1 * c0)
+            ) + 0.0
+        except ValueError as e:  # an orientation of other than 6 values
             logger.debug("Failed to compute projection score: %s", e)
             metadata["ProjectionScore"] = None
     else:
@@ -1152,14 +1201,14 @@ def _extract_single_file_metadata(
     # and sequences are stored as their size: as text, their bytes take 3 times their
     # size in every table and pool message.
     if extract_private_tags:
-        for elem in dcm:
-            if elem.tag.is_private:
-                try:
-                    key = f"Private_{elem.tag.group:04X}_{elem.tag.element:04X}"
-                    metadata[key] = _private_value(elem)
-                except Exception as e:
-                    logger.debug("Failed to extract private tag %s: %s", elem.tag, e)
-                    continue
+        # dcm[private] converts only the private elements: a loop over the dataset converts
+        # every element of the header. sorted() keeps the tag order of that loop.
+        for private in sorted(tag for tag in dcm.keys() if tag.is_private):
+            try:
+                key = f"Private_{private.group:04X}_{private.element:04X}"
+                metadata[key] = _private_value(dcm[private])
+            except Exception as e:
+                logger.debug("Failed to extract private tag %s: %s", private, e)
 
     return metadata
 

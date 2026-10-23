@@ -16,8 +16,9 @@ print(series.head())
 ```
 
 - **Workers**: each worker process imports Pictologics before it reads a file, so workers pay off only for large scans. With `num_workers=None`, `from_folders()` reads a scan of fewer than 6,000 DICOM files (`POOL_MIN_FILES`) in the calling process, which is faster. A larger scan starts at most 8 workers (`MAX_WORKERS`). Every scan starts at most one worker per 1,000 DICOM files (`FILES_PER_WORKER`). `show_progress=False` turns the progress bar off.
-- **Private tags**: `extract_private_tags=True` (default) keeps the vendor tags. A binary private value (for example a 60 KB CSA header) or a private sequence is stored as its size, such as `<OB, 60000 bytes>`.
+- **Private tags**: `extract_private_tags=True` (default) keeps the vendor tags. A binary private value (for example a 60 KB CSA header) or a private sequence is stored as its size, such as `<OB, 60000 bytes>`. A private element that pydicom cannot read is left out.
 - **Skipped files**: DICOMDIR files are not patient data, so they are skipped.
+- **Links**: the scan does not follow links to folders. A link to a file and the file count as one file.
 - **Completeness**: the series table tells whether a series is complete (`IsComplete`), whether its slices have gaps (`HasGaps`), and its slice spacing (`SpacingMM`).
 - **Scouts**: the database lists every image, also a scout that `load_image()` leaves out of a series.
 
@@ -82,7 +83,7 @@ save_slices("qc/", image=image, mask=mask, format="tiff", dpi=300)     # png (de
 - **Gray scale**: without `window_center` and `window_width`, all slices share one gray scale: the minimum and the maximum of the volume (without NaN values). For CT, give a window: soft tissue 40 / 400, bone 400 / 1800, lung -600 / 1500.
 - **Colormaps**: `tab20` (default, 20 colours), `tab10`, `Set1`, `Set2`, `Paired`.
 - **Slices**: a single slice index outside the image raises a `ValueError`; in a list, indices outside the image are skipped.
-- **Files**: `save_slices` writes the slices in threads (numba's thread count), as RGB files (the overlay is mixed into the colours). Each file has one pixel per voxel. `dpi` (default 300) is only the resolution tag in the file: viewers and printers use it to scale the image. PNG files use compression level 3, 2 times faster than the default level 6, for files 4 % larger.
+- **Files**: `save_slices` writes the slices in threads (numba's thread count), as RGB files (the overlay is mixed into the colours). For a volume of 8.4 M voxels or more, it also finds the gray range in threads. Each file has one pixel per voxel. `dpi` (default 300) is only the resolution tag in the file: viewers and printers use it to scale the image. PNG files use compression level 3, 2 times faster than the default level 6, for files 4 % larger.
 
 ### Quality Images of Many Cases
 

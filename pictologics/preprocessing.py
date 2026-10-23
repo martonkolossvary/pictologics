@@ -26,9 +26,16 @@ from typing import Any, Literal, Optional, cast
 import numpy as np
 from numba import jit, prange
 from numpy import typing as npt
-from scipy.ndimage import affine_transform, distance_transform_edt, generate_binary_structure, label
+from scipy.ndimage import affine_transform, label
 
-from .features._utils import PRANGE_ONLY, compute_nonzero_bbox, roi_min_max, serial_twin, sized
+from .features._utils import (
+    _SAME_SIZE,
+    PRANGE_ONLY,
+    compute_nonzero_bbox,
+    roi_min_max,
+    serial_twin,
+    sized,
+)
 from .filters._passes import fma as _fma
 from .loader import Image, _direction_matrix, _row_order, _validate_geometry
 from .threads import get_num_threads
@@ -56,17 +63,14 @@ COMMON_SENTINEL_VALUES: tuple[float, ...] = (
 
 # Below this size the numba parallel-launch overhead exceeds the scan itself;
 # the numpy fallback paths are kept for small arrays (same convention as
-# features._utils). filter_outliers dispatches on it, and so do the kernels below
+# features._utils). filter_outliers runs its parallel kernels from this size on and
+# makes the new mask with a serial kernel below it; the kernels below also use it
 # for arrays that share no memory order (they need a copy); both paths are
-# bit-identical, so the switch is purely a performance decision.
+# bit-identical, so the switch is purely a performance decision. round_intensities
+# also uses it when more than one thread runs: with new memory pages, the kernel is
+# faster from about 0.5 million voxels; with pages in the cache, below 1.5 million.
 _KERNEL_MIN_SIZE = 1 << 20
 
-# Measured crossovers (14-core M4 Pro), in output voxels: below these sizes the
-# resample kernels' start-up cost (about 0.1 ms) is more than scipy's whole run.
-# Both give the same output, so the switch is purely a performance decision.
-_NEAREST_KERNEL_MIN_SIZE = 25_000
-_LINEAR_KERNEL_MIN_SIZE = 4_500
-_MASKED_KERNEL_MIN_SIZE = 1_800
 # Output voxels from which the resample kernels run in parallel; below, their serial twins
 # (measured on 10 threads: starting the threads costs about 70 us).
 _NEAREST_PARALLEL_MIN = 160_000
@@ -81,10 +85,18 @@ _SPLINE_POLE = -0.267949192431122706472553658494127633
 _CUBIC_PARALLEL_MIN = 5_000
 _PREFILTER_PARALLEL_MIN = 1 << 17
 
-# Measured crossovers (14-core M4 Pro), in voxels: below these sizes the kernels'
+# Measured crossover (14-core M4 Pro), in voxels: below this size the sentinel kernel's
 # start-up cost (0.07-0.2 ms) is more than the numpy code's whole run.
-_RESEGMENT_KERNEL_MIN_SIZE = 80_000
 _SENTINEL_KERNEL_MIN_SIZE = 200_000
+# Voxels from which the != kernel of a sentinel mask runs in parallel; below, its serial
+# twin (measured on 10 threads; the serial twin is faster than numpy at every size)
+_NOT_EQUAL_PARALLEL_MIN = 1_500_000
+# The parallel gather of ROI values (_threaded_roi_values) needs this many threads. With fewer,
+# numpy's gather is faster (measured on 1 M voxels: x1.9 at 1 thread, x1.1 at 2, x0.85 at 4).
+_GATHER_MIN_THREADS = 4
+# Voxels from which the resegment kernel runs in parallel; below, its serial twin
+# (measured on 10 threads: the two take the same time at 0.8 to 1.2 million voxels)
+_RESEGMENT_PARALLEL_MIN = 1 << 20
 
 
 def _shared_order(*arrays: npt.NDArray[Any]) -> Optional[Literal["C", "F"]]:
@@ -101,9 +113,10 @@ def _shared_order(*arrays: npt.NDArray[Any]) -> Optional[Literal["C", "F"]]:
 # Numba kernels
 # ---------------------------------------------------------------------------
 # Single-pass parallel replacements for the memory-bound numpy chains below.
-# The discretise/resegment kernels apply the exact same per-element operations
-# (in the same order) as the numpy code they shadow, so their output is
-# bit-identical; uncommon dtypes fall back to numpy. All signatures used by
+# The discretise kernels apply the exact same per-element operations (in the
+# same order) as the numpy code they shadow, and the resegment kernel keeps or
+# zeroes the bits of each mask value, so their output is bit-identical;
+# uncommon dtypes fall back to numpy. All signatures used by
 # the dispatch code are compiled eagerly in warmup.warmup_jit().
 
 
@@ -118,9 +131,12 @@ def _nonfinite_blocks_numba(flat: npt.NDArray[np.float64], found: npt.NDArray[np
                 break
 
 
-# From this many values on, the finite check of a float64 array runs in threads. Measured
-# for roi_min_max: below ~2^19 values, starting the threads costs more than the pass.
-_FINITE_PARALLEL_MIN = 1 << 19
+# From this many values on, with 4 threads or more, the finite check of a float64 array runs
+# in threads (measured on the M4 Pro). One thread of the kernel reads a value in about 3 times
+# the time of np.sum, and the start of the threads costs about 70 us. So np.sum is faster below
+# 2^21 values on 10 threads, and at all sizes on 1 to 3 threads.
+_FINITE_PARALLEL_MIN = 1 << 21
+_FINITE_PARALLEL_THREADS = 4
 
 # The result of _all_finite for each array that lives (key: the id of the array). A weak
 # finalizer removes the result when the array dies, so an id names one array.
@@ -129,9 +145,9 @@ _FINITE_RESULTS: dict[int, bool] = {}
 
 def _all_finite(array: npt.NDArray[Any]) -> bool:
     """Whether every value of a float array is finite: one parallel pass for a large
-    contiguous float64 array, else numpy (the sum of an array with a NaN or an infinite
-    value is not finite; a sum too large for float64 only costs the caller one more
-    check).
+    contiguous float64 array on 4 threads or more, else numpy (the sum of an array with a
+    NaN or an infinite value is not finite; a sum too large for float64 only costs the
+    caller one more check).
 
     The result stays while the array lives, so the next run on the same image does not read
     it again. This memo assumes that the caller does not change the array in place between
@@ -140,13 +156,19 @@ def _all_finite(array: npt.NDArray[Any]) -> bool:
     if key in _FINITE_RESULTS:
         return _FINITE_RESULTS[key]
     contiguous = array.flags.c_contiguous or array.flags.f_contiguous
-    if array.dtype == np.float64 and array.size >= _FINITE_PARALLEL_MIN and contiguous:
+    if (
+        array.dtype == np.float64
+        and array.size >= _FINITE_PARALLEL_MIN
+        and contiguous
+        and get_num_threads() >= _FINITE_PARALLEL_THREADS
+    ):
         flat = array.ravel(order="K")
         found = np.zeros((flat.size + 65535) // 65536, dtype=np.uint8)
         _nonfinite_blocks_numba(flat, found)
         finite = not found.any()
     else:
-        finite = math.isfinite(float(np.sum(array)))
+        with np.errstate(over="ignore", invalid="ignore"):  # inf + -inf, or a sum too large
+            finite = math.isfinite(float(np.sum(array)))
     _FINITE_RESULTS[key] = finite
     weakref.finalize(array, _FINITE_RESULTS.pop, key, None)
     return finite
@@ -247,6 +269,22 @@ _DISCRETISE_PARALLEL_MIN = 160_000
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _normalise_map_numba(
+    flat: npt.NDArray[np.float64], center: float, scale: float, out: npt.NDArray[np.float64]
+) -> None:
+    """out = (flat - center) / scale: the subtraction and the division of np.subtract and
+    np.divide in one pass, so each value is the same."""
+    for i in prange(flat.size):
+        out[i] = (flat[i] - center) / scale
+
+
+_normalise_map_numba_serial = serial_twin(_normalise_map_numba)
+# Voxels from which the normalise map runs in parallel; below, its serial twin (measured on
+# 10 threads: the two take the same time at about 450,000 voxels)
+_NORMALISE_PARALLEL_MIN = 1 << 19
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
 def _resegment_numba(
     img_flat: npt.NDArray[np.float64],
     mask_flat: npt.NDArray[Any],
@@ -257,14 +295,24 @@ def _resegment_numba(
     """Copy mask, zeroing voxels whose intensity lies outside [range_min, range_max].
 
     A NaN intensity is in no range, so its voxel leaves the mask, as in the numpy
-    fallback. Missing bounds are passed as +/-inf.
+    fallback. Missing bounds are passed as +/-inf. The mask and out are the integer
+    view of the mask (see resegment_mask): a multiply by 1 or 0 keeps the bits or
+    gives 0. The compiler vectorises the multiply; it cannot vectorise a branch.
     """
     for i in prange(img_flat.size):
         v = img_flat[i]
-        if range_min <= v <= range_max:
-            out[i] = mask_flat[i]
-        else:
-            out[i] = 0
+        out[i] = mask_flat[i] * ((v >= range_min) & (v <= range_max))
+
+
+_resegment_numba_serial = serial_twin(_resegment_numba)
+
+
+@jit(nopython=True, parallel=True, cache=True)  # type: ignore
+def _rint_numba(flat: npt.NDArray[np.float64], out: npt.NDArray[np.float64]) -> None:
+    """out = np.round(flat): the nearest whole number, a half to the even number, in
+    threads. np.rint gives the same bits as np.round (NaN, infinite values and -0.0 stay)."""
+    for i in prange(flat.size):
+        out[i] = np.rint(flat[i])
 
 
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
@@ -342,6 +390,40 @@ def _linear_axis_numba(
     return lo, hi, w0, w1
 
 
+@jit(nopython=True, inline="always", cache=True)  # type: ignore
+def _trilinear_value(
+    src: npt.NDArray[Any],
+    z0: int,
+    z1: int,
+    wz0: float,
+    wz1: float,
+    y0: int,
+    y1: int,
+    wy0: float,
+    wy1: float,
+    x0: int,
+    x1: int,
+    wx0: float,
+    wx1: float,
+) -> Any:
+    """The trilinear value of one output voxel from its 8 support voxels and weights.
+
+    scipy starts the sum at 0.0 (so -0.0 terms give +0.0) and multiplies each coefficient
+    by the per-axis weights sequentially (value * wz * wy * wx, left-associated); keep that
+    exact order so the result is bit-identical.
+    """
+    acc = 0.0
+    acc += src[z0, y0, x0] * wz0 * wy0 * wx0
+    acc += src[z0, y0, x1] * wz0 * wy0 * wx1
+    acc += src[z0, y1, x0] * wz0 * wy1 * wx0
+    acc += src[z0, y1, x1] * wz0 * wy1 * wx1
+    acc += src[z1, y0, x0] * wz1 * wy0 * wx0
+    acc += src[z1, y0, x1] * wz1 * wy0 * wx1
+    acc += src[z1, y1, x0] * wz1 * wy1 * wx0
+    acc += src[z1, y1, x1] * wz1 * wy1 * wx1
+    return acc
+
+
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
 def _resample_trilinear_numba(
     src: npt.NDArray[Any],
@@ -350,16 +432,19 @@ def _resample_trilinear_numba(
     start: npt.NDArray[np.int64],
     unsigned_out: bool,
     threshold: float,
+    rounded: bool,
     out: npt.NDArray[Any],
 ) -> None:
     """Trilinear resampling for a diagonal transform, 'nearest' boundary.
 
     Replicates scipy's zoom_shift path bit for bit: the per-axis indices and weights
-    of `_linear_axis_numba`, and the 8 support terms added in scipy's point order,
-    each with left-to-right weight products. A `threshold` (not NaN) stores 1 where
-    the value rounds to 1 at it, else 0 (see `_mask_threshold`). Else, with `unsigned_out`,
-    the value is stored as scipy stores it in an unsigned integer output: t + 0.5 for
-    t > 0, else 0, truncated.
+    of `_linear_axis_numba`, and the 8 support terms added in scipy's point order
+    (`_trilinear_value`). A `threshold` (not NaN) stores 1 where the value rounds to 1
+    at it, else 0 (see `_mask_threshold`). Else, with `unsigned_out`, the value is
+    stored as scipy stores it in an unsigned integer output: t + 0.5 for t > 0, else 0,
+    truncated. Else, with `rounded`, the value is rounded to the nearest integer (half
+    to even: the bits of np.round). Each row chooses its store rule once, so the loop
+    over the row has no branch on the rule.
     """
     nz, ny, nx = src.shape
     oz, oy, ox = out.shape
@@ -370,28 +455,30 @@ def _resample_trilinear_numba(
         z0, z1, wz0, wz1 = zlo[k], zhi[k], zw0[k], zw1[k]
         for j in range(oy):
             y0, y1, wy0, wy1 = ylo[j], yhi[j], yw0[j], yw1[j]
-            for i in range(ox):
-                x0, x1, wx0, wx1 = xlo[i], xhi[i], xw0[i], xw1[i]
-
-                # scipy starts the sum at 0.0 (so -0.0 terms give +0.0) and
-                # multiplies each coefficient by the per-axis weights
-                # sequentially (value * wz * wy * wx, left-associated); keep
-                # that exact order so the result is bit-identical.
-                acc = 0.0
-                acc += src[z0, y0, x0] * wz0 * wy0 * wx0
-                acc += src[z0, y0, x1] * wz0 * wy0 * wx1
-                acc += src[z0, y1, x0] * wz0 * wy1 * wx0
-                acc += src[z0, y1, x1] * wz0 * wy1 * wx1
-                acc += src[z1, y0, x0] * wz1 * wy0 * wx0
-                acc += src[z1, y0, x1] * wz1 * wy0 * wx1
-                acc += src[z1, y1, x0] * wz1 * wy1 * wx0
-                acc += src[z1, y1, x1] * wz1 * wy1 * wx1
-                if threshold == threshold:
+            if threshold == threshold:
+                for i in range(ox):
+                    acc = _trilinear_value(
+                        src, z0, z1, wz0, wz1, y0, y1, wy0, wy1, xlo[i], xhi[i], xw0[i], xw1[i]
+                    )
                     out[k, j, i] = 1 if acc + (1.0 - threshold) >= 1.0 else 0
-                elif unsigned_out:
+            elif unsigned_out:
+                for i in range(ox):
+                    acc = _trilinear_value(
+                        src, z0, z1, wz0, wz1, y0, y1, wy0, wy1, xlo[i], xhi[i], xw0[i], xw1[i]
+                    )
                     out[k, j, i] = acc + 0.5 if acc > 0 else 0.0
-                else:
-                    out[k, j, i] = acc
+            elif rounded:
+                for i in range(ox):
+                    out[k, j, i] = np.rint(
+                        _trilinear_value(
+                            src, z0, z1, wz0, wz1, y0, y1, wy0, wy1, xlo[i], xhi[i], xw0[i], xw1[i]
+                        )
+                    )
+            else:
+                for i in range(ox):
+                    out[k, j, i] = _trilinear_value(
+                        src, z0, z1, wz0, wz1, y0, y1, wy0, wy1, xlo[i], xhi[i], xw0[i], xw1[i]
+                    )
 
 
 _resample_trilinear_numba_serial = serial_twin(_resample_trilinear_numba)
@@ -825,6 +912,107 @@ def _sentinel_counts_numba(
     return total.sum(axis=0), inside.sum(axis=0)
 
 
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _sentinel_counts6_numba(
+    flat: npt.NDArray[np.float64],
+    roi_flat: npt.NDArray[Any],
+    c: npt.NDArray[np.float64],
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """_sentinel_counts_numba for exactly 6 candidates, with scalar counters: the compiler
+    keeps them in registers and vectorizes the pass."""
+    n = flat.size
+    n_chunks = 64
+    step = (n + n_chunks - 1) // n_chunks
+    total = np.zeros((n_chunks, 6), dtype=np.int64)
+    inside = np.zeros((n_chunks, 6), dtype=np.int64)
+    has_roi = roi_flat.size == n
+    c0, c1, c2, c3, c4, c5 = c[0], c[1], c[2], c[3], c[4], c[5]
+    for ch in prange(n_chunks):
+        t0 = 0
+        t1 = 0
+        t2 = 0
+        t3 = 0
+        t4 = 0
+        t5 = 0
+        i0 = 0
+        i1 = 0
+        i2 = 0
+        i3 = 0
+        i4 = 0
+        i5 = 0
+        lo = ch * step
+        hi = min(n, (ch + 1) * step)
+        if has_roi:
+            for i in range(lo, hi):
+                v = flat[i]
+                r = roi_flat[i] != 0
+                e0 = v == c0
+                e1 = v == c1
+                e2 = v == c2
+                e3 = v == c3
+                e4 = v == c4
+                e5 = v == c5
+                t0 += e0
+                t1 += e1
+                t2 += e2
+                t3 += e3
+                t4 += e4
+                t5 += e5
+                i0 += e0 & r
+                i1 += e1 & r
+                i2 += e2 & r
+                i3 += e3 & r
+                i4 += e4 & r
+                i5 += e5 & r
+        else:
+            for i in range(lo, hi):
+                v = flat[i]
+                t0 += v == c0
+                t1 += v == c1
+                t2 += v == c2
+                t3 += v == c3
+                t4 += v == c4
+                t5 += v == c5
+        total[ch, 0] = t0
+        total[ch, 1] = t1
+        total[ch, 2] = t2
+        total[ch, 3] = t3
+        total[ch, 4] = t4
+        total[ch, 5] = t5
+        inside[ch, 0] = i0
+        inside[ch, 1] = i1
+        inside[ch, 2] = i2
+        inside[ch, 3] = i3
+        inside[ch, 4] = i4
+        inside[ch, 5] = i5
+    return total.sum(axis=0), inside.sum(axis=0)
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _not_equal_numba(
+    flat: npt.NDArray[np.float64], value: float, out: npt.NDArray[np.bool_]
+) -> None:
+    """out = flat != value, in parallel."""
+    for i in prange(flat.size):
+        out[i] = flat[i] != value
+
+
+_not_equal_numba_serial = serial_twin(_not_equal_numba)
+
+
+def _not_sentinel(array: npt.NDArray[Any], value: float) -> npt.NDArray[np.bool_]:
+    """array != value (True = valid voxel), in the memory order of `array`. A float64 array
+    in row or column order takes the kernel: one pass, in parallel from
+    _NOT_EQUAL_PARALLEL_MIN voxels, with the bits of numpy."""
+    order = _shared_order(array)
+    if array.dtype != np.float64 or order is None:
+        return cast(npt.NDArray[np.bool_], array != value)
+    out = np.empty(array.size, dtype=np.bool_)
+    kernel = sized(_not_equal_numba, _not_equal_numba_serial, array.size, _NOT_EQUAL_PARALLEL_MIN)
+    kernel(array.ravel(order), float(value), out)
+    return out.reshape(array.shape, order=order)
+
+
 def detect_sentinel_value(
     image: Image,
     candidate_values: tuple[float, ...] = COMMON_SENTINEL_VALUES,
@@ -872,6 +1060,17 @@ def detect_sentinel_value(
             print(f"Detected sentinel value: {sentinel}")
         ```
     """
+    return _sentinel_search(image, candidate_values, min_presence_fraction, roi_mask)[0]
+
+
+def _sentinel_search(
+    image: Image,
+    candidate_values: tuple[float, ...] = COMMON_SENTINEL_VALUES,
+    min_presence_fraction: float = 0.05,
+    roi_mask: Optional[Image] = None,
+) -> tuple[Optional[float], int]:
+    """detect_sentinel_value with the count of the image voxels equal to the found value
+    (0 when no value is found)."""
     array = image.array
     total_voxels = array.size
     roi_arr: Optional[npt.NDArray[np.bool_]] = None
@@ -891,14 +1090,15 @@ def detect_sentinel_value(
         roi_flat = (
             roi_mask.array.ravel(order or "C") if roi_mask is not None else np.empty(0, np.uint8)
         )
-        counts, inside_counts = _sentinel_counts_numba(
-            array.ravel(order or "C"), roi_flat, np.asarray(candidate_values, dtype=np.float64)
-        )
+        candidates = np.asarray(candidate_values, dtype=np.float64)
+        kernel = _sentinel_counts6_numba if candidates.size == 6 else _sentinel_counts_numba
+        counts, inside_counts = kernel(array.ravel(order or "C"), roi_flat, candidates)
     elif roi_mask is not None:
         roi_arr = roi_mask.array != 0
 
     best_candidate: Optional[float] = None
     best_fraction = 0.0
+    best_count = 0
 
     for k, candidate in enumerate(candidate_values):
         if counts is None:
@@ -926,8 +1126,9 @@ def detect_sentinel_value(
         if fraction > best_fraction:
             best_fraction = fraction
             best_candidate = candidate
+            best_count = int(count)
 
-    return best_candidate
+    return best_candidate, best_count
 
 
 def create_source_mask_from_sentinel(
@@ -966,12 +1167,12 @@ def create_source_mask_from_sentinel(
         ```
     """
     if tolerance == 0:
-        valid = image.array != sentinel_value
+        valid = _not_sentinel(image.array, sentinel_value)
     else:
         valid = np.abs(image.array - sentinel_value) > tolerance
 
     return Image(
-        array=valid.astype(np.uint8),
+        array=valid.view(np.uint8),  # the bytes of a bool array are 0 and 1
         spacing=image.spacing,
         origin=image.origin,
         direction=image.direction,
@@ -1304,14 +1505,13 @@ def resample_image(
     new_source_mask: Optional[npt.NDArray[np.bool_]] = None
     start = np.zeros(3, dtype=np.int64)
 
-    # The parallel kernels cover the hot path (3D, 'nearest' boundary, common
-    # dtypes); anything else falls back to scipy.ndimage. The kernels take the
-    # shift form scipy's zoom_shift uses internally (coordinate is
-    # (idx + offset/scale) * scale) and follow its steps, so their output is
-    # bit for bit the scipy output.
+    # The kernels cover the hot path (3D, 'nearest' boundary, common dtypes) at every
+    # size, with serial twins below the parallel gates; anything else falls back to
+    # scipy.ndimage. The kernels take the shift form scipy's zoom_shift uses internally
+    # (coordinate is (idx + offset/scale) * scale) and follow its steps, so their output
+    # is bit for bit the scipy output.
     kernel_ok = image.array.ndim == 3 and boundary_mode == "nearest"
     kernel_shift = offset / matrix
-    n_out = math.prod(out_shape)
     if region is not None:
         dtype = image.array.dtype
         if not (
@@ -1337,20 +1537,17 @@ def resample_image(
             return _region_of(whole, region)
         start = np.array([r.start for r in region], dtype=np.int64)
         out_shape = tuple(r.stop - r.start for r in region)
-        n_out = math.prod(out_shape)
     # A mask threshold applies to the interpolated value: a uint8 or bool mask would
     # otherwise round or truncate the value first and lose the threshold.
     thresholded = False
+    # The linear kernel rounds the values itself (no second pass over the output)
+    rounded = False
 
     if effective_source is None:
-        if (
-            kernel_ok
-            and order == 1
-            and image.array.dtype in (np.float64, np.uint8)
-            and (n_out >= _LINEAR_KERNEL_MIN_SIZE or region is not None)
-        ):
+        if kernel_ok and order == 1 and image.array.dtype in (np.float64, np.uint8):
             src = _row_order_copy(image.array)
             thresholded = mask_threshold is not None
+            rounded = bool(round_intensities)
             resampled_array = np.empty(
                 out_shape, dtype=np.uint8 if thresholded else image.array.dtype
             )
@@ -1367,14 +1564,10 @@ def resample_image(
                 start,
                 image.array.dtype == np.uint8,
                 math.nan if mask_threshold is None else float(mask_threshold),
+                rounded,
                 resampled_array,
             )
-        elif (
-            kernel_ok
-            and order == 0
-            and image.array.dtype in _NEAREST_DTYPES
-            and (n_out >= _NEAREST_KERNEL_MIN_SIZE or region is not None)
-        ):
+        elif kernel_ok and order == 0 and image.array.dtype in _NEAREST_DTYPES:
             src = _row_order_copy(image.array)
             resampled_array = np.empty(out_shape, dtype=image.array.dtype)
             nearest = sized(
@@ -1385,7 +1578,7 @@ def resample_image(
             )
             nearest(src, matrix, kernel_shift, start, resampled_array)
         elif kernel_ok and order == 3 and image.array.dtype == np.float64:
-            coef = _spline_coefficients(np.ascontiguousarray(image.array))
+            coef = _spline_coefficients(_row_order_copy(image.array))
             resampled_array = np.empty(out_shape, dtype=np.float64)
             cubic = sized(
                 _resample_tricubic_numba,
@@ -1417,12 +1610,7 @@ def resample_image(
         if source_all_valid:
             # Preserve the output contract: a resampled image keeps a source mask
             new_source_mask = np.ones(out_shape, dtype=bool)
-    elif (
-        kernel_ok
-        and order == 1
-        and image.array.dtype == np.float64
-        and (n_out >= _MASKED_KERNEL_MIN_SIZE or region is not None)
-    ):
+    elif kernel_ok and order == 1 and image.array.dtype == np.float64:
         # Masked resampling: one fused pass instead of two affine_transforms
         src = _row_order_copy(image.array)
         valid = _row_order_copy(effective_source)
@@ -1446,8 +1634,8 @@ def resample_image(
         )
     elif kernel_ok and order == 3 and image.array.dtype == np.float64:
         # Masked cubic resampling: the two sums of the normalized interpolation in one pass
-        src = np.ascontiguousarray(image.array)
-        valid = np.ascontiguousarray(effective_source)
+        src = _row_order_copy(image.array)
+        valid = _row_order_copy(effective_source)
         coef, wcoef = _spline_coefficients_masked(src, valid)
         resampled_array = np.empty(out_shape, dtype=np.float64)
         new_source_mask = np.empty(out_shape, dtype=np.bool_)
@@ -1486,7 +1674,7 @@ def resample_image(
     if mask_threshold is not None and not thresholded:
         # Binarize mask
         resampled_array = _mask_threshold(resampled_array, mask_threshold, order > 0)
-    elif round_intensities:
+    elif round_intensities and not rounded:
         # Round intensities, in place: the resampled array is always a new one
         np.round(resampled_array, out=resampled_array)
 
@@ -1767,6 +1955,10 @@ def apply_mask(
     """
     Apply mask to image and return flattened array of voxel values.
 
+    A large 3D array (from 2^20 voxels, row order, a float64 or int32 image, a uint8, bool
+    or float64 mask) is gathered in parallel when 4 or more threads are set. The values and
+    their order are the same.
+
     Args:
         image: Image object or numpy array.
         mask: Image object (mask) or numpy array.
@@ -1810,6 +2002,12 @@ def apply_mask(
 
     # Handle mask values
     if mask_values is None:
+        # A large array takes the parallel gather where it can
+        values = (
+            None if img_arr.size < _KERNEL_MIN_SIZE else _threaded_roi_values(img_arr, mask_arr)
+        )
+        if values is not None:
+            return values
         roi_mask = mask_arr != 0
     else:
         if isinstance(mask_values, int):
@@ -1876,12 +2074,13 @@ def extract_roi(
             mask_values = [mask_values]
         roi_mask = np.isin(mask.array, mask_values)
 
-    # Preserve floating dtype (NaN-capable); only integer inputs need upcasting
+    # Preserve floating dtype (NaN-capable); only integer inputs need upcasting. One pass
+    # writes the ROI values and the NaN values (a 0-d NaN array keeps the dtype).
     if np.issubdtype(image.array.dtype, np.floating):
-        new_array = image.array.copy()
+        dtype = image.array.dtype
     else:
-        new_array = image.array.astype(float)
-    new_array[~roi_mask] = np.nan
+        dtype = np.dtype(np.float64)
+    new_array = np.where(roi_mask, image.array, np.array(np.nan, dtype=dtype))
 
     return Image(
         array=new_array,
@@ -1937,18 +2136,28 @@ def resegment_mask(
         raise
 
     order = _shared_order(image.array, mask.array)
+    # The kernel reads and writes the mask as the integer type of its size (the same
+    # bits), so a float mask keeps its NaN, infinite and negative values, and 0 is +0.0
+    bits = _SAME_SIZE.get(mask.array.dtype.itemsize) if mask.array.dtype.kind in "biuf" else None
     if (
         image.array.dtype == np.float64
-        and image.array.size >= (_RESEGMENT_KERNEL_MIN_SIZE if order else _KERNEL_MIN_SIZE)
-        and mask.array.dtype in (np.float64, np.uint8, np.bool_)
+        and bits is not None
+        and (order is not None or image.array.size >= _KERNEL_MIN_SIZE)
     ):
         # Single-pass kernel; bit-identical to the numpy chain below. It keeps the
         # memory order that the image and the mask share.
         lo = float("-inf") if range_min is None else float(range_min)
         hi = float("inf") if range_max is None else float(range_max)
         flat_out = np.empty(mask.array.size, dtype=mask.array.dtype)
-        _resegment_numba(
-            image.array.ravel(order or "C"), mask.array.ravel(order or "C"), lo, hi, flat_out
+        resegment = sized(
+            _resegment_numba, _resegment_numba_serial, flat_out.size, _RESEGMENT_PARALLEL_MIN
+        )
+        resegment(
+            image.array.ravel(order or "C"),
+            mask.array.ravel(order or "C").view(bits),
+            lo,
+            hi,
+            flat_out.view(bits),
         )
         new_mask_array = flat_out.reshape(mask.array.shape, order=order or "C")
     else:
@@ -1999,6 +2208,73 @@ def _roi_values_numba(
     return values
 
 
+@jit(nopython=True, nogil=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _box_values_numba(
+    image: npt.NDArray[Any],
+    mask: npt.NDArray[Any],
+    z0: int,
+    z1: int,
+    y0: int,
+    y1: int,
+    x0: int,
+    x1: int,
+) -> npt.NDArray[Any]:
+    """image[box][mask[box] != 0] for the box z0:z1, y0:y1, x0:x1, in row order and in the
+    image type (as numpy gives them), read in place. Each row of the box counts its ROI
+    voxels, a running sum gives each row its start, and the rows then copy their values
+    in parallel. Without the GIL: the morphology worker thread runs at the same time."""
+    ny = y1 - y0
+    rows = (z1 - z0) * ny
+    starts = np.zeros(rows + 1, dtype=np.int64)
+    for r in prange(rows):
+        z = z0 + r // ny
+        y = y0 + r % ny
+        count = 0
+        for x in range(x0, x1):
+            if mask[z, y, x] != 0:
+                count += 1
+        starts[r + 1] = count
+    for r in range(rows):
+        starts[r + 1] += starts[r]
+    values = np.empty(starts[rows], dtype=image.dtype)
+    for r in prange(rows):
+        z = z0 + r // ny
+        y = y0 + r % ny
+        k = starts[r]
+        for x in range(x0, x1):
+            if mask[z, y, x] != 0:
+                values[k] = image[z, y, x]
+                k += 1
+    return values
+
+
+def _threaded_roi_values(
+    image: npt.NDArray[Any],
+    mask: npt.NDArray[Any],
+    box: Optional[tuple[slice, slice, slice]] = None,
+) -> Optional[npt.NDArray[Any]]:
+    """image[box][mask[box] != 0] (box None: the whole arrays) by the parallel gather of
+    _box_values_numba: the same values in the same order, with no bool mask and no copy of
+    the box. None when numpy's gather is faster (a box of fewer than _KERNEL_MIN_SIZE
+    voxels, or fewer than _GATHER_MIN_THREADS threads) or when the kernel does not take
+    the arrays (not 3D, other shapes, types or memory order)."""
+    if image.ndim != 3 or image.shape != mask.shape:
+        return None
+    if box is None:
+        box = (slice(0, image.shape[0]), slice(0, image.shape[1]), slice(0, image.shape[2]))
+    (z0, z1), (y0, y1), (x0, x1) = ((b.start, b.stop) for b in box)
+    if (
+        (z1 - z0) * (y1 - y0) * (x1 - x0) >= _KERNEL_MIN_SIZE
+        and image.dtype in (np.float64, np.int32)
+        and mask.dtype in (np.float64, np.uint8, np.bool_)
+        and image.flags.c_contiguous
+        and mask.flags.c_contiguous
+        and get_num_threads() >= _GATHER_MIN_THREADS
+    ):
+        return cast(npt.NDArray[Any], _box_values_numba(image, mask, z0, z1, y0, y1, x0, x1))
+    return None
+
+
 @jit(nopython=True, parallel=True, cache=True)  # type: ignore
 def _filter_outliers_numba(
     image_flat: npt.NDArray[np.float64],
@@ -2021,6 +2297,26 @@ def _filter_outliers_numba(
                 out[i] = 0
         else:
             out[i] = m
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _filter_outliers_serial_numba(
+    image_flat: npt.NDArray[np.float64],
+    mask_flat: npt.NDArray[Any],
+    lower: float,
+    upper: float,
+    out: npt.NDArray[Any],
+) -> None:
+    """Serial form of _filter_outliers_numba with the same result. Each voxel reads its
+    intensity, and one select (no branch) keeps the mask value when it is 0 or when the
+    intensity is in [lower, upper]. A NaN intensity compares False and is zeroed."""
+    for i in range(image_flat.size):
+        m = mask_flat[i]
+        v = image_flat[i]
+        if ((v >= lower) & (v <= upper)) | (m == 0):
+            out[i] = m
+        else:
+            out[i] = 0
 
 
 def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
@@ -2054,11 +2350,15 @@ def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
 
     # Large images use two parallel passes (the ROI values, then the new mask); they
     # give the same values in the same order, so the mean and the std stay the same.
-    large = (
-        image.array.dtype == np.float64
-        and image.array.size >= _KERNEL_MIN_SIZE
-        and mask.array.dtype in (np.float64, np.uint8, np.bool_)
+    # Smaller images in a shared memory order make the new mask with a serial kernel.
+    size = image.array.size
+    order = _shared_order(image.array, mask.array)
+    kernel = image.array.dtype == np.float64 and mask.array.dtype in (
+        np.float64,
+        np.uint8,
+        np.bool_,
     )
+    large = kernel and size >= _KERNEL_MIN_SIZE
 
     # Gather intensities within the mask once; all thresholding below runs on
     # this ROI-sized array instead of the full volume
@@ -2069,8 +2369,10 @@ def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
         roi_values = image.array[roi]
 
     # Exclude NaNs (e.g. from extract_roi) which would otherwise poison the
-    # mean/std and wipe the whole mask
-    finite_values = roi_values[~np.isnan(roi_values)]
+    # mean/std and wipe the whole mask; with no NaN, the ROI values are used as they
+    # are (no copy)
+    nan = np.isnan(roi_values)
+    finite_values = roi_values[~nan] if nan.any() else roi_values
 
     if finite_values.size == 0:
         return mask
@@ -2082,16 +2384,17 @@ def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
     lower_bound = mean_val - sigma * std_val
     upper_bound = mean_val + sigma * std_val
 
-    if large:
+    if large or (kernel and order is not None):
         flat_out = np.empty(mask.array.size, dtype=mask.array.dtype)
-        _filter_outliers_numba(
-            image.array.ravel(),
-            mask.array.ravel(),
+        zero = sized(_filter_outliers_numba, _filter_outliers_serial_numba, size, _KERNEL_MIN_SIZE)
+        zero(
+            image.array.ravel(order or "C"),
+            mask.array.ravel(order or "C"),
             float(lower_bound),
             float(upper_bound),
             flat_out,
         )
-        new_mask_array = flat_out.reshape(mask.array.shape)
+        new_mask_array = flat_out.reshape(mask.array.shape, order=order or "C")
     else:
         # Keep values within [lower, upper]; NaN compares False and is excluded
         keep = (roi_values >= lower_bound) & (roi_values <= upper_bound)
@@ -2113,9 +2416,24 @@ def filter_outliers(image: Image, mask: Image, sigma: float = 3.0) -> Image:
 
 def round_intensities(image: Image) -> Image:
     """
-    Round image intensities to the nearest integer.
+    Round image intensities to the nearest integer (a half goes to the even integer,
+    as with np.round).
+
+    When more than one thread runs, a float64 image of 2^20 voxels or more in row or
+    column order is rounded in threads. The result is the same, bit for bit.
     """
-    new_array = np.round(image.array)
+    array = image.array
+    order = _shared_order(array)
+    if (
+        array.dtype == np.float64
+        and array.size >= _KERNEL_MIN_SIZE
+        and order is not None
+        and get_num_threads() > 1
+    ):
+        new_array = np.empty(array.shape, dtype=np.float64, order=order)
+        _rint_numba(array.ravel(order), new_array.ravel(order))
+    else:
+        new_array = np.round(array)
     return Image(
         array=new_array,
         spacing=image.spacing,
@@ -2132,7 +2450,8 @@ def keep_largest_component(mask: Image) -> Image:
     Uses full (26-)connectivity in 3D, i.e. voxels touching at a face, edge, or
     vertex belong to the same component. This matches the connectivity IBSI
     prescribes for 3D zones (GLSZM/GLDZM) and the convention used elsewhere in
-    this library, rather than scipy's face-only (6-connectivity) default.
+    this library, rather than scipy's face-only (6-connectivity) default. A mask
+    that fills its bounding box is one component, so the function does not label it.
     """
     mask_array = mask.array
     new_array: npt.NDArray[Any] = np.zeros(mask_array.shape, dtype=np.uint8)
@@ -2149,17 +2468,22 @@ def keep_largest_component(mask: Image) -> Image:
         bbox = tuple(slice(None) for _ in mask_array.shape)
 
     if bbox is not None:
-        sub = mask_array[bbox]
-        # Full connectivity: connectivity == ndim connects all diagonal neighbours.
-        structure = generate_binary_structure(sub.ndim, sub.ndim)
-        labeled_sub, num_features = label(sub, structure=structure)
-        if num_features <= 1:
-            new_array[bbox] = sub != 0
+        inside = mask_array[bbox] != 0
+        if inside.all():  # A full box is one component: labeling is not necessary.
+            new_array[bbox] = 1
         else:
-            counts = np.bincount(labeled_sub.ravel())
-            counts[0] = 0  # ignore background
-            max_label = int(counts.argmax())
-            new_array[bbox] = labeled_sub == max_label
+            # Full connectivity: a block of 3 voxels on each axis, all True, connects
+            # all diagonal neighbours.
+            structure = np.ones((3,) * inside.ndim, dtype=bool)
+            labeled_sub, num_features = label(inside, structure=structure)
+            if num_features <= 1:
+                new_array[bbox] = inside
+            else:
+                del inside  # Release it before np.bincount makes its intp copy of the labels.
+                counts = np.bincount(labeled_sub.ravel())
+                counts[0] = 0  # ignore background
+                max_label = int(counts.argmax())
+                new_array[bbox] = labeled_sub == max_label
 
     return Image(
         array=new_array,
@@ -2168,6 +2492,191 @@ def keep_largest_component(mask: Image) -> Image:
         direction=mask.direction,
         modality=mask.modality,
     )
+
+
+# The distance passes of grow_mask and _nearest_roi_map: one pass for each axis, in the
+# order 0, 1, 2. A voxel gets ((d0 * s0)^2 + (d1 * s1)^2) + (d2 * s2)^2 for its nearest
+# feature voxel: the sum of scipy's distance_transform_edt, in the same order. The passes
+# along axes 1 and 2 are the Voronoi step of scipy's feature transform.
+
+
+@jit(nopython=True, cache=True)  # type: ignore
+def _edt_line(
+    f: npt.NDArray[np.float64],
+    s: float,
+    out: npt.NDArray[np.float64],
+    src: npt.NDArray[np.int64],
+    stack: npt.NDArray[np.int64],
+) -> None:
+    """One line of a pass with the spacing s. f holds the squared distance (mm^2) of each
+    voxel in the axes before (inf: no feature voxel yet). Puts into src[q] the p of the
+    least f[p] + ((p - q) * s)^2 and into out[q] that sum: the Voronoi step of scipy's
+    feature transform (_VoronoiFT, Maurer et al.), with its removal test, its scan and
+    the same operations in the same order. At a tie, the lower p. With no finite f[p], out
+    is inf and src is -1. stack is a work line."""
+    n = f.size
+    top = -1
+    for q in range(n):
+        wr = f[q]
+        if wr == np.inf:
+            continue
+        while top >= 1:
+            p1 = stack[top]
+            p0 = stack[top - 1]
+            a = (p1 - p0) * s
+            b = (q - p1) * s
+            c = a + b
+            if c * f[p1] - b * f[p0] - a * wr - a * b * c <= 0.0:
+                break
+            top -= 1
+        top += 1
+        stack[top] = q
+    if top < 0:
+        for q in range(n):
+            out[q] = np.inf
+            src[q] = -1
+        return
+    k = 0
+    for q in range(n):
+        step = (stack[k] - q) * s
+        d1 = f[stack[k]] + step * step
+        while k < top:
+            step = (stack[k + 1] - q) * s
+            d2 = f[stack[k + 1]] + step * step
+            if d1 <= d2:
+                break
+            d1 = d2
+            k += 1
+        out[q] = d1
+        src[q] = stack[k]
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _edt_axis0_numba(
+    feature: npt.NDArray[np.bool_],
+    s: float,
+    d2: npt.NDArray[np.float64],
+    lab: npt.NDArray[np.int32],
+    carry: bool,
+) -> None:
+    """The pass along axis 0: into d2, the squared distance (mm^2, spacing s) to the
+    nearest voxel of the axis-0 line where feature is True (inf when the line has none;
+    at a tie, the lower one). With carry, each voxel of lab gets the lab value of that
+    voxel. One row (axis 1) of each plane for each thread."""
+    nz, ny, nx = feature.shape
+    for j in prange(ny):
+        near = np.empty(nx, np.int64)
+        for i in range(nx):
+            near[i] = -1
+        for k in range(nz):
+            for i in range(nx):
+                if feature[k, j, i]:
+                    near[i] = k
+                d2[k, j, i] = k - near[i] if near[i] >= 0 else np.inf
+                if carry and near[i] >= 0:
+                    lab[k, j, i] = lab[near[i], j, i]
+        for i in range(nx):
+            near[i] = -1
+        for k in range(nz - 1, -1, -1):
+            for i in range(nx):
+                if feature[k, j, i]:
+                    near[i] = k
+                if near[i] >= 0 and near[i] - k < d2[k, j, i]:
+                    d2[k, j, i] = near[i] - k
+                    if carry:
+                        lab[k, j, i] = lab[near[i], j, i]
+                if d2[k, j, i] != np.inf:
+                    step = d2[k, j, i] * s
+                    d2[k, j, i] = step * step
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _edt_axis1_numba(
+    d2: npt.NDArray[np.float64], s: float, lab: npt.NDArray[np.int32], carry: bool
+) -> None:
+    """The pass along axis 1: each axis-1 line of d2 becomes the least d2 + (distance
+    along axis 1)^2 (see _edt_line); with carry, lab follows. One plane for each thread."""
+    nz, ny, nx = d2.shape
+    for k in prange(nz):
+        f = np.empty(ny)
+        out = np.empty(ny)
+        src = np.empty(ny, np.int64)
+        stack = np.empty(ny, np.int64)
+        line = np.empty(ny, np.int32)
+        for i in range(nx):
+            for j in range(ny):
+                f[j] = d2[k, j, i]
+            _edt_line(f, s, out, src, stack)
+            if src[0] < 0:
+                continue
+            for j in range(ny):
+                d2[k, j, i] = out[j]
+            if carry:
+                for j in range(ny):
+                    line[j] = lab[k, j, i]
+                for j in range(ny):
+                    lab[k, j, i] = line[src[j]]
+
+
+@jit(nopython=True, parallel=PRANGE_ONLY, cache=True)  # type: ignore
+def _edt_axis2_numba(
+    d2: npt.NDArray[np.float64], s: float, lab: npt.NDArray[np.int32], carry: bool
+) -> None:
+    """As _edt_axis1_numba, along axis 2 (the rows of one plane for each thread)."""
+    nz, ny, nx = d2.shape
+    for k in prange(nz):
+        f = np.empty(nx)
+        out = np.empty(nx)
+        src = np.empty(nx, np.int64)
+        stack = np.empty(nx, np.int64)
+        line = np.empty(nx, np.int32)
+        for j in range(ny):
+            for i in range(nx):
+                f[i] = d2[k, j, i]
+            _edt_line(f, s, out, src, stack)
+            if src[0] < 0:
+                continue
+            for i in range(nx):
+                d2[k, j, i] = out[i]
+            if carry:
+                for i in range(nx):
+                    line[i] = lab[k, j, i]
+                for i in range(nx):
+                    lab[k, j, i] = line[src[i]]
+
+
+_edt_axis0_numba_serial = serial_twin(_edt_axis0_numba)
+_edt_axis1_numba_serial = serial_twin(_edt_axis1_numba)
+_edt_axis2_numba_serial = serial_twin(_edt_axis2_numba)
+
+# From this many voxels on, the distance passes run in parallel: below, the start of three
+# parallel regions costs more than it saves (about 27,000 voxels on 10 threads)
+_EDT_PARALLEL_MIN = 30_000
+
+
+def _squared_distances(
+    feature: npt.NDArray[np.bool_],
+    spacing: tuple[float, ...],
+    lab: Optional[npt.NDArray[np.int32]] = None,
+) -> npt.NDArray[np.float64]:
+    """The squared distance (mm^2) of each voxel to the nearest True voxel of the 3D bool
+    array `feature`, with the spacing of each axis (inf when there is none). These are the
+    squares of scipy's distance_transform_edt(~feature, sampling=spacing), bit for bit
+    where the scipy build does not fuse a multiply-add. With `lab` (int32, row order, the
+    shape of `feature`), each voxel of `lab` gets the value of that nearest voxel, in
+    place."""
+    feature = np.ascontiguousarray(feature)
+    d2 = np.empty(feature.shape)
+    work = np.zeros((1, 1, 1), np.int32) if lab is None else lab
+    carry = lab is not None
+    size = feature.size
+    axis0 = sized(_edt_axis0_numba, _edt_axis0_numba_serial, size, _EDT_PARALLEL_MIN)
+    axis0(feature, float(spacing[0]), d2, work, carry)
+    axis1 = sized(_edt_axis1_numba, _edt_axis1_numba_serial, size, _EDT_PARALLEL_MIN)
+    axis1(d2, float(spacing[1]), work, carry)
+    axis2 = sized(_edt_axis2_numba, _edt_axis2_numba_serial, size, _EDT_PARALLEL_MIN)
+    axis2(d2, float(spacing[2]), work, carry)
+    return d2
 
 
 # A distance within this much (mm) of a grow_mask limit counts as at the limit: 3 steps of
@@ -2250,9 +2759,8 @@ def grow_mask(mask: Image, to_mm: float, from_mm: Optional[float] = None) -> Ima
                 return inside
             outside = x > 0
             if outside not in distances:  # to the nearest voxel in (out of) the mask
-                distances[outside] = distance_transform_edt(
-                    ~inside if outside else inside, sampling=spacing
-                )
+                squares = _squared_distances(inside if outside else ~inside, spacing)
+                distances[outside] = np.sqrt(squares, out=squares)
             if outside:
                 return distances[outside] <= x + _GROW_TOLERANCE_MM
             return distances[outside] > _GROW_TOLERANCE_MM - x
@@ -2273,8 +2781,10 @@ def grow_mask(mask: Image, to_mm: float, from_mm: Optional[float] = None) -> Ima
 def _nearest_roi_map(labels: Image, reach_mm: float) -> Optional[Image]:
     """The label of the nearest ROI voxel of each voxel up to `reach_mm` (and 2 voxels)
     from the box of the ROIs of the label map `labels` (0: background). Each voxel has one
-    nearest voxel (the feature transform of scipy), so the voxels of the map have one ROI
-    each. None for a map without ROIs."""
+    nearest voxel (the same Voronoi step as scipy's feature transform, in plain float64: a
+    voxel at the same distance from two ROIs goes to the same one on every machine and
+    thread count), so the voxels of the map have one ROI each. None for a map without
+    ROIs."""
     box = compute_nonzero_bbox(labels.array)
     if box is None:
         return None
@@ -2286,12 +2796,12 @@ def _nearest_roi_map(labels: Image, reach_mm: float) -> Optional[Image]:
             for b, m, n in zip(box, margins, labels.array.shape, strict=True)
         ),
     )
-    part = labels.array[region]
-    nearest = distance_transform_edt(
-        part == 0, sampling=labels.spacing, return_distances=False, return_indices=True
-    )
+    # A row-order int32 copy (the labels are at most 1,048,576, see run_rois): the passes
+    # write the label of the nearest ROI voxel into it
+    nearest: npt.NDArray[Any] = labels.array[region].astype(np.int32, order="C")
+    _squared_distances(nearest != 0, labels.spacing, nearest)
     return Image(
-        array=part[tuple(nearest)],
+        array=nearest,
         spacing=labels.spacing,
         origin=_region_origin(labels.origin, labels.direction, labels.spacing, region),
         direction=labels.direction,
@@ -2404,12 +2914,25 @@ def _normalised(
     """`image` normalised by the statistics of the voxels in `select` (None: all) with a
     finite value in the range, and the center and scale of the map."""
     array = image.array
-    keep = np.isfinite(array) if select is None else select & np.isfinite(array)
-    if range_min is not None:
-        keep &= array >= range_min
-    if range_max is not None:
-        keep &= array <= range_max
-    values = array[keep]
+    values: npt.NDArray[Any]
+    if (
+        select is None
+        and range_min is None
+        and range_max is None
+        and array.flags.c_contiguous
+        and _all_finite(array)
+    ):
+        # Every voxel counts. numpy reduces a row-order array in the order of its gathered
+        # copy, so the statistics of the array are those of the copy, with no copy.
+        values = array
+    else:
+        keep = np.isfinite(array) if select is None else select & np.isfinite(array)
+        if range_min is not None:
+            keep &= array >= range_min
+        if range_max is not None:
+            keep &= array <= range_max
+        values = array[keep]
+        del keep  # free the selection before the map makes its output
     if values.size == 0:
         raise ValueError("The normalise region holds no voxel with a finite value in its range.")
     if method == "zscore":
@@ -2422,6 +2945,16 @@ def _normalised(
             f"The values of the normalise region do not spread (scale {scale:g}), so they "
             "cannot set the scale."
         )
-    normalised = np.subtract(array, center, dtype=np.float64)
-    normalised /= scale
+    order = _shared_order(array)
+    if array.dtype == np.float64 and order is not None:
+        # One pass in the memory order of the array, with no copy
+        flat = array.ravel(order)
+        mapped = np.empty(flat.size, dtype=np.float64)
+        sized(
+            _normalise_map_numba, _normalise_map_numba_serial, flat.size, _NORMALISE_PARALLEL_MIN
+        )(flat, center, scale, mapped)
+        normalised = mapped.reshape(array.shape, order=order)
+    else:
+        normalised = np.subtract(array, center, dtype=np.float64)
+        normalised /= scale
     return replace(image, array=normalised), center, scale

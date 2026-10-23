@@ -30,6 +30,7 @@ from pictologics.filters import (
 )
 from pictologics.filters.base import (
     _apply_with_boundary_padding,
+    _fast_width,
     _float32_cut,
     _normalized_convolve1d,
     _normalized_gaussian_laplace,
@@ -250,6 +251,18 @@ class TestApplyWithBoundaryPadding:
         result = _apply_with_boundary_padding(func, image, BoundaryCondition.MIRROR, 100)
         assert result.shape == image.shape
 
+    def test_pad_grows_to_a_fast_size_of_the_same_parity(self):
+        image = np.ones((13, 4, 7), dtype=np.float32)
+
+        def func(arr, crop):
+            # 13 + 2*13 = 39 grows to 45; 4 + 2*2 = 8 and 7 + 2*2 = 11 are fast sizes
+            assert arr.shape == (45, 8, 11)
+            assert crop == (slice(16, 29), slice(2, 6), slice(2, 9))
+            return _float32_cut(arr, crop)
+
+        result = _apply_with_boundary_padding(func, image, BoundaryCondition.MIRROR, (13, 2, 2))
+        assert_array_equal(result, image)
+
     def test_zero_padding_fills_with_zero(self):
         image = np.array([[[1.0, 2.0, 3.0, 4.0]]], dtype=np.float32)  # shape (1, 1, 4)
         captured = {}
@@ -320,6 +333,109 @@ class TestBaseInternalHelpers:
             _prepare_masked_image(image, mask, fill_value=5.0),
             np.array([10.0, 5.0, 30.0], dtype=np.float32),
         )
+
+    @staticmethod
+    def _slab_branches() -> Any:
+        """Patches that send a small array through the slab threads of _on_planes."""
+        from contextlib import ExitStack
+
+        from pictologics.filters import base
+
+        stack = ExitStack()
+        stack.enter_context(patch.object(base, "_SLAB_MIN_SIZE", 1))
+        stack.enter_context(patch.object(base, "get_num_threads", return_value=3))
+        return stack
+
+    def test_the_masked_copy_gives_the_values_of_numpy(self) -> None:
+        """The masked copy (the plane kernel for row-order and strided float arrays, numpy
+        for column order and integer images) has the bytes of np.where, in row order, with
+        NaN and inf at valid and invalid voxels, on one call and on the slab threads."""
+        from contextlib import nullcontext
+
+        from pictologics.filters import base
+
+        rng = np.random.default_rng(31)
+        big = rng.normal(40.0, 20.0, (11, 12, 13))
+        big[1, 1, 1], big[2, 3, 4], big[5, 5, 5], big[6, 7, 8] = np.nan, np.inf, -np.inf, np.nan
+        big_mask = rng.random(big.shape) > 0.3
+        row, row_mask = big[1:-1, 1:-1, 1:-1].copy(), big_mask[1:-1, 1:-1, 1:-1].copy()
+        forms = [
+            (row, row_mask),
+            (row.astype(np.float32), row_mask),
+            (big[1:-1, 1:-1, 1:-1], big_mask[1:-1, 1:-1, 1:-1]),  # strided views
+            (np.asfortranarray(row), np.asfortranarray(row_mask)),  # column order: numpy
+        ]
+        for context in (nullcontext(), self._slab_branches()):
+            with context:
+                for image, mask in [
+                    *forms,
+                    (np.nan_to_num(row, posinf=0.0, neginf=0.0).astype(np.int16), row_mask),
+                ]:
+                    for dtype in (None, np.float32):
+                        for fill in (0.0, -1000.0):
+                            got = base._prepare_masked_image(image, mask, fill, dtype)
+                            kind = image.dtype if dtype is None else dtype
+                            expected = np.where(mask, image, fill).astype(kind)
+                            assert got.tobytes() == expected.tobytes() and got.flags.c_contiguous
+                for image, mask in forms:
+                    expected = np.where(mask, image, 0.0).astype(np.float64)
+                    assert base._zero_filled(image, mask).tobytes() == expected.tobytes()
+        flat = base._prepare_masked_image(row[0], row_mask[0], -1.0)  # 2-D: numpy
+        assert flat.tobytes() == np.where(row_mask[0], row[0], -1.0).tobytes()
+
+    def test_normalize_kernel_gives_the_values_of_numpy(self) -> None:
+        """The normalized response of the plane kernel (row order, also on the slab threads)
+        and of numpy (column order) equals np.divide where the weight reaches the threshold,
+        as float32, with the valid mask, also with NaN and inf responses and edge weights."""
+        from pictologics.filters import base
+
+        rng = np.random.default_rng(32)
+        response = rng.normal(size=(8, 9, 10))
+        response[0, 0, 0], response[1, 2, 3] = np.nan, np.inf
+        weight = rng.random(response.shape) * 0.03
+        weight[2, 2, 2], weight[3, 3, 3], weight[4, 4, 4] = np.nan, 0.0, 0.01
+        weight[5, 5, 5] = np.nextafter(0.01, 0.0)
+        valid = weight >= 0.01
+        expected = np.divide(response, weight, out=np.zeros_like(response), where=valid)
+        for context, layout in ((self._slab_branches(), np.ascontiguousarray), (patch.object(base, "_SLAB_MIN_SIZE", 1 << 30), np.ascontiguousarray), (patch.object(base, "_SLAB_MIN_SIZE", 1 << 30), np.asfortranarray)):  # fmt: skip
+            with context:
+                out, got_valid = base._normalize(layout(response), layout(weight), 0.01)
+            assert out.tobytes() == expected.astype(np.float32).tobytes()
+            assert np.array_equal(got_valid, valid) and out.dtype == np.float32
+
+    def test_the_weight_keeps_the_layout_of_astype(self) -> None:
+        """The weight has the bytes and the memory order of mask.astype(np.float64)."""
+        from pictologics.filters import base
+
+        mask = np.random.default_rng(33).random((7, 8, 9)) > 0.4
+        forms = (mask, np.asfortranarray(mask), mask[1:-1, ::2, 1:], mask.transpose(2, 0, 1))
+        for size in (1 << 30, 1):
+            with patch.object(base, "_SLAB_MIN_SIZE", size):
+                for form in forms:
+                    got, expected = base._weight(form), form.astype(np.float64)
+                    assert got.tobytes() == expected.tobytes()
+                    assert got.flags.c_contiguous == expected.flags.c_contiguous
+                    assert got.flags.f_contiguous == expected.flags.f_contiguous
+
+    def test_the_masked_wavelet_entry_casts_once(self) -> None:
+        """A masked wavelet gives the response of the float32 image with 0 at the invalid
+        voxels, for row-order, strided, column-order, float32 and int16 images."""
+        rng = np.random.default_rng(34)
+        big = rng.normal(40.0, 20.0, (14, 15, 13))
+        big_mask = rng.random(big.shape) > 0.3
+        image, mask = big[1:-1, 1:-1, 1:-1].copy(), big_mask[1:-1, 1:-1, 1:-1].copy()
+        forms = [
+            (image, mask),
+            (big[1:-1, 1:-1, 1:-1], big_mask[1:-1, 1:-1, 1:-1]),
+            (np.asfortranarray(image), np.asfortranarray(mask)),
+            (image.astype(np.float32), mask),
+            (image.astype(np.int16), mask),
+        ]
+        for img, m in forms:
+            got = wavelet_transform(img, "db2", 1, "LHL", source_mask=m)
+            plain = np.where(m, img.astype(np.float32), 0).astype(np.float32)
+            expected = wavelet_transform(plain, "db2", 1, "LHL")
+            assert got.tobytes() == expected.tobytes()
 
     def test_normalized_uniform_filter(self):
         # Normalized convolution interpolates the invalid center from its neighbours:
@@ -1143,8 +1259,143 @@ class TestRieszTransform:
         assert not np.array_equal(periodic, nearest)
 
 
+def _plain_riesz_log(
+    image: np.ndarray,
+    sigma_mm: float,
+    spacing: tuple[float, float, float],
+    order: tuple[int, int, int],
+    mode: str,
+    value: float = 0.0,
+    truncate: float = 4.0,
+) -> np.ndarray:
+    """riesz_log of a 3-D image with a non-periodic boundary as a plain numpy chain: the
+    image padded with np.pad by the widths of the filter, the LoG transfer of the Gaussian
+    kernels, the full Riesz table, one inverse FFT and the cut, as float32."""
+    from pictologics.filters import base, riesz
+
+    image = np.asarray(image, dtype=np.float64)
+    pad_width = riesz._riesz_log_pad_width(sigma_mm, spacing, truncate)
+    sigmas = [sigma_mm / s for s in spacing]
+    radii = [int(truncate * s + 0.5) for s in sigmas]
+    widths = [
+        base._fast_width(n, max(min(p, n), r))
+        for n, p, r in zip(image.shape, pad_width, radii, strict=True)
+    ]
+    extra = {"constant_values": value} if mode == "constant" else {}
+    padded = np.pad(image, [(w, w) for w in widths], mode=mode, **extra)
+    sizes = padded.shape
+    forms = ((-1, 1, 1), (1, -1, 1), (1, 1, -1))
+    spectra = [
+        base._kernel_spectra(s, r, n, truncate, axis == 2)
+        for axis, (s, r, n) in enumerate(zip(sigmas, radii, sizes, strict=True))
+    ]
+    g = [sp[0].reshape(form) for sp, form in zip(spectra, forms, strict=True)]
+    d = [sp[1].reshape(form) for sp, form in zip(spectra, forms, strict=True)]
+    log = d[0] * g[1] * g[2] + g[0] * d[1] * g[2] + g[0] * g[1] * d[2]
+    freqs = np.meshgrid(
+        np.fft.fftfreq(sizes[0]) * 2 * np.pi,
+        np.fft.fftfreq(sizes[1]) * 2 * np.pi,
+        np.fft.rfftfreq(sizes[2]) * 2 * np.pi,
+        indexing="ij",
+        sparse=True,
+    )
+    table = riesz._riesz_values(list(freqs), order, sum(order))
+    table[0, 0, 0] = 0
+    response = np.fft.irfftn(np.fft.rfftn(padded) * log * table, s=sizes, axes=(0, 1, 2))
+    cut = tuple(slice(w, w + n) for w, n in zip(widths, image.shape, strict=True))
+    return response[cut].astype(np.float32)
+
+
+def test_fast_width_gives_an_eleven_smooth_size_of_the_same_parity() -> None:
+    from pictologics.filters import base
+
+    assert base._fast_width(1, 1) == 1
+    assert base._fast_width(13, 13) == 16
+    assert base._fast_width(141, 8) == 12
+    assert base._fast_width(193, 8) == 16
+
+
+@pytest.mark.parametrize("boundary", ["mirror", "zero", "nearest"])
+def test_padded_fft_filter_is_the_periodic_filter_of_the_fast_pad(boundary: str) -> None:
+    """A non-periodic FFT filter gives the periodic response of the image padded to the
+    fast widths and cut back, bit for bit."""
+    from pictologics.filters import base
+
+    image = np.random.default_rng(4).normal(size=(13, 9, 20))
+    mode = base._NUMPY_PAD_MODE_MAP[resolve_boundary(boundary)]
+    for call, pad in (
+        (lambda a, **kw: simoncelli_wavelet(a, level=1, **kw), 8),
+        (lambda a, **kw: riesz_transform(a, (1, 1, 0), **kw), 16),
+    ):
+        widths = [_fast_width(n, min(pad, n)) for n in image.shape]
+        expected = call(np.pad(image, [(w, w) for w in widths], mode=mode))
+        cut = tuple(slice(w, w + n) for w, n in zip(widths, image.shape, strict=True))
+        got = call(image, boundary=boundary)
+        assert got.tobytes() == np.ascontiguousarray(expected[cut]).tobytes()
+
+
 class TestRieszLog:
     """Tests for riesz_log function."""
+
+    @pytest.mark.parametrize(("boundary", "mode"), [("zero", "constant"), ("mirror", "symmetric"), ("nearest", "edge")])  # fmt: skip
+    def test_one_fft_round_trip(self, boundary: str, mode: str) -> None:
+        """A non-periodic boundary pads once and runs the LoG and the Riesz transform in
+        one FFT round trip: the values of the plain numpy chain, as float32."""
+        image = np.random.default_rng(3).normal(40.0, 20.0, (12, 10, 9))
+        spacing = (1.0, 1.5, 2.0)
+        for order in ((1, 0, 0), (2, 0, 0), (0, 1, 2)):
+            got = riesz_log(image, 2.0, spacing, order, boundary=boundary)
+            expected = _plain_riesz_log(image, 2.0, spacing, order, mode)
+            assert got.dtype == np.float32 and got.shape == image.shape
+            assert_allclose(got, expected, rtol=0, atol=1e-6 * np.abs(expected).max())
+
+    def test_slab_path_and_inputs_give_the_same_bits(self) -> None:
+        """The slab path, a column-order image, the slab threads and a float32 image (the
+        bits of its float64 cast) give the bits of the one-call path."""
+        from pictologics.filters import base
+
+        image = np.random.default_rng(3).normal(40.0, 20.0, (12, 10, 9))
+        expected = riesz_log(image, 2.0, (1.0, 1.5, 2.0), (1, 0, 0), boundary="mirror")
+        with patch.object(base, "_LOG_SLAB_MIN", 1):
+            slabs = riesz_log(image, 2.0, (1.0, 1.5, 2.0), (1, 0, 0), boundary="mirror")
+        _assert_gabor_bits(slabs, expected, "slabs")
+        column = riesz_log(np.asfortranarray(image), 2.0, (1.0, 1.5, 2.0), (1, 0, 0), boundary="mirror")  # fmt: skip
+        assert column.tobytes() == expected.tobytes()
+        with (
+            patch.object(base, "_LOG_SLAB_MIN", 1),
+            patch.object(base, "_SLAB_MIN_SIZE", 1),
+            patch.object(base, "get_num_threads", return_value=3),
+        ):
+            threads = riesz_log(image, 2.0, (1.0, 1.5, 2.0), (1, 0, 0), boundary="mirror")
+        assert threads.tobytes() == slabs.tobytes()
+        single = image.astype(np.float32)
+        got = riesz_log(single, 2.0, (1.0, 1.5, 2.0), (1, 0, 0), boundary="mirror")
+        cast = riesz_log(single.astype(np.float64), 2.0, (1.0, 1.5, 2.0), (1, 0, 0), boundary="mirror")  # fmt: skip
+        assert got.tobytes() == cast.tobytes()
+
+    @pytest.mark.parametrize("boundary", ["zero", "periodic"])
+    def test_invalid_scale_raises(self, boundary: str) -> None:
+        image = np.zeros((6, 6, 6))
+        message = "must be a positive number|must hold positive numbers"
+        for kwargs in (
+            {"sigma_mm": np.nan},
+            {"sigma_mm": np.inf},
+            {"sigma_mm": 1.0, "spacing_mm": (1.0, 0.0, 1.0)},
+            {"sigma_mm": 1.0, "truncate": 0.0},
+        ):
+            with pytest.raises(ValueError, match=message):
+                riesz_log(image, boundary=boundary, **kwargs)
+
+    def test_two_d_image_keeps_the_two_stages(self) -> None:
+        """A 2-D image with a non-periodic boundary keeps the LoG and the Riesz stages; a
+        source mask zeroes the invalid voxels of the result."""
+        image = np.random.default_rng(4).normal(size=(16, 14))
+        mask = np.ones(image.shape, dtype=bool)
+        mask[:3] = False
+        plain = riesz_log(image, 2.0, (1.0, 1.0), (1, 0), boundary="zero")
+        assert plain.shape == image.shape and np.isfinite(plain).all()
+        masked = riesz_log(image, 2.0, (1.0, 1.0), (1, 0), boundary="zero", source_mask=mask)
+        assert masked.shape == image.shape and np.all(masked[~mask] == 0)
 
     def test_basic_application(self, small_3d_image):
         result = riesz_log(small_3d_image, sigma_mm=2.0, order=(1, 0, 0))
@@ -1633,6 +1884,55 @@ def test_transfer_functions_built_in_slabs_match_one_volume() -> None:
                 assert not built.flags.writeable
 
 
+_TABLE_SHAPES = ((9, 8, 7), (6, 10, 5), (8, 9, 10), (1, 5, 7), (5, 7, 1), (2, 3, 4))
+
+
+def test_transfer_table_kernels_match_the_numpy_build() -> None:
+    """The parallel kernels of the 3-D Simoncelli and Riesz tables (the gate at 0) give the
+    bits of the numpy slab build, also with a singleton axis, as read-only tables: float64
+    for Simoncelli; complex128 with a DC value of +0 for every power branch of Riesz, for a
+    full table and a half table."""
+    from pictologics.filters import base, riesz, wavelets
+
+    for shape in _TABLE_SHAPES:
+        for level in (1, 2, 3):
+            with patch.object(wavelets, "_TABLE_KERNEL_MIN", 1 << 62):
+                expected = wavelets._simoncelli_transfer.__wrapped__(shape, level)
+            with patch.object(wavelets, "_TABLE_KERNEL_MIN", 0):
+                built = wavelets._simoncelli_transfer.__wrapped__(shape, level)
+            assert built.dtype == np.float64 and not built.flags.writeable
+            assert built.tobytes() == expected.tobytes(), (shape, level)
+    orders = ((1, 0, 0), (0, 1, 1), (0, 0, 2), (3, 0, 0), (0, 4, 1), (2, 3, 1))
+    for half in (base._HALF_TABLE_MIN, 0):
+        with patch.object(base, "_HALF_TABLE_MIN", half):
+            for shape in _TABLE_SHAPES:
+                for order in orders:
+                    with patch.object(riesz, "_TABLE_KERNEL_MIN", 1 << 62):
+                        expected = riesz._riesz_transfer.__wrapped__(shape, order)
+                    with patch.object(riesz, "_TABLE_KERNEL_MIN", 0):
+                        built = riesz._riesz_transfer.__wrapped__(shape, order)
+                    assert built.dtype == np.complex128 and not built.flags.writeable
+                    assert built.view(np.uint64).tobytes() == expected.view(np.uint64).tobytes()
+                    assert not np.signbit(built.real.flat[0]) and not np.signbit(built.imag.flat[0])
+
+
+def test_simoncelli_table_blocks_give_the_same_bits() -> None:
+    """Every block count of the Simoncelli table kernel gives the same bits: a block reads
+    the row before it from its own buffer (blocks > 1) or from its own rows."""
+    from pictologics.filters import wavelets
+
+    for shape in ((8, 9, 10), (9, 8, 7)):
+        with patch.object(wavelets, "_TABLE_KERNEL_MIN", 1 << 62):
+            expected = wavelets._simoncelli_transfer.__wrapped__(shape, 1)
+        for blocks in (1, 2, 3, shape[0]):
+            with (
+                patch.object(wavelets, "_TABLE_KERNEL_MIN", 0),
+                patch.object(wavelets, "get_num_threads", return_value=blocks),
+            ):
+                built = wavelets._simoncelli_transfer.__wrapped__(shape, 1)
+            assert built.tobytes() == expected.tobytes(), (shape, blocks)
+
+
 def test_laws_rotations_pool_as_the_rotation_loop() -> None:
     """The rotation-invariant Laws filter pools each base response as soon as it is ready,
     with in-place signs, passes and energy: the values of the loop over all 24 rotations
@@ -1696,6 +1996,31 @@ def test_laws_rotations_pool_as_the_rotation_loop() -> None:
                     assert_array_equal((result + 0.0).view(bits), (expected + 0.0).view(bits))
 
 
+def test_inverse_without_the_c_temporary_gives_the_irfftn_bits() -> None:
+    """The split inverse (an in-place inverse FFT of the leading axes, the inverse real FFT
+    of the last axis, the scale in the float32 cut) gives the bits of scipy's irfftn cast to
+    float32: 1-D, 2-D and 3-D, float64 and float32 images, with a crop, and with the cut on
+    the slab threads."""
+    import scipy.fft
+
+    from pictologics.filters import base
+
+    rng = np.random.default_rng(35)
+    for shape in ((50,), (12, 11), (9, 8, 7), (12, 11, 10), (1, 64, 64)):
+        for kind in (np.float64, np.float32):
+            image = rng.normal(size=shape).astype(kind)
+            crop = tuple(slice(1, max(2, n - 1)) if n > 2 else slice(None) for n in shape)
+            for part in (None, crop):
+                expected = scipy.fft.irfftn(scipy.fft.rfftn(image), s=shape)
+                expected = (expected if part is None else expected[part]).astype(np.float32)
+                for gate in (base._SLAB_UFUNC_MIN_BYTES, 0):
+                    with patch.object(base, "_SLAB_UFUNC_MIN_BYTES", gate):
+                        response, scale = base._irfftn_unscaled(scipy.fft.rfftn(image), shape, 1)
+                        got = base._float32_cut(response, part, scale)
+                    assert got.tobytes() == expected.tobytes(), (shape, kind, part, gate)
+                    assert got.flags.c_contiguous and got.dtype == np.float32
+
+
 def test_filter_threads_follow_the_numba_thread_count() -> None:
     """The FFT filters, the rotation threads of the wavelet and Laws filters (and the pass
     threads of a large wavelet image) and the slice threads of the Gabor filter use numba's
@@ -1726,7 +2051,7 @@ def test_filter_threads_follow_the_numba_thread_count() -> None:
             stack.enter_context(patch.object(module, "get_num_threads", return_value=2))
         ffts = [
             stack.enter_context(patch.object(scipy.fft, name, wraps=getattr(scipy.fft, name)))
-            for name in ("rfftn", "irfftn")
+            for name in ("rfftn", "ifftn", "irfft")
         ]
         for name, run in fft_runs.items():
             assert_array_equal(run(), expected[name])
@@ -2010,13 +2335,13 @@ def test_padding_value_is_constant_value_padding() -> None:
     fft = {  # (filter, the pad width of its boundary padding, for every axis)
         "simoncelli": (lambda img, **kw: simoncelli_wavelet(img, level=1, **kw), 8),
         "riesz": (lambda img, **kw: riesz_transform(img, order=(1, 0, 0), **kw), 16),
-        "riesz_log": (lambda img, **kw: riesz_log(img, 1.0, order=(0, 1, 0), **kw), 20),
         "riesz_simoncelli": (lambda img, **kw: riesz_simoncelli(img, 1, order=(0, 0, 1), **kw), 24),
     }
     cases = [(name, call, (margin,) * 3, "zero") for name, call in spatial.items()]
-    # An FFT filter pads each axis by its width, at most the length of the axis
+    # An FFT filter pads each axis by its width, at most the length of the axis, then up to
+    # a fast FFT size (see _fast_width)
     cases += [
-        (name, call, tuple(min(width, n) for n in image.shape), "periodic")
+        (name, call, tuple(_fast_width(n, min(width, n)) for n in image.shape), "periodic")
         for name, (call, width) in fft.items()
     ]
     for name, call, widths, outer in cases:
@@ -2032,6 +2357,16 @@ def test_padding_value_is_constant_value_padding() -> None:
         )
         with pytest.raises(ValueError, match="needs the constant"):
             call(image, boundary="mirror", padding_value=value)
+    # riesz_log pads once with the value and runs one FFT round trip (see TestRieszLog)
+    got = riesz_log(image, 1.0, order=(0, 1, 0), boundary="constant", padding_value=value)
+    expected = _plain_riesz_log(image, 1.0, (1.0,) * 3, (0, 1, 0), "constant", value)
+    assert_allclose(got, expected, rtol=0, atol=1e-5 * np.abs(expected).max())
+    assert_array_equal(
+        riesz_log(image, 1.0, boundary="zero", padding_value=0.0),
+        riesz_log(image, 1.0, boundary="zero"),
+    )
+    with pytest.raises(ValueError, match="needs the constant"):
+        riesz_log(image, 1.0, boundary="mirror", padding_value=value)
     mask = rng.random(image.shape) > 0.1
     response, valid = mean_filter(image, 3, "constant", source_mask=mask, padding_value=value)
     assert response.shape == valid.shape == image.shape

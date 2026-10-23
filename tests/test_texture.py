@@ -365,7 +365,7 @@ class TestTextureFeatures(unittest.TestCase):
         """The zone matrices with `n_chunks` threads, so at most that many z-chunks (also
         for these small volumes, which else take one serial fill)."""
         vol, counts = texture_module._texture_volume(data, np.asarray(mask) != 0, self.n_bins)
-        dist = np.pad(dist_map.astype(np.int32), 1)
+        dist = np.pad(dist_map.astype(np.uint16), 1)
         with (
             patch.object(texture_module.numba, "get_num_threads", return_value=n_chunks),
             patch.object(texture_module, "_ZONE_PARALLEL_MIN_SIZE", 0),
@@ -382,7 +382,7 @@ class TestTextureFeatures(unittest.TestCase):
         mask = np.zeros((depth, 3, 3), dtype=int)
         mask[:, 1, 1] = 1
         # strictly decreasing distance so the per-chunk DFS updates min_dist
-        dist_map = np.zeros((depth, 3, 3), dtype=np.int32)
+        dist_map = np.zeros((depth, 3, 3), dtype=np.uint16)
         dist_map[:, 1, 1] = np.arange(depth, 0, -1)
         glszm, gldzm = self._run_parallel_zone_kernel(data, mask, dist_map, n_chunks=4)
         self.assertEqual(int(glszm.sum()), 1)  # the per-chunk sub-zones merged into one
@@ -465,7 +465,7 @@ class TestTextureFeatures(unittest.TestCase):
         data = np.ones((depth, 3, 3), dtype=int)
         mask = np.zeros((depth, 3, 3), dtype=int)
         mask[:, 1, 1] = 1
-        dist = np.zeros((depth, 3, 3), dtype=np.int32)
+        dist = np.zeros((depth, 3, 3), dtype=np.uint16)
 
         # More threads than slices: one chunk per slice
         glszm, _ = self._run_parallel_zone_kernel(data, mask, dist, n_chunks=100)
@@ -507,7 +507,7 @@ class TestTextureFeatures(unittest.TestCase):
         mask[0, 2, 2] = 1  # chunk-0 zone B (higher id, not adjacent to A)
         mask[1, 1, 1] = 1  # chunk-1 zone C, 26-adjacent to both A and B
         data = np.ones((2, 4, 4), dtype=int)
-        dist = np.zeros((2, 4, 4), dtype=np.int32)
+        dist = np.zeros((2, 4, 4), dtype=np.uint16)
         glszm, _ = self._run_parallel_zone_kernel(data, mask, dist, n_chunks=2)
         self.assertEqual(int(glszm.sum()), 1)  # A, B and C all merge into one zone
 
@@ -576,7 +576,7 @@ class TestTextureFeatures(unittest.TestCase):
         for y, gl in ((1, 1), (4, 1), (7, 3)):
             data[1, y, 10] = gl
             mask_u8[1, y, 10] = 1
-        dist = np.zeros((3, 15, 15), dtype=np.int32)
+        dist = np.zeros((3, 15, 15), dtype=np.uint16)
         dense, _ = texture_module.calculate_zone_features(data, mask_u8, dist, self.n_bins)
         self.assertEqual(int(dense[1, 2]), 3)  # the repeated (grey 2, size 3) cell
         for dense_cells in (1 << 18, 2 * self.n_bins):  # table only; table width 2 + sorting
@@ -600,7 +600,7 @@ class TestTextureFeatures(unittest.TestCase):
         zone that goes through the sorted path."""
         rng = np.random.default_rng(31)
         mask = rng.random((12, 13, 14)) < 0.8
-        dist = np.zeros((14, 15, 16), dtype=np.int32)
+        dist = np.zeros((14, 15, 16), dtype=np.uint16)
         for n_bins in (2, 1024, 1025, 4096):
             data = rng.integers(1, n_bins + 1, mask.shape)
             data[:5] = 1  # one large zone
@@ -631,7 +631,9 @@ class TestTextureFeatures(unittest.TestCase):
         zones_only = texture_module._texture_matrices(
             self.data, self.mask, self.n_bins, compact=True, **local
         )
-        self.assertEqual(set(zones_only), {"glszm_cells", "gldzm", "roi", "distance_map"})
+        self.assertEqual(
+            set(zones_only), {"glszm_cells", "gldzm", "roi", "distance_map", "n_voxels"}
+        )
         full = texture_module._texture_matrices(self.data, self.mask, self.n_bins, **local)
         self.assertFalse(full["glcm"].any())
         no_zones_full = texture_module._texture_matrices(
@@ -698,7 +700,7 @@ class TestGldzmDistanceMap(unittest.TestCase):
         from scipy.ndimage import distance_transform_cdt
 
         mask_padded = np.pad(mask_bool, 1, mode="constant", constant_values=0)
-        dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.int32)
+        dist_map_padded = distance_transform_cdt(mask_padded, metric="taxicab").astype(np.uint16)
         unpad = tuple(slice(1, -1) for _ in range(mask_bool.ndim))
         return dist_map_padded[unpad]
 
@@ -986,17 +988,20 @@ def test_glcm_tables_alternate_up_to_64_levels() -> None:
         roi = (rng.random(levels.shape) > 0.2).astype(np.uint8)
         roi[:, :, 2:18] = 1
         vol, counts = texture_module._texture_volume(levels, roi, n_bins)
-        with patch.object(
-            texture_module, "_thread_tables", wraps=texture_module._thread_tables
-        ) as tables:
-            got = texture_module._local_matrices(
-                vol, counts, n_bins, True, False, False, False, 1, True
-            )
-        shape = tables.call_args_list[0].args[0]
-        assert shape[1:] == (n_alt, 1, n_bins + 1, n_bins + 1)
-        np.testing.assert_array_equal(
-            got[0][0], _texture_by_loops(levels, roi, n_bins, 1, 1, 1, 1)[0]
-        )
+        expected = _texture_by_loops(levels, roi, n_bins, 1, 1, 1, 1)[0]
+        # The serial twin keeps one table: it has no long rows, and one table needs no sum
+        for parallel, alt in ((True, n_alt), (False, 1)):
+            with patch.object(
+                texture_module, "_thread_tables", wraps=texture_module._thread_tables
+            ) as tables:
+                got = texture_module._local_matrices(
+                    vol, counts, n_bins, True, False, False, False, 1, True, parallel=parallel
+                )
+            shape = tables.call_args_list[0].args[0]
+            assert shape[1:] == (alt, 1, n_bins + 1, n_bins + 1)
+            if not parallel:
+                assert shape[0] == 1
+            np.testing.assert_array_equal(got[0][0], expected)
 
 
 def test_texture_distances_match_loops_over_the_voxels() -> None:
@@ -1242,3 +1247,271 @@ def test_gldzm_needs_the_mask_inside_the_distance_mask() -> None:
     )
     zones = texture_module.calculate_glszm_features(data, inner, 3)
     assert features["zone_percentage_VIWW"] == zones["zone_percentage_P30P"]
+
+
+def test_np_sum_numba_gives_the_bits_of_np_sum() -> None:
+    # The loop form of numpy's pairwise sum gives the bits of np.sum at every size: the
+    # blocks of 8, the halves of a long range and all three stages of the loop.
+    rng = np.random.default_rng(19)
+    for n in [*range(301), 383, 1_000, 4_099, 70_001]:
+        values = rng.random(n) * 10.0 ** rng.integers(-12, 12, n)
+        for a in (values, values * rng.choice([-1.0, 1.0], n)):
+            got = np.float64(texture_module._np_sum_numba(a, n))
+            assert got.tobytes() == np.sum(a).tobytes(), n
+            if n >= 3:  # the prefix of a longer array
+                prefix = np.float64(texture_module._np_sum_numba(a, n - 3))
+                assert prefix.tobytes() == np.sum(a[: n - 3]).tobytes(), n
+
+
+def test_feature_kernels_give_the_values_of_the_numpy_path() -> None:
+    # An unsigned matrix takes the feature kernel, a float64 matrix the numpy body: the
+    # values agree (not bitwise: numpy's SIMD log2 and exp can differ from libm by one unit
+    # in the last place). The dense GLSZM gives the values of its cells.
+    rng = np.random.default_rng(20)
+    z, y, x = np.indices((10, 10, 10))
+    sphere = (z - 4.5) ** 2 + (y - 4.5) ** 2 + (x - 4.5) ** 2 <= 3.9**2
+    one_voxel = np.zeros((5, 5, 5), dtype=bool)
+    one_voxel[2, 2, 2] = True
+    cases = [
+        (rng.integers(1, 33, (10, 10, 10)), sphere, 32),  # a tiny ROI
+        (rng.integers(1, 33, (20, 20, 20)), np.ones((20, 20, 20), dtype=bool), 32),
+        (rng.choice(np.arange(1, 257, 37), (12, 12, 12)), np.ones((12, 12, 12), dtype=bool), 256),
+        (np.full((6, 6, 6), 3), np.ones((6, 6, 6), dtype=bool), 8),  # uniform: correlation 1
+        # One voxel: no GLRLM. The run tables of a 1x1x1 box have the run lengths 0 and 1,
+        # and the local kernel adds 0 to the cell of length 2 (outside the table; with the
+        # compiler off, an IndexError)
+        (rng.integers(1, 9, (5, 5, 5)), one_voxel, 8),
+        (rng.integers(1, 9, (1, 12, 12)), np.ones((1, 12, 12), dtype=bool), 8),  # one slice
+    ]
+    families = {
+        "glcm": texture_module.calculate_glcm_features,
+        "glrlm": texture_module.calculate_glrlm_features,
+        "gldzm": texture_module.calculate_gldzm_features,
+        "ngldm": texture_module.calculate_ngldm_features,
+    }
+    for levels, roi, n_bins in cases:
+        data, mask = levels.astype(np.float64), roi.astype(np.uint8)
+        runs = roi.sum() > 1
+        matrices = texture_module.calculate_all_texture_matrices(
+            data, mask, n_bins, calc_glrlm=runs
+        )
+        for family, function in families.items():
+            if family == "glrlm" and not runs:
+                continue
+            given = matrices[family]
+            reference = function(data, mask, n_bins, **{f"{family}_matrix": given.astype(float)})
+            for kind in (np.uint64, np.uint32):
+                got = function(data, mask, n_bins, **{f"{family}_matrix": given.astype(kind)})
+                assert list(got) == list(reference), family
+                np.testing.assert_allclose(
+                    list(got.values()), list(reference.values()), rtol=1e-12, equal_nan=True
+                )
+        cells = texture_module.calculate_glszm_features(data, mask, n_bins)
+        for kind in (np.uint8, np.float64):
+            dense = texture_module.calculate_glszm_features(
+                data, mask, n_bins, glszm_matrix=matrices["glszm"].astype(kind)
+            )
+            assert list(dense) == list(cells)
+            np.testing.assert_allclose(
+                list(dense.values()), list(cells.values()), rtol=1e-12, equal_nan=True
+            )
+        glcm = matrices["glcm"].astype(np.uint64)
+        table = texture_module.calculate_glcm_features(data, mask, n_bins, glcm_matrix=glcm)
+        two_d = glcm.sum(axis=0)  # one table counts as the sum of the 13
+        no_roi = np.zeros_like(mask)  # Ng_eff 1
+        for got, expected in (
+            (texture_module.calculate_glcm_features(data, mask, n_bins, glcm_matrix=two_d), table),
+            (
+                texture_module.calculate_glcm_features(data, no_roi, n_bins, glcm_matrix=glcm),
+                texture_module._glcm_features(glcm, n_bins, 1),
+            ),
+        ):
+            assert list(got) == list(expected)
+            np.testing.assert_array_equal(list(got.values()), list(expected.values()))
+    # A zero matrix gives no features and does not read the mask
+    zero = np.zeros((13, 8, 8), dtype=np.uint64)
+    assert texture_module.calculate_glcm_features(data, None, 8, glcm_matrix=zero) == {}
+    assert texture_module.calculate_glrlm_features(data, None, 8, glrlm_matrix=zero) == {}
+    zero_float = np.zeros((8, 3))  # the numpy body
+    assert texture_module.calculate_gldzm_features(data, None, 8, gldzm_matrix=zero_float) == {}
+    assert texture_module.calculate_ngldm_features(data, None, 8, ngldm_matrix=zero_float) == {}
+
+
+def test_count_kernel_keeps_the_rows_and_columns_with_counts() -> None:
+    # From min_cells cells on, the count kernel keeps only the rows and the columns that
+    # hold counts; the features are those of the whole matrix. A zero matrix returns 0 and
+    # leaves `out` as it is.
+    rng = np.random.default_rng(21)
+    holes = rng.integers(0, 5, (1, 6, 7)).astype(np.uint64)
+    holes[0, 2, :] = 0
+    holes[0, :, 3] = 0
+    full = rng.integers(1, 5, (1, 6, 7)).astype(np.uint64)
+    for tables in (holes, full):
+        gathered, whole = np.zeros(17), np.zeros(17)
+        total = texture_module._count_matrix_features_numba(tables, 0, 1, gathered)
+        assert total == texture_module._count_matrix_features_numba(tables, 0, 10**9, whole)
+        assert total == int(tables.sum())
+        np.testing.assert_allclose(gathered, whole, rtol=1e-12, equal_nan=True)
+    out = np.full(17, 7.0)
+    zero = np.zeros((1, 3, 3), dtype=np.uint64)
+    assert texture_module._count_matrix_features_numba(zero, 0, 1, out) == 0
+    assert (out == 7.0).all()
+
+
+def test_compact_matrices_give_the_voxel_count_and_ng_eff() -> None:
+    # The volume pass gives the texture voxel count and the grey-level span of the GLCM:
+    # the ROI voxels with a level in 1..n_bins, and the span of roi_min_max on them.
+    from pictologics.features._utils import roi_min_max
+
+    rng = np.random.default_rng(22)
+    data = rng.integers(3, 6, (6, 7, 8)).astype(np.float64)
+    data[0, 0, :5] = (0.0, 9.0, np.nan, 2.5, 6.5)  # out of range, NaN, non-integer levels
+    roi = rng.random(data.shape) < 0.6
+    roi[0, 0, :5] = True
+    compact = texture_module._texture_matrices(data, roi.astype(np.uint8), 8, compact=True)
+    valid = roi & (data >= 1) & (data <= 8)
+    assert compact["n_voxels"] == np.count_nonzero(valid)
+    np.testing.assert_array_equal(compact["roi"], valid)
+    span = roi_min_max(data, compact["roi"])
+    assert span is not None and compact["ng_eff"] == int(span[1] - span[0] + 1) == 5
+    invalid = np.zeros(data.shape, dtype=np.uint8)
+    invalid[0, 0, :3] = 1  # only levels outside 1..n_bins
+    only_invalid = texture_module._texture_matrices(data, invalid, 8, compact=True)
+    assert only_invalid["n_voxels"] == 0 and only_invalid["ng_eff"] == 1
+    no_glcm = texture_module._texture_matrices(data, roi, 8, compact=True, calc_glcm=False)
+    assert "ng_eff" not in no_glcm and no_glcm["n_voxels"] == compact["n_voxels"]
+    empty_slice = roi.copy()
+    empty_slice[2] = False
+    span_out = np.zeros((data.shape[0], 2))
+    texture_module._texture_volume(np.ascontiguousarray(data), empty_slice, 8, span_out)
+    assert span_out[2, 0] == np.inf and span_out[2, 1] == -np.inf
+
+
+def test_directions_are_cached() -> None:
+    # The directions of each planar flag are made once and shared (still writable, so the
+    # local kernel takes them with its compiled signature).
+    for planar in ((False, False, False), (True, False, False), (False, True, True)):
+        first = texture_module._directions(planar)
+        assert texture_module._directions(planar) is first
+        steps_out = (texture_module.DIRECTIONS_13 != 0) & np.array(planar)
+        np.testing.assert_array_equal(first, np.flatnonzero(~steps_out.any(axis=1)))
+        assert first.dtype == np.int64 and first.flags.writeable
+
+
+def test_one_thread_on_a_large_volume_keeps_two_glcm_tables() -> None:
+    # One thread on a volume above the parallel gate keeps the two GLCM tables of the
+    # parallel kernel (the gate of the one table is the serial twin, not the thread count);
+    # its one block of slices and its tables with no thread sum give the matrices of the
+    # serial twin.
+    rng = np.random.default_rng(24)
+    levels = rng.integers(1, 33, (12, 30, 30)).astype(np.float64)
+    roi = (rng.random(levels.shape) > 0.1).astype(np.uint8)
+    vol, counts = texture_module._texture_volume(levels, roi, 32)
+    assert vol.size >= texture_module._LOCAL_PARALLEL_MIN_SIZE
+    flags = (True, True, True, True, 0, True)
+    with (
+        patch.object(texture_module.numba, "get_num_threads", return_value=1),
+        patch.object(
+            texture_module, "_thread_tables", wraps=texture_module._thread_tables
+        ) as tables,
+    ):
+        one_thread = texture_module._local_matrices(vol, counts, 32, *flags)
+    assert tables.call_args_list[0].args[0][:2] == (1, 2)
+    twin = texture_module._local_matrices(vol, counts, 32, *flags, parallel=False)
+    for got, expected in zip(one_thread, twin, strict=True):
+        np.testing.assert_array_equal(got, expected)
+
+
+def test_calculate_zone_features_checks_the_distance_map() -> None:
+    # The zone kernels read a uint16 distance map: a value outside [0, 65535] or a NaN
+    # raises (a cast would wrap it); a float map of whole numbers gives the zones of the
+    # int32 map; without the GLDZM the map is not read.
+    rng = np.random.default_rng(25)
+    data = rng.integers(1, 5, (4, 5, 6)).astype(np.int32)
+    mask = np.ones(data.shape, dtype=np.uint8)
+    dist_map = rng.integers(1, 4, data.shape).astype(np.int32)
+    for bad in (70_000.0, -1.0, np.nan):
+        broken = dist_map.astype(np.float64)
+        broken[1, 2, 3] = bad
+        with pytest.raises(ValueError, match="^dist_map values must lie in"):
+            texture_module.calculate_zone_features(data, mask, broken, 4)
+    expected = texture_module.calculate_zone_features(data, mask, dist_map, 4)
+    got = texture_module.calculate_zone_features(data, mask, dist_map.astype(np.float64), 4)
+    for a, b in zip(got, expected, strict=True):
+        np.testing.assert_array_equal(a, b)
+    texture_module.calculate_zone_features(data, mask, np.full(data.shape, -1), 4, calc_gldzm=False)
+
+
+def test_distance_map_is_uint16_with_a_long_axis() -> None:
+    # A row of 65,534 voxels: depth + height + width + 1 is above 65535, so the far value
+    # stays at 65535, and every distance is the nearest end of the row. (With the compiler
+    # off, the kernel adds numpy uint16 values, which wrap at 65535 + 1; numba adds them as
+    # int64. So the row stays short enough that no sum of the passes passes 65535.)
+    n = 65_534
+    padded = texture_module._distance_map(np.ones((1, 1, n), dtype=bool), (True, True, False))
+    assert padded.dtype == np.uint16
+    x = np.arange(n)
+    np.testing.assert_array_equal(padded[1, 1, 1:-1], np.minimum(x + 1, n - x))
+
+
+def test_zone_tables_in_threads_give_the_serial_tables() -> None:
+    # The compact zone tables in threads (each chunk of zones in a thread; the large zones
+    # gathered after the chunks) give the tables of the serial fill, array by array, also
+    # for a zero distance map and for each family alone.
+    rng = np.random.default_rng(26)
+    shape = (9, 7, 8)
+    for levels in (2, 8, 256):
+        data = rng.integers(1, levels + 1, shape)
+        data[:3] = 1  # one large zone across chunks
+        roi = rng.random(shape) < 0.7
+        vol, counts = texture_module._texture_volume(data, roi, levels)
+        padded = texture_module._chamfer_distance_taxicab_numba(roi, False, False, False)
+        for dist in (padded, np.zeros_like(padded)):
+            for flags in ((True, True), (True, False), (False, True)):
+                # A narrow dense table: large zones in several chunks
+                with patch.object(texture_module, "_GLSZM_DENSE_CELLS", 2 * levels):
+                    serial = texture_module._zone_matrices(
+                        vol.copy(), counts, dist, levels, *flags, False, parallel=False
+                    )
+                    for n_chunks in (2, 3, 7):
+                        with patch.object(
+                            texture_module.numba, "get_num_threads", return_value=n_chunks
+                        ):
+                            threaded = texture_module._zone_matrices(
+                                vol.copy(), counts, dist, levels, *flags, False, parallel=True
+                            )
+                        for got, expected in zip(threaded, serial, strict=True):
+                            assert got.shape == expected.shape
+                            np.testing.assert_array_equal(got, expected)
+
+
+def test_zone_tables_in_threads_from_the_gate() -> None:
+    # The compact zone tables run in threads from _ZONE_TABLES_PARALLEL_MIN zones on (or when
+    # the caller asks for the parallel kernel), for at most _GLSZM_MANY_LEVELS levels, and
+    # never for the dense GLSZM.
+    rng = np.random.default_rng(27)
+    data = rng.integers(1, 9, (9, 7, 8))
+    vol, counts = texture_module._texture_volume(data, np.ones(data.shape, dtype=bool), 8)
+    dist = np.zeros(tuple(s + 2 for s in data.shape), dtype=np.uint16)
+
+    def calls(n_bins: int, dense: bool, parallel: Any) -> int:
+        with (
+            patch.object(texture_module.numba, "get_num_threads", return_value=3),
+            patch.object(texture_module, "_ZONE_PARALLEL_MIN_SIZE", 0),
+            patch.object(
+                texture_module,
+                "_zone_cells_parallel_numba",
+                wraps=texture_module._zone_cells_parallel_numba,
+            ) as spy,
+        ):
+            texture_module._zone_matrices(
+                vol.copy(), counts, dist, n_bins, True, True, dense, parallel=parallel
+            )
+        return spy.call_count
+
+    assert calls(8, False, None) == 0
+    with patch.object(texture_module, "_ZONE_TABLES_PARALLEL_MIN", 0):
+        assert calls(8, False, None) == 1
+    assert calls(1025, False, True) == 0
+    assert calls(8, True, True) == 0
+    assert calls(8, False, True) == 1

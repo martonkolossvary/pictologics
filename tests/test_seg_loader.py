@@ -21,13 +21,14 @@ os.environ["PICTOLOGICS_DISABLE_WARMUP"] = "1"
 import numpy as np
 import pytest
 
-from pictologics.loader import Image, _is_dicom_seg
+from pictologics.loader import Image, _dicom_sop_class
 from pictologics.loaders.seg_loader import (
     _align_to_reference,
     _extract_combined_segments,
     _extract_seg_geometry,
     _extract_segment_masks,
     _frame_layout,
+    _inside_level,
     get_segment_info,
     load_seg,
 )
@@ -106,50 +107,46 @@ def _frames(pixel_array: np.ndarray) -> list[tuple[int, np.ndarray]]:
 
 
 # ============================================================================
-# Test _is_dicom_seg
+# Test _dicom_sop_class
 # ============================================================================
 
 
-class TestIsDicomSeg:
-    """Tests for _is_dicom_seg helper function."""
+class TestDicomSopClass:
+    """Tests for the _dicom_sop_class helper function (one header read)."""
 
-    def test_is_dicom_seg_true(self) -> None:
-        """Test detection of DICOM SEG file."""
+    def test_dicom_sop_class_of_a_seg(self) -> None:
+        """A SEG file gives its SOP class UID, from one read of the header."""
         with patch("pydicom.dcmread") as mock_read:
             mock_dcm = MagicMock()
             mock_dcm.SOPClassUID = "1.2.840.10008.5.1.4.1.1.66.4"
             mock_read.return_value = mock_dcm
 
-            result = _is_dicom_seg("/path/to/file.dcm")
-            assert result is True
+            result = _dicom_sop_class("/path/to/file.dcm")
+            assert result == "1.2.840.10008.5.1.4.1.1.66.4"
             mock_read.assert_called_once_with("/path/to/file.dcm", stop_before_pixels=True)
 
-    def test_is_dicom_seg_false_different_sop(self) -> None:
-        """Test non-SEG DICOM file returns False."""
+    def test_dicom_sop_class_of_a_ct_image(self) -> None:
+        """A CT image gives its own SOP class UID."""
         with patch("pydicom.dcmread") as mock_read:
             mock_dcm = MagicMock()
             mock_dcm.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"  # CT Image
             mock_read.return_value = mock_dcm
 
-            result = _is_dicom_seg("/path/to/file.dcm")
-            assert result is False
+            assert _dicom_sop_class("/path/to/file.dcm") == "1.2.840.10008.5.1.4.1.1.2"
 
-    def test_is_dicom_seg_false_no_sop(self) -> None:
-        """Test file without SOPClassUID returns False."""
+    def test_dicom_sop_class_without_the_attribute(self) -> None:
+        """A file without SOPClassUID gives an empty string."""
         with patch("pydicom.dcmread") as mock_read:
-            mock_dcm = MagicMock(spec=[])
-            mock_read.return_value = mock_dcm
+            mock_read.return_value = MagicMock(spec=[])
 
-            result = _is_dicom_seg("/path/to/file.dcm")
-            assert result is False
+            assert _dicom_sop_class("/path/to/file.dcm") == ""
 
-    def test_is_dicom_seg_false_exception(self) -> None:
-        """Test file read exception returns False."""
+    def test_dicom_sop_class_of_a_file_that_cannot_be_read(self) -> None:
+        """A read error gives an empty string."""
         with patch("pydicom.dcmread") as mock_read:
             mock_read.side_effect = Exception("Read error")
 
-            result = _is_dicom_seg("/path/to/file.dcm")
-            assert result is False
+            assert _dicom_sop_class("/path/to/file.dcm") == ""
 
 
 # ============================================================================
@@ -470,10 +467,10 @@ class TestLoadImageIntegration:
         mock_seg = create_mock_seg_dataset()
 
         with (
-            patch("pictologics.loader._is_dicom_seg") as mock_is_seg,
+            patch("pictologics.loader._dicom_sop_class") as mock_is_seg,
             patch("pictologics.loaders.seg_loader.pydicom.dcmread") as mock_read,
         ):
-            mock_is_seg.return_value = True
+            mock_is_seg.return_value = "1.2.840.10008.5.1.4.1.1.66.4"
             mock_read.return_value = mock_seg
 
             result = load_image(str(dummy_file))
@@ -939,6 +936,18 @@ class TestHighdicomRoundTrip:
 
 class TestSegFixes:
     """Fractional thresholds, more than 255 segments, per-frame geometry."""
+
+    def test_inside_level_is_the_integer_ceiling(self) -> None:
+        # The stored values are integers, so the level rounds up: x >= 127.5 is x >= 128.
+        from types import SimpleNamespace as NS
+
+        values = np.arange(256, dtype=np.uint8)
+        assert _inside_level(NS(SegmentationType="BINARY"), 0.5) == 1
+        for maximum, threshold in [(255, 0.5), (255, 0.1), (100, 1 / 3), (7, 0.5), (1000, 0.5), (255, 0.0)]:  # fmt: skip
+            seg = NS(SegmentationType="FRACTIONAL", MaximumFractionalValue=maximum)
+            level = _inside_level(seg, threshold)
+            assert type(level) is int
+            np.testing.assert_array_equal(values >= level, values >= max(threshold * maximum, 1.0))
 
     def test_fractional_segments_use_a_threshold(self, tmp_path: Path) -> None:
         # A FRACTIONAL SEG: a voxel is in the segment when its value is at least the

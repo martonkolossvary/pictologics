@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-21T17:44:23.758734",
+  "timestamp": "2026-10-23T16:02:14.247420",
   "total": 9,
   "passed": 9,
   "failed": 0,
@@ -17,7 +17,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 63.1,
+      "time_ms": 95.2,
       "notes": "Baseline (no filter)"
     },
     "2.B": {
@@ -26,7 +26,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 121.4,
+      "time_ms": 133.1,
       "notes": "3D, support=5"
     },
     "3.B": {
@@ -35,7 +35,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 141.4,
+      "time_ms": 142.5,
       "notes": "\u03c3=1.5mm, truncate=4\u03c3"
     },
     "4.B": {
@@ -44,7 +44,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 132.9,
+      "time_ms": 154.8,
       "notes": "L5E5E5, rot-inv max, energy \u03b4=7"
     },
     "5.B": {
@@ -53,7 +53,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 201.5,
+      "time_ms": 188.9,
       "notes": "\u03c3=5mm, \u03bb=2mm, \u03b3=1.5, rot-inv avg"
     },
     "6.B": {
@@ -62,7 +62,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 137.8,
+      "time_ms": 144.3,
       "notes": "LLH level 1, rot-inv avg"
     },
     "7.B": {
@@ -71,7 +71,7 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 129.3,
+      "time_ms": 150.6,
       "notes": "HHH level 2, rot-inv avg"
     },
     "8.B": {
@@ -80,7 +80,7 @@
       "passed": 17,
       "failed": 0,
       "total": 17,
-      "time_ms": 168.0,
+      "time_ms": 134.3,
       "notes": "B map level 1"
     },
     "9.B": {
@@ -89,11 +89,11 @@
       "passed": 18,
       "failed": 0,
       "total": 18,
-      "time_ms": 115.3,
+      "time_ms": 69.8,
       "notes": "B map level 2"
     }
   },
-  "total_time_seconds": 1.2107,
+  "total_time_seconds": 1.2135,
   "environment": {
     "system": "Darwin",
     "machine": "arm64",

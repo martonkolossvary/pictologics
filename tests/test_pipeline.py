@@ -952,7 +952,7 @@ def test_extract_ivh_full_params(
         )
 
 
-@patch("pictologics.pipeline.calculate_glcm_features")
+@patch("pictologics.pipeline._glcm_features")
 @patch("pictologics.pipeline._texture_matrices")
 def test_extract_texture_error_no_discretise(
     mock_matrices: MagicMock,
@@ -980,7 +980,7 @@ def test_extract_texture_error_no_discretise(
 
 @patch("pictologics.pipeline.discretise_image")
 @patch("pictologics.pipeline._texture_matrices")
-@patch("pictologics.pipeline.calculate_glcm_features")
+@patch("pictologics.pipeline._glcm_features")
 # ... mock others if needed ...
 def test_extract_texture_success(
     mock_glcm: MagicMock,
@@ -997,6 +997,8 @@ def test_extract_texture_success(
         "glszm": 1,
         "glszm_cells": 1,
         "roi": np.ones((1, 1, 1), dtype=bool),
+        "n_voxels": 1,
+        "ng_eff": 1,
         "gldzm": 1,
         "ngtdm_s": 1,
         "ngtdm_n": 1,
@@ -1017,11 +1019,11 @@ def test_extract_texture_success(
     # We need to ensure 'pipeline.py' feature extraction calls GLCM, GLRLM etc.
     # I'll rely on patching calculation functions to prevent errors.
     with (
-        patch("pictologics.pipeline.calculate_glrlm_features") as mr,
+        patch("pictologics.pipeline._glrlm_features") as mr,
         patch("pictologics.pipeline._glszm_features_from_cells") as ms,
-        patch("pictologics.pipeline.calculate_gldzm_features") as md,
+        patch("pictologics.pipeline._gldzm_features") as md,
         patch("pictologics.pipeline.calculate_ngtdm_features") as mt,
-        patch("pictologics.pipeline.calculate_ngldm_features") as mn,
+        patch("pictologics.pipeline._ngldm_features") as mn,
     ):
         mr.return_value = {}
         ms.return_value = {}
@@ -1158,6 +1160,27 @@ def test_get_log_copies_the_entries_with_their_run_time() -> None:
     log[0]["steps_executed"].clear()
     assert pipeline.get_log()[0]["status"] == "completed"
     assert pipeline.get_log()[0]["steps_executed"]
+    assert pipeline.get_log() == pipeline._log
+    steps = len(pipeline._log[0]["config_snapshot"]["steps"])
+    log[0]["config_snapshot"]["steps"].append({"step": "changed"})  # the shared snapshot too
+    assert len(pipeline._log[0]["config_snapshot"]["steps"]) == steps
+
+
+def test_get_log_copies_a_log_that_pickle_cannot_write() -> None:
+    # A step parameter that pickle cannot write (a lambda, with validate=False) takes the
+    # deep copy: the copy equals the log, and a change of it leaves the log as it is.
+    image = Image(np.arange(1000.0).reshape(10, 10, 10), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    roi = np.zeros((10, 10, 10), dtype=np.uint8)
+    roi[2:8, 2:8, 2:8] = 1
+    pipeline = RadiomicsPipeline(load_standard=False)
+    params = {"families": ["intensity"], "hook": lambda value: value}
+    pipeline.add_config("hook", [{"step": "extract_features", "params": params}], validate=False)
+    pipeline.run(image, Image(roi, image.spacing, image.origin), config_names=["hook"])
+    log = pipeline.get_log()
+    assert log == pipeline._log
+    status = pipeline._log[0]["status"]
+    log[0]["status"] = "changed"
+    assert pipeline._log[0]["status"] == status
 
 
 def test_log_entries_hold_the_environment_and_a_config_hash(tmp_path: Any) -> None:
@@ -1933,12 +1956,12 @@ def test_params_explicit_none_all(
     with (
         patch("pictologics.pipeline.calculate_ivh_features") as mock_ivh,
         patch("pictologics.pipeline._texture_matrices") as mock_tex,
-        patch("pictologics.pipeline.calculate_glcm_features"),
-        patch("pictologics.pipeline.calculate_glrlm_features"),
+        patch("pictologics.pipeline._glcm_features"),
+        patch("pictologics.pipeline._glrlm_features"),
         patch("pictologics.pipeline._glszm_features_from_cells"),
-        patch("pictologics.pipeline.calculate_gldzm_features"),
+        patch("pictologics.pipeline._gldzm_features"),
         patch("pictologics.pipeline.calculate_ngtdm_features"),
-        patch("pictologics.pipeline.calculate_ngldm_features"),
+        patch("pictologics.pipeline._ngldm_features"),
         patch("pictologics.pipeline.discretise_image", return_value=mock_image),
     ):
         mock_ivh.return_value = {}
@@ -2039,12 +2062,12 @@ def test_step_discretise_fbs_success(
 
     with (
         patch("pictologics.pipeline._texture_matrices") as mock_tex,
-        patch("pictologics.pipeline.calculate_glcm_features", return_value={}),
-        patch("pictologics.pipeline.calculate_glrlm_features", return_value={}),
+        patch("pictologics.pipeline._glcm_features", return_value={}),
+        patch("pictologics.pipeline._glrlm_features", return_value={}),
         patch("pictologics.pipeline._glszm_features_from_cells", return_value={}),
-        patch("pictologics.pipeline.calculate_gldzm_features", return_value={}),
+        patch("pictologics.pipeline._gldzm_features", return_value={}),
         patch("pictologics.pipeline.calculate_ngtdm_features", return_value={}),
-        patch("pictologics.pipeline.calculate_ngldm_features", return_value={}),
+        patch("pictologics.pipeline._ngldm_features", return_value={}),
     ):
         mock_tex.return_value = {
             "glcm": 1,
@@ -2120,12 +2143,12 @@ def test_texture_matrix_params_explicit(
         patch("pictologics.pipeline._texture_matrices") as mock_tex,
         patch("pictologics.pipeline.discretise_image", return_value=mock_image),
         patch("pictologics.pipeline.apply_mask", return_value=[1]),
-        patch("pictologics.pipeline.calculate_glcm_features", return_value={}),
-        patch("pictologics.pipeline.calculate_glrlm_features", return_value={}),
+        patch("pictologics.pipeline._glcm_features", return_value={}),
+        patch("pictologics.pipeline._glrlm_features", return_value={}),
         patch("pictologics.pipeline._glszm_features_from_cells", return_value={}),
-        patch("pictologics.pipeline.calculate_gldzm_features", return_value={}),
+        patch("pictologics.pipeline._gldzm_features", return_value={}),
         patch("pictologics.pipeline.calculate_ngtdm_features", return_value={}),
-        patch("pictologics.pipeline.calculate_ngldm_features", return_value={}),
+        patch("pictologics.pipeline._ngldm_features", return_value={}),
     ):
         mock_tex.return_value = {
             "glcm": 1,
@@ -2973,7 +2996,7 @@ def test_last_deduplication_plan_property(pipeline: RadiomicsPipeline) -> None:
 
 @patch("pictologics.pipeline.discretise_image")
 @patch("pictologics.pipeline._texture_matrices")
-@patch("pictologics.pipeline.calculate_glrlm_features")
+@patch("pictologics.pipeline._glrlm_features")
 def test_extract_single_family_texture_glrlm(
     mock_glrlm: MagicMock,
     mock_matrices: MagicMock,
@@ -2991,6 +3014,8 @@ def test_extract_single_family_texture_glrlm(
         "glszm": np.zeros((32, 10)),
         "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
         "roi": np.zeros((1, 1, 1), dtype=bool),
+        "n_voxels": 1,
+        "ng_eff": 1,
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -3038,6 +3063,8 @@ def test_extract_single_family_texture_glszm(
         "glszm": np.zeros((32, 10)),
         "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
         "roi": np.zeros((1, 1, 1), dtype=bool),
+        "n_voxels": 1,
+        "ng_eff": 1,
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -3067,7 +3094,7 @@ def test_extract_single_family_texture_glszm(
 
 @patch("pictologics.pipeline.discretise_image")
 @patch("pictologics.pipeline._texture_matrices")
-@patch("pictologics.pipeline.calculate_gldzm_features")
+@patch("pictologics.pipeline._gldzm_features")
 def test_extract_single_family_texture_gldzm(
     mock_gldzm: MagicMock,
     mock_matrices: MagicMock,
@@ -3084,6 +3111,8 @@ def test_extract_single_family_texture_gldzm(
         "glszm": np.zeros((32, 10)),
         "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
         "roi": np.zeros((1, 1, 1), dtype=bool),
+        "n_voxels": 1,
+        "ng_eff": 1,
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -3130,6 +3159,8 @@ def test_extract_single_family_texture_ngtdm(
         "glszm": np.zeros((32, 10)),
         "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
         "roi": np.zeros((1, 1, 1), dtype=bool),
+        "n_voxels": 1,
+        "ng_eff": 1,
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -3159,7 +3190,7 @@ def test_extract_single_family_texture_ngtdm(
 
 @patch("pictologics.pipeline.discretise_image")
 @patch("pictologics.pipeline._texture_matrices")
-@patch("pictologics.pipeline.calculate_ngldm_features")
+@patch("pictologics.pipeline._ngldm_features")
 def test_extract_single_family_texture_ngldm(
     mock_ngldm: MagicMock,
     mock_matrices: MagicMock,
@@ -3176,6 +3207,8 @@ def test_extract_single_family_texture_ngldm(
         "glszm": np.zeros((32, 10)),
         "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
         "roi": np.zeros((1, 1, 1), dtype=bool),
+        "n_voxels": 1,
+        "ng_eff": 1,
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -3630,7 +3663,7 @@ def test_extract_local_intensity_via_dedup(
 
 @patch("pictologics.pipeline.discretise_image")
 @patch("pictologics.pipeline._texture_matrices")
-@patch("pictologics.pipeline.calculate_glcm_features")
+@patch("pictologics.pipeline._glcm_features")
 def test_extract_texture_glcm_via_dedup(
     mock_glcm: MagicMock,
     mock_matrices: MagicMock,
@@ -3647,6 +3680,8 @@ def test_extract_texture_glcm_via_dedup(
         "glszm": np.zeros((32, 10)),
         "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
         "roi": np.zeros((1, 1, 1), dtype=bool),
+        "n_voxels": 1,
+        "ng_eff": 1,
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -3676,7 +3711,7 @@ def test_extract_texture_glcm_via_dedup(
 
 @patch("pictologics.pipeline.discretise_image")
 @patch("pictologics.pipeline._texture_matrices")
-@patch("pictologics.pipeline.calculate_ngldm_features")
+@patch("pictologics.pipeline._ngldm_features")
 def test_extract_texture_with_ngldm_alpha(
     mock_ngldm: MagicMock,
     mock_matrices: MagicMock,
@@ -3693,6 +3728,8 @@ def test_extract_texture_with_ngldm_alpha(
         "glszm": np.zeros((32, 10)),
         "glszm_cells": np.zeros((3, 0), dtype=np.uint32),
         "roi": np.zeros((1, 1, 1), dtype=bool),
+        "n_voxels": 1,
+        "ng_eff": 1,
         "gldzm": np.zeros((32, 10)),
         "ngtdm_s": np.zeros(32),
         "ngtdm_n": np.zeros(32),
@@ -4685,6 +4722,123 @@ def test_masked_values_empty_mask() -> None:
     assert isinstance(pipeline._masked_values(img, empty, {}), np.ndarray)
 
 
+def test_a_box_of_roi_voxels_gives_a_view_of_the_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    # From _KERNEL_MIN_SIZE box voxels, a contiguous image box whose voxels are all ROI gives
+    # its values as a view; any other box gives a copy. The features are those of the numpy
+    # gather, and the image does not change.
+    import pictologics.pipeline as pipeline_module
+
+    monkeypatch.setattr(pipeline_module, "_KERNEL_MIN_SIZE", 0)
+    rng = np.random.default_rng(17)
+    image = Image(rng.normal(100.0, 20.0, (6, 7, 8)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    before = image.array.tobytes()
+    pipeline = RadiomicsPipeline(load_standard=False)
+    full = np.ones(image.array.shape, dtype=np.uint8)
+    values = pipeline._masked_values(image, Image(full, image.spacing, image.origin), {})
+    assert np.shares_memory(values, image.array)
+    assert values.tobytes() == image.array.ravel().tobytes()
+    for hole in ((3, 3, 3), (0, 0, 0), (-1, -1, -1)):
+        holed = full.copy()
+        holed[hole] = 0
+        values = pipeline._masked_values(image, Image(holed, image.spacing, image.origin), {})
+        assert not np.shares_memory(values, image.array)
+        assert values.tobytes() == image.array[holed != 0].tobytes()
+    column = Image(np.asfortranarray(image.array), image.spacing, image.origin)
+    values = pipeline._masked_values(column, Image(full, image.spacing, image.origin), {})
+    assert not np.shares_memory(values, column.array)
+    assert values.tobytes() == image.array.ravel().tobytes()
+    configs = {
+        "ih": [
+            {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+            {"step": "extract_features", "params": {"families": ["intensity", "histogram", "ivh"]}},
+        ],
+        "ivh_cont": [
+            {
+                "step": "extract_features",
+                "params": {"families": ["ivh"], "ivh_use_continuous": True},
+            }
+        ],
+        "ivh_fbs": [
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["ivh"],
+                    "ivh_discretisation": {"method": "FBS", "bin_width": 2.5, "min_val": 0.0},
+                },
+            }
+        ],
+        "ivh_fbn": [
+            {
+                "step": "extract_features",
+                "params": {
+                    "families": ["ivh"],
+                    "ivh_discretisation": {"method": "FBN", "n_bins": 16},
+                },
+            }
+        ],
+    }
+
+    def run(mask: Image | None) -> dict[str, Any]:
+        fresh = RadiomicsPipeline(load_standard=False)
+        for name, steps in configs.items():
+            fresh.add_config(name, steps)
+        return fresh.run(image, mask, config_names=list(configs))
+
+    for mask in (None, Image(full, image.spacing, image.origin)):
+        viewed = run(mask)
+        monkeypatch.setattr(pipeline_module, "_KERNEL_MIN_SIZE", 1 << 62)
+        gathered = run(mask)
+        monkeypatch.setattr(pipeline_module, "_KERNEL_MIN_SIZE", 0)
+        assert all(viewed[name].equals(gathered[name]) for name in configs)
+    assert image.array.tobytes() == before
+
+
+def test_a_large_mask_box_takes_the_threaded_gather(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A mask box that is not all ROI takes the parallel gather of its box from
+    # _KERNEL_MIN_SIZE voxels with 4 threads or more, else apply_mask; the values and the
+    # features are those of the numpy gather.
+    import pictologics.pipeline as pipeline_module
+    from pictologics import preprocessing
+    from pictologics.features._utils import compute_nonzero_bbox
+
+    z, y, x = np.indices((12, 14, 16))
+    roi = ((z - 6) / 4.0) ** 2 + ((y - 7) / 5.0) ** 2 + ((x - 8) / 6.0) ** 2 <= 1.0
+    image = Image(
+        np.random.default_rng(18).normal(50.0, 10.0, roi.shape), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)
+    )
+    mask = Image(roi.astype(np.uint8), image.spacing, image.origin)
+    steps = [
+        {"step": "discretise", "params": {"method": "FBN", "n_bins": 8}},
+        {"step": "extract_features", "params": {"families": ["intensity", "histogram"]}},
+    ]
+
+    def run() -> Any:
+        fresh = RadiomicsPipeline(load_standard=False)
+        fresh.add_config("ih", steps)
+        return fresh.run(image, mask, config_names=["ih"])["ih"]
+
+    plain = run()
+    monkeypatch.setattr(pipeline_module, "_KERNEL_MIN_SIZE", 0)
+    monkeypatch.setattr(preprocessing, "_KERNEL_MIN_SIZE", 0)
+    monkeypatch.setattr(preprocessing, "get_num_threads", lambda: 4)
+    pipeline = RadiomicsPipeline(load_standard=False)
+    box = compute_nonzero_bbox(roi)
+    assert box is not None
+    with patch.object(
+        preprocessing, "_box_values_numba", wraps=preprocessing._box_values_numba
+    ) as spy:
+        values = pipeline._masked_values(image, mask, {})
+        assert values.tobytes() == image.array[roi].tobytes()
+        bounds = tuple(v for b in box for v in (b.start, b.stop))
+        assert spy.call_args.args[2:] == bounds
+        assert run().equals(plain)
+        calls = spy.call_count
+        monkeypatch.setattr(preprocessing, "get_num_threads", lambda: 1)
+        values = pipeline._masked_values(image, mask, {})
+        assert values.tobytes() == image.array[roi].tobytes()
+        assert spy.call_count == calls
+
+
 def test_compute_texture_features_default_cache_empty_mask() -> None:
     # Discretised state + empty masks: default bbox cache and the empty-bbox branch.
     disc = Image(np.ones((5, 5, 5), dtype=np.int32), (1, 1, 1), (0, 0, 0))
@@ -5115,7 +5269,7 @@ def test_run_does_the_start_up_once_per_run(sm_mask: Image) -> None:
     check = RadiomicsPipeline._ensure_nonempty_roi
     with (
         patch.object(
-            pipeline_module, "detect_sentinel_value", wraps=pipeline_module.detect_sentinel_value
+            pipeline_module, "_sentinel_search", wraps=pipeline_module._sentinel_search
         ) as detect,
         patch.object(
             pipeline_module, "_source_mask", wraps=pipeline_module._source_mask
@@ -5352,7 +5506,7 @@ def test_a_failing_family_leaves_the_other_families(tmp_path: Any) -> None:
     pipeline.add_config("b", copy.deepcopy(steps))
     boom = RuntimeError("boom")
     with (
-        patch("pictologics.pipeline.calculate_glcm_features", side_effect=boom),
+        patch("pictologics.pipeline._glcm_features", side_effect=boom),
         pytest.warns(UserWarning, match=r"The texture features failed \(RuntimeError: boom\)"),
     ):
         results = pipeline.run(image, mask, config_names=["a", "b"])
@@ -5365,7 +5519,7 @@ def test_a_failing_family_leaves_the_other_families(tmp_path: Any) -> None:
         assert texture and series[texture].isna().all()
         assert np.isfinite(series["mean_intensity_Q4LE"])
     # run_batch counts the failed family
-    with patch("pictologics.pipeline.calculate_glcm_features", side_effect=boom):
+    with patch("pictologics.pipeline._glcm_features", side_effect=boom):
         table = pipeline.run_batch(
             [{"subject_id": "s", "image": image, "mask": mask}],
             tmp_path,
@@ -7280,6 +7434,7 @@ def test_a_second_run_on_an_image_does_not_check_it_for_nan_again(sm_mask: Image
     pipeline.add_config("c", [{"step": "extract_features", "params": {"families": ["intensity"]}}])
     with (
         patch.object(preprocessing, "_FINITE_PARALLEL_MIN", 0),
+        patch.object(preprocessing, "_FINITE_PARALLEL_THREADS", 1),
         patch.object(
             preprocessing, "_nonfinite_blocks_numba", wraps=preprocessing._nonfinite_blocks_numba
         ) as kernel,
@@ -7324,6 +7479,7 @@ def test_the_nan_check_reads_the_region_of_the_run() -> None:
     inside[45, 46, 25] = np.nan
     with (
         patch.object(preprocessing, "_FINITE_PARALLEL_MIN", 0),
+        patch.object(preprocessing, "_FINITE_PARALLEL_THREADS", 1),
         patch.object(
             preprocessing, "_nonfinite_blocks_numba", wraps=preprocessing._nonfinite_blocks_numba
         ) as kernel,
@@ -7441,7 +7597,7 @@ def test_a_failing_morphology_part_gives_the_outcome_of_one_thread() -> None:
             if glcm:  # a family after morphology fails too
                 glcm_error = RuntimeError("no glcm")
                 stack.enter_context(
-                    patch("pictologics.pipeline.calculate_glcm_features", side_effect=glcm_error)
+                    patch("pictologics.pipeline._glcm_features", side_effect=glcm_error)
                 )
             if one_thread:
                 ahead = patch.object(RadiomicsPipeline, "_morphology_ahead", return_value=None)

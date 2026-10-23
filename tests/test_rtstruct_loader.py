@@ -260,11 +260,12 @@ def test_rtstruct_frame_of_reference(tmp_path: Path) -> None:
         load_rtstruct(path, REFERENCE, combine_rois=False)
 
 
-def test_rtstruct_fill_writes_only_the_columns_of_the_crossings() -> None:
-    # A fill writes only the columns from the first to the last crossing of its rows: the
-    # pixels of the full-width fill of 0.6.0 (a copy below), also for vertices on pixel
-    # centers and polygons partly outside the plane.
-    from pictologics.loaders.rtstruct_loader import _fill_even_odd
+def test_rtstruct_fill_in_the_box_of_the_spans() -> None:
+    # An ROI fills only the box of the spans of its slices, with the pixels of the
+    # full-width fill of 0.6.0 (a copy below), also for vertices on pixel centers,
+    # polygons partly outside the slice and a vertex so far away that the crossings of its
+    # edges overflow (to an infinite column).
+    from pictologics.loaders.rtstruct_loader import _filled
 
     def fill_of_0_6_0(plane: np.ndarray, polygons: list[np.ndarray]) -> None:
         rows_n, cols_n = plane.shape
@@ -289,6 +290,17 @@ def test_rtstruct_fill_writes_only_the_columns_of_the_crossings() -> None:
         np.add.at(steps, (rows[0::2] - low, end), -1)
         plane[low : rows[-1] + 1] |= np.cumsum(steps[:, :-1], axis=1) > 0
 
+    square = np.array([[2.5, 3.5, 0.0], [5.5, 3.5, 0.0], [5.5, 6.5, 0.0], [2.5, 6.5, 0.0]])
+    one_slice = Image(np.zeros((40, 30, 1)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    box, part = _filled(("square", [square]), one_slice, 0.5, 0.01)
+    assert box == (slice(3, 6), slice(4, 7), slice(0, 1)) and part.shape == (3, 3, 1) and part.all()
+    # A polygon between two rows of pixel centers fills nothing, in both
+    thin = np.array([[2.1, 1.0], [2.9, 5.0], [2.2, 8.0]])
+    expected = np.zeros((10, 12), dtype=bool)
+    fill_of_0_6_0(expected, [thin])
+    flat = Image(np.zeros((10, 12, 1)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+    box, part = _filled(("thin", [np.column_stack([thin, np.zeros(3)])]), flat, 0.5, 0.01)
+    assert not expected.any() and part.size == 0
     rng = np.random.default_rng(5)
     for trial in range(200):
         shape = (int(rng.integers(4, 40)), int(rng.integers(4, 40)))
@@ -298,11 +310,17 @@ def test_rtstruct_fill_writes_only_the_columns_of_the_crossings() -> None:
         ]
         if trial % 2:
             polygons = [np.round(p) for p in polygons]  # vertices on pixel centers
+        if trial % 3 == 0:
+            polygons[0][0] = -1e300
         expected = np.zeros(shape, dtype=bool)
-        fill_of_0_6_0(expected, polygons)
-        got = np.zeros(shape, dtype=bool)
-        _fill_even_odd(got, polygons)
-        np.testing.assert_array_equal(got, expected)
+        reference = Image(np.zeros((*shape, 1)), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0))
+        contours = [np.column_stack([p, np.zeros(len(p))]) for p in polygons]
+        with np.errstate(over="ignore"):
+            fill_of_0_6_0(expected, polygons)
+            box, part = _filled(("r", contours), reference, 0.5, 0.01)
+        got = np.zeros((*shape, 1), dtype=bool)
+        got[box] = part
+        np.testing.assert_array_equal(got[:, :, 0], expected)
 
 
 def test_rtstruct_labels_on_planes_of_each_axis(tmp_path: Path) -> None:

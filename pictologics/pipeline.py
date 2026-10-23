@@ -85,13 +85,13 @@ from .features.morphology import (
 from .features.texture import (
     _TEXTURE_FAMILIES,
     _directions,
+    _glcm_features,
+    _gldzm_features,
+    _glrlm_features,
     _glszm_features_from_cells,
+    _ngldm_features,
     _planar_axes,
     _texture_matrices,
-    calculate_glcm_features,
-    calculate_gldzm_features,
-    calculate_glrlm_features,
-    calculate_ngldm_features,
     calculate_ngtdm_features,
 )
 from .filters import (
@@ -120,6 +120,7 @@ from .loader import (
     load_image,
 )
 from .preprocessing import (
+    _KERNEL_MIN_SIZE,
     _NORMALISE_METHODS,
     _all_finite,
     _grow_problem,
@@ -127,11 +128,13 @@ from .preprocessing import (
     _nearest_roi_part,
     _normalise_problem,
     _normalised,
+    _not_sentinel,
     _output_grid,
     _region_origin,
     _roi_region,
+    _sentinel_search,
+    _threaded_roi_values,
     apply_mask,
-    detect_sentinel_value,
     discretise_image,
     filter_outliers,
     grow_mask,
@@ -2040,10 +2043,7 @@ class RadiomicsPipeline:
                         # If mask was auto-generated (full mask), do not use it for
                         # "outside-ness" check in detection, as everything is "inside".
                         mask_for_detection = orig_mask if not mask_was_generated else None
-                        found = detect_sentinel_value(orig_img, roi_mask=mask_for_detection)
-                        count = (
-                            0 if found is None else int(np.count_nonzero(orig_img.array == found))
-                        )
+                        found, count = _sentinel_search(orig_img, roi_mask=mask_for_detection)
                         detection = (found, count)
                         total = int(orig_img.array.size)
                         warnings.warn(
@@ -2058,9 +2058,9 @@ class RadiomicsPipeline:
 
                 if sentinel_detected and detected_sentinel_value is not None:
                     if source_key not in source_masks:
-                        # create_source_mask_from_sentinel as bool, with no uint8 copy
+                        # the mask of create_source_mask_from_sentinel as bool, with no uint8 view
                         source_masks[source_key] = _source_mask(
-                            orig_img.array != detected_sentinel_value, orig_img
+                            _not_sentinel(orig_img.array, detected_sentinel_value), orig_img
                         )
                     source_mask = source_masks[source_key]
             if source_users[source_key] == 0:
@@ -2813,7 +2813,13 @@ class RadiomicsPipeline:
                     print(entry["config_name"], entry["error"])
             ```
         """
-        return copy.deepcopy(self._log)
+        try:  # pickle copies the nested dicts faster than deepcopy
+            log: list[dict[str, Any]] = pickle.loads(
+                pickle.dumps(self._log, protocol=pickle.HIGHEST_PROTOCOL)
+            )
+        except Exception:  # a step parameter that pickle cannot write
+            return copy.deepcopy(self._log)
+        return log
 
     def clear_log(self) -> None:
         """Clear the in-memory processing log."""
@@ -3616,12 +3622,33 @@ class RadiomicsPipeline:
         scan and boolean gather touch only the ROI bounding box rather than the full
         volume. The gathered values (and their order) are bit-identical, since
         cropping only removes voxels that are outside the mask anyway.
+
+        From 2^20 box voxels: when every voxel of the box is ROI and the image box is
+        contiguous, the values are a view of the image box (no copy; the feature functions
+        only read them); else the parallel gather reads the box in place (see
+        _threaded_roi_values). The values and their order are the same.
         """
         bbox = self._cached_nonzero_bbox(mask.array, bbox_cache)
         if bbox is None:
             return apply_mask(image, mask)
         img_arr = image.array if isinstance(image, Image) else image
-        return apply_mask(img_arr[bbox], mask.array[bbox])
+        img_box, mask_box = img_arr[bbox], mask.array[bbox]
+        if img_box.size >= _KERNEL_MIN_SIZE:
+            if (
+                img_box.flags.c_contiguous
+                and img_box.shape == mask_box.shape
+                and mask_box.flat[0] != 0  # a corner outside the ROI ends the check at once
+                and mask_box.flat[-1] != 0
+                and mask_box.all()
+            ):
+                # Every voxel of the box is ROI (for example a run without a mask): the
+                # values are the image box in row order, as a view. The feature functions
+                # only read them.
+                return cast(npt.NDArray[np.floating[Any]], img_box.reshape(-1))
+            values = _threaded_roi_values(img_arr, mask.array, bbox)
+            if values is not None:
+                return values
+        return apply_mask(img_box, mask_box)
 
     def _roi_values(
         self, image: Image, mask: Image, cache: _PassCache
@@ -4015,35 +4042,23 @@ class RadiomicsPipeline:
                 weakref.ref(state.intensity_mask.array),
                 texture_matrices["distance_map"],
             )
-        # The bool ROI gives the same ROI voxel counts as intensity_mask_c, from a fast
-        # count.
-        roi = texture_matrices["roi"]
-
+        # The texture voxel count and the GLCM Ng_eff come with the matrices: the feature
+        # functions make no pass over the ROI
+        n_voxels = texture_matrices["n_voxels"]
         if want_glcm:
-            results["glcm"] = calculate_glcm_features(
-                disc_c,
-                roi.view(np.uint8),  # the texture ROI, in one mask type and layout
-                n_bins,
-                glcm_matrix=texture_matrices["glcm"],
+            results["glcm"] = _glcm_features(
+                texture_matrices["glcm"], n_bins, texture_matrices["ng_eff"]
             )
         if want_glrlm:
-            results["glrlm"] = calculate_glrlm_features(
-                disc_c,
-                roi,
-                n_bins,
-                glrlm_matrix=texture_matrices["glrlm"],
-                n_directions=_directions(planar).size,
+            results["glrlm"] = _glrlm_features(
+                texture_matrices["glrlm"], None, _directions(planar).size, n_voxels=n_voxels
             )
         if want_glszm:
-            results["glszm"] = _glszm_features_from_cells(texture_matrices["glszm_cells"], roi)
-        if want_gldzm:
-            results["gldzm"] = calculate_gldzm_features(
-                disc_c,
-                roi,
-                n_bins,
-                gldzm_matrix=texture_matrices["gldzm"],
-                distance_mask=morph_mask_c,
+            results["glszm"] = _glszm_features_from_cells(
+                texture_matrices["glszm_cells"], None, n_voxels=n_voxels
             )
+        if want_gldzm:
+            results["gldzm"] = _gldzm_features(texture_matrices["gldzm"], None, n_voxels=n_voxels)
         if want_ngtdm:
             results["ngtdm"] = calculate_ngtdm_features(
                 disc_c,
@@ -4055,12 +4070,7 @@ class RadiomicsPipeline:
                 ),
             )
         if want_ngldm:
-            results["ngldm"] = calculate_ngldm_features(
-                disc_c,
-                roi,
-                n_bins,
-                ngldm_matrix=texture_matrices["ngldm"],
-            )
+            results["ngldm"] = _ngldm_features(texture_matrices["ngldm"], None, n_voxels=n_voxels)
 
         return results
 

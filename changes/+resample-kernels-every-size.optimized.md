@@ -1,0 +1,1 @@
+The linear, nearest and source-mask resample kernels now run at every output size. Before, an output of fewer than 1,800 to 25,000 voxels used scipy. The output is the same, bit for bit. The resample of a 12³ image to 1 mm takes 10 µs instead of 42 µs. `run()` of a small cropped image is up to 34 % faster.
