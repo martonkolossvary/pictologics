@@ -1,1 +1,0 @@
-`get_log()` copies the log with `pickle` in place of `copy.deepcopy`. A log of 1,200 entries (200 ROIs and six configurations) takes 3.8 ms instead of 19 ms. The copy is equal to the log and independent of it. A step parameter that `pickle` cannot write gets `copy.deepcopy`, as before.

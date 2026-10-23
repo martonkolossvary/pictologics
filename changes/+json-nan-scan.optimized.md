@@ -1,1 +1,0 @@
-`save_results` and `format_results` find a NaN or infinite value before they make a JSON text, so they encode the text one time. Before, a NaN made a second encode. A JSON file of 2,000 wide rows with a NaN in the last row takes 1.4 s instead of 2.5 s. The JSON text does not change.

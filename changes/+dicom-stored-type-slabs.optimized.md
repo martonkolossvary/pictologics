@@ -1,1 +1,0 @@
-`load_image(..., apply_rescale=False)` of a large DICOM series converts the slices a slab at a time into the stored-type output, as the rescaled load does. A 200-slice CT (512 x 512) loads in 58 ms instead of 86 ms, with a peak of 137 MB instead of 203 MB. The array, its type and its row order are the same.

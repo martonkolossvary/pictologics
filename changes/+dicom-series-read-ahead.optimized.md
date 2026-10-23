@@ -1,1 +1,0 @@
-`load_image()` of a DICOM series reads the slices of the next 32-slice slab on a worker thread while the threads of the package convert the current slab. A 200-slice CT (512 x 512) loads in 64 ms instead of 73 ms (133 ms instead of 146 ms at 1 thread). The array is the same, bit for bit. The peak memory is 16 MB more (one more slab).

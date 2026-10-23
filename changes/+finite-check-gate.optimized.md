@@ -1,1 +1,0 @@
-The NaN check of a run uses the numpy sum below 2,097,152 values (not 524,288) and on fewer than 4 threads. The check of a region of 1 million voxels takes 0.13 ms instead of 0.17 ms on 10 threads and 0.13 ms instead of 0.37 ms on 1 thread. A region of 7 million voxels takes 0.83 ms instead of 2.2 ms on 1 thread. Results are unchanged, bit for bit.

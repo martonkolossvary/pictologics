@@ -1,1 +1,0 @@
-`load_image()` of one DICOM file reads the SOP class of the header once, not two or three times. A 512 x 512 slice loads in 0.63 ms instead of 0.75 ms, and a PET slice with `suv` in 0.57 ms instead of 0.86 ms.

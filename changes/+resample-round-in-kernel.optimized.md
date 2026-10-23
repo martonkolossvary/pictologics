@@ -1,1 +1,0 @@
-A linear resample with `round_intensities=True` now rounds the values in its kernel. A second pass over the output is not necessary. The values are the same, bit for bit. A 512x512x200 CT to 1 mm takes 12 ms instead of 16 ms on 10 threads.

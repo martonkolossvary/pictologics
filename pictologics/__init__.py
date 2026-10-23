@@ -5,7 +5,7 @@ Pictologics: IBSI-compliant radiomic feature extraction from medical images.
 # The number of threads is set before the imports that start numba.
 # ruff: noqa: E402
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 from .threads import _configure, get_num_threads, set_num_threads
 

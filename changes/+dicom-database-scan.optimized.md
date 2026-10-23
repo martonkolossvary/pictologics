@@ -1,1 +1,0 @@
-`DicomDatabase.from_folders()` reads the folders with one `os.scandir` walk and gets the real path of each folder once, not of each file. It converts only the private elements of a header, and it computes the projection score without numpy. A serial scan of 6,000 synthetic CT files takes 3.0 s instead of 3.9 s; the database does not change.

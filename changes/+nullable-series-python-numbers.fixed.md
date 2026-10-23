@@ -1,1 +1,0 @@
-`format_results` gives Python numbers for a Series of a nullable type (Int64, Float64, boolean), as the long format did for the values. Before, the wide format gave numpy numbers, and its JSON output of an Int64 or boolean Series raised a TypeError.

@@ -1,1 +1,0 @@
-The cubic resample now copies a column-order float64 image and its source mask with the tiled parallel copy of the loaders. The linear and nearest resamples already did this. A 512×512×200 CT to 1 mm takes 147 ms instead of 385 ms at 10 threads. With a source mask, it takes 281 ms instead of 654 ms. The values are the same, bit for bit.

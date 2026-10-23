@@ -1,1 +1,0 @@
-The Simoncelli and Riesz filters now make the inverse FFT without the temporary copy of the spectrum that SciPy makes. On a 256x256x256 image, a filter call needs 322 MB instead of 451 MB in addition to its input and tables. On a 512x512x200 CT, it needs 211 MB instead of 782 MB. Calls with a cached table are up to 16 % faster. The values are the same, bit for bit.

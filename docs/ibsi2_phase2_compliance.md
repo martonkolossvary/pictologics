@@ -63,9 +63,9 @@ print(results["ibsi2_test_3b"])
 
 ## Provenance
 
--   **Pictologics version**: `0.8.0`
+-   **Pictologics version**: `0.9.0`
 -   **IBSI 2 reference manual**: version 9 (the revision bundled under `dev/IBSI2/documentation/`)
--   **Reference data**: `IBSI2/references/feature_values/reference_values.csv` (IBSI 2 reference feature values, [https://github.com/theibsi/ibsi_2_reference_data](https://github.com/theibsi/ibsi_2_reference_data))
+-   **Reference data**: `dev/IBSI2/references/feature_values/reference_values.csv` (IBSI 2 reference feature values, [https://github.com/theibsi/ibsi_2_reference_data](https://github.com/theibsi/ibsi_2_reference_data))
 -   **Reference data SHA-256** (first 12 hex chars): `6d1a4e7b297e`
 
 ## Phase 2 Results
