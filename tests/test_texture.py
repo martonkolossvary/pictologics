@@ -1277,9 +1277,7 @@ def test_feature_kernels_give_the_values_of_the_numpy_path() -> None:
         (rng.integers(1, 33, (20, 20, 20)), np.ones((20, 20, 20), dtype=bool), 32),
         (rng.choice(np.arange(1, 257, 37), (12, 12, 12)), np.ones((12, 12, 12), dtype=bool), 256),
         (np.full((6, 6, 6), 3), np.ones((6, 6, 6), dtype=bool), 8),  # uniform: correlation 1
-        # One voxel: no GLRLM. The run tables of a 1x1x1 box have the run lengths 0 and 1,
-        # and the local kernel adds 0 to the cell of length 2 (outside the table; with the
-        # compiler off, an IndexError)
+        # One voxel: the run tables of a 1x1x1 box have the run lengths 0 and 1 only
         (rng.integers(1, 9, (5, 5, 5)), one_voxel, 8),
         (rng.integers(1, 9, (1, 12, 12)), np.ones((1, 12, 12), dtype=bool), 8),  # one slice
     ]
@@ -1291,13 +1289,8 @@ def test_feature_kernels_give_the_values_of_the_numpy_path() -> None:
     }
     for levels, roi, n_bins in cases:
         data, mask = levels.astype(np.float64), roi.astype(np.uint8)
-        runs = roi.sum() > 1
-        matrices = texture_module.calculate_all_texture_matrices(
-            data, mask, n_bins, calc_glrlm=runs
-        )
+        matrices = texture_module.calculate_all_texture_matrices(data, mask, n_bins)
         for family, function in families.items():
-            if family == "glrlm" and not runs:
-                continue
             given = matrices[family]
             reference = function(data, mask, n_bins, **{f"{family}_matrix": given.astype(float)})
             for kind in (np.uint64, np.uint32):

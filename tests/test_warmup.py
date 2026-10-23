@@ -249,6 +249,8 @@ for kind in (np.uint64, np.uint32, np.float64):  # given matrices: the feature k
         function = getattr(texture, f"calculate_{family}_features")
         function(levels, mask.array, 16, **{f"{family}_matrix": matrices[family].astype(kind)})
 texture.calculate_glcm_features(levels, mask.array, 16, glcm_matrix=matrices["glcm"].sum(axis=0))
+for kind in (np.float64, np.int64):  # given NGTDM sums and counts: the feature kernel
+    texture.calculate_ngtdm_features(levels, mask.array, 16, ngtdm_matrices=(matrices["ngtdm_s"], matrices["ngtdm_n"].astype(kind)))
 for kind in (np.uint8, np.int64, np.float32):  # direct calls with other types
     texture.calculate_all_texture_features(levels.astype(kind), mask.array, 16)
     intensity.calculate_intensity_histogram_features(levels[roi].astype(kind))

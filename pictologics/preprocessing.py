@@ -2813,7 +2813,10 @@ def _nearest_roi_part(grown: Image, mask: Image, nearest: Image, label: int) -> 
     """`grown` (a mask grown from `mask`, on its grid) without the added voxels whose
     nearest ROI in the map `nearest` (see _nearest_roi_map; the map voxel nearest to each
     voxel center) is not `label`. Changes the array of `grown`."""
-    added = np.argwhere((grown.array != 0) & (mask.array == 0))
+    # Only the box of the grown mask holds added voxels
+    box = compute_nonzero_bbox(grown.array) or (slice(0, 0),) * 3
+    added = np.argwhere((grown.array[box] != 0) & (mask.array[box] == 0))
+    added += np.array([part.start for part in box], dtype=added.dtype)
     to_world = _direction_matrix(grown.direction) * np.asarray(grown.spacing)
     to_map = np.linalg.inv(_direction_matrix(nearest.direction) * np.asarray(nearest.spacing))
     shift = np.asarray(grown.origin) - np.asarray(nearest.origin)

@@ -553,7 +553,9 @@ def _pairs_and_runs_voxel(
                 twos += two
             else:
                 glrlm[tid, t, i, 1] += one
-                glrlm[tid, t, i, 2] += two
+                # A 1x1x1 box has no cell of length 2: write only a run
+                if two:
+                    glrlm[tid, t, i, 2] += two
             if starts & (not ends) & (not ends_2):
                 length = 3
                 c = v + 3 * od
@@ -563,7 +565,8 @@ def _pairs_and_runs_voxel(
                 glrlm[tid, t, i, length] += 1
     if calc_glrlm and merged:
         glrlm[tid, dir_table[0], i, 1] += ones
-        glrlm[tid, dir_table[0], i, 2] += twos
+        if twos:
+            glrlm[tid, dir_table[0], i, 2] += twos
 
 
 # A row segment of fewer ROI voxels goes voxel by voxel: the row passes pay a start for
@@ -3254,6 +3257,81 @@ def _ngtdm_complexity_numba(
     return 2.0 * total
 
 
+@jit(nopython=True, nogil=True, error_model="numpy", cache=True)  # type: ignore
+def _ngtdm_features_numba(
+    s: npt.NDArray[np.float64], n: npt.NDArray[np.float64], out: npt.NDArray[np.float64]
+) -> float:
+    """The 5 NGTDM features (coarseness, contrast, busyness, complexity, strength) of the
+    sums `s` and the counts `n` of the grey levels 1 to n_bins into `out`, with the bits
+    of the numpy expressions of before (pairwise sums over the levels with a count, in
+    their order). Returns the voxel count N_vp; `out` stays as it is when N_vp is 0."""
+    n_bins = n.shape[0]
+    n_vp = _np_sum_numba(n, n_bins)
+    if n_vp == 0.0:
+        return 0.0
+    m = 0
+    for i in range(n_bins):
+        if n[i] > 0.0:
+            m += 1
+    levels = np.empty(m, dtype=np.int64)
+    p = np.empty(m)
+    s_m = np.empty(m)
+    k = 0
+    for i in range(n_bins):
+        if n[i] > 0.0:
+            levels[k] = i + 1
+            p[k] = n[i] / n_vp
+            s_m[k] = s[i]
+            k += 1
+    sum_s = _np_sum_numba(s, n_bins)
+    t = np.empty(m)
+    for k in range(m):
+        t[k] = p[k] * s_m[k]
+    sum_ps = _np_sum_numba(t, m)
+    out[0] = 1.0 / sum_ps if sum_ps > 1e-10 else 1e6
+    # The sums over the pairs of levels have closed forms in sums over the m levels,
+    # written without the difference of two large sums: with S0 = sum p_i, the mean level
+    # mu = sum p_i i / S0, the mean c and the sum V = sum_j (j - c)^2 of the levels,
+    #   sum_ij p_i p_j (i - j)^2       = 2 S0 sum_i p_i (i - mu)^2        (contrast)
+    #   sum_ij |a_i - a_j|             = 2 sum_k k (m - k) (a_(k) - a_(k-1))  (busyness;
+    #                                    a = i p_i, sorted)
+    #   sum_ij (p_i + p_j) (i - j)^2   = 2 sum_i p_i (m (i - c)^2 + V)    (strength)
+    # The complexity has no closed form (_ngtdm_complexity_numba).
+    if m > 1:
+        s0 = _np_sum_numba(p, m)
+        for k in range(m):
+            t[k] = p[k] * np.float64(levels[k])
+        mu = _np_sum_numba(t, m) / s0
+        for k in range(m):
+            dm = np.float64(levels[k]) - mu
+            t[k] = p[k] * dm * dm
+        term1 = 2.0 * s0 * _np_sum_numba(t, m) / np.float64(m * (m - 1))
+        out[1] = term1 * (sum_s / n_vp)
+    else:
+        out[1] = 0.0
+    for k in range(m):
+        t[k] = np.float64(levels[k]) * p[k]
+    a = np.sort(t)
+    d = np.empty(m - 1)
+    for k in range(1, m):
+        d[k - 1] = np.float64(k * (m - k)) * (a[k] - a[k - 1])
+    denom = 2.0 * _np_sum_numba(d, m - 1)
+    out[2] = sum_ps / denom if denom > 1e-10 else 0.0
+    out[3] = (1.0 / n_vp) * _ngtdm_complexity_numba(levels, p, s_m)
+    for k in range(m):
+        t[k] = np.float64(levels[k])
+    mean = _np_sum_numba(t, m) / np.float64(m)
+    for k in range(m):
+        dc = np.float64(levels[k]) - mean
+        t[k] = dc * dc
+    v = _np_sum_numba(t, m)
+    for k in range(m):
+        dc = np.float64(levels[k]) - mean
+        t[k] = p[k] * (np.float64(m) * dc * dc + v)
+    out[4] = 2.0 * _np_sum_numba(t, m) / sum_s if sum_s > 1e-10 else 0.0
+    return float(n_vp)
+
+
 def calculate_ngtdm_features(
     data: npt.NDArray[np.floating[Any]],
     mask: npt.NDArray[np.floating[Any]],
@@ -3290,77 +3368,23 @@ def calculate_ngtdm_features(
     else:
         s, n = ngtdm_matrices
 
-    # s[i] is sum of absolute differences for grey level i+1
-    # n[i] is number of voxels of grey level i+1 with valid neighborhood
-
-    N_vp = np.sum(n)
-    if N_vp == 0:
+    # s[i] and n[i]: the sum of the absolute differences and the count of the voxels of
+    # grey level i + 1 (with a valid neighbourhood). The kernel computes the features with
+    # the bits of the numpy expressions; the closed forms of the sums over the pairs of
+    # levels are in its comment.
+    out = np.empty(5)
+    n_vp = _ngtdm_features_numba(
+        np.ascontiguousarray(s, dtype=np.float64), np.ascontiguousarray(n, dtype=np.float64), out
+    )
+    if n_vp == 0.0:
         return {}
-
-    p = n / N_vp
-
-    # Indices
-    i_idx = np.arange(n_bins)
-    I = i_idx + 1  # noqa: E741
-
-    features = {}
-
-    # Filter for non-zero probabilities (required for Busyness, Complexity, Strength)
-    mask_p = p > 0
-    p_nz = p[mask_p]
-    s_nz = s[mask_p]
-    I_nz = I[mask_p]
-    Ng_p = len(p_nz)
-    sum_s = np.sum(s)
-
-    # The sums over the pairs of non-zero grey levels have closed forms in sums over the
-    # levels, written without the difference of two large sums: with S0 = Σ p_i, the mean
-    # level mu = Σ p_i i / S0, the mean c and the sum V = Σ_j (j - c)^2 of the m levels,
-    #   Σ_ij p_i p_j (i - j)^2       = 2 S0 Σ_i p_i (i - mu)^2
-    #   Σ_ij (p_i + p_j) (i - j)^2   = 2 Σ_i p_i (m (i - c)^2 + V)
-    #   Σ_ij |a_i - a_j|             = 2 Σ_k k (m - k) (a_(k) - a_(k-1))  (a = i p_i, sorted)
-    # The complexity has no closed form (_ngtdm_complexity_numba).
-
-    # Coarseness - QCDE
-    sum_ps = np.sum(p_nz * s_nz)
-    if sum_ps > 1e-10:
-        features["coarseness_QCDE"] = 1 / sum_ps
-    else:
-        features["coarseness_QCDE"] = 1e6
-
-    # Contrast - 65HE
-    if Ng_p > 1:
-        # Term 1: Dynamic range variance
-        S0 = np.sum(p_nz)
-        dm = I_nz - np.sum(p_nz * I_nz) / S0
-        term1 = 2 * S0 * np.sum(p_nz * dm * dm) / (Ng_p * (Ng_p - 1))
-        # Term 2: Intensity change
-        features["contrast_65HE"] = term1 * (sum_s / N_vp)
-    else:
-        features["contrast_65HE"] = 0.0
-
-    # Busyness - NQ30
-    a = np.sort(I_nz * p_nz)
-    k = np.arange(1, Ng_p)
-    denom_busyness = 2 * np.sum(k * (Ng_p - k) * np.diff(a))
-    if denom_busyness > 1e-10:
-        features["busyness_NQ30"] = sum_ps / denom_busyness
-    else:
-        features["busyness_NQ30"] = 0.0
-
-    # Complexity - HDEZ
-    complexity = _ngtdm_complexity_numba(I_nz.astype(np.int64), p_nz, s_nz.astype(np.float64))
-    features["complexity_HDEZ"] = (1 / N_vp) * complexity
-
-    # Strength - 1X9X
-    dc = I_nz - np.mean(I_nz)
-    sum_term_str = 2 * np.sum(p_nz * (Ng_p * dc * dc + np.sum(dc * dc)))
-    if sum_s > 1e-10:
-        features["strength_1X9X"] = sum_term_str / sum_s
-    else:
-        features["strength_1X9X"] = 0.0
-
-    return features
+    return {
+        "coarseness_QCDE": float(out[0]),
+        "contrast_65HE": float(out[1]),
+        "busyness_NQ30": float(out[2]),
+        "complexity_HDEZ": float(out[3]),
+        "strength_1X9X": float(out[4]),
+    }
 
 
 # --- NGLDM ---

@@ -1,0 +1,1 @@
+The GLRLM kernel no longer writes past its run tables for a ROI whose box is one voxel. The tables of such a box hold the run lengths 0 and 1 only, and the kernel wrote a zero into the cell of length 2 outside them. With the compiler off, that raised an IndexError. The features do not change.

@@ -1,0 +1,1 @@
+In `run_rois`, a `grow_mask` step with `nearest_roi` now finds the added voxels of a ROI in the box of its grown mask, not in the full image. For 20 small ROIs on a 512x512x200 CT, the step with the intensity features takes 0.12 s instead of 2.3 s at 10 threads, and 0.26 s instead of 2.4 s at 1 thread. The masks and the features are the same, bit for bit.

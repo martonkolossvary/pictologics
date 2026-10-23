@@ -2590,7 +2590,7 @@ class RadiomicsPipeline:
             # A label map case: one row for each ROI (one row without ROIs when it failed)
             by_roi = record["results"] if record.get("rois") else {None: record["results"]}
             for roi, values in (by_roi or {None: {}}).items():
-                # A case file holds a NaN feature as null (None)
+                # A record holds a NaN feature as null (None)
                 results = {
                     name: {
                         key: math.nan if value is None else value for key, value in features.items()
@@ -2619,9 +2619,15 @@ class RadiomicsPipeline:
         label_map = case.get("rois") is not None
         arguments = {k: v for k, v in case.items() if k not in _OTHER_CASE_KEYS[label_map]}
 
-        def plain(results: dict[str, pd.Series]) -> dict[str, dict[str, float]]:
+        def plain(results: dict[str, pd.Series]) -> dict[str, dict[str, float | None]]:
+            # A NaN feature is null (None), as in the file
             return {
-                name: {key: float(value) for key, value in series.items()}
+                name: {
+                    key: None if math.isnan(value) else value
+                    for key, value in zip(
+                        series.index, series.to_numpy(dtype=np.float64).tolist(), strict=True
+                    )
+                }
                 for name, series in results.items()
             }
 
@@ -2657,12 +2663,19 @@ class RadiomicsPipeline:
                 )
         record["warnings"] = list(dict.fromkeys(str(warning.message) for warning in caught))
         record["seconds"] = time.perf_counter() - started
-        record["log"] = self._make_serializable(self._log)
+        entries = list(self._log)
         self.clear_log()
+        # The log entries are JSON-ready, apart from the raw step of a failed configuration
+        record["log"] = [
+            self._make_serializable(entry) if "failed_step" in entry else entry for entry in entries
+        ]
+        try:
+            text = json.dumps(record, allow_nan=False)
+        except (TypeError, ValueError):  # a NaN, infinite or not JSON-ready value
+            record["log"] = self._make_serializable(entries)
+            text = json.dumps(_json_safe(record), default=str, allow_nan=False)
         temporary = path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(_json_safe(record), default=str, allow_nan=False), encoding="utf-8"
-        )
+        temporary.write_text(text, encoding="utf-8")
         os.replace(temporary, path)
         return record
 

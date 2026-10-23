@@ -155,6 +155,7 @@ def _warmup_texture() -> None:
     texture._glcm_mu_sums_numba(glcm_p, glcm_levels, 1.5)
     # The NGTDM complexity: int64 levels, float64 probabilities and differences
     texture._ngtdm_complexity_numba(glcm_levels, np.full(2, 0.5), np.ones(2))
+    texture._ngtdm_features_numba(np.ones(2), np.ones(2), np.empty(5))
     # The feature kernels: uint64 count tables, float64 sums, int64 zone cells
     tables = np.ones((1, 2, 3), dtype=np.uint64)
     texture._count_matrix_features_numba(tables, 1, 1024, np.empty(17))

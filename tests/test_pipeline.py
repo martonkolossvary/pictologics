@@ -8,6 +8,7 @@ warnings.filterwarnings("ignore", message="The NumPy module was reloaded")
 
 import copy
 import json
+import math
 import os
 
 os.environ["NUMBA_DISABLE_JIT"] = "1"
@@ -1410,6 +1411,93 @@ def _batch_test_pipeline() -> RadiomicsPipeline:
         source_mode="auto",
     )
     return pipeline
+
+
+def _label_map_case(folder: Any, huge: bool = False) -> dict[str, Any]:
+    """A run_batch case of a 10^3 NIfTI image and a label map with three small ROIs (with
+    huge, a value of 1e300 in ROI 1)."""
+    import nibabel as nib
+
+    labels = np.zeros((10, 10, 10), dtype=np.uint8)
+    labels[1:4, 1:4, 1:4], labels[5:8, 1:4, 1:4], labels[1:4, 5:8, 5:8] = 1, 2, 3
+    image = np.random.default_rng(28).normal(40.0, 20.0, labels.shape)
+    if huge:
+        image[2, 2, 2] = 1e300
+    nib.save(nib.Nifti1Image(image, np.eye(4)), folder / "image.nii.gz")
+    nib.save(nib.Nifti1Image(labels, np.eye(4)), folder / "rois.nii.gz")
+    return {
+        "subject_id": "s",
+        "image": str(folder / "image.nii.gz"),
+        "rois": str(folder / "rois.nii.gz"),
+    }
+
+
+def _case_text(
+    pipeline: RadiomicsPipeline, case: dict[str, Any], names: list[str], path: Any, monkeypatch: Any
+) -> tuple[dict[str, Any], str]:
+    """The record of _run_case and the text of the full conversion of its log (0.8.0)."""
+    from pictologics.results import _json_safe
+
+    saved: list[dict[str, Any]] = []
+    clear_log = RadiomicsPipeline.clear_log
+
+    def saving(self: RadiomicsPipeline) -> None:
+        saved[:] = list(self._log)
+        clear_log(self)
+
+    monkeypatch.setattr(RadiomicsPipeline, "clear_log", saving)
+    record = pipeline._run_case(case, names, {name: "h" for name in names}, path)
+    full = {**record, "log": pipeline._make_serializable(saved)}
+    return record, json.dumps(_json_safe(full), default=str, allow_nan=False)
+
+
+def test_run_batch_case_file_is_the_full_conversion(tmp_path: Any, monkeypatch: Any) -> None:
+    # The record of a case is written in one JSON pass: the text of the full conversion of
+    # every log entry, also for the raw step of a failed configuration; the record holds
+    # None for a NaN feature.
+    extract = {"step": "extract_features", "params": {"families": ["intensity"]}}
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("i", [extract])
+    binarize = {"step": "binarize_mask", "params": {"mask_values": (1000, 2000)}}
+    pipeline.add_config("binfail", [binarize, extract])
+    path = tmp_path / "case.json"
+    record, expected = _case_text(
+        pipeline, _label_map_case(tmp_path), ["i", "binfail"], path, monkeypatch
+    )
+    text = path.read_text(encoding="utf-8")
+    assert text == expected
+    failed = [entry for entry in json.loads(text)["log"] if "failed_step" in entry]
+    assert failed and failed[0]["failed_step"]["params"]["mask_values"] == {"range": [1000, 2000]}
+    values = [v for roi in record["results"].values() for f in roi.values() for v in f.values()]
+    assert None in values and not any(isinstance(v, float) and math.isnan(v) for v in values)
+
+
+@pytest.mark.parametrize("kind", ["numpy scalar", "huge values"])
+def test_run_batch_case_file_falls_back_to_the_full_conversion(
+    tmp_path: Any, monkeypatch: Any, kind: str
+) -> None:
+    # A value that json does not write (a numpy scalar in the log: TypeError) or a feature
+    # that is not finite (ValueError) takes the full conversion of 0.8.0: the same text.
+    # An infinite feature is null in the file, and inf in the record and in the table.
+    pipeline = RadiomicsPipeline(load_standard=False)
+    pipeline.add_config("i", [{"step": "extract_features", "params": {"families": ["intensity"]}}])
+    case = _label_map_case(tmp_path, huge=kind == "huge values")
+    if kind == "numpy scalar":
+        case["mask_min_overlap_fraction"] = np.float32(0.5)
+    path = tmp_path / "case.json"
+    record, expected = _case_text(pipeline, case, ["i"], path, monkeypatch)
+    assert path.read_text(encoding="utf-8") == expected
+    if kind == "huge values":
+        features = record["results"]["1"]["i"]
+        infinite = [k for k, v in features.items() if v is not None and math.isinf(v)]
+        assert infinite
+        assert json.loads(expected)["results"]["1"]["i"][infinite[0]] is None
+        monkeypatch.undo()
+        table = pipeline.run_batch(
+            [case], tmp_path / "out", config_names=["i"], show_progress=False
+        )
+        row = table[table["roi"] == "1"].iloc[0]
+        assert math.isinf(row[f"i__{infinite[0]}"])
 
 
 def test_run_batch_writes_a_file_per_case_and_resumes(tmp_path: Any) -> None:
